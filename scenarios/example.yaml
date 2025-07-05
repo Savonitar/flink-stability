@@ -1,0 +1,23 @@
+scenario:
+  phases:
+    - flink_version: 1.17
+      jar: job-1.17.jar
+      parallelism: 2
+      checkpoint_interval: 5000
+      total_records: 1000
+    - flink_version: 1.18
+      jar: job-1.18.jar
+      parallelism: 3
+      checkpoint_interval: 5000
+      total_records: 1000
+
+chaos:
+  - type: kill-taskmanager
+    after_seconds: 120
+
+validate:
+  - type: kafka-count
+    topic: flink-output
+    expected_records: 2000
+  - type: kafka-unique-ids
+    topic: flink-output
