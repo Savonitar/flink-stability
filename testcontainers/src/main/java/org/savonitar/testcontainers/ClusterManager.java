@@ -13,7 +13,7 @@ import org.testcontainers.utility.DockerImageName;
 import java.io.IOException;
 import java.time.Duration;
 
-public class ClusterManager {
+public class ClusterManager implements AutoCloseable {
     private static final Logger LOG = LoggerFactory.getLogger(ClusterManager.class);
     private final Network network = Network.newNetwork();
     private KafkaValidator kafkaValidator;
@@ -204,6 +204,11 @@ public class ClusterManager {
         LOG.info("ClusterManager stopping everything.");
         stopFlink();
         if (kafka != null) kafka.stop();
+    }
+
+    @Override
+    public void close() {
+        stopAll();
     }
 
     public String getJobManagerRestUrl() {
