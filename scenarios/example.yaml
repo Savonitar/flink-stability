@@ -1,19 +1,16 @@
 scenario:
   phases:
-    - flink_version: 1.17
-      jar: job-1.17.jar
+    - flink_version: 1.19
+      jar: ./flink-job-generator/target/flink-job-generator-0.1.0-SNAPSHOT.jar
       parallelism: 2
       checkpoint_interval: 5000
-      total_records: 1000
-    - flink_version: 1.18
-      jar: job-1.18.jar
+      processing_delay_ms: 250
+    - flink_version: 1.19
+      jar: ./flink-job-generator/target/flink-job-generator-0.1.0-SNAPSHOT.jar
       parallelism: 3
       checkpoint_interval: 5000
-      total_records: 1000
 
-chaos:
-  - type: kill-taskmanager
-    after_seconds: 120
+chaos: []
 
 validate:
   - type: kafka-count

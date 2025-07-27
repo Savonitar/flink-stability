@@ -15,34 +15,31 @@ public class ScenarioPhase {
     @JsonProperty("checkpoint_interval")
     private int checkpointInterval;
     
-    @JsonProperty("total_records")
-    private int totalRecords;
+    @JsonProperty("processing_delay_ms")
+    private int processingDelayMs;
     
     // Default constructor for Jackson
     public ScenarioPhase() {}
     
     public ScenarioPhase(String flinkVersion, String jar, int parallelism, 
-                       int checkpointInterval, int totalRecords) {
+                       int checkpointInterval, int processingDelayMs) {
         this.flinkVersion = flinkVersion;
         this.jar = jar;
         this.parallelism = parallelism;
         this.checkpointInterval = checkpointInterval;
-        this.totalRecords = totalRecords;
+        this.processingDelayMs = processingDelayMs;
     }
     
-    // Getters
     public String getFlinkVersion() { return flinkVersion; }
     public String getJar() { return jar; }
     public int getParallelism() { return parallelism; }
     public int getCheckpointInterval() { return checkpointInterval; }
-    public int getTotalRecords() { return totalRecords; }
-    
-    // Setters
+    public int getProcessingDelayMs() { return processingDelayMs; }
     public void setFlinkVersion(String flinkVersion) { this.flinkVersion = flinkVersion; }
     public void setJar(String jar) { this.jar = jar; }
     public void setParallelism(int parallelism) { this.parallelism = parallelism; }
     public void setCheckpointInterval(int checkpointInterval) { this.checkpointInterval = checkpointInterval; }
-    public void setTotalRecords(int totalRecords) { this.totalRecords = totalRecords; }
+    public void setProcessingDelayMs(int processingDelayMs) { this.processingDelayMs = processingDelayMs; }
     
     @Override
     public String toString() {
@@ -51,7 +48,7 @@ public class ScenarioPhase {
                 ", jar='" + jar + '\'' +
                 ", parallelism=" + parallelism +
                 ", checkpointInterval=" + checkpointInterval +
-                ", totalRecords=" + totalRecords +
+                ", processingDelayMs=" + processingDelayMs +
                 '}';
     }
 }
