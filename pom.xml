@@ -13,6 +13,7 @@
         <module>cli</module>
         <module>core</module>
         <module>testcontainers</module>
+        <module>flink-job-generator</module>
     </modules>
 
     <properties>
