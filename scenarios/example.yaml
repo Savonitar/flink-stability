@@ -1,11 +1,11 @@
 scenario:
   phases:
-    - flink_version: 1.19
+    - flink_image: flink:1.19
       jar: ./flink-job-generator/target/flink-job-generator-0.1.0-SNAPSHOT.jar
       parallelism: 2
       checkpoint_interval: 5000
       processing_delay_ms: 250
-    - flink_version: 1.19
+    - flink_image: flink:1.19
       jar: ./flink-job-generator/target/flink-job-generator-0.1.0-SNAPSHOT.jar
       parallelism: 3
       checkpoint_interval: 5000

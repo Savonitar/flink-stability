@@ -54,7 +54,7 @@ public class ScenarioRunner {
         LOG.info("Starting phase: {}", phase);
 
         try {
-            clusterManager.startFlink(phase.getFlinkVersion());
+            clusterManager.startFlink(phase.getFlinkImage());
             String jobId = startFlinkJob(phase, clusterManager, savepointPath.get());
 
             int phaseId = phaseNum.incrementAndGet();
@@ -64,7 +64,7 @@ public class ScenarioRunner {
                 handleSubsequentPhase(clusterManager);
             }
 
-            LOG.info("Phase={} completed for version: {}", phase, phase.getFlinkVersion());
+            LOG.info("Phase={} completed for flinkImage: {}", phase, phase.getFlinkImage());
         } catch (Exception e) {
             LOG.error("Failed to execute phase", e);
             throw new RuntimeException("Phase execution failed", e);

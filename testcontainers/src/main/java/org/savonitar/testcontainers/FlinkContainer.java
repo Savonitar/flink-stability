@@ -18,8 +18,8 @@ public class FlinkContainer {
     private final DockerImageName flinkImage;
     private final Network network;
 
-    public FlinkContainer(String version, Network network) {
-        this.flinkImage = DockerImageName.parse("flink:" + version);
+    public FlinkContainer(String imageName, Network network) {
+        this.flinkImage = DockerImageName.parse(imageName).asCompatibleSubstituteFor("flink");
         this.network = network;
     }
 
