@@ -25,6 +25,7 @@ public class ClusterManager implements AutoCloseable {
     private static final String KAFKA_BOOTSTRAP_SERVER = "localhost:9093";
     private static final String RECORDS_FILE_PATH = "/tmp/records.txt";
     private static final int CONSUMER_TIMEOUT_MS = 10000;
+    private FlinkContainer flinkContainer;
 
     private static final class KafkaTopicConfig {
         private final String name;
@@ -140,12 +141,32 @@ public class ClusterManager implements AutoCloseable {
         LOG.info("Topics output: {}", execResult.getStdout());
     }
 
+    public void simulateTaskManagerFailureAndRecovery() {
+        if (this.taskManager == null || !this.taskManager.isRunning()) {
+            throw new IllegalStateException("TaskManager is not running");
+        }
+        LOG.info("Simulating TaskManager failure by stopping the container");
+        this.taskManager.stop();
+        LOG.info("TaskManager container stopped");
+
+        try {
+            Thread.sleep(5000);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+        }
+
+        LOG.info("Starting a new TaskManager to trigger recovery");
+        this.taskManager = this.flinkContainer.createTaskManager();
+        this.taskManager.start();
+        LOG.info("TaskManager started");
+    }
+
     public void startFlink(String version) throws InterruptedException, IOException {
         registerShutdownHook();
 
-        FlinkContainer containerConfig = new FlinkContainer(version, network);
-        jobManager = containerConfig.createJobManager();
-        taskManager = containerConfig.createTaskManager();
+        this.flinkContainer = new FlinkContainer(version, network);
+        jobManager = flinkContainer.createJobManager();
+        taskManager = flinkContainer.createTaskManager();
 
         startContainers();
         configureJobManagerUrl();

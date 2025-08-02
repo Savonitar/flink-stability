@@ -26,11 +26,19 @@ public class ScenarioRunner {
         try (ClusterManager clusterManager = new ClusterManager()) {
             initializeCluster(clusterManager);
             executeScenarioPhases(scenarioFile, clusterManager);
+            performFinalValidation(clusterManager);
         } catch (Exception e) {
             LOG.error("Failed to execute scenario", e);
             throw new RuntimeException("Scenario execution failed", e);
         }
         LOG.info("Scenario execution completed.");
+    }
+
+    private static void performFinalValidation(ClusterManager clusterManager) throws Exception {
+        LOG.info("Performing final validation...");
+        clusterManager.waitForAndValidateKafkaOutput(KAFKA_OUTPUT_TOPIC, EXPECTED_MESSAGES);
+        clusterManager.performFinalValidation(KAFKA_OUTPUT_TOPIC, EXPECTED_MESSAGES);
+        clusterManager.printKafka();
     }
 
     private static void initializeCluster(ClusterManager clusterManager) throws IOException, InterruptedException {
@@ -51,24 +59,48 @@ public class ScenarioRunner {
 
     private static void executePhase(ScenarioPhase phase, ClusterManager clusterManager,
                                      AtomicInteger phaseNum, AtomicReference<String> savepointPath) {
+        int phaseId = phaseNum.incrementAndGet();
         LOG.info("Starting phase: {}", phase);
 
         try {
-            clusterManager.startFlink(phase.getFlinkImage());
-            String jobId = startFlinkJob(phase, clusterManager, savepointPath.get());
+            switch (phaseId) {
+                case 1:
+                    handleFirstPhase(phase, clusterManager, savepointPath);
+                    break;
 
-            int phaseId = phaseNum.incrementAndGet();
-            if (phaseId == FIRST_PHASE) {
-                handleFirstPhase(jobId, clusterManager, savepointPath);
-            } else {
-                handleSubsequentPhase(clusterManager);
+                case 2:
+                    handlePreFailurePhase(phase, clusterManager, savepointPath.get());
+                    break;
+
+                case 3:
+                    handleRecoveryPhase();
+                    break;
+
+                default:
+                    LOG.warn("Unknown phase: {}", phaseId);
+                    break;
             }
-
             LOG.info("Phase={} completed for flinkImage: {}", phase, phase.getFlinkImage());
         } catch (Exception e) {
             LOG.error("Failed to execute phase", e);
             throw new RuntimeException("Phase execution failed", e);
         }
+    }
+
+    private static void handleRecoveryPhase() {
+        LOG.info("Phase 3: Recovering job");
+        sleep(INITIAL_PHASE_WAIT_MS);
+        LOG.info("Phase 3: Recovering finished");
+    }
+
+    private static void handlePreFailurePhase(ScenarioPhase phase, ClusterManager clusterManager, String savepoint) throws IOException, InterruptedException {
+        clusterManager.startFlink(phase.getFlinkImage());
+        startFlinkJob(phase, clusterManager, savepoint);
+
+        LOG.info("Phase 2: Job restored.");
+        sleep(INITIAL_PHASE_WAIT_MS);
+
+        clusterManager.simulateTaskManagerFailureAndRecovery();
     }
 
     private static String startFlinkJob(ScenarioPhase phase, ClusterManager clusterManager, String savepointPath)
@@ -96,13 +128,19 @@ public class ScenarioRunner {
                 KAFKA_BOOTSTRAP_SERVERS, phase.getProcessingDelayMs());
     }
 
-    private static void handleFirstPhase(String jobId, ClusterManager clusterManager,
-                                         AtomicReference<String> savepointPath) throws IOException {
+    private static void handleFirstPhase(ScenarioPhase phase, ClusterManager clusterManager,
+                                         AtomicReference<String> savepointPath) throws IOException, InterruptedException {
         LOG.info("Executing first phase tasks...");
-        FlinkRestClient restClient = new FlinkRestClient(clusterManager.getJobManagerRestUrl());
+        clusterManager.startFlink(phase.getFlinkImage());
+        String jobId = startFlinkJob(phase, clusterManager, null);
 
+        LOG.info("Phase 1: Running job to create initial state");
         sleep(INITIAL_PHASE_WAIT_MS);
+
+        FlinkRestClient restClient = new FlinkRestClient(clusterManager.getJobManagerRestUrl());
         createSavepoint(jobId, restClient, savepointPath);
+        LOG.info("Created savepoint at: {}", savepointPath.get());
+
         clusterManager.stopFlink();
     }
 
