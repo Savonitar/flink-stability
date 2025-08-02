@@ -12,15 +12,16 @@ import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.concurrent.ExecutorService;
 import java.util.concurrent.TimeUnit;
 
 /**
- * A client for interacting with the Flink REST API. This class provides methods to manage Flink jobs, e.g.:
- * upload JAR files, retrieve job statuses, and interact with savepoints, etc.
+ * A client for interacting with the Flink REST API for chaos testing scenarios.
+ * This class provides methods to manage Flink jobs: upload JAR files, 
+ * retrieve job statuses, and interact with savepoints.
  * <p>
- * Instances of this class are thread-safe. It is recommended to use this client in a try-with-resources
- * block or explicitly call the {@link #close()} method to release resources properly.
+ * Instances of this class are thread-safe. It is recommended to use this client 
+ * in a try-with-resources block or explicitly call the {@link #close()} method 
+ * to release resources properly.
  */
 public class FlinkRestClient implements AutoCloseable {
 
@@ -30,7 +31,7 @@ public class FlinkRestClient implements AutoCloseable {
     private static final int CONNECT_TIMEOUT_SECONDS = 30;
     private static final int READ_TIMEOUT_SECONDS = 60;
     private static final int WRITE_TIMEOUT_SECONDS = 60;
-    private static final int SAVEPOINT_POLL_RETRIES = 60;
+    private static final int SAVEPOINT_POLL_RETRIES = 30; // 30 * 2s = 1 minute
     private static final int SAVEPOINT_POLL_DELAY_MS = 2000;
 
     private final OkHttpClient client;
@@ -118,21 +119,7 @@ public class FlinkRestClient implements AutoCloseable {
 
     @Override
     public void close() {
-        shutdownExecutor();
         client.connectionPool().evictAll();
-    }
-
-    private void shutdownExecutor() {
-        try {
-            ExecutorService executor = client.dispatcher().executorService();
-            executor.shutdown();
-            if (!executor.awaitTermination(60, TimeUnit.SECONDS)) {
-                executor.shutdownNow();
-            }
-        } catch (InterruptedException e) {
-            Thread.currentThread().interrupt();
-            client.dispatcher().executorService().shutdownNow();
-        }
     }
 
     public String stopJobWithSavepoint(String jobId, String targetDirectory) throws IOException {
@@ -161,35 +148,47 @@ public class FlinkRestClient implements AutoCloseable {
 
     private String pollForSavepointCompletion(String jobId, String requestId) throws IOException {
         String url = jobManagerUrl + "/jobs/" + jobId + "/savepoints/" + requestId;
-        for (int i = 0; i < SAVEPOINT_POLL_RETRIES; i++) {
+        for (int attempt = 0; attempt < SAVEPOINT_POLL_RETRIES; attempt++) {
             try {
                 Thread.sleep(SAVEPOINT_POLL_DELAY_MS);
             } catch (InterruptedException e) {
                 Thread.currentThread().interrupt();
                 throw new IOException("Interrupted while waiting for savepoint completion", e);
             }
-            Request request = new Request.Builder().url(url).get().build();
-            try (Response response = client.newCall(request).execute()) {
-                if (!response.isSuccessful()) continue;
-                String body = response.body().string();
-                LOG.info("body={}", body);
-                JsonNode root = new ObjectMapper().readTree(body);
-                String status = root.get("status").get("id").asText();
-                LOG.info("Savepoint status: {}", status);
-                if ("COMPLETED".equals(status)) {
-                    JsonNode operation = root.get("operation");
-                    LOG.info("Operation={}", operation.asText());
-                    String location = operation.get("location").asText();
-                    LOG.info("Savepoint completed: {}", location);
-                    return location;
-                } else if ("FAILED".equals(status)) {
-                    throw new IOException("Savepoint creation failed: " + body);
+            
+            try {
+                Request request = new Request.Builder().url(url).get().build();
+                try (Response response = client.newCall(request).execute()) {
+                    if (!response.isSuccessful()) {
+                        LOG.warn("Savepoint poll attempt {} failed with status: {}", attempt + 1, response.code());
+                        continue;
+                    }
+                    
+                    String body = response.body().string();
+                    JsonNode root = objectMapper.readTree(body);
+                    String status = root.get("status").get("id").asText();
+                    LOG.info("Savepoint status: {}", status);
+                    
+                    if ("COMPLETED".equals(status)) {
+                        JsonNode operation = root.get("operation");
+                        String location = operation.get("location").asText();
+                        LOG.info("Savepoint completed: {}", location);
+                        return location;
+                    } else if ("FAILED".equals(status)) {
+                        String failureReason = root.get("status").get("failure-cause").asText();
+                        throw new IOException("Savepoint creation failed: " + failureReason);
+                    }
+                    // Continue polling for IN_PROGRESS or other statuses
                 }
+            } catch (IOException e) {
+                LOG.warn("Network error during savepoint poll attempt {}: {}", attempt + 1, e.getMessage());
+                // Continue retrying for network issues
             }
         }
-        throw new IOException("Timed out waiting for savepoint completion.");
+        
+        throw new IOException("Timed out waiting for savepoint completion after " + SAVEPOINT_POLL_RETRIES + " attempts.");
     }
-
+    
     public List<String> availableJars() throws IOException {
         Request request = new Request.Builder()
                 .url(jobManagerUrl + "/jars")
