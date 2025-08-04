@@ -10,6 +10,7 @@ import java.nio.file.Paths;
 
 public class FlinkContainer {
     private static final String CHECKPOINT_PATH = "/flink/checkpoints";
+    public static final String SAVEPOINT_PATH = "file:" + CHECKPOINT_PATH;
     private static final String LOCAL_CHECKPOINT_PATH = Paths.get("checkpoints").toAbsolutePath().toString();
     private static final String TASK_SLOTS_PROPERTY = "taskmanager.numberOfTaskSlots: 2";
     private static final String JOB_MANAGER_ALIAS = "jobmanager";

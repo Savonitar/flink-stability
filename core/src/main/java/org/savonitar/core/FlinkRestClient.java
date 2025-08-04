@@ -14,13 +14,15 @@ import java.util.List;
 import java.util.Map;
 import java.util.concurrent.TimeUnit;
 
+import static org.savonitar.testcontainers.FlinkContainer.SAVEPOINT_PATH;
+
 /**
  * A client for interacting with the Flink REST API for chaos testing scenarios.
- * This class provides methods to manage Flink jobs: upload JAR files, 
+ * This class provides methods to manage Flink jobs: upload JAR files,
  * retrieve job statuses, and interact with savepoints.
  * <p>
- * Instances of this class are thread-safe. It is recommended to use this client 
- * in a try-with-resources block or explicitly call the {@link #close()} method 
+ * Instances of this class are thread-safe. It is recommended to use this client
+ * in a try-with-resources block or explicitly call the {@link #close()} method
  * to release resources properly.
  */
 public class FlinkRestClient implements AutoCloseable {
@@ -122,7 +124,8 @@ public class FlinkRestClient implements AutoCloseable {
         client.connectionPool().evictAll();
     }
 
-    public String stopJobWithSavepoint(String jobId, String targetDirectory) throws IOException {
+    public String stopJobWithSavepoint(String jobId) throws IOException {
+        String targetDirectory = SAVEPOINT_PATH;
         ObjectMapper mapper = new ObjectMapper();
         Map<String, Object> body = new HashMap<>();
         body.put("targetDirectory", targetDirectory);
@@ -155,7 +158,7 @@ public class FlinkRestClient implements AutoCloseable {
                 Thread.currentThread().interrupt();
                 throw new IOException("Interrupted while waiting for savepoint completion", e);
             }
-            
+
             try {
                 Request request = new Request.Builder().url(url).get().build();
                 try (Response response = client.newCall(request).execute()) {
@@ -163,17 +166,22 @@ public class FlinkRestClient implements AutoCloseable {
                         LOG.warn("Savepoint poll attempt {} failed with status: {}", attempt + 1, response.code());
                         continue;
                     }
-                    
+
                     String body = response.body().string();
                     JsonNode root = objectMapper.readTree(body);
                     String status = root.get("status").get("id").asText();
                     LOG.info("Savepoint status: {}", status);
-                    
+
                     if ("COMPLETED".equals(status)) {
-                        JsonNode operation = root.get("operation");
-                        String location = operation.get("location").asText();
-                        LOG.info("Savepoint completed: {}", location);
-                        return location;
+                        try {
+                            JsonNode operation = root.get("operation");
+                            String location = operation.get("location").asText();
+                            LOG.info("Savepoint completed: {}", location);
+                            return location;
+                        } catch (Exception e) {
+                            LOG.error("Failed to extract savepoint location from response: {}", body, e);
+                            // Not rethrowing because we have retries
+                        }
                     } else if ("FAILED".equals(status)) {
                         String failureReason = root.get("status").get("failure-cause").asText();
                         throw new IOException("Savepoint creation failed: " + failureReason);
@@ -185,10 +193,10 @@ public class FlinkRestClient implements AutoCloseable {
                 // Continue retrying for network issues
             }
         }
-        
+
         throw new IOException("Timed out waiting for savepoint completion after " + SAVEPOINT_POLL_RETRIES + " attempts.");
     }
-    
+
     public List<String> availableJars() throws IOException {
         Request request = new Request.Builder()
                 .url(jobManagerUrl + "/jars")
