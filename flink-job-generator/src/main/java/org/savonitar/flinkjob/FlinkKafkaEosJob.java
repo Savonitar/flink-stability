@@ -7,12 +7,14 @@ import org.apache.flink.connector.base.DeliveryGuarantee;
 import org.apache.flink.connector.kafka.sink.KafkaRecordSerializationSchema;
 import org.apache.flink.connector.kafka.sink.KafkaSink;
 import org.apache.flink.connector.kafka.source.KafkaSource;
-import org.apache.flink.connector.kafka.source.enumerator.initializer.OffsetsInitializer;
 import org.apache.flink.streaming.api.environment.CheckpointConfig;
 import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
+import org.apache.kafka.clients.producer.ProducerConfig;
+import org.apache.kafka.common.serialization.ByteArraySerializer;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import java.time.Duration;
 import java.util.Arrays;
 import java.util.Properties;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -39,6 +41,13 @@ public class FlinkKafkaEosJob {
 
 
         Properties props = new Properties();
+        props.put(
+                ProducerConfig.KEY_SERIALIZER_CLASS_CONFIG, ByteArraySerializer.class.getName());
+        props.put(
+                ProducerConfig.VALUE_SERIALIZER_CLASS_CONFIG, ByteArraySerializer.class.getName());
+        props.put(
+                ProducerConfig.TRANSACTION_TIMEOUT_CONFIG,
+                (int) Duration.ofHours(2).toMillis());
         props.setProperty("bootstrap.servers", bootstrapServers);
         props.setProperty("client.id", "flink-producer");
         props.setProperty("metadata.max.age.ms", "5000");
@@ -48,7 +57,6 @@ public class FlinkKafkaEosJob {
                 .setBootstrapServers(bootstrapServers)
                 .setTopics("input-topic")
                 .setGroupId("flink-job-test-group")
-                .setBounded(OffsetsInitializer.latest())
                 .setValueOnlyDeserializer(new SimpleStringSchema())
                 .build();
 
@@ -66,6 +74,8 @@ public class FlinkKafkaEosJob {
                 .map(x -> {
                     if (processingDelayMs.get() != 0) {
                         Thread.sleep(processingDelayMs.get());
+                    } else {
+                        Thread.sleep(100);
                     }
                     LOG.info("FlinkKafkaEosJob Processed msg={}", x);
                     return x;
