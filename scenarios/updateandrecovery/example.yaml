@@ -1,0 +1,28 @@
+setup:
+  kafka:
+    start: true
+  flink:
+    version: 1.19
+    job:
+      jar: ./job.jar
+      args: [...]
+      parallelism: 2
+      checkpoint_interval: 1000
+
+scenario:
+  phases:
+    - name: upgrade
+      steps:
+        - savepoint
+        - restart-flink
+
+    - name: chaos
+      repeat: 10
+      nemesis:
+        - kill-taskmanager
+        - wait: 10s
+
+validation:
+  invariants:
+    - kafka-count: 1000
+    - kafka-unique-ids: 1000
