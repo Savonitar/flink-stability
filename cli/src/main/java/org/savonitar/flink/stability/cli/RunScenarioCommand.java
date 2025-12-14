@@ -1,6 +1,6 @@
-package org.savonitar.cli;
+package org.savonitar.flink.stability.cli;
 
-import org.savonitar.core.ScenarioRunner;
+import org.savonitar.flink.stability.core.ScenarioRunner;
 import picocli.CommandLine;
 
 @CommandLine.Command(name = "run", description = "Run chaos scenario")

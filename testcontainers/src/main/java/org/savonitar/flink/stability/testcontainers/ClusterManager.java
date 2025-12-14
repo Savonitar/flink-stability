@@ -1,4 +1,4 @@
-package org.savonitar.testcontainers;
+package org.savonitar.flink.stability.testcontainers;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;

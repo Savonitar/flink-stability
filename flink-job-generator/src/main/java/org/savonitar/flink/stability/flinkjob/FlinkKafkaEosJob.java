@@ -1,4 +1,4 @@
-package org.savonitar.flinkjob;
+package org.savonitar.flink.stability.flinkjob;
 
 import org.apache.flink.api.common.eventtime.WatermarkStrategy;
 import org.apache.flink.api.common.serialization.SimpleStringSchema;

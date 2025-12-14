@@ -1,4 +1,4 @@
-package org.savonitar.core;
+package org.savonitar.flink.stability.core;
 
 import java.util.List;
 

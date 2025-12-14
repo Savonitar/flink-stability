@@ -1,8 +1,8 @@
-package org.savonitar.core;
+package org.savonitar.flink.stability.core;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import org.savonitar.testcontainers.ClusterManager;
+import org.savonitar.flink.stability.testcontainers.ClusterManager;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 

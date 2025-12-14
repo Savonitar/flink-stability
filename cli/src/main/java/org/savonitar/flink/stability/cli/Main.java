@@ -1,4 +1,4 @@
-package org.savonitar.cli;
+package org.savonitar.flink.stability.cli;
 
 import picocli.CommandLine;
 

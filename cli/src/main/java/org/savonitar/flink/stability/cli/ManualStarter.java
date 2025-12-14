@@ -1,6 +1,6 @@
-package org.savonitar.cli;
+package org.savonitar.flink.stability.cli;
 
-import org.savonitar.core.ScenarioRunner;
+import org.savonitar.flink.stability.core.ScenarioRunner;
 
 // Running via maven sometimes can face the issue in testcontainers:
 // https://github.com/testcontainers/testcontainers-java/issues/1454

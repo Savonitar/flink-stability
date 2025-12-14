@@ -1,4 +1,4 @@
-package org.savonitar.core;
+package org.savonitar.flink.stability.core;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -14,7 +14,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.concurrent.TimeUnit;
 
-import static org.savonitar.testcontainers.FlinkContainer.SAVEPOINT_PATH;
+import static org.savonitar.flink.stability.testcontainers.FlinkContainer.SAVEPOINT_PATH;
 
 /**
  * A client for interacting with the Flink REST API for chaos testing scenarios.

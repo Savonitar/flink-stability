@@ -1,4 +1,4 @@
-package org.savonitar.core;
+package org.savonitar.flink.stability.core;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.dataformat.yaml.YAMLFactory;
