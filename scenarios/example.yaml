@@ -39,7 +39,8 @@ scenario:
         - type: wait
           wait_ms: 10000
 
-    - name: chaos_recovery
+    - name: recovery_loop
+      repeat: 10
       steps:
         - type: kill
           component: taskmanager

@@ -18,20 +18,26 @@ public class ScenarioRunner {
 
     public static void runScenario(String scenarioPath) {
         LOG.info("Loading scenario: {}", scenarioPath);
+        final long beginTime = System.currentTimeMillis();
         ScenarioFile scenarioFile = ScenarioLoader.load(scenarioPath);
 
         try (ClusterManager clusterManager = new ClusterManager()) {
             for (ScenarioPhase phase : scenarioFile.getScenario().getPhases()) {
-                LOG.info("Starting phase: {}", phase.getName());
-                executePhase(phase, clusterManager);
-                LOG.info("Completed phase: {}", phase.getName());
+                final int repeats = phase.effectiveRepeat();
+                for (int i = 0; i < repeats; i++) {
+                    LOG.info("Starting phase: {} (iteration {}/{})", phase.getName(), i, repeats);
+                    final long phaseBeginTime = System.currentTimeMillis();
+                    executePhase(phase, clusterManager);
+                    LOG.info("Completed phase: {} (iteration {}/{}) in {} ms", phase.getName(), i, repeats,
+                            System.currentTimeMillis() - phaseBeginTime);
+                }
             }
         } catch (Exception e) {
             LOG.error("Failed to execute scenario", e);
             throw new RuntimeException("Scenario execution failed", e);
         }
 
-        LOG.info("Scenario execution completed.");
+        LOG.info("Scenario execution completed in {} ms", System.currentTimeMillis() - beginTime);
     }
 
     private static void executePhase(ScenarioPhase phase, ClusterManager clusterManager) throws Exception {
