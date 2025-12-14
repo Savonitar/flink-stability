@@ -13,7 +13,6 @@ import java.io.IOException;
 import java.time.Duration;
 import java.util.Arrays;
 import java.util.List;
-import java.util.Set;
 import java.util.UUID;
 import java.util.stream.Collectors;
 
@@ -185,7 +184,7 @@ public class KafkaManager {
 
     private boolean validateMessages(KafkaValidationConfig config, int timeoutSeconds, boolean waitForStability) throws Exception {
         LOG.info("Waiting for {} messages to appear in Kafka topic: {}", config.expectedMessages(), config.topic());
-        Set<String> messages;
+        List<String> messages;
         long start = System.currentTimeMillis();
 
         do {
@@ -215,11 +214,11 @@ public class KafkaManager {
 
     public void checkKafkaUniqueIds(String topic, int expectedMessages) throws Exception {
         KafkaValidationConfig config = KafkaValidationConfig.forFinalCheck(topic, expectedMessages);
-        Set<String> messages = getMessages(config);
+        List<String> messages = getMessages(config);
         validateMessageSequence(messages, expectedMessages);
     }
 
-    private Set<String> getMessages(KafkaValidationConfig config) throws IOException, InterruptedException {
+    private List<String> getMessages(KafkaValidationConfig config) throws IOException, InterruptedException {
         String command = String.format("%s --bootstrap-server %s --topic %s --from-beginning " +
                         "--timeout-ms %d --max-messages %d --consumer-property group.id=%s " +
                         "--consumer-property isolation.level=%s",
@@ -230,10 +229,10 @@ public class KafkaManager {
         return Arrays.stream(result.getStdout().split("\n"))
                 .map(String::trim)
                 .filter(line -> !line.isEmpty())
-                .collect(Collectors.toSet());
+                .toList();
     }
 
-    private boolean validateMessageSequence(Set<String> messages, int expectedMessages) {
+    private boolean validateMessageSequence(List<String> messages, int expectedMessages) {
         List<Integer> ids = messages.stream()
                 .map(s -> {
                     try {
@@ -242,8 +241,15 @@ public class KafkaManager {
                         throw new RuntimeException("Non-integer message found: " + s);
                     }
                 })
-                .sorted()
-                .toList();
+                .collect(Collectors.toList());
+
+        // Check for duplicates
+        if (ids.size() != ids.stream().distinct().count()) {
+            LOG.error("❌ Duplicate message IDs found");
+            return false;
+        }
+
+        ids = ids.stream().sorted().toList();
         LOG.info("Found {} messages in Kafka topic: {}", ids.size(), ids);
 
         for (int i = 0; i < expectedMessages; i++) {
