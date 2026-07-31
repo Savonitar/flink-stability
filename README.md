@@ -1,33 +1,140 @@
 # Flink Stability Testing Framework
 
-A framework for validating Apache Flink's behavior during various failure scenarios, including rescaling, restarts, network partitions, and version upgrades. The framework ensures data consistency in Kafka by verifying that data is processed exactly once, without losses or duplicates.
+A chaos-testing harness for [Apache Flink](https://flink.apache.org/). It spins up a real
+Flink cluster and Kafka broker in Docker, subjects a running job to failures — killed
+TaskManagers, restarts, savepoint-based version upgrades, rescaling — and then verifies
+that the output topic still contains exactly the records it should: no losses, no
+duplicates.
 
-## Features
+Failure scenarios are declared in YAML, so reproducing a suspected exactly-once bug is a
+matter of writing a file rather than writing code.
 
-###
-Core Capabilities
-- ✅Multi-version Flink support(e.g., testing 1.18 → 1.19upgrades)
-- ✅Failure scenario testing: 
-- TaskManager/JobManager stops
-- Network partitions
-- Job rescaling
-- ✅Savepoint management:
-- Stop with savepoint
-- Restart from savepoint
-- ✅Exactly-once processing validation
+## How it works
 
-###
-Kafka Integration
-- ✅Automated Kafka setup using Testcontainers
-- ✅Input/ output topic management
-- ✅Data validation:
-- ✅No duplicates
-- ✅No data loss
+The runner drives three things over the course of a scenario:
 
-## Architecture
+- **Testcontainers** brings up a `confluentinc/cp-kafka` broker and one or more Flink
+  containers on a shared Docker network. The Flink image is chosen per step, which is what
+  makes cross-version upgrade testing possible.
+- **The Flink REST API** (`FlinkRestClient`) triggers savepoints and tracks job state.
+  Checkpoints are bind-mounted to `./checkpoints` on the host so a job can be restored into
+  a container that did not write them.
+- **A Kafka consumer** replays the output topic at the end and asserts record count and ID
+  uniqueness.
 
-### Configuration
-Scenarios are defined in YAML format.
+The bundled test job (`flink-job-generator`) reads `input-topic`, optionally sleeps per
+record to keep the pipeline in flight, and writes to `flink-output` with
+`DeliveryGuarantee.EXACTLY_ONCE`.
 
-### How to use
-mvn clean install && mvn exec:java -pl cli -Dexec.args="run --scenario scenarios/example.yaml"
+## Requirements
+
+- **JDK 21**
+- **Maven 3.8+**
+- **Docker**, running and reachable by Testcontainers
+
+Scenarios pull Flink and Kafka images on first run, so expect the initial execution to take
+a few minutes.
+
+## Getting started
+
+Build all modules, including the shaded job JAR that scenarios submit:
+
+```bash
+mvn clean install
+```
+
+Run the bundled example — a 1.19 job that takes a savepoint, restarts, survives ten
+TaskManager kills, and is then validated for exactly-once delivery:
+
+```bash
+mvn exec:java -pl cli -Dexec.args="run --scenario scenarios/example.yaml"
+```
+
+## Writing a scenario
+
+A scenario is a list of named phases, each a list of steps, executed in order. A phase with
+`repeat: N` runs its steps N times — useful for hammering a job with repeated failures.
+
+```yaml
+scenario:
+  phases:
+    - name: startup
+      steps:
+        - type: start
+          component: kafka
+        - type: wait
+          wait_ms: 10000
+        - type: start
+          component: flink
+          image: flink:1.19
+          jar: ./flink-job-generator/target/flink-job-generator-0.1.0-SNAPSHOT.jar
+          args:
+            - --bootstrapServers kafka:9095
+            - --processingDelayMs 250
+          parallelism: 2
+          checkpoint_interval: 1000
+
+    - name: recovery_loop
+      repeat: 10
+      steps:
+        - type: kill
+          component: taskmanager
+        - type: wait
+          wait_ms: 10000
+        - type: start
+          component: taskmanager
+
+    - name: validation
+      steps:
+        - type: validate
+          validations:
+            - type: kafka-count
+              topic: flink-output
+              expected_records: 1000
+            - type: kafka-unique-ids
+              topic: flink-output
+              expected_records: 1000
+```
+
+### Step types
+
+| `type` | Purpose | Relevant fields |
+| --- | --- | --- |
+| `start` | Start a component, or submit a job to Flink | `component`, `image`, `jar`, `args`, `parallelism`, `checkpoint_interval`, `restore_from_savepoint` |
+| `stop` | Stop a component gracefully | `component` |
+| `kill` | Kill a component abruptly | `component` |
+| `savepoint` | Trigger a savepoint and record its path | `job` |
+| `wait` | Sleep before the next step | `wait_ms` |
+| `validate` | Run assertions against Kafka | `validations` |
+
+`component` is one of `kafka`, `flink`, or `taskmanager`. Setting
+`restore_from_savepoint: true` on a `start` step resumes from the most recent savepoint,
+which is how an upgrade across two `image` values is expressed.
+
+### Validation types
+
+| `type` | Asserts |
+| --- | --- |
+| `kafka-count` | The topic holds exactly `expected_records` records |
+| `kafka-unique-ids` | Those records carry `expected_records` distinct IDs — i.e. no duplicates |
+
+## Modules
+
+| Module | Contents |
+| --- | --- |
+| `cli` | picocli entry point (`chaos-kit run --scenario ...`) |
+| `core` | Scenario model, YAML loader, runner, Flink REST client |
+| `testcontainers` | Flink and Kafka container lifecycle management |
+| `flink-job-generator` | The exactly-once Kafka job used as the test subject |
+
+## Status
+
+Early and experimental. There is no automated test suite yet, the validation rules cover
+count and uniqueness only, and the scenario schema should be expected to change.
+
+## License
+
+Licensed under the [Apache License 2.0](LICENSE).
+
+This is an independent personal project. It is not affiliated with or endorsed by the
+Apache Software Foundation; Apache Flink and Apache Kafka are trademarks of the ASF.

@@ -24,4 +24,27 @@
         <slf4j.version>1.7.36</slf4j.version>
     </properties>
 
+    <build>
+        <plugins>
+            <!-- Scenario runs write logs and Flink checkpoints to the repository root,
+                 outside any target/ directory. Have `mvn clean` remove them too. -->
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-clean-plugin</artifactId>
+                <version>3.3.2</version>
+                <inherited>false</inherited>
+                <configuration>
+                    <filesets>
+                        <fileset>
+                            <directory>${maven.multiModuleProjectDirectory}/logs</directory>
+                        </fileset>
+                        <fileset>
+                            <directory>${maven.multiModuleProjectDirectory}/checkpoints</directory>
+                        </fileset>
+                    </filesets>
+                </configuration>
+            </plugin>
+        </plugins>
+    </build>
+
 </project>
