@@ -17,8 +17,9 @@ The runner drives three things over the course of a scenario:
   containers on a shared Docker network. The Flink image is chosen per step, which is what
   makes cross-version upgrade testing possible.
 - **The Flink REST API** (`FlinkRestClient`) triggers savepoints and tracks job state.
-  Checkpoints are bind-mounted to `./checkpoints` on the host so a job can be restored into
-  a container that did not write them.
+  Each manager bind-mounts one isolated `./checkpoints/attempt-*` host directory into every
+  JobManager and TaskManager, so replacement containers see the same state without sharing it
+  with another run. State is retained as run evidence and removed by `mvn clean`.
 - **A Kafka consumer** replays the output topic at the end and asserts record count and ID
   uniqueness.
 
@@ -147,9 +148,9 @@ which is how an upgrade across two `image` values is expressed.
 ## Status
 
 Early and experimental. The v1 contracts, catalog loader, parameter resolver,
-semantic preflight, suite planner, and artifact preparation have automated coverage.
-The Docker runner still executes the legacy format; wiring the first narrow v1
-execution vertical is the next implementation stage.
+semantic preflight, suite planner, artifact preparation, and named container lifecycle have
+automated coverage. The Docker runner still executes the legacy format; wiring the first
+narrow v1 execution vertical is the next implementation stage.
 
 ## License
 

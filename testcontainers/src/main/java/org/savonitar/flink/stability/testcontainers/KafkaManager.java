@@ -16,7 +16,7 @@ import java.util.List;
 import java.util.UUID;
 import java.util.stream.Collectors;
 
-public class KafkaManager {
+public class KafkaManager implements KafkaCluster {
     private static final Logger LOG = LoggerFactory.getLogger(KafkaManager.class);
     private static final int DEFAULT_TIMEOUT_SECONDS = 60;
     private static final int STABILITY_WAIT_MS = 10_000;
@@ -30,6 +30,8 @@ public class KafkaManager {
     private static final int CONSUMER_TIMEOUT_MS = 10_000;
 
     private final ConfluentKafkaContainer kafka;
+    private boolean startAttempted;
+    private boolean started;
 
     public KafkaManager(Network network, int messages) {
         this.kafka = new ConfluentKafkaContainer(
@@ -46,16 +48,33 @@ public class KafkaManager {
                 .withEnv("KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS", "0")
                 .withStartupTimeout(Duration.ofSeconds(120))
                 .withLogConsumer(new Slf4jLogConsumer(LoggerFactory.getLogger("KAFKA_CONTAINER_LOGS")));
-        this.kafka.start();
         this.messages = messages;
     }
 
+    @Override
+    public synchronized void start() {
+        if (started) {
+            throw new IllegalStateException("Kafka is already running");
+        }
+        startAttempted = true;
+        kafka.start();
+        started = true;
+    }
+
+    @Override
     public String getBootstrapServers() {
+        requireStarted();
         return this.kafka.getBootstrapServers();
     }
 
-    public void stop() {
+    @Override
+    public synchronized void stop() {
+        if (!startAttempted) {
+            return;
+        }
         this.kafka.stop();
+        started = false;
+        startAttempted = false;
     }
 
     private static final class KafkaTopicConfig {
@@ -91,12 +110,16 @@ public class KafkaManager {
         }
     }
 
+    @Override
     public boolean waitForAndValidateKafkaOutput(String topic, int expectedMessages) throws Exception {
+        requireStarted();
         KafkaValidationConfig config = KafkaValidationConfig.forValidation(topic, expectedMessages);
         return validateMessages(config, DEFAULT_TIMEOUT_SECONDS, true);
     }
 
+    @Override
     public boolean performFinalValidation(String topic, int expectedMessages) throws Exception {
+        requireStarted();
         LOG.info("✅ Proceeding with Flink job shutdown and final Kafka validation...");
         KafkaValidationConfig config = KafkaValidationConfig.forFinalCheck(topic, expectedMessages);
         boolean valid = validateMessages(config, 0, false);
@@ -106,7 +129,9 @@ public class KafkaManager {
         return validateMessageSequence(getMessages(config), expectedMessages);
     }
 
+    @Override
     public void createAndFillInInputTopic() throws IOException, InterruptedException {
+        requireStarted();
         KafkaTopicConfig topicConfig = new KafkaTopicConfig(
                 "input-topic",
                 1,
@@ -212,7 +237,9 @@ public class KafkaManager {
         return true;
     }
 
+    @Override
     public void checkKafkaUniqueIds(String topic, int expectedMessages) throws Exception {
+        requireStarted();
         KafkaValidationConfig config = KafkaValidationConfig.forFinalCheck(topic, expectedMessages);
         List<String> messages = getMessages(config);
         validateMessageSequence(messages, expectedMessages);
@@ -263,8 +290,10 @@ public class KafkaManager {
         return true;
     }
 
+    @Override
     public void printMessages(String topic, int timeoutMs, int maxMessages)
             throws InterruptedException, IOException {
+        requireStarted();
         String command = String.format(
                 "kafka-console-consumer --bootstrap-server localhost:9093 " +
                         "--topic %s --from-beginning --timeout-ms %d --max-messages %d " +
@@ -274,5 +303,11 @@ public class KafkaManager {
 
         Container.ExecResult result = kafka.execInContainer("/bin/sh", "-c", command);
         LOG.info("Consumer output: {}", result.getStdout());
+    }
+
+    private synchronized void requireStarted() {
+        if (!started || !kafka.isRunning()) {
+            throw new IllegalStateException("Kafka is not running");
+        }
     }
 }
