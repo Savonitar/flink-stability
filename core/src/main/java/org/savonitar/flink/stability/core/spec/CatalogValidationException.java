@@ -1,7 +1,9 @@
 package org.savonitar.flink.stability.core.spec;
 
 import java.util.Comparator;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.stream.Collectors;
 
 /** Raised when discovered documents do not form a coherent v1 catalog. */
@@ -37,6 +39,11 @@ public final class CatalogValidationException extends IllegalArgumentException {
     }
 
     private static List<CatalogIssue> normalized(List<CatalogIssue> issues) {
-        return issues.stream().distinct().sorted(ISSUE_ORDER).toList();
+        Map<IssueIdentity, CatalogIssue> unique = new LinkedHashMap<>();
+        issues.stream().sorted(ISSUE_ORDER).forEach(issue -> unique.putIfAbsent(
+                new IssueIdentity(issue.source().toString(), issue.code(), issue.path()), issue));
+        return List.copyOf(unique.values());
     }
+
+    private record IssueIdentity(String source, String code, String path) {}
 }

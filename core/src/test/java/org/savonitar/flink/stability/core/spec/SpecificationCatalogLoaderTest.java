@@ -74,6 +74,8 @@ class SpecificationCatalogLoaderTest {
                 CatalogValidationException.class, () -> loader.load(temporaryDirectory));
 
         assertHasIssue(exception, "catalog.expected-result-name-mismatch", "minimal.expected.yaml");
+        assertEquals(1, countIssues(exception, "catalog.expected-result-name-mismatch",
+                "minimal.expected.yaml"));
     }
 
     @Test
@@ -154,6 +156,56 @@ class SpecificationCatalogLoaderTest {
     }
 
     @Test
+    void doesNotTraverseDirectorySymlinks() throws IOException {
+        Path outsideDiscoveryRoot = Files.createDirectories(temporaryDirectory.resolve("outside"));
+        copyValidPair(outsideDiscoveryRoot);
+        Path discoveryRoot = Files.createDirectories(temporaryDirectory.resolve("discovery"));
+        Files.createSymbolicLink(discoveryRoot.resolve("linked-directory"), outsideDiscoveryRoot);
+
+        SpecificationCatalog catalog = loader.load(discoveryRoot);
+
+        assertTrue(catalog.scenarios().isEmpty());
+    }
+
+    @Test
+    void ignoresNonCanonicalYamlExtensions() throws IOException {
+        Files.writeString(temporaryDirectory.resolve("invalid.yml"), "not: [valid");
+        Files.writeString(temporaryDirectory.resolve("invalid.YAML"), "not: [valid");
+        Files.writeString(temporaryDirectory.resolve("extensionless"), "not: [valid");
+
+        SpecificationCatalog catalog = loader.load(temporaryDirectory);
+
+        assertTrue(catalog.scenarios().isEmpty());
+    }
+
+    @Test
+    void treatsSymlinkedExpectedResultAsMissing() throws IOException {
+        copyResource("minimal.yaml", temporaryDirectory.resolve("minimal.yaml"));
+        Path outsideDiscoveryRoot = Files.createDirectories(temporaryDirectory.resolve("outside"));
+        Path realExpected = outsideDiscoveryRoot.resolve("minimal.expected.yaml");
+        copyResource("minimal.expected.yaml", realExpected);
+        Files.createSymbolicLink(temporaryDirectory.resolve("minimal.expected.yaml"),
+                realExpected);
+
+        CatalogValidationException exception = assertThrows(
+                CatalogValidationException.class, () -> loader.load(temporaryDirectory));
+
+        assertHasIssue(exception, "catalog.expected-result-missing", "minimal.yaml");
+    }
+
+    @Test
+    void rejectsSymlinkDiscoveryRootWithoutFollowingIt() throws IOException {
+        Path realRoot = Files.createDirectories(temporaryDirectory.resolve("real-root"));
+        copyValidPair(realRoot);
+        Path linkedRoot = Files.createSymbolicLink(temporaryDirectory.resolve("linked-root"), realRoot);
+
+        CatalogValidationException exception = assertThrows(
+                CatalogValidationException.class, () -> loader.load(linkedRoot));
+
+        assertHasIssue(exception, "catalog.root-not-directory", "linked-root");
+    }
+
+    @Test
     void rejectsNonDirectoryRootsWithoutFollowingSymlinks() throws IOException {
         Path file = Files.writeString(temporaryDirectory.resolve("scenario.yaml"), "format: v1\n");
 
@@ -190,5 +242,13 @@ class SpecificationCatalogLoaderTest {
                         .anyMatch(issue -> issue.code().equals(code)
                                 && issue.source().getFileName().toString().equals(filename)),
                 () -> "Expected " + code + " in " + filename + " but got " + exception.issues());
+    }
+
+    private static long countIssues(
+            CatalogValidationException exception, String code, String filename) {
+        return exception.issues().stream()
+                .filter(issue -> issue.code().equals(code)
+                        && issue.source().getFileName().toString().equals(filename))
+                .count();
     }
 }
