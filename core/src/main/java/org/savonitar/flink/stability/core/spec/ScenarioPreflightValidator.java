@@ -14,9 +14,14 @@ import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 /** Validates the resolved declaration graph and expected oracle before Docker exists. */
 public final class ScenarioPreflightValidator {
+    private static final Pattern STATIC_TARGET_NAME =
+            Pattern.compile("^(taskmanager|jobmanager|broker)-([1-9][0-9]*)$");
+
     public ResolvedScenario validateScenario(ResolvedScenario scenario) {
         Objects.requireNonNull(scenario, "scenario");
         List<PreflightIssue> issues = validateResolvedScenario(scenario);
@@ -128,6 +133,9 @@ public final class ScenarioPreflightValidator {
         }
 
         Set<String> connectorAliases = fieldNames(objectAt(document, "/subject/connectors"));
+        ObjectNode flink = objectAt(document, "/setup/flink");
+        BigInteger jobmanagers = flink.path("jobmanagers").bigIntegerValue();
+        BigInteger taskmanagers = flink.path("taskmanagers").bigIntegerValue();
         Map<String, JobIndex> jobs = new LinkedHashMap<>();
         List<KafkaEndpoint> endpoints = new ArrayList<>();
         ArrayNode jobNodes = (ArrayNode) document.at("/workload/jobs");
@@ -203,6 +211,8 @@ public final class ScenarioPreflightValidator {
                 Map.copyOf(clusters),
                 Map.copyOf(proxies),
                 Set.copyOf(connectorAliases),
+                jobmanagers,
+                taskmanagers,
                 Map.copyOf(jobs),
                 List.copyOf(inputs),
                 List.copyOf(endpoints),
@@ -218,6 +228,7 @@ public final class ScenarioPreflightValidator {
         validateJobs(source, scope, index, issues);
         validateInputSources(source, scope, index, issues);
         validateTerminalValidators(source, scope, index, issues);
+        validatePhases(source, scope, index, issues);
     }
 
     private static void validateProxies(
@@ -317,61 +328,68 @@ public final class ScenarioPreflightValidator {
             ResolutionScope scope,
             SideIndex index,
             List<PreflightIssue> issues) {
-        InputEndpoint input = index.inputs().size() == 1 ? index.inputs().getFirst() : null;
+        boolean customInput = index.inputs().size() == 1
+                && index.inputs().getFirst().mode().equals("custom");
         for (TerminalValidatorIndex validator : index.terminalValidators()) {
-            ObjectNode config = validator.config();
-            switch (validator.type()) {
-                case "kafka.id-set", "kafka.record-count" -> validateTopicReference(
-                        source,
-                        scope,
-                        index,
-                        config.path("cluster").textValue(),
-                        config.path("topic").textValue(),
-                        validator.path(),
-                        "terminal validator '" + validator.type() + "'",
-                        issues);
-                case "kafka.no-hanging-transactions" -> {
-                    String cluster = config.path("cluster").textValue();
-                    boolean clusterExists = index.clusters().containsKey(cluster);
-                    if (!clusterExists) {
-                        issues.add(issue(source, scope,
-                                "preflight.reference.kafka-cluster-not-found",
-                                validator.path() + "/cluster",
-                                "Terminal validator references undeclared Kafka cluster '"
-                                        + cluster + "'"));
-                    }
-                    String prefix = config.path("transactional_id_prefix").textValue();
-                    boolean matchingSink = index.jobs().values().stream().anyMatch(job ->
-                            job.sink().cluster().equals(cluster)
-                                    && "EXACTLY_ONCE".equals(job.sink().deliveryGuarantee())
-                                    && prefix.equals(job.sink().transactionalIdPrefix()));
-                    if (clusterExists && !matchingSink) {
-                        issues.add(issue(source, scope,
-                                "preflight.terminal.transactional-sink-not-found",
-                                validator.path() + "/transactional_id_prefix",
-                                "No exactly-once sink on cluster '" + cluster
-                                        + "' uses transactional ID prefix '" + prefix + "'"));
-                    }
-                }
-                case "flink.log-match" -> {
-                    String job = config.path("job").textValue();
-                    if (!index.jobs().containsKey(job)) {
-                        issues.add(issue(source, scope, "preflight.reference.job-not-found",
-                                validator.path() + "/job",
-                                "Terminal validator references undeclared job '" + job + "'"));
-                    }
-                }
-                default -> {
-                    // The resolved schema owns the closed validator type union.
-                }
-            }
+            validateValidatorReferences(
+                    source, scope, index, validator, !customInput, issues);
+        }
+    }
 
-            if (validator.type().equals("kafka.id-set")
-                    && index.inputs().size() <= 1
-                    && (index.inputs().isEmpty()
-                            || !index.inputs().getFirst().mode().equals("custom"))) {
-                validateIdSetManifestLink(source, scope, index, validator, input, issues);
+    private static void validateValidatorReferences(
+            Path source,
+            ResolutionScope scope,
+            SideIndex index,
+            TerminalValidatorIndex validator,
+            boolean validateManifestLink,
+            List<PreflightIssue> issues) {
+        ObjectNode config = validator.config();
+        switch (validator.type()) {
+            case "kafka.id-set", "kafka.record-count" -> validateTopicReference(
+                    source,
+                    scope,
+                    index,
+                    config.path("cluster").textValue(),
+                    config.path("topic").textValue(),
+                    validator.path(),
+                    "validator '" + validator.type() + "'",
+                    issues);
+            case "kafka.no-hanging-transactions" -> {
+                String cluster = config.path("cluster").textValue();
+                boolean clusterExists = index.clusters().containsKey(cluster);
+                if (!clusterExists) {
+                    issues.add(issue(source, scope,
+                            "preflight.reference.kafka-cluster-not-found",
+                            validator.path() + "/cluster",
+                            "Validator references undeclared Kafka cluster '" + cluster + "'"));
+                }
+                String prefix = config.path("transactional_id_prefix").textValue();
+                boolean matchingSink = hasTransactionalSink(index, cluster, prefix);
+                if (clusterExists && !matchingSink) {
+                    issues.add(issue(source, scope,
+                            "preflight.validator.transactional-sink-not-found",
+                            validator.path() + "/transactional_id_prefix",
+                            "No exactly-once sink on cluster '" + cluster
+                                    + "' uses transactional ID prefix '" + prefix + "'"));
+                }
             }
+            case "flink.log-match" -> validateJobReference(
+                    source,
+                    index,
+                    config.path("job").textValue(),
+                    validator.path() + "/job",
+                    "Validator",
+                    issues);
+            default -> {
+                // The resolved schema owns the closed validator type union.
+            }
+        }
+
+        InputEndpoint input = index.inputs().size() == 1 ? index.inputs().getFirst() : null;
+        if (validateManifestLink
+                && validator.type().equals("kafka.id-set")
+                && index.inputs().size() <= 1) {
+            validateIdSetManifestLink(source, scope, index, validator, input, issues);
         }
     }
 
@@ -417,6 +435,443 @@ public final class ScenarioPreflightValidator {
                             + "' instead of input manifest topic '" + input.cluster() + "/"
                             + input.topic() + "'"));
         }
+    }
+
+    private static void validatePhases(
+            Path source,
+            ResolutionScope scope,
+            SideIndex index,
+            List<PreflightIssue> issues) {
+        ArrayNode phases = (ArrayNode) index.document().get("phases");
+        Map<String, String> phasePaths = new LinkedHashMap<>();
+        for (int phaseIndex = 0; phaseIndex < phases.size(); phaseIndex++) {
+            ObjectNode phase = (ObjectNode) phases.get(phaseIndex);
+            String phasePath = "$/phases/" + phaseIndex;
+            String name = phase.path("name").textValue();
+            String earlier = phasePaths.putIfAbsent(name, phasePath);
+            if (earlier != null) {
+                issues.add(issue(source, ResolutionScope.COMMON,
+                        "preflight.phase.duplicate-name",
+                        phasePath + "/name",
+                        "Phase name '" + name + "' duplicates " + earlier + "/name"));
+            }
+        }
+
+        StateArtifactLedger ledger = indexStateArtifacts(source, scope, phases, issues);
+        Set<StateArtifactKey> priorArtifacts = new LinkedHashSet<>();
+        for (int phaseIndex = 0; phaseIndex < phases.size(); phaseIndex++) {
+            ObjectNode phase = (ObjectNode) phases.get(phaseIndex);
+            validateSteps(
+                    source,
+                    scope,
+                    index,
+                    (ArrayNode) phase.get("steps"),
+                    "$/phases/" + phaseIndex + "/steps",
+                    ledger,
+                    priorArtifacts,
+                    issues);
+        }
+    }
+
+    private static StateArtifactLedger indexStateArtifacts(
+            Path source,
+            ResolutionScope scope,
+            ArrayNode phases,
+            List<PreflightIssue> issues) {
+        List<StateArtifactDeclaration> declarations = new ArrayList<>();
+        Map<StateArtifactKey, StateArtifactDeclaration> firstByKey = new LinkedHashMap<>();
+        Set<StateArtifactKey> invalidKeys = new LinkedHashSet<>();
+        for (int phaseIndex = 0; phaseIndex < phases.size(); phaseIndex++) {
+            ObjectNode phase = (ObjectNode) phases.get(phaseIndex);
+            indexStateArtifactsInSteps(
+                    source,
+                    scope,
+                    (ArrayNode) phase.get("steps"),
+                    "$/phases/" + phaseIndex + "/steps",
+                    false,
+                    declarations,
+                    firstByKey,
+                    invalidKeys,
+                    issues);
+        }
+        return new StateArtifactLedger(
+                List.copyOf(declarations), Set.copyOf(invalidKeys));
+    }
+
+    private static void indexStateArtifactsInSteps(
+            Path source,
+            ResolutionScope scope,
+            ArrayNode steps,
+            String stepsPath,
+            boolean repeated,
+            List<StateArtifactDeclaration> declarations,
+            Map<StateArtifactKey, StateArtifactDeclaration> firstByKey,
+            Set<StateArtifactKey> invalidKeys,
+            List<PreflightIssue> issues) {
+        for (int stepIndex = 0; stepIndex < steps.size(); stepIndex++) {
+            ObjectNode step = (ObjectNode) steps.get(stepIndex);
+            String stepPath = stepsPath + "/" + stepIndex;
+            String type = step.has("checkpoint")
+                    ? "checkpoint"
+                    : step.has("savepoint") ? "savepoint" : null;
+            if (type != null) {
+                ObjectNode producer = (ObjectNode) step.get(type);
+                if (producer.has("as")) {
+                    StateArtifactKey key = new StateArtifactKey(
+                            producer.path("job").textValue(),
+                            type,
+                            producer.path("as").textValue());
+                    StateArtifactDeclaration declaration =
+                            new StateArtifactDeclaration(key, stepPath + "/" + type + "/as");
+                    declarations.add(declaration);
+                    StateArtifactDeclaration earlier = firstByKey.putIfAbsent(key, declaration);
+                    if (earlier != null) {
+                        invalidKeys.add(key);
+                        issues.add(issue(source, ResolutionScope.COMMON,
+                                "preflight.state-artifact.duplicate-identity",
+                                declaration.path(),
+                                "State artifact '" + key.name() + "' for job '" + key.job()
+                                        + "' and type '" + key.type() + "' duplicates "
+                                        + earlier.path()));
+                    }
+                    if (repeated) {
+                        invalidKeys.add(key);
+                        issues.add(issue(source, scope,
+                                "preflight.state-artifact.repeated-name",
+                                declaration.path(),
+                                "Named state artifact '" + key.name()
+                                        + "' is inside a loop that executes more than once"));
+                    }
+                }
+            }
+            if (step.get("loop") instanceof ObjectNode loop) {
+                boolean nestedRepeated = repeated
+                        || loop.path("times").bigIntegerValue().compareTo(BigInteger.ONE) > 0;
+                indexStateArtifactsInSteps(
+                        source,
+                        scope,
+                        (ArrayNode) loop.get("steps"),
+                        stepPath + "/loop/steps",
+                        nestedRepeated,
+                        declarations,
+                        firstByKey,
+                        invalidKeys,
+                        issues);
+            }
+        }
+    }
+
+    private static void validateSteps(
+            Path source,
+            ResolutionScope scope,
+            SideIndex index,
+            ArrayNode steps,
+            String stepsPath,
+            StateArtifactLedger ledger,
+            Set<StateArtifactKey> priorArtifacts,
+            List<PreflightIssue> issues) {
+        for (int stepIndex = 0; stepIndex < steps.size(); stepIndex++) {
+            ObjectNode step = (ObjectNode) steps.get(stepIndex);
+            String stepPath = stepsPath + "/" + stepIndex;
+            if (step.get("await") instanceof ObjectNode await) {
+                validateAwait(source, scope, index, await, stepPath + "/await", issues);
+            } else if (step.get("start") instanceof ObjectNode start) {
+                validateJobReference(
+                        source, index, start.path("job").textValue(),
+                        stepPath + "/start/job", "Start step", issues);
+            } else if (step.get("kill") instanceof ObjectNode kill) {
+                validateProcessTarget(
+                        source, scope, index, (ObjectNode) kill.get("target"),
+                        stepPath + "/kill/target", issues);
+            } else if (step.get("stop") instanceof ObjectNode stop) {
+                validateProcessTarget(
+                        source, scope, index, (ObjectNode) stop.get("target"),
+                        stepPath + "/stop/target", issues);
+            } else if (step.get("loop") instanceof ObjectNode loop) {
+                validateSteps(
+                        source,
+                        scope,
+                        index,
+                        (ArrayNode) loop.get("steps"),
+                        stepPath + "/loop/steps",
+                        ledger,
+                        priorArtifacts,
+                        issues);
+            } else if (step.get("checkpoint") instanceof ObjectNode checkpoint) {
+                validateStateProducer(
+                        source, index, "checkpoint", checkpoint,
+                        stepPath + "/checkpoint", priorArtifacts, issues);
+            } else if (step.get("savepoint") instanceof ObjectNode savepoint) {
+                validateStateProducer(
+                        source, index, "savepoint", savepoint,
+                        stepPath + "/savepoint", priorArtifacts, issues);
+            } else if (step.get("restore") instanceof ObjectNode restore) {
+                validateRestore(
+                        source, index, restore, stepPath + "/restore",
+                        ledger, priorArtifacts, issues);
+            } else if (step.get("restart") instanceof ObjectNode restart) {
+                validateRestart(source, index, restart, stepPath + "/restart", issues);
+            } else if (step.get("validate") instanceof ObjectNode inlineValidator) {
+                Set<String> customReasons = new LinkedHashSet<>();
+                if (inlineValidator.get("failure_reasons") instanceof ArrayNode reasons) {
+                    reasons.forEach(reason -> customReasons.add(reason.textValue()));
+                }
+                validateValidatorReferences(
+                        source,
+                        scope,
+                        index,
+                        new TerminalValidatorIndex(
+                                inlineValidator.path("type").textValue(),
+                                inlineValidator,
+                                Set.copyOf(customReasons),
+                                stepPath + "/validate"),
+                        true,
+                        issues);
+            }
+        }
+    }
+
+    private static void validateAwait(
+            Path source,
+            ResolutionScope scope,
+            SideIndex index,
+            ObjectNode await,
+            String path,
+            List<PreflightIssue> issues) {
+        ObjectNode condition = (ObjectNode) await.get("condition");
+        String conditionPath = path + "/condition";
+        switch (condition.path("type").textValue()) {
+            case "job-state", "checkpoint-completed", "savepoint-completed" ->
+                    validateJobReference(
+                            source, index, condition.path("job").textValue(),
+                            conditionPath + "/job", "Await condition", issues);
+            case "log-marker" -> {
+                if (condition.has("job")) {
+                    validateJobReference(
+                            source, index, condition.path("job").textValue(),
+                            conditionPath + "/job", "Await condition", issues);
+                }
+            }
+            case "taskmanager-count" -> {
+                BigInteger value = condition.path("value").bigIntegerValue();
+                if (value.compareTo(index.taskmanagers()) > 0) {
+                    issues.add(issue(source, scope,
+                            "preflight.await.taskmanager-count-exceeds-configured",
+                            conditionPath + "/value",
+                            "Awaited TaskManager count " + value
+                                    + " exceeds configured count " + index.taskmanagers()));
+                }
+            }
+            case "kafka-transaction-state" -> {
+                String cluster = condition.path("cluster").textValue();
+                if (!index.clusters().containsKey(cluster)) {
+                    issues.add(issue(source, scope,
+                            "preflight.reference.kafka-cluster-not-found",
+                            conditionPath + "/cluster",
+                            "Await condition references undeclared Kafka cluster '"
+                                    + cluster + "'"));
+                } else {
+                    String prefix = condition.path("transactional_id_prefix").textValue();
+                    if (!hasTransactionalSink(index, cluster, prefix)) {
+                        issues.add(issue(source, scope,
+                                "preflight.await.transactional-sink-not-found",
+                                conditionPath + "/transactional_id_prefix",
+                                "No exactly-once sink on cluster '" + cluster
+                                        + "' uses transactional ID prefix '" + prefix + "'"));
+                    }
+                }
+            }
+            case "record-threshold" -> validateTopicReference(
+                    source,
+                    scope,
+                    index,
+                    condition.path("cluster").textValue(),
+                    condition.path("topic").textValue(),
+                    conditionPath,
+                    "await condition",
+                    issues);
+            default -> {
+                // The resolved schema owns the closed await-condition union.
+            }
+        }
+    }
+
+    private static void validateProcessTarget(
+            Path source,
+            ResolutionScope scope,
+            SideIndex index,
+            ObjectNode target,
+            String path,
+            List<PreflightIssue> issues) {
+        if ("selector".equals(target.path("kind").textValue())) {
+            issues.add(issue(source, ResolutionScope.COMMON,
+                    "capability.runtime-target-selector.unsupported",
+                    path + "/kind",
+                    "v1 supports only statically named process targets"));
+            return;
+        }
+
+        String role = target.path("role").textValue();
+        String name = target.path("name").textValue();
+        Matcher matcher = STATIC_TARGET_NAME.matcher(name);
+        boolean matchesRole = matcher.matches() && matcher.group(1).equals(role);
+        BigInteger ordinal = matchesRole
+                ? new BigInteger(matcher.group(2))
+                : BigInteger.ZERO;
+        if (role.equals("broker") && matchesRole) {
+            List<String> matchingClusters = index.clusters().entrySet().stream()
+                    .filter(entry -> ordinal.compareTo(entry.getValue().brokers()) <= 0)
+                    .map(Map.Entry::getKey)
+                    .sorted()
+                    .toList();
+            if (matchingClusters.size() == 1) {
+                return;
+            }
+            if (matchingClusters.size() > 1) {
+                issues.add(issue(source, scope,
+                        "preflight.target.broker-cluster-ambiguous",
+                        path + "/name",
+                        "Named broker target '" + name
+                                + "' exists in Kafka clusters " + matchingClusters));
+                return;
+            }
+        }
+
+        BigInteger upperBound = switch (role) {
+            case "taskmanager" -> index.taskmanagers();
+            case "jobmanager" -> index.jobmanagers();
+            case "broker" -> index.clusters().values().stream()
+                    .map(ClusterIndex::brokers)
+                    .max(BigInteger::compareTo)
+                    .orElse(BigInteger.ZERO);
+            default -> BigInteger.ZERO;
+        };
+        if (!matchesRole || ordinal.compareTo(upperBound) > 0) {
+            issues.add(issue(source, scope,
+                    "preflight.target.named-not-found",
+                    path + "/name",
+                    "No declared " + role + " target named '" + name
+                            + "'; available names are " + role + "-1 through "
+                            + role + "-" + upperBound));
+        }
+    }
+
+    private static void validateStateProducer(
+            Path source,
+            SideIndex index,
+            String type,
+            ObjectNode producer,
+            String path,
+            Set<StateArtifactKey> priorArtifacts,
+            List<PreflightIssue> issues) {
+        String job = producer.path("job").textValue();
+        validateJobReference(source, index, job, path + "/job", "State step", issues);
+        if (producer.has("as")) {
+            priorArtifacts.add(new StateArtifactKey(
+                    job, type, producer.path("as").textValue()));
+        }
+    }
+
+    private static void validateRestore(
+            Path source,
+            SideIndex index,
+            ObjectNode restore,
+            String path,
+            StateArtifactLedger ledger,
+            Set<StateArtifactKey> priorArtifacts,
+            List<PreflightIssue> issues) {
+        String job = restore.path("job").textValue();
+        if (!validateJobReference(source, index, job, path + "/job", "Restore step", issues)) {
+            return;
+        }
+        if (!(restore.get("from") instanceof ObjectNode from) || !from.has("name")) {
+            return;
+        }
+
+        String type = from.path("type").textValue();
+        String name = from.path("name").textValue();
+        String namePath = path + "/from/name";
+        StateArtifactKey key = new StateArtifactKey(job, type, name);
+        if (ledger.invalidKeys().contains(key)) {
+            return;
+        }
+        if (priorArtifacts.contains(key)) {
+            return;
+        }
+        if (ledger.declarations().stream().anyMatch(declaration -> declaration.key().equals(key))) {
+            issues.add(issue(source, ResolutionScope.COMMON,
+                    "preflight.state-artifact.not-prior",
+                    namePath,
+                    "Named " + type + " artifact '" + name
+                            + "' for job '" + job + "' is declared only after this restore"));
+            return;
+        }
+        if (ledger.declarations().stream().anyMatch(declaration ->
+                declaration.key().job().equals(job)
+                        && declaration.key().name().equals(name))) {
+            issues.add(issue(source, ResolutionScope.COMMON,
+                    "preflight.state-artifact.type-mismatch",
+                    namePath,
+                    "State artifact '" + name + "' for job '" + job
+                            + "' is not a " + type));
+            return;
+        }
+        if (ledger.declarations().stream().anyMatch(declaration ->
+                declaration.key().type().equals(type)
+                        && declaration.key().name().equals(name))) {
+            issues.add(issue(source, ResolutionScope.COMMON,
+                    "preflight.state-artifact.job-mismatch",
+                    namePath,
+                    "Named " + type + " artifact '" + name
+                            + "' belongs to another job"));
+            return;
+        }
+        issues.add(issue(source, ResolutionScope.COMMON,
+                "preflight.state-artifact.not-found",
+                namePath,
+                "No named " + type + " artifact '" + name
+                        + "' is declared for job '" + job + "'"));
+    }
+
+    private static void validateRestart(
+            Path source,
+            SideIndex index,
+            ObjectNode restart,
+            String path,
+            List<PreflightIssue> issues) {
+        if ("kafka".equals(restart.path("component").textValue())
+                && index.clusters().size() != 1) {
+            issues.add(issue(source, ResolutionScope.COMMON,
+                    "preflight.restart.kafka-cluster-ambiguous",
+                    path + "/component",
+                    "Kafka restart is ambiguous because the scenario declares clusters "
+                            + index.clusters().keySet().stream().sorted().toList()));
+        }
+    }
+
+    private static boolean validateJobReference(
+            Path source,
+            SideIndex index,
+            String job,
+            String path,
+            String owner,
+            List<PreflightIssue> issues) {
+        if (index.jobs().containsKey(job)) {
+            return true;
+        }
+        issues.add(issue(source, ResolutionScope.COMMON,
+                "preflight.reference.job-not-found",
+                path,
+                owner + " references undeclared job '" + job + "'"));
+        return false;
+    }
+
+    private static boolean hasTransactionalSink(
+            SideIndex index, String cluster, String prefix) {
+        return index.jobs().values().stream().anyMatch(job ->
+                job.sink().cluster().equals(cluster)
+                        && "EXACTLY_ONCE".equals(job.sink().deliveryGuarantee())
+                        && prefix.equals(job.sink().transactionalIdPrefix()));
     }
 
     private static void validateExpectedContract(
@@ -653,11 +1108,21 @@ public final class ScenarioPreflightValidator {
             Set<String> customReasons,
             String path) {}
 
+    private record StateArtifactKey(String job, String type, String name) {}
+
+    private record StateArtifactDeclaration(StateArtifactKey key, String path) {}
+
+    private record StateArtifactLedger(
+            List<StateArtifactDeclaration> declarations,
+            Set<StateArtifactKey> invalidKeys) {}
+
     private record SideIndex(
             ObjectNode document,
             Map<String, ClusterIndex> clusters,
             Map<String, ProxyIndex> proxies,
             Set<String> connectorAliases,
+            BigInteger jobmanagers,
+            BigInteger taskmanagers,
             Map<String, JobIndex> jobs,
             List<InputEndpoint> inputs,
             List<KafkaEndpoint> endpoints,

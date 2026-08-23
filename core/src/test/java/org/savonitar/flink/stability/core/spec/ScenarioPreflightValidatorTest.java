@@ -296,7 +296,7 @@ class ScenarioPreflightValidatorTest {
         assertHasIssue(
                 transactionSink,
                 ResolutionScope.SINGLE,
-                "preflight.terminal.transactional-sink-not-found",
+                "preflight.validator.transactional-sink-not-found",
                 "$/terminal_validations/1/transactional_id_prefix");
 
         ScenarioPreflightException job = reject(document ->
@@ -305,7 +305,7 @@ class ScenarioPreflightValidatorTest {
                         "missing"));
         assertHasIssue(
                 job,
-                ResolutionScope.SINGLE,
+                ResolutionScope.COMMON,
                 "preflight.reference.job-not-found",
                 "$/terminal_validations/1/job");
     }
