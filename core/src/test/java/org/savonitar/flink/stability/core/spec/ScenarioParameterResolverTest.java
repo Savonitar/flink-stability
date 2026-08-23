@@ -99,6 +99,78 @@ class ScenarioParameterResolverTest {
     }
 
     @Test
+    void rejectsIndirectSuiteAndSubmitControlOfInvocationPolicyFields() {
+        ScenarioSpecification scenario = scenario(document -> {
+            parameterWithDefault(document, "run_count", "integer", IntNode.valueOf(1));
+            parameterWithDefault(document, "retry_count", "integer", IntNode.valueOf(1));
+            document.put("runs", "${run_count}");
+            document.put("health_retry_limit", "${retry_count}");
+        });
+
+        ResolvedSide fromScenarioDefaults = resolver.resolve(
+                scenario, ResolutionRequest.none()).side(ScenarioSide.SINGLE);
+        assertEquals(1, fromScenarioDefaults.document().path("runs").intValue());
+        assertEquals(1, fromScenarioDefaults.document()
+                .path("health_retry_limit").intValue());
+
+        ScenarioResolutionException suiteRuns = assertThrows(
+                ScenarioResolutionException.class,
+                () -> resolver.resolve(scenario, new ResolutionRequest(
+                        Map.of("run_count", IntNode.valueOf(2)), Map.of())));
+        assertHasIssue(
+                suiteRuns,
+                "parameter.suite-binding-controls-runs",
+                ResolutionScope.COMMON,
+                "$/suite-bindings/run_count");
+
+        ScenarioResolutionException submitRuns = assertThrows(
+                ScenarioResolutionException.class,
+                () -> resolver.resolve(scenario, new ResolutionRequest(
+                        Map.of(), Map.of("run_count", IntNode.valueOf(2)))));
+        assertHasIssue(
+                submitRuns,
+                "parameter.submit-override-controls-runs",
+                ResolutionScope.COMMON,
+                "$/submit-overrides/run_count");
+
+        ScenarioResolutionException suiteHealth = assertThrows(
+                ScenarioResolutionException.class,
+                () -> resolver.resolve(scenario, new ResolutionRequest(
+                        Map.of("retry_count", IntNode.valueOf(2)), Map.of())));
+        assertHasIssue(
+                suiteHealth,
+                "parameter.suite-binding-controls-health-retry-limit",
+                ResolutionScope.COMMON,
+                "$/suite-bindings/retry_count");
+
+        ScenarioResolutionException submitHealth = assertThrows(
+                ScenarioResolutionException.class,
+                () -> resolver.resolve(scenario, new ResolutionRequest(
+                        Map.of(), Map.of("retry_count", IntNode.valueOf(2)))));
+        assertHasIssue(
+                submitHealth,
+                "parameter.submit-override-controls-health-retry-limit",
+                ResolutionScope.COMMON,
+                "$/submit-overrides/retry_count");
+
+        ScenarioResolutionException bothRunBindings = assertThrows(
+                ScenarioResolutionException.class,
+                () -> resolver.resolve(scenario, new ResolutionRequest(
+                        Map.of("run_count", IntNode.valueOf(2)),
+                        Map.of("run_count", IntNode.valueOf(3)))));
+        assertHasIssue(
+                bothRunBindings,
+                "parameter.suite-binding-controls-runs",
+                ResolutionScope.COMMON,
+                "$/suite-bindings/run_count");
+        assertHasIssue(
+                bothRunBindings,
+                "parameter.submit-override-controls-runs",
+                ResolutionScope.COMMON,
+                "$/submit-overrides/run_count");
+    }
+
+    @Test
     void preservesWholeScalarIntegerAndBooleanTypesAcrossNumericFields() {
         ScenarioSpecification scenario = scenario(document -> {
             parameterWithDefault(document, "broker_count", "integer", IntNode.valueOf(2));

@@ -38,6 +38,19 @@ public final class ScenarioParameterResolver {
     }
 
     public ResolvedScenario resolve(ScenarioSpecification scenario, ResolutionRequest request) {
+        return resolve(scenario, request, true);
+    }
+
+    ResolvedScenario resolveExpectationProbe(
+            ScenarioSpecification scenario,
+            ResolutionRequest request) {
+        return resolve(scenario, request, false);
+    }
+
+    private ResolvedScenario resolve(
+            ScenarioSpecification scenario,
+            ResolutionRequest request,
+            boolean validateInvocationPolicyBindings) {
         Objects.requireNonNull(scenario, "scenario");
         Objects.requireNonNull(request, "request");
         Path source = scenario.source();
@@ -94,6 +107,15 @@ public final class ScenarioParameterResolver {
             throw new ScenarioResolutionException(issues);
         }
 
+        if (validateInvocationPolicyBindings) {
+            for (SideMaterialization materialization : materializations) {
+                validateInvocationPolicyBindings(source, materialization, request, issues);
+            }
+            if (!issues.isEmpty()) {
+                throw new ScenarioResolutionException(issues);
+            }
+        }
+
         for (SideMaterialization materialization : materializations) {
             issues.addAll(capabilityValidator.validate(
                     source, scopeOf(materialization.side()), materialization.document()));
@@ -141,6 +163,62 @@ public final class ScenarioParameterResolver {
                         materialization.appliedDefaults()))
                 .toList();
         return new ResolvedScenario(scenario, common, resolvedExperiment, resolvedSides);
+    }
+
+    private static void validateInvocationPolicyBindings(
+            Path source,
+            SideMaterialization materialization,
+            ResolutionRequest request,
+            List<ResolutionIssue> issues) {
+        validateInvocationPolicyBinding(
+                source, materialization, request, "$/runs", "runs", issues);
+        validateInvocationPolicyBinding(
+                source,
+                materialization,
+                request,
+                "$/health_retry_limit",
+                "health-retry-limit",
+                issues);
+    }
+
+    private static void validateInvocationPolicyBinding(
+            Path source,
+            SideMaterialization materialization,
+            ResolutionRequest request,
+            String documentPath,
+            String codeSuffix,
+            List<ResolutionIssue> issues) {
+        materialization.provenance().getOrDefault(documentPath, Set.of()).forEach(parameter -> {
+            if (request.internalSuiteBindings().containsKey(parameter)) {
+                addInvocationPolicyBindingIssue(
+                        source, parameter, "suite", documentPath, codeSuffix, issues);
+            }
+            if (request.internalSubmitOverrides().containsKey(parameter)) {
+                addInvocationPolicyBindingIssue(
+                        source, parameter, "submit", documentPath, codeSuffix, issues);
+            }
+        });
+    }
+
+    private static void addInvocationPolicyBindingIssue(
+            Path source,
+            String parameter,
+            String bindingKind,
+            String documentPath,
+            String codeSuffix,
+            List<ResolutionIssue> issues) {
+        String codeSource = "suite".equals(bindingKind)
+                ? "suite-binding"
+                : "submit-override";
+        issues.add(issue(
+                source,
+                ResolutionScope.COMMON,
+                "parameter." + codeSource + "-controls-" + codeSuffix,
+                bindingPath(bindingKind, parameter),
+                ("suite".equals(bindingKind) ? "Suite binding" : "Submit-time override")
+                        + " for parameter '" + parameter + "' cannot control "
+                        + documentPath + "; use the committed scenario value"
+                        + ("runs".equals(codeSuffix) ? " or suite-entry runs" : "")));
     }
 
     private Map<String, Definition> readDefinitions(

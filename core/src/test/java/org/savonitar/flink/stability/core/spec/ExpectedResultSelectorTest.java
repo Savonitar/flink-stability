@@ -272,6 +272,25 @@ class ExpectedResultSelectorTest {
     }
 
     @Test
+    void internalCaseProbesDoNotTurnScenarioDefaultsIntoSuiteOverrides() {
+        ScenarioSpecification scenario = plainScenario(document -> {
+            parameter(document, "run_count", "integer", IntNode.valueOf(2));
+            parameter(document, "profile", "string", TextNode.valueOf("blue"));
+            document.put("runs", "${run_count}");
+        });
+        ExpectedResultSpecification expected = expected(document -> addPlainFailCase(
+                document, Map.of("profile", TextNode.valueOf("red"))));
+
+        ResolvedScenarioPlan plan = selector.select(
+                bundle(scenario, expected),
+                parameterResolver.resolve(scenario, ResolutionRequest.none()));
+
+        assertEquals(ExpectationSelectionKind.DEFAULT, plan.selectedExpectation().kind());
+        assertEquals(2, plan.scenario().side(ScenarioSide.SINGLE)
+                .document().path("runs").intValue());
+    }
+
+    @Test
     void rejectsSameSubsetAndDisjointKeyOverlaps() {
         ScenarioSpecification scenario = plainScenario(document -> {
             parameter(document, "a", "integer", IntNode.valueOf(3));

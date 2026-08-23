@@ -48,6 +48,7 @@ public final class ScenarioPreflightValidator {
         List<PreflightIssue> issues = new ArrayList<>();
         List<SideIndex> indexes = indexResolvedScenario(scenario, issues);
         Path source = scenario.template().source();
+        validateInvocationPolicy(source, scenario, issues);
         for (int index = 0; index < scenario.sides().size(); index++) {
             validateSide(
                     source,
@@ -56,6 +57,29 @@ public final class ScenarioPreflightValidator {
                     issues);
         }
         return issues;
+    }
+
+    private static void validateInvocationPolicy(
+            Path source,
+            ResolvedScenario scenario,
+            List<PreflightIssue> issues) {
+        if (!scenario.isExperiment()) {
+            return;
+        }
+        BigInteger baselineRetryLimit = scenario.side(ScenarioSide.BASELINE)
+                .document().path("health_retry_limit").bigIntegerValue();
+        BigInteger candidateRetryLimit = scenario.side(ScenarioSide.CANDIDATE)
+                .document().path("health_retry_limit").bigIntegerValue();
+        if (!baselineRetryLimit.equals(candidateRetryLimit)) {
+            issues.add(issue(
+                    source,
+                    ResolutionScope.COMMON,
+                    "preflight.invocation.health-retry-limit-side-mismatch",
+                    "$/health_retry_limit",
+                    "Experiment resolves health_retry_limit to " + baselineRetryLimit
+                            + " for baseline and " + candidateRetryLimit
+                            + " for candidate, but one invocation has one shared retry budget"));
+        }
     }
 
     private static List<SideIndex> indexResolvedScenario(

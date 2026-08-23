@@ -7,6 +7,7 @@ import java.io.IOException;
 import java.net.URISyntaxException;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -144,6 +145,91 @@ class SpecificationCatalogLoaderTest {
     }
 
     @Test
+    void rejectsSuiteEntryThatReferencesUndiscoveredScenario() throws IOException {
+        writeSuite("""
+                  - scenario: missing-scenario
+                """);
+
+        CatalogValidationException exception = assertThrows(
+                CatalogValidationException.class, () -> loader.load(temporaryDirectory));
+
+        assertExactSuiteIssues(exception,
+                "catalog.suite-scenario-not-found@$/scenarios/0/scenario");
+    }
+
+    @Test
+    void requiresExplicitAliasOnEveryOccurrenceOfRepeatedScenario() throws IOException {
+        copyValidPair(temporaryDirectory);
+        writeSuite("""
+                  - scenario: minimal
+                  - scenario: minimal
+                    as: first-run
+                  - scenario: minimal
+                """);
+
+        CatalogValidationException exception = assertThrows(
+                CatalogValidationException.class, () -> loader.load(temporaryDirectory));
+
+        assertExactSuiteIssues(exception,
+                "catalog.suite-entry-alias-required@$/scenarios/0/as",
+                "catalog.suite-entry-alias-required@$/scenarios/2/as");
+    }
+
+    @Test
+    void rejectsDuplicateExplicitSuiteEntryIds() throws IOException {
+        copyValidPair(temporaryDirectory);
+        copyValidPairNamed("alternate");
+        writeSuite("""
+                  - scenario: minimal
+                    as: shared-entry
+                  - scenario: alternate
+                    as: shared-entry
+                """);
+
+        CatalogValidationException exception = assertThrows(
+                CatalogValidationException.class, () -> loader.load(temporaryDirectory));
+
+        assertExactSuiteIssues(exception,
+                "catalog.suite-duplicate-entry-id@$/scenarios/0/as",
+                "catalog.suite-duplicate-entry-id@$/scenarios/1/as");
+    }
+
+    @Test
+    void rejectsDefaultSuiteEntryIdCollidingWithExplicitIdForAnotherScenario() throws IOException {
+        copyValidPair(temporaryDirectory);
+        copyValidPairNamed("alternate");
+        writeSuite("""
+                  - scenario: minimal
+                  - scenario: alternate
+                    as: minimal
+                """);
+
+        CatalogValidationException exception = assertThrows(
+                CatalogValidationException.class, () -> loader.load(temporaryDirectory));
+
+        assertExactSuiteIssues(exception,
+                "catalog.suite-duplicate-entry-id@$/scenarios/0/scenario",
+                "catalog.suite-duplicate-entry-id@$/scenarios/1/as");
+    }
+
+    @Test
+    void acceptsRepeatedScenarioWithDistinctExplicitAliases() throws IOException {
+        copyValidPair(temporaryDirectory);
+        writeSuite("""
+                  - scenario: minimal
+                    as: first-run
+                  - scenario: minimal
+                    as: second-run
+                """);
+
+        SpecificationCatalog catalog = loader.load(temporaryDirectory);
+
+        SuiteSpecification suite = catalog.suite("membership-suite").orElseThrow();
+        assertEquals("first-run", suite.at("/scenarios/0/as").textValue());
+        assertEquals("second-run", suite.at("/scenarios/1/as").textValue());
+    }
+
+    @Test
     void doesNotFollowSpecificationSymlinks() throws IOException {
         Path outsideDiscoveryRoot = Files.createDirectories(temporaryDirectory.resolve("outside"));
         copyValidPair(outsideDiscoveryRoot);
@@ -220,6 +306,30 @@ class SpecificationCatalogLoaderTest {
         copyResource("minimal.expected.yaml", directory.resolve("minimal.expected.yaml"));
     }
 
+    private void copyValidPairNamed(String name) throws IOException {
+        String scenario = resourceText("minimal.yaml")
+                .replace("  name: minimal\n", "  name: " + name + "\n");
+        Files.writeString(temporaryDirectory.resolve(name + ".yaml"), scenario);
+
+        String expected = resourceText("minimal.expected.yaml")
+                .replace("  name: minimal.expected\n", "  name: " + name + ".expected\n")
+                .replace("  scenario: minimal\n", "  scenario: " + name + "\n");
+        Files.writeString(temporaryDirectory.resolve(name + ".expected.yaml"), expected);
+    }
+
+    private void writeSuite(String scenarioEntries) throws IOException {
+        Files.writeString(temporaryDirectory.resolve("membership-suite.yaml"), """
+                format: v1
+                kind: suite
+
+                meta:
+                  name: membership-suite
+
+                scenarios:
+                %s
+                """.formatted(scenarioEntries));
+    }
+
     private void copyResource(String name, Path target) throws IOException {
         Files.copy(resource(name), target);
     }
@@ -250,5 +360,16 @@ class SpecificationCatalogLoaderTest {
                 .filter(issue -> issue.code().equals(code)
                         && issue.source().getFileName().toString().equals(filename))
                 .count();
+    }
+
+    private static void assertExactSuiteIssues(
+            CatalogValidationException exception, String... expectedIssues) {
+        assertTrue(exception.issues().stream()
+                        .allMatch(issue -> issue.source().getFileName().toString()
+                                .equals("membership-suite.yaml")),
+                () -> "Expected only membership-suite.yaml issues but got " + exception.issues());
+        assertEquals(List.of(expectedIssues), exception.issues().stream()
+                .map(issue -> issue.code() + "@" + issue.path())
+                .toList());
     }
 }

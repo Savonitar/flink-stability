@@ -491,6 +491,41 @@ class ScenarioPreflightValidatorTest {
                 .allMatch(issue -> issue.scope() == ResolutionScope.CANDIDATE));
     }
 
+    @Test
+    void rejectsDifferentHealthRetryBudgetsAcrossExperimentSides() {
+        ScenarioSpecification experiment = scenario(document -> {
+            ObjectNode retryLimit = document.putObject("parameters")
+                    .putObject("retry_limit");
+            retryLimit.put("type", "integer");
+            retryLimit.put("default", 1);
+            retryLimit.put("min", 0);
+            retryLimit.put("max", 2);
+            document.put("health_retry_limit", "${retry_limit}");
+
+            ObjectNode definition = document.putObject("experiment");
+            definition.put("claim", "Both sides use one invocation health budget.");
+            definition.putArray("varies").add("retry_limit");
+            definition.putObject("baseline").put("retry_limit", 1);
+            definition.putObject("candidate").put("retry_limit", 2);
+        });
+        ExpectedResultSpecification expectation = expected(document -> {
+            ObjectNode defaultNode = document.withObject("default");
+            defaultNode.removeAll();
+            defaultNode.putObject("baseline").put("outcome", "pass");
+            defaultNode.putObject("candidate").put("outcome", "pass");
+        });
+
+        ScenarioPreflightException exception = assertThrows(
+                ScenarioPreflightException.class,
+                () -> validator.validate(plan(experiment, expectation)));
+
+        assertHasIssue(
+                exception,
+                ResolutionScope.COMMON,
+                "preflight.invocation.health-retry-limit-side-mismatch",
+                "$/health_retry_limit");
+    }
+
     private ScenarioPreflightException reject(Consumer<ObjectNode> scenarioChanges) {
         return reject(scenarioChanges, document -> {});
     }

@@ -1,5 +1,8 @@
 package org.savonitar.flink.stability.core.spec;
 
+import com.fasterxml.jackson.databind.node.ArrayNode;
+import com.fasterxml.jackson.databind.node.ObjectNode;
+
 import java.io.IOException;
 import java.io.UncheckedIOException;
 import java.nio.file.Files;
@@ -10,6 +13,7 @@ import java.util.Comparator;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.function.Function;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
@@ -46,6 +50,7 @@ public final class SpecificationCatalogLoader {
         validateScenarioIdentities(scenarios, issues);
         validateExpectedResultIdentities(scenarios, expectedResults, issues);
         validateSuiteIdentities(suites, issues);
+        validateSuiteMembership(suites, scenarios, issues);
         if (!issues.isEmpty()) {
             throw new CatalogValidationException(issues);
         }
@@ -176,6 +181,71 @@ public final class SpecificationCatalogLoader {
         });
     }
 
+    private void validateSuiteMembership(
+            List<SuiteSpecification> suites,
+            List<ScenarioSpecification> scenarios,
+            List<CatalogIssue> issues) {
+        Set<String> scenarioNames = scenarios.stream()
+                .map(ScenarioSpecification::name)
+                .collect(Collectors.toSet());
+        suites.forEach(suite -> {
+            List<SuiteEntryDeclaration> entries = suiteEntries(suite);
+            entries.stream()
+                    .filter(entry -> !scenarioNames.contains(entry.scenarioName()))
+                    .forEach(entry -> issues.add(issue(
+                            suite.source(),
+                            "catalog.suite-scenario-not-found",
+                            entry.path() + "/scenario",
+                            "Suite references undiscovered scenario '"
+                                    + entry.scenarioName() + "'")));
+
+            Set<Integer> entriesMissingRequiredAlias = entries.stream()
+                    .collect(Collectors.groupingBy(SuiteEntryDeclaration::scenarioName))
+                    .values().stream()
+                    .filter(group -> group.size() > 1)
+                    .flatMap(List::stream)
+                    .filter(entry -> entry.explicitId() == null)
+                    .peek(entry -> issues.add(issue(
+                            suite.source(),
+                            "catalog.suite-entry-alias-required",
+                            entry.path() + "/as",
+                            "Scenario '" + entry.scenarioName()
+                                    + "' appears more than once; every occurrence requires 'as'")))
+                    .map(SuiteEntryDeclaration::index)
+                    .collect(Collectors.toSet());
+
+            entries.stream()
+                    .filter(entry -> !entriesMissingRequiredAlias.contains(entry.index()))
+                    .collect(Collectors.groupingBy(SuiteEntryDeclaration::effectiveId))
+                    .values().stream()
+                    .filter(group -> group.size() > 1)
+                    .flatMap(List::stream)
+                    .forEach(entry -> issues.add(issue(
+                            suite.source(),
+                            "catalog.suite-duplicate-entry-id",
+                            entry.path() + (entry.explicitId() == null ? "/scenario" : "/as"),
+                            "Suite entry ID '" + entry.effectiveId()
+                                    + "' is used by multiple entries")));
+        });
+    }
+
+    private static List<SuiteEntryDeclaration> suiteEntries(SuiteSpecification suite) {
+        ArrayNode nodes = (ArrayNode) suite.document().get("scenarios");
+        List<SuiteEntryDeclaration> entries = new ArrayList<>();
+        for (int index = 0; index < nodes.size(); index++) {
+            ObjectNode node = (ObjectNode) nodes.get(index);
+            String scenarioName = node.path("scenario").textValue();
+            String explicitId = node.has("as") ? node.path("as").textValue() : null;
+            entries.add(new SuiteEntryDeclaration(
+                    index,
+                    scenarioName,
+                    explicitId,
+                    explicitId == null ? scenarioName : explicitId,
+                    "$/scenarios/" + index));
+        }
+        return List.copyOf(entries);
+    }
+
     private static <T extends LoadedSpecification> List<T> specificationsOfType(
             List<LoadedSpecification> documents, Class<T> type) {
         return documents.stream().filter(type::isInstance).map(type::cast).toList();
@@ -211,4 +281,11 @@ public final class SpecificationCatalogLoader {
         return new CatalogValidationException(List.of(issue(root, "catalog.io-error", "$",
                 exception.getMessage() == null ? exception.getClass().getSimpleName() : exception.getMessage())));
     }
+
+    private record SuiteEntryDeclaration(
+            int index,
+            String scenarioName,
+            String explicitId,
+            String effectiveId,
+            String path) {}
 }

@@ -132,7 +132,7 @@ final class ExpectedResultSelector {
         conditions.fields().forEachRemaining(entry ->
                 probeBindings.put(entry.getKey(), entry.getValue().deepCopy()));
         try {
-            ResolvedScenario probe = parameterResolver.resolve(
+            ResolvedScenario probe = parameterResolver.resolveExpectationProbe(
                     resolved.template(), new ResolutionRequest(probeBindings, Map.of()));
             List<PreflightIssue> preflightIssues = new ArrayList<>();
             for (ResolvedSide side : probe.sides()) {

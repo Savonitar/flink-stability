@@ -2,7 +2,7 @@ package org.savonitar.flink.stability.core.spec;
 
 import java.util.Objects;
 
-/** Resolves parameters and validates resolved declaration and expectation semantics. */
+/** Resolves a scenario and completes its Docker-free semantic preflight. */
 public final class ScenarioPlanResolver {
     private final ScenarioParameterResolver parameterResolver;
     private final ExpectedResultSelector expectedResultSelector;
