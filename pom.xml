@@ -47,6 +47,9 @@
                             <directory>${maven.multiModuleProjectDirectory}/logs</directory>
                         </fileset>
                         <fileset>
+                            <directory>${maven.multiModuleProjectDirectory}/cli/logs</directory>
+                        </fileset>
+                        <fileset>
                             <directory>${maven.multiModuleProjectDirectory}/checkpoints</directory>
                         </fileset>
                         <fileset>

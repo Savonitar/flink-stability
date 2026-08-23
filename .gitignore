@@ -5,7 +5,7 @@ target/
 
 ### Scenario run artifacts ###
 /jobs/
-/logs/
+logs/
 /checkpoints/
 /savepoints/
 .flink-stability/

@@ -30,10 +30,10 @@ record to keep the pipeline in flight, and writes to `flink-output` with
 
 - **JDK 21**
 - **Maven 3.8+**
-- **Docker**, running and reachable by Testcontainers
+- **Docker**, running and reachable by Testcontainers, for `run` only
 
-Scenarios pull Flink and Kafka images on first run, so expect the initial execution to take
-a few minutes.
+Docker-free `validate` needs only JDK and Maven. Executed scenarios pull Flink and
+Kafka images on first run, so expect the initial execution to take a few minutes.
 
 ## Getting started
 
@@ -49,6 +49,23 @@ TaskManager kills, and is then validated for exactly-once delivery:
 ```bash
 mvn exec:java -pl cli -Dexec.args="run --scenario scenarios/example.yaml"
 ```
+
+The `run` command above still uses the original executable format. The v1
+scenario/suite contract can already be checked end to end without Docker:
+
+```bash
+mvn exec:java -pl cli \
+  -Dexec.args="validate --catalog-root path/to/catalog --scenario scenario-name \
+  --artifact-root ."
+```
+
+Select a suite with `--suite suite-name`. Repeat `-p NAME=VALUE` for submit-time
+scalar overrides, and add `--offline` to restrict Maven connector resolution to
+the local cache. Validation recursively loads the complete catalog, resolves
+parameters and expected results, checks semantic references and capabilities,
+then stages and checksums every local/Maven artifact. It does not start Docker.
+Exit status is `0` for a valid target, `1` for validation failure, and `2` for
+invalid command syntax or an unknown scenario/suite name.
 
 ## Writing a scenario
 
@@ -122,15 +139,17 @@ which is how an upgrade across two `image` values is expressed.
 
 | Module | Contents |
 | --- | --- |
-| `cli` | picocli entry point (`chaos-kit run --scenario ...`) |
-| `core` | Scenario model, YAML loader, runner, Flink REST client |
+| `cli` | picocli entry points for the legacy runner and Docker-free v1 validation |
+| `core` | v1 schema/catalog/planning/preflight plus the legacy runner and Flink REST client |
 | `testcontainers` | Flink and Kafka container lifecycle management |
 | `flink-job-generator` | The exactly-once Kafka job used as the test subject |
 
 ## Status
 
-Early and experimental. There is no automated test suite yet, the validation rules cover
-count and uniqueness only, and the scenario schema should be expected to change.
+Early and experimental. The v1 contracts, catalog loader, parameter resolver,
+semantic preflight, suite planner, and artifact preparation have automated coverage.
+The Docker runner still executes the legacy format; wiring the first narrow v1
+execution vertical is the next implementation stage.
 
 ## License
 
