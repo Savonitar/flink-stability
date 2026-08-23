@@ -85,6 +85,16 @@ public final class SpecificationLoader {
 
     /** Validates an already-parsed raw scenario without reading it from disk. */
     ScenarioSpecification validateScenarioDocument(Path source, ObjectNode document) {
+        return (ScenarioSpecification) validateDocument(source, document, DocumentKind.SCENARIO);
+    }
+
+    /** Validates an already-parsed expected-result document without reading it from disk. */
+    ExpectedResultSpecification validateExpectedResultDocument(Path source, ObjectNode document) {
+        return (ExpectedResultSpecification) validateDocument(source, document, DocumentKind.EXPECTED_RESULT);
+    }
+
+    private LoadedSpecification validateDocument(
+            Path source, ObjectNode document, DocumentKind expectedKind) {
         Path normalizedSource = source.toAbsolutePath().normalize();
         String format = requiredText(document, normalizedSource, "format", "document.missing-format");
         if (!SUPPORTED_FORMAT.equals(format)) {
@@ -92,12 +102,12 @@ public final class SpecificationLoader {
                     "Unsupported format '" + format + "'; supported formats: " + SUPPORTED_FORMAT);
         }
         String kind = requiredText(document, normalizedSource, "kind", "document.missing-kind");
-        if (!DocumentKind.SCENARIO.value().equals(kind)) {
+        if (!expectedKind.value().equals(kind)) {
             throw failure(normalizedSource, "document.kind-mismatch", "$/kind",
-                    "Expected kind 'scenario' but found '" + kind + "'");
+                    "Expected kind '" + expectedKind.value() + "' but found '" + kind + "'");
         }
-        validateSchema(normalizedSource, DocumentKind.SCENARIO, document);
-        return new ScenarioSpecification(normalizedSource, document);
+        validateSchema(normalizedSource, expectedKind, document);
+        return createSpecification(normalizedSource, expectedKind, document);
     }
 
     /** Re-validates a fully materialized scenario and rejects unresolved constructs. */

@@ -6,10 +6,8 @@ import com.fasterxml.jackson.databind.node.IntNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.fasterxml.jackson.databind.node.TextNode;
 
-import java.math.BigInteger;
 import java.nio.file.Path;
 import java.util.ArrayList;
-import java.util.Iterator;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
@@ -19,10 +17,11 @@ import java.util.Set;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
+import static org.savonitar.flink.stability.core.spec.ScenarioParameterContract.Definition;
+
 /** Resolves typed v1 parameters, interpolation, and schema-annotated defaults. */
 public final class ScenarioParameterResolver {
     private static final Pattern TEMPLATE = Pattern.compile("\\$\\{([A-Za-z_][A-Za-z0-9_]*)}");
-    private static final Pattern DURATION = Pattern.compile("[1-9][0-9]*(ms|s|m|h)");
 
     private final SpecificationLoader specificationLoader;
     private final ScenarioCapabilityValidator capabilityValidator;
@@ -44,7 +43,7 @@ public final class ScenarioParameterResolver {
         Path source = scenario.source();
         ObjectNode template = scenario.document();
         List<ResolutionIssue> issues = new ArrayList<>();
-        Map<String, ParameterDefinition> definitions = readDefinitions(template, source, issues);
+        Map<String, Definition> definitions = readDefinitions(template, source, issues);
         Set<String> varies = readVaries(template, source, definitions, issues);
 
         validateBindings(source, ResolutionScope.COMMON, "suite", request.internalSuiteBindings(),
@@ -144,34 +143,22 @@ public final class ScenarioParameterResolver {
         return new ResolvedScenario(scenario, common, resolvedExperiment, resolvedSides);
     }
 
-    private Map<String, ParameterDefinition> readDefinitions(
+    private Map<String, Definition> readDefinitions(
             ObjectNode template, Path source, List<ResolutionIssue> issues) {
-        Map<String, ParameterDefinition> definitions = new LinkedHashMap<>();
+        Map<String, Definition> definitions = ScenarioParameterContract.definitions(template);
         JsonNode parameters = template.get("parameters");
         if (!(parameters instanceof ObjectNode parameterObject)) {
             return definitions;
         }
 
         findForbiddenDefinitionTemplates(source, parameterObject, "$/parameters", issues);
-        parameterObject.fields().forEachRemaining(entry -> {
-            String name = entry.getKey();
-            ObjectNode declaration = (ObjectNode) entry.getValue();
-            ParameterType type = ParameterType.from(declaration.path("type").textValue());
-            BigInteger minimum = declaration.has("min") ? declaration.get("min").bigIntegerValue() : null;
-            BigInteger maximum = declaration.has("max") ? declaration.get("max").bigIntegerValue() : null;
-            ParameterDefinition definition = new ParameterDefinition(
-                    name,
-                    type,
-                    declaration.get("default"),
-                    declaration.path("required").asBoolean(false),
-                    minimum,
-                    maximum);
-            definitions.put(name, definition);
-
+        definitions.forEach((name, definition) -> {
             String declarationPath = "$/parameters/" + escapePointer(name);
-            if (minimum != null && maximum != null && minimum.compareTo(maximum) > 0) {
+            if (definition.minimum() != null && definition.maximum() != null
+                    && definition.minimum().compareTo(definition.maximum()) > 0) {
                 issues.add(issue(source, ResolutionScope.COMMON, "parameter.invalid-bounds", declarationPath,
-                        "Parameter minimum " + minimum + " exceeds maximum " + maximum));
+                        "Parameter minimum " + definition.minimum()
+                                + " exceeds maximum " + definition.maximum()));
             }
             if (definition.defaultValue() != null) {
                 validateValue(source, ResolutionScope.COMMON, definition, definition.defaultValue(),
@@ -184,7 +171,7 @@ public final class ScenarioParameterResolver {
     private Set<String> readVaries(
             ObjectNode template,
             Path source,
-            Map<String, ParameterDefinition> definitions,
+            Map<String, Definition> definitions,
             List<ResolutionIssue> issues) {
         Set<String> varies = new LinkedHashSet<>();
         JsonNode variesNode = template.at("/experiment/varies");
@@ -207,12 +194,12 @@ public final class ScenarioParameterResolver {
             ResolutionScope scope,
             String bindingKind,
             Map<String, JsonNode> bindings,
-            Map<String, ParameterDefinition> definitions,
+            Map<String, Definition> definitions,
             Set<String> varies,
             boolean commonBinding,
             List<ResolutionIssue> issues) {
         bindings.forEach((name, value) -> {
-            ParameterDefinition definition = definitions.get(name);
+            Definition definition = definitions.get(name);
             String path = bindingPath(bindingKind, name);
             if (definition == null) {
                 issues.add(issue(source, scope, unknownBindingCode(bindingKind), path,
@@ -235,48 +222,18 @@ public final class ScenarioParameterResolver {
     private void validateValue(
             Path source,
             ResolutionScope scope,
-            ParameterDefinition definition,
+            Definition definition,
             JsonNode value,
             String path,
             String valueSource,
             List<ResolutionIssue> issues) {
-        if (containsTemplate(value)) {
-            issues.add(issue(source, scope, "parameter.recursive-expansion", path,
-                    "Parameter values may not contain templates: " + value));
-            return;
-        }
-
-        boolean validType = switch (definition.type()) {
-            case STRING -> value.isTextual();
-            case INTEGER -> value.isIntegralNumber();
-            case BOOLEAN -> value.isBoolean();
-            case DURATION -> value.isTextual() && DURATION.matcher(value.textValue()).matches();
-        };
-        if (!validType) {
-            String code = definition.type() == ParameterType.DURATION && value.isTextual()
-                    ? "parameter.invalid-duration"
-                    : "parameter.type-mismatch";
-            issues.add(issue(source, scope, code, path,
-                    valueSource + " for parameter '" + definition.name() + "' must be "
-                            + definition.type().wireName()));
-            return;
-        }
-
-        if (definition.type() == ParameterType.INTEGER) {
-            BigInteger integer = value.bigIntegerValue();
-            if (definition.minimum() != null && integer.compareTo(definition.minimum()) < 0) {
-                issues.add(issue(source, scope, "parameter.out-of-range", path,
-                        "Parameter '" + definition.name() + "' must be at least " + definition.minimum()));
-            }
-            if (definition.maximum() != null && integer.compareTo(definition.maximum()) > 0) {
-                issues.add(issue(source, scope, "parameter.out-of-range", path,
-                        "Parameter '" + definition.name() + "' must be at most " + definition.maximum()));
-            }
-        }
+        ScenarioParameterContract.validate(definition, value).forEach(problem ->
+                issues.add(issue(source, scope, "parameter." + problem.code(), path,
+                        valueSource + " for " + problem.message())));
     }
 
     private Map<String, EffectiveParameter> bindCommon(
-            Map<String, ParameterDefinition> definitions,
+            Map<String, Definition> definitions,
             Map<String, JsonNode> suiteBindings,
             Map<String, JsonNode> submitOverrides) {
         Map<String, EffectiveParameter> effective = new LinkedHashMap<>();
@@ -319,11 +276,11 @@ public final class ScenarioParameterResolver {
     private void validateRequired(
             Path source,
             ResolutionScope scope,
-            Map<String, ParameterDefinition> definitions,
+            Map<String, Definition> definitions,
             Map<String, EffectiveParameter> effective,
             List<ResolutionIssue> issues) {
         definitions.values().stream()
-                .filter(ParameterDefinition::required)
+                .filter(Definition::required)
                 .filter(definition -> !effective.containsKey(definition.name()))
                 .forEach(definition -> issues.add(issue(source, scope, "parameter.required-value-missing",
                         "$/parameters/" + escapePointer(definition.name()),
@@ -556,21 +513,6 @@ public final class ScenarioParameterResolver {
         return overrides;
     }
 
-    private static boolean containsTemplate(JsonNode value) {
-        if (value.isTextual()) {
-            return containsTemplateSyntax(value.textValue());
-        }
-        if (value.isContainerNode()) {
-            Iterator<JsonNode> elements = value.elements();
-            while (elements.hasNext()) {
-                if (containsTemplate(elements.next())) {
-                    return true;
-                }
-            }
-        }
-        return false;
-    }
-
     private static boolean containsTemplateSyntax(String value) {
         return value.contains("${");
     }
@@ -645,41 +587,6 @@ public final class ScenarioParameterResolver {
             String message) {
         return new ResolutionIssue(source, scope, code, path, message);
     }
-
-    private enum ParameterType {
-        STRING("string"),
-        INTEGER("integer"),
-        BOOLEAN("boolean"),
-        DURATION("duration");
-
-        private final String wireName;
-
-        ParameterType(String wireName) {
-            this.wireName = wireName;
-        }
-
-        String wireName() {
-            return wireName;
-        }
-
-        static ParameterType from(String value) {
-            return switch (value) {
-                case "string" -> STRING;
-                case "integer" -> INTEGER;
-                case "boolean" -> BOOLEAN;
-                case "duration" -> DURATION;
-                default -> throw new IllegalArgumentException("Unsupported parameter type " + value);
-            };
-        }
-    }
-
-    private record ParameterDefinition(
-            String name,
-            ParameterType type,
-            JsonNode defaultValue,
-            boolean required,
-            BigInteger minimum,
-            BigInteger maximum) {}
 
     private record SideMaterialization(
             ScenarioSide side,

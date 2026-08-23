@@ -120,6 +120,54 @@ class SpecificationLoaderTest {
     }
 
     @Test
+    void rejectsExpectedFailureWithoutOracle() {
+        Path source = resource("minimal.expected.yaml");
+        ObjectNode document = loader.loadExpectedResult(source).document();
+        ObjectNode expectation = document.withObject("default");
+        expectation.removeAll();
+        expectation.put("outcome", "fail");
+        expectation.put("reason", "validator.kafka.id-set.missing-ids");
+
+        DocumentValidationException exception = assertThrows(
+                DocumentValidationException.class,
+                () -> loader.validateExpectedResultDocument(source, document));
+
+        assertHasIssue(exception, "schema.one-of", "$/default");
+    }
+
+    @Test
+    void rejectsExpectedFailureWithoutReason() {
+        Path source = resource("minimal.expected.yaml");
+        ObjectNode document = loader.loadExpectedResult(source).document();
+        ObjectNode expectation = document.withObject("default");
+        expectation.removeAll();
+        expectation.put("outcome", "fail");
+        expectation.put("oracle", "kafka.id-set");
+
+        DocumentValidationException exception = assertThrows(
+                DocumentValidationException.class,
+                () -> loader.validateExpectedResultDocument(source, document));
+
+        assertHasIssue(exception, "schema.one-of", "$/default");
+    }
+
+    @Test
+    void rejectsFailingExperimentBaseline() {
+        Path source = resource("minimal.expected.yaml");
+        ObjectNode document = loader.loadExpectedResult(source).document();
+        ObjectNode expectation = document.withObject("default");
+        expectation.removeAll();
+        expectation.putObject("baseline").put("outcome", "fail");
+        expectation.putObject("candidate").put("outcome", "pass");
+
+        DocumentValidationException exception = assertThrows(
+                DocumentValidationException.class,
+                () -> loader.validateExpectedResultDocument(source, document));
+
+        assertHasIssue(exception, "schema.one-of", "$/default");
+    }
+
+    @Test
     void rejectsUnknownSuiteEntryField() throws IOException {
         String invalid = Files.readString(resource("smoke-suite.yaml"))
                 .replace("  - scenario: minimal\n", "  - scenario: minimal\n    health_retry_limit: 2\n");
