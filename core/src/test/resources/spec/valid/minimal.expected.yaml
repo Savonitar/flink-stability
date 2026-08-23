@@ -1,0 +1,9 @@
+format: v1
+kind: expected-result
+
+meta:
+  name: minimal.expected
+  scenario: minimal
+
+default:
+  outcome: pass

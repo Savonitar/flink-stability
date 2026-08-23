@@ -1,0 +1,64 @@
+format: v1
+kind: scenario
+
+meta:
+  name: minimal
+  description: Minimal structurally valid scenario used by loader tests.
+
+runs: 1
+
+setup:
+  kafka:
+    clusters:
+      main:
+        image: apache/kafka:4.0.0
+        brokers: 1
+        topics:
+          - name: input
+            partitions: 1
+            replication_factor: 1
+            input_source:
+              mode: generated
+              format: integer-sequence
+              total: 10
+          - name: output
+            partitions: 1
+            replication_factor: 1
+  flink:
+    image: flink:1.20
+
+subject:
+  connectors:
+    kafka:
+      artifact: maven:org.apache.flink:flink-connector-kafka:1.20.0
+
+workload:
+  jobs:
+    - alias: eos-job
+      jar: ./flink-job-generator/target/flink-job-generator.jar
+      connectors: [kafka]
+      parallelism: 1
+      source: { cluster: main, topic: input }
+      sink:
+        cluster: main
+        topic: output
+        delivery_guarantee: EXACTLY_ONCE
+        transactional_id_prefix: minimal
+        transaction_id_naming_strategy: INCREMENTING
+      checkpointing:
+        interval: 5s
+        mode: EXACTLY_ONCE
+
+phases:
+  - name: verify-running
+    steps:
+      - await:
+          condition: { type: job-state, job: eos-job, state: RUNNING }
+          timeout: 2m
+          on_timeout: inconclusive
+
+terminal_validations:
+  - type: kafka.id-set
+    cluster: main
+    topic: output
+    expected: input-manifest

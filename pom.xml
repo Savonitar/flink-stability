@@ -21,11 +21,18 @@
         <maven.compiler.target>21</maven.compiler.target>
         <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
         <log4j.version>2.23.1</log4j.version>
-        <slf4j.version>1.7.36</slf4j.version>
+        <slf4j.version>2.0.17</slf4j.version>
+        <junit.version>5.13.3</junit.version>
     </properties>
 
     <build>
         <plugins>
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-surefire-plugin</artifactId>
+                <version>3.2.5</version>
+            </plugin>
+
             <!-- Scenario runs write logs and Flink checkpoints to the repository root,
                  outside any target/ directory. Have `mvn clean` remove them too. -->
             <plugin>
