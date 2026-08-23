@@ -8,6 +8,7 @@ target/
 /logs/
 /checkpoints/
 /savepoints/
+.flink-stability/
 
 ### IntelliJ IDEA ###
 .idea/

@@ -23,6 +23,7 @@
         <log4j.version>2.23.1</log4j.version>
         <slf4j.version>2.0.17</slf4j.version>
         <junit.version>5.13.3</junit.version>
+        <maven-resolver.version>1.9.25</maven-resolver.version>
     </properties>
 
     <build>
@@ -47,6 +48,9 @@
                         </fileset>
                         <fileset>
                             <directory>${maven.multiModuleProjectDirectory}/checkpoints</directory>
+                        </fileset>
+                        <fileset>
+                            <directory>${maven.multiModuleProjectDirectory}/.flink-stability</directory>
                         </fileset>
                     </filesets>
                 </configuration>
