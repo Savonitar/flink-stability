@@ -11,6 +11,7 @@ import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
@@ -121,15 +122,32 @@ public final class ScenarioPreflightValidator {
         });
 
         Map<String, ProxyIndex> proxies = new LinkedHashMap<>();
+        Map<String, String> proxyListenPaths = new LinkedHashMap<>();
         JsonNode proxyNodes = document.at("/setup/proxies");
         if (proxyNodes instanceof ObjectNode proxyObject) {
-            proxyObject.fields().forEachRemaining(entry -> {
+            var proxyFields = proxyObject.fields();
+            while (proxyFields.hasNext()) {
+                Map.Entry<String, JsonNode> entry = proxyFields.next();
                 ObjectNode proxy = (ObjectNode) entry.getValue();
+                ObjectNode bootstrap = (ObjectNode) proxy.get("bootstrap");
+                String proxyPath = "$/setup/proxies/" + pointer(entry.getKey());
+                String listen = proxy.path("listen").textValue();
+                String earlierListenPath = proxyListenPaths.putIfAbsent(
+                        canonicalAddress(listen), proxyPath);
+                if (earlierListenPath != null) {
+                    issues.add(issue(source, scope,
+                            "preflight.proxy.duplicate-listen",
+                            proxyPath + "/listen",
+                            "Proxy listen address '" + listen + "' duplicates "
+                                    + earlierListenPath + "/listen"));
+                }
                 proxies.put(entry.getKey(), new ProxyIndex(
                         proxy.path("cluster").textValue(),
-                        optionalText((ObjectNode) proxy.get("bootstrap"), "cluster"),
-                        "$/setup/proxies/" + pointer(entry.getKey())));
-            });
+                        listen,
+                        optionalText(bootstrap, "cluster"),
+                        optionalText(bootstrap, "address"),
+                        proxyPath));
+            }
         }
 
         Set<String> connectorAliases = fieldNames(objectAt(document, "/subject/connectors"));
@@ -260,6 +278,15 @@ public final class ScenarioPreflightValidator {
                             "Managed bootstrap cluster '" + proxy.bootstrapCluster()
                                     + "' must equal proxy cluster '" + proxy.cluster() + "'"));
                 }
+            }
+            if (proxy.bootstrapAddress() != null
+                    && canonicalAddress(proxy.bootstrapAddress())
+                            .equals(canonicalAddress(proxy.listen()))) {
+                issues.add(issue(source, scope,
+                        "preflight.proxy.bootstrap-listen-cycle",
+                        proxy.path() + "/bootstrap/address",
+                        "Proxy bootstrap address must not equal its own listen address '"
+                                + proxy.listen() + "'"));
             }
         });
     }
@@ -597,6 +624,14 @@ public final class ScenarioPreflightValidator {
                         ledger,
                         priorArtifacts,
                         issues);
+            } else if (step.get("network_fault") instanceof ObjectNode networkFault) {
+                validateNetworkFault(
+                        source,
+                        scope,
+                        index,
+                        networkFault,
+                        stepPath + "/network_fault",
+                        issues);
             } else if (step.get("checkpoint") instanceof ObjectNode checkpoint) {
                 validateStateProducer(
                         source, index, "checkpoint", checkpoint,
@@ -754,6 +789,217 @@ public final class ScenarioPreflightValidator {
                             + "'; available names are " + role + "-1 through "
                             + role + "-" + upperBound));
         }
+    }
+
+    private static void validateNetworkFault(
+            Path source,
+            ResolutionScope scope,
+            SideIndex index,
+            ObjectNode networkFault,
+            String path,
+            List<PreflightIssue> issues) {
+        String proxyAlias = networkFault.path("proxy").textValue();
+        ProxyIndex proxy = index.proxies().get(proxyAlias);
+        if (proxy == null) {
+            issues.add(issue(source, ResolutionScope.COMMON,
+                    "preflight.reference.proxy-not-found",
+                    path + "/proxy",
+                    "Network fault references undeclared proxy '" + proxyAlias + "'"));
+            return;
+        }
+
+        ObjectNode target = (ObjectNode) networkFault.get("target");
+        String targetCluster = target.path("cluster").textValue();
+        ClusterIndex cluster = index.clusters().get(targetCluster);
+        if (cluster == null) {
+            issues.add(issue(source, scope,
+                    "preflight.reference.kafka-cluster-not-found",
+                    path + "/target/cluster",
+                    "Network fault targets undeclared Kafka cluster '"
+                            + targetCluster + "'"));
+            return;
+        }
+        if (!index.clusters().containsKey(proxy.cluster())) {
+            return;
+        }
+        if (!targetCluster.equals(proxy.cluster())) {
+            issues.add(issue(source, scope,
+                    "preflight.network.proxy-target-cluster-mismatch",
+                    path + "/target/cluster",
+                    "Network fault targets cluster '" + targetCluster + "' but proxy '"
+                            + proxyAlias + "' is attached to cluster '" + proxy.cluster() + "'"));
+            return;
+        }
+        if (target.has("broker")
+                && !networkBrokerExists(cluster, target.path("broker").textValue())) {
+            issues.add(issue(source, scope,
+                    "preflight.network.broker-not-found",
+                    path + "/target/broker",
+                    "Kafka cluster '" + targetCluster + "' has no broker target named '"
+                            + target.path("broker").textValue() + "'; available names are "
+                            + "broker-1 through broker-" + cluster.brokers()));
+            return;
+        }
+
+        ObjectNode match = (ObjectNode) networkFault.get("match");
+        String api = match.path("api").textValue();
+        KafkaFaultApiRegistry.Profile profile = KafkaFaultApiRegistry.profile(api);
+        if (profile == null) {
+            issues.add(issue(source, ResolutionScope.COMMON,
+                    "capability.network-api.unsupported",
+                    path + "/match/api",
+                    "Harness does not support Kafka fault API '" + api + "'"));
+            return;
+        }
+
+        String topic = optionalText(match, "topic");
+        String transactionalIdPrefix = optionalText(match, "transactional_id_prefix");
+        boolean selectorValid = true;
+        if (topic != null
+                && profile.topicBinding() == KafkaFaultApiRegistry.TopicBinding.FORBIDDEN) {
+            issues.add(issue(source, ResolutionScope.COMMON,
+                    "preflight.network.topic-selector-unsupported",
+                    path + "/match/topic",
+                    "Kafka API '" + api + "' has no safely matchable topic field in v1"));
+            selectorValid = false;
+        } else if (topic != null && !cluster.topics().containsKey(topic)) {
+            issues.add(issue(source, scope,
+                    "preflight.reference.kafka-topic-not-found",
+                    path + "/match/topic",
+                    "Network fault references undeclared topic '" + topic
+                            + "' in Kafka cluster '" + targetCluster + "'"));
+            selectorValid = false;
+        }
+        if (transactionalIdPrefix != null && !profile.transactional()) {
+            issues.add(issue(source, ResolutionScope.COMMON,
+                    "preflight.network.transactional-prefix-unsupported",
+                    path + "/match/transactional_id_prefix",
+                    "Kafka API '" + api
+                            + "' cannot be selected by transactional ID prefix"));
+            selectorValid = false;
+        }
+
+        ObjectNode fault = (ObjectNode) networkFault.get("fault");
+        if ("error-response".equals(fault.path("type").textValue())) {
+            String error = fault.path("error").textValue();
+            if (!profile.allowedErrors().contains(error)) {
+                issues.add(issue(source, ResolutionScope.COMMON,
+                        "preflight.network.error-response-unsupported",
+                        path + "/fault/error",
+                        "Kafka API '" + api + "' cannot safely return error '" + error
+                                + "' in v1; allowed errors: "
+                                + profile.allowedErrors().stream().sorted().toList()));
+                selectorValid = false;
+            }
+        }
+        if (!selectorValid) {
+            return;
+        }
+
+        List<KafkaEndpoint> logicalCandidates = index.endpoints().stream()
+                .filter(endpoint -> matchesNetworkSelector(
+                        profile,
+                        endpoint,
+                        targetCluster,
+                        topic,
+                        transactionalIdPrefix))
+                .toList();
+        List<KafkaEndpoint> routedCandidates = logicalCandidates.stream()
+                .filter(endpoint -> proxyAlias.equals(endpoint.proxy()))
+                .toList();
+        if (!routedCandidates.isEmpty()) {
+            return;
+        }
+
+        if (!logicalCandidates.isEmpty()) {
+            List<String> routes = logicalCandidates.stream()
+                    .map(ScenarioPreflightValidator::describeRoute)
+                    .sorted()
+                    .toList();
+            issues.add(issue(source, scope,
+                    "preflight.network.endpoint-bypasses-proxy",
+                    path + "/match",
+                    "Matching Kafka endpoints bypass proxy '" + proxyAlias
+                            + "' or use another proxy: " + routes));
+            return;
+        }
+
+        boolean proxyHasRoutedEndpoint = index.endpoints().stream().anyMatch(endpoint ->
+                endpoint.cluster().equals(targetCluster)
+                        && proxyAlias.equals(endpoint.proxy()));
+        if (proxyHasRoutedEndpoint) {
+            issues.add(issue(source, scope,
+                    "preflight.network.endpoint-not-found",
+                    path + "/match",
+                    "No routed endpoint matches Kafka API '" + api + "'"
+                            + selectorSuffix(topic, transactionalIdPrefix)));
+        } else {
+            issues.add(issue(source, scope,
+                    "preflight.network.proxy-has-no-routed-endpoint",
+                    path + "/proxy",
+                    "No source, sink, or input-source endpoint on cluster '"
+                            + targetCluster + "' routes through proxy '" + proxyAlias + "'"));
+        }
+    }
+
+    private static boolean matchesNetworkSelector(
+            KafkaFaultApiRegistry.Profile profile,
+            KafkaEndpoint endpoint,
+            String targetCluster,
+            String topic,
+            String transactionalIdPrefix) {
+        if (!profile.endpointKinds().contains(endpoint.kind())
+                || !endpoint.cluster().equals(targetCluster)) {
+            return false;
+        }
+        if (profile.transactional()
+                && (!"EXACTLY_ONCE".equals(endpoint.deliveryGuarantee())
+                        || endpoint.kind() != KafkaFaultApiRegistry.EndpointKind.SINK)) {
+            return false;
+        }
+        if (transactionalIdPrefix != null
+                && !transactionalIdPrefix.equals(endpoint.transactionalIdPrefix())) {
+            return false;
+        }
+        return switch (profile.topicBinding()) {
+            case ENDPOINT -> topic == null || topic.equals(endpoint.topic());
+            case SOURCE -> endpoint.sourceCluster().equals(targetCluster)
+                    && (topic == null || topic.equals(endpoint.sourceTopic()));
+            case FORBIDDEN -> true;
+        };
+    }
+
+    private static boolean networkBrokerExists(ClusterIndex cluster, String name) {
+        Matcher matcher = STATIC_TARGET_NAME.matcher(name);
+        return matcher.matches()
+                && matcher.group(1).equals("broker")
+                && new BigInteger(matcher.group(2)).compareTo(cluster.brokers()) <= 0;
+    }
+
+    private static String canonicalAddress(String address) {
+        int separator = address.lastIndexOf(':');
+        String host = address.substring(0, separator).toLowerCase(Locale.ROOT);
+        while (host.endsWith(".")) {
+            host = host.substring(0, host.length() - 1);
+        }
+        return host + address.substring(separator);
+    }
+
+    private static String describeRoute(KafkaEndpoint endpoint) {
+        return endpoint.path() + " ("
+                + (endpoint.proxy() == null ? "direct" : "proxy=" + endpoint.proxy())
+                + ")";
+    }
+
+    private static String selectorSuffix(String topic, String transactionalIdPrefix) {
+        List<String> selectors = new ArrayList<>();
+        if (topic != null) {
+            selectors.add("topic=" + topic);
+        }
+        if (transactionalIdPrefix != null) {
+            selectors.add("transactional_id_prefix=" + transactionalIdPrefix);
+        }
+        return selectors.isEmpty() ? "" : " with " + String.join(", ", selectors);
     }
 
     private static void validateStateProducer(
@@ -1055,7 +1301,12 @@ public final class ScenarioPreflightValidator {
 
     private record ClusterIndex(BigInteger brokers, Map<String, String> topics) {}
 
-    private record ProxyIndex(String cluster, String bootstrapCluster, String path) {}
+    private record ProxyIndex(
+            String cluster,
+            String listen,
+            String bootstrapCluster,
+            String bootstrapAddress,
+            String path) {}
 
     private record InputEndpoint(
             String cluster, String topic, String mode, String proxy, String path) {}
@@ -1074,9 +1325,11 @@ public final class ScenarioPreflightValidator {
             String alias, TopicEndpoint source, SinkEndpoint sink, String path) {}
 
     private record KafkaEndpoint(
-            String kind,
+            KafkaFaultApiRegistry.EndpointKind kind,
             String cluster,
             String topic,
+            String sourceCluster,
+            String sourceTopic,
             String proxy,
             String job,
             String deliveryGuarantee,
@@ -1084,20 +1337,25 @@ public final class ScenarioPreflightValidator {
             String path) {
         private static KafkaEndpoint source(JobIndex job) {
             return new KafkaEndpoint(
-                    "source", job.source().cluster(), job.source().topic(), job.source().proxy(),
+                    KafkaFaultApiRegistry.EndpointKind.SOURCE,
+                    job.source().cluster(), job.source().topic(),
+                    job.source().cluster(), job.source().topic(), job.source().proxy(),
                     job.alias(), null, null, job.source().path());
         }
 
         private static KafkaEndpoint sink(JobIndex job) {
             return new KafkaEndpoint(
-                    "sink", job.sink().cluster(), job.sink().topic(), job.sink().proxy(),
+                    KafkaFaultApiRegistry.EndpointKind.SINK,
+                    job.sink().cluster(), job.sink().topic(),
+                    job.source().cluster(), job.source().topic(), job.sink().proxy(),
                     job.alias(), job.sink().deliveryGuarantee(),
                     job.sink().transactionalIdPrefix(), job.sink().path());
         }
 
         private static KafkaEndpoint input(InputEndpoint input) {
             return new KafkaEndpoint(
-                    "input", input.cluster(), input.topic(), input.proxy(),
+                    KafkaFaultApiRegistry.EndpointKind.INPUT,
+                    input.cluster(), input.topic(), input.cluster(), input.topic(), input.proxy(),
                     null, null, null, input.path());
         }
     }
