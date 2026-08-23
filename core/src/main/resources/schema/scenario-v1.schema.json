@@ -2040,6 +2040,14 @@
         "timeout": {
           "$ref": "#/$defs/durationOrTemplate"
         },
+        "failure_reasons": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "$ref": "#/$defs/customFailureReason"
+          },
+          "uniqueItems": true
+        },
         "config": {
           "type": "object",
           "additionalProperties": {
@@ -2141,6 +2149,10 @@
     "nonEmptyString": {
       "type": "string",
       "minLength": 1
+    },
+    "customFailureReason": {
+      "type": "string",
+      "pattern": "^validator\\.custom\\.[a-z][a-z0-9-]*(\\.[a-z][a-z0-9-]*)*$"
     },
     "parameterName": {
       "type": "string",

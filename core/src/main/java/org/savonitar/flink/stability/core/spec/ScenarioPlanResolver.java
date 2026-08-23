@@ -2,10 +2,11 @@ package org.savonitar.flink.stability.core.spec;
 
 import java.util.Objects;
 
-/** Resolves scenario parameters and then selects the committed expected-result contract. */
+/** Resolves parameters and validates resolved declaration and expectation semantics. */
 public final class ScenarioPlanResolver {
     private final ScenarioParameterResolver parameterResolver;
     private final ExpectedResultSelector expectedResultSelector;
+    private final ScenarioPreflightValidator preflightValidator;
 
     public ScenarioPlanResolver() {
         this(new ScenarioParameterResolver());
@@ -14,11 +15,14 @@ public final class ScenarioPlanResolver {
     ScenarioPlanResolver(ScenarioParameterResolver parameterResolver) {
         this.parameterResolver = Objects.requireNonNull(parameterResolver, "parameterResolver");
         this.expectedResultSelector = new ExpectedResultSelector(parameterResolver);
+        this.preflightValidator = new ScenarioPreflightValidator();
     }
 
     public ResolvedScenarioPlan resolve(ScenarioBundle bundle, ResolutionRequest request) {
         Objects.requireNonNull(bundle, "bundle");
         ResolvedScenario scenario = parameterResolver.resolve(bundle.scenario(), request);
-        return expectedResultSelector.select(bundle, scenario);
+        preflightValidator.validateScenario(scenario);
+        ResolvedScenarioPlan selected = expectedResultSelector.select(bundle, scenario);
+        return preflightValidator.validate(selected);
     }
 }

@@ -254,6 +254,24 @@ class ExpectedResultSelectorTest {
     }
 
     @Test
+    void rejectsUnselectedCaseThatBreaksResolvedTopology() {
+        ScenarioSpecification scenario = plainScenario(document -> {
+            parameter(document, "source_topic", "string", TextNode.valueOf("input"));
+            job(document).withObject("source").put("topic", "${source_topic}");
+        });
+        ExpectedResultSpecification expected = expected(document -> addPlainFailCase(
+                document, Map.of("source_topic", TextNode.valueOf("missing"))));
+
+        ExpectedResultSelectionException exception = assertThrows(
+                ExpectedResultSelectionException.class,
+                () -> selector.select(bundle(scenario, expected),
+                        parameterResolver.resolve(scenario, ResolutionRequest.none())));
+
+        assertHasIssue(exception, "expectation.case-value-invalid", "$/cases/0/when");
+        assertTrue(exception.getMessage().contains("preflight.reference.kafka-topic-not-found"));
+    }
+
+    @Test
     void rejectsSameSubsetAndDisjointKeyOverlaps() {
         ScenarioSpecification scenario = plainScenario(document -> {
             parameter(document, "a", "integer", IntNode.valueOf(3));

@@ -13,11 +13,11 @@ import java.util.Objects;
 import java.util.Set;
 import java.util.stream.Collectors;
 
-/** Validates an expected-result contract and selects its one matching replacement. */
-public final class ExpectedResultSelector {
+/** Internal selector used only after current-scenario topology preflight. */
+final class ExpectedResultSelector {
     private final ScenarioParameterResolver parameterResolver;
 
-    public ExpectedResultSelector() {
+    ExpectedResultSelector() {
         this(new ScenarioParameterResolver());
     }
 
@@ -25,7 +25,7 @@ public final class ExpectedResultSelector {
         this.parameterResolver = Objects.requireNonNull(parameterResolver, "parameterResolver");
     }
 
-    public ResolvedScenarioPlan select(ScenarioBundle bundle, ResolvedScenario resolved) {
+    ResolvedScenarioPlan select(ScenarioBundle bundle, ResolvedScenario resolved) {
         Objects.requireNonNull(bundle, "bundle");
         Objects.requireNonNull(resolved, "resolved");
         if (!sameScenario(bundle.scenario(), resolved.template())) {
@@ -132,8 +132,23 @@ public final class ExpectedResultSelector {
         conditions.fields().forEachRemaining(entry ->
                 probeBindings.put(entry.getKey(), entry.getValue().deepCopy()));
         try {
-            parameterResolver.resolve(
+            ResolvedScenario probe = parameterResolver.resolve(
                     resolved.template(), new ResolutionRequest(probeBindings, Map.of()));
+            List<PreflightIssue> preflightIssues = new ArrayList<>();
+            for (ResolvedSide side : probe.sides()) {
+                preflightIssues.addAll(ScenarioPreflightValidator.validateResolvedSide(
+                        probe.template().source(), scopeOf(side.side()), side.document()));
+            }
+            if (!preflightIssues.isEmpty()) {
+                String details = preflightIssues.stream()
+                        .map(issue -> issue.scope() + ":" + issue.code() + "@" + issue.path()
+                                + " - " + issue.message())
+                        .sorted()
+                        .distinct()
+                        .collect(Collectors.joining(", "));
+                issues.add(issue(source, "expectation.case-value-invalid", "$/cases/" + index + "/when",
+                        "Case values cannot produce a valid scenario: " + details));
+            }
         } catch (ScenarioResolutionException exception) {
             String details = exception.issues().stream()
                     .map(issue -> issue.scope() + ":" + issue.code() + "@" + issue.path()
@@ -144,6 +159,14 @@ public final class ExpectedResultSelector {
             issues.add(issue(source, "expectation.case-value-invalid", "$/cases/" + index + "/when",
                     "Case values cannot produce a valid scenario: " + details));
         }
+    }
+
+    private static ResolutionScope scopeOf(ScenarioSide side) {
+        return switch (side) {
+            case SINGLE -> ResolutionScope.SINGLE;
+            case BASELINE -> ResolutionScope.BASELINE;
+            case CANDIDATE -> ResolutionScope.CANDIDATE;
+        };
     }
 
     private static boolean validateCaseLiterals(

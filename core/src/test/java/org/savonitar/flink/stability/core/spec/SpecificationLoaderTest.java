@@ -229,6 +229,23 @@ class SpecificationLoaderTest {
     }
 
     @Test
+    void customValidatorFailureReasonsUseTheirDedicatedNamespace() {
+        Path source = resource("minimal.yaml");
+        ObjectNode document = loader.loadScenario(source).document();
+        ObjectNode custom = document.withArray("terminal_validations").addObject();
+        custom.put("type", "custom");
+        custom.put("artifact", "./validator.jar");
+        custom.put("timeout", "30s");
+        custom.putArray("failure_reasons").add("await.job-state.timeout");
+
+        DocumentValidationException exception = assertThrows(
+                DocumentValidationException.class,
+                () -> loader.validateScenarioDocument(source, document));
+
+        assertHasIssue(exception, "schema.pattern", "$/terminal_validations/1/failure_reasons/0");
+    }
+
+    @Test
     void resolvedDocumentValidationRejectsDefinitionsAndUnresolvedTemplates() {
         Path source = resource("minimal.yaml");
         ObjectNode raw = loader.loadScenario(source).document();
