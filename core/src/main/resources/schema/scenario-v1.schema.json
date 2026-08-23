@@ -393,14 +393,7 @@
           "$ref": "#/$defs/nonEmptyString"
         },
         "mode": {
-          "oneOf": [
-            {
-              "const": "kraft"
-            },
-            {
-              "$ref": "#/$defs/templatedString"
-            }
-          ],
+          "$ref": "#/$defs/nonEmptyString",
           "default": "kraft"
         },
         "brokers": {
@@ -793,36 +786,13 @@
           "$ref": "#/$defs/kebabName"
         },
         "delivery_guarantee": {
-          "oneOf": [
-            {
-              "type": "string",
-              "enum": [
-                "NONE",
-                "AT_LEAST_ONCE",
-                "EXACTLY_ONCE"
-              ]
-            },
-            {
-              "$ref": "#/$defs/templatedString"
-            }
-          ]
+          "$ref": "#/$defs/nonEmptyString"
         },
         "transactional_id_prefix": {
           "$ref": "#/$defs/nonEmptyString"
         },
         "transaction_id_naming_strategy": {
-          "oneOf": [
-            {
-              "type": "string",
-              "enum": [
-                "INCREMENTING",
-                "POOLING"
-              ]
-            },
-            {
-              "$ref": "#/$defs/templatedString"
-            }
-          ]
+          "$ref": "#/$defs/nonEmptyString"
         }
       },
       "allOf": [
@@ -961,18 +931,7 @@
       ]
     },
     "stateBackend": {
-      "oneOf": [
-        {
-          "type": "string",
-          "enum": [
-            "hashmap",
-            "rocksdb"
-          ]
-        },
-        {
-          "$ref": "#/$defs/templatedString"
-        }
-      ]
+      "$ref": "#/$defs/nonEmptyString"
     },
     "stateTtl": {
       "oneOf": [
@@ -1687,18 +1646,7 @@
               "$ref": "#/$defs/stateRef"
             },
             "mode": {
-              "oneOf": [
-                {
-                  "type": "string",
-                  "enum": [
-                    "claim",
-                    "no-claim"
-                  ]
-                },
-                {
-                  "$ref": "#/$defs/templatedString"
-                }
-              ]
+              "$ref": "#/$defs/nonEmptyString"
             }
           }
         }

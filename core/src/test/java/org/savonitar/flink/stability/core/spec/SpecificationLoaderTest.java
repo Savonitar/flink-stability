@@ -169,6 +169,34 @@ class SpecificationLoaderTest {
     }
 
     @Test
+    void rejectsParameterInterpolationInScenarioLocalAliases() throws IOException {
+        String invalid = Files.readString(resource("minimal.yaml"))
+                .replace("alias: eos-job", "alias: ${job_alias}");
+
+        DocumentValidationException exception = assertThrows(
+                DocumentValidationException.class,
+                () -> loader.load(write("templated-alias.yaml", invalid)));
+
+        assertHasIssue(exception, "schema.pattern", "$/workload/jobs/0/alias");
+    }
+
+    @Test
+    void resolvedDocumentValidationRejectsDefinitionsAndUnresolvedTemplates() {
+        Path source = resource("minimal.yaml");
+        ObjectNode raw = loader.loadScenario(source).document();
+        raw.putObject("parameters").putObject("brokers")
+                .put("type", "integer").put("default", 1);
+        ((ObjectNode) raw.at("/setup/kafka/clusters/main")).put("brokers", "${brokers}");
+
+        DocumentValidationException exception = assertThrows(
+                DocumentValidationException.class,
+                () -> loader.validateResolvedScenario(source, raw));
+
+        assertHasIssue(exception, "resolved.parameters-present", "$/parameters");
+        assertHasIssue(exception, "resolved.unresolved-template", "$/setup/kafka/clusters/main/brokers");
+    }
+
+    @Test
     void rejectsDuplicateYamlKeysWithSourceLocation() throws IOException {
         Path document = write("duplicate-key.yaml", "format: v1\nformat: v1\nkind: scenario\n");
 

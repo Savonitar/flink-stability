@@ -18,8 +18,10 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.EnumMap;
+import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
 
@@ -79,6 +81,42 @@ public final class SpecificationLoader {
 
     public SuiteSpecification loadSuite(Path source) {
         return (SuiteSpecification) load(source, DocumentKind.SUITE);
+    }
+
+    /** Validates an already-parsed raw scenario without reading it from disk. */
+    ScenarioSpecification validateScenarioDocument(Path source, ObjectNode document) {
+        Path normalizedSource = source.toAbsolutePath().normalize();
+        String format = requiredText(document, normalizedSource, "format", "document.missing-format");
+        if (!SUPPORTED_FORMAT.equals(format)) {
+            throw failure(normalizedSource, "document.unsupported-format", "$/format",
+                    "Unsupported format '" + format + "'; supported formats: " + SUPPORTED_FORMAT);
+        }
+        String kind = requiredText(document, normalizedSource, "kind", "document.missing-kind");
+        if (!DocumentKind.SCENARIO.value().equals(kind)) {
+            throw failure(normalizedSource, "document.kind-mismatch", "$/kind",
+                    "Expected kind 'scenario' but found '" + kind + "'");
+        }
+        validateSchema(normalizedSource, DocumentKind.SCENARIO, document);
+        return new ScenarioSpecification(normalizedSource, document);
+    }
+
+    /** Re-validates a fully materialized scenario and rejects unresolved constructs. */
+    ScenarioSpecification validateResolvedScenario(Path source, ObjectNode document) {
+        ScenarioSpecification validated = validateScenarioDocument(source, document);
+        List<ValidationIssue> issues = new ArrayList<>();
+        if (document.has("parameters")) {
+            issues.add(new ValidationIssue("resolved.parameters-present", "$/parameters",
+                    "A materialized scenario must not contain parameter declarations"));
+        }
+        if (document.has("experiment")) {
+            issues.add(new ValidationIssue("resolved.experiment-present", "$/experiment",
+                    "An executable side must not contain the pair-level experiment block"));
+        }
+        findUnresolvedTemplates(document, "$", issues);
+        if (!issues.isEmpty()) {
+            throw new DocumentValidationException(validated.source(), issues);
+        }
+        return validated;
     }
 
     private ObjectNode parse(Path source) {
@@ -223,5 +261,30 @@ public final class SpecificationLoader {
                 .sorted()
                 .reduce((left, right) -> left + ", " + right)
                 .orElseThrow();
+    }
+
+    private static void findUnresolvedTemplates(
+            JsonNode node, String path, List<ValidationIssue> issues) {
+        if (node.isTextual() && node.textValue().contains("${")) {
+            issues.add(new ValidationIssue("resolved.unresolved-template", path,
+                    "Materialized value still contains parameter template syntax"));
+            return;
+        }
+        if (node.isObject()) {
+            Iterator<Map.Entry<String, JsonNode>> fields = node.fields();
+            while (fields.hasNext()) {
+                Map.Entry<String, JsonNode> field = fields.next();
+                String fieldPath = path + "/" + escapeJsonPointerElement(field.getKey());
+                if (field.getKey().contains("${")) {
+                    issues.add(new ValidationIssue("resolved.unresolved-template", fieldPath,
+                            "Materialized map key still contains parameter template syntax"));
+                }
+                findUnresolvedTemplates(field.getValue(), fieldPath, issues);
+            }
+        } else if (node.isArray()) {
+            for (int index = 0; index < node.size(); index++) {
+                findUnresolvedTemplates(node.get(index), path + "/" + index, issues);
+            }
+        }
     }
 }
