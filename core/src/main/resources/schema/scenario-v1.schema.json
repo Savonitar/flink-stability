@@ -1,0 +1,2220 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://savonitar.org/flink-stability/schema/scenario-v1.schema.json",
+  "title": "Flink Stability Scenario v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "format",
+    "kind",
+    "meta",
+    "runs",
+    "setup",
+    "subject",
+    "workload",
+    "phases",
+    "terminal_validations"
+  ],
+  "properties": {
+    "format": {
+      "const": "v1"
+    },
+    "kind": {
+      "const": "scenario"
+    },
+    "meta": {
+      "$ref": "#/$defs/meta"
+    },
+    "parameters": {
+      "$ref": "#/$defs/parameters"
+    },
+    "experiment": {
+      "$ref": "#/$defs/experiment"
+    },
+    "runs": {
+      "$ref": "#/$defs/positiveIntegerOrTemplate"
+    },
+    "health_retry_limit": {
+      "$ref": "#/$defs/nonNegativeIntegerOrTemplate",
+      "default": 1
+    },
+    "setup": {
+      "$ref": "#/$defs/setup"
+    },
+    "subject": {
+      "$ref": "#/$defs/subject"
+    },
+    "workload": {
+      "$ref": "#/$defs/workload"
+    },
+    "phases": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "$ref": "#/$defs/phase"
+      }
+    },
+    "terminal_validations": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "$ref": "#/$defs/terminalValidation"
+      }
+    }
+  },
+  "$defs": {
+    "meta": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "name",
+        "description"
+      ],
+      "properties": {
+        "name": {
+          "$ref": "#/$defs/kebabName"
+        },
+        "description": {
+          "type": "string",
+          "minLength": 1
+        },
+        "tickets": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "string",
+            "minLength": 1
+          },
+          "uniqueItems": true
+        }
+      }
+    },
+    "parameters": {
+      "type": "object",
+      "minProperties": 1,
+      "propertyNames": {
+        "$ref": "#/$defs/parameterName"
+      },
+      "additionalProperties": {
+        "$ref": "#/$defs/parameter"
+      }
+    },
+    "parameter": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "type"
+      ],
+      "properties": {
+        "type": {
+          "type": "string",
+          "enum": [
+            "string",
+            "integer",
+            "boolean",
+            "duration"
+          ]
+        },
+        "default": {
+          "type": [
+            "string",
+            "integer",
+            "boolean"
+          ]
+        },
+        "required": {
+          "type": "boolean"
+        },
+        "min": {
+          "type": "integer"
+        },
+        "max": {
+          "type": "integer"
+        },
+        "description": {
+          "type": "string",
+          "minLength": 1
+        }
+      },
+      "oneOf": [
+        {
+          "required": [
+            "default"
+          ],
+          "not": {
+            "required": [
+              "required"
+            ]
+          },
+          "allOf": [
+            {
+              "if": {
+                "properties": {
+                  "type": {
+                    "const": "string"
+                  }
+                }
+              },
+              "then": {
+                "properties": {
+                  "default": {
+                    "type": "string"
+                  }
+                }
+              }
+            },
+            {
+              "if": {
+                "properties": {
+                  "type": {
+                    "const": "integer"
+                  }
+                }
+              },
+              "then": {
+                "properties": {
+                  "default": {
+                    "type": "integer"
+                  }
+                }
+              }
+            },
+            {
+              "if": {
+                "properties": {
+                  "type": {
+                    "const": "boolean"
+                  }
+                }
+              },
+              "then": {
+                "properties": {
+                  "default": {
+                    "type": "boolean"
+                  }
+                },
+                "not": {
+                  "anyOf": [
+                    {
+                      "required": [
+                        "min"
+                      ]
+                    },
+                    {
+                      "required": [
+                        "max"
+                      ]
+                    }
+                  ]
+                }
+              }
+            },
+            {
+              "if": {
+                "properties": {
+                  "type": {
+                    "const": "duration"
+                  }
+                }
+              },
+              "then": {
+                "properties": {
+                  "default": {
+                    "$ref": "#/$defs/duration"
+                  }
+                },
+                "not": {
+                  "anyOf": [
+                    {
+                      "required": [
+                        "min"
+                      ]
+                    },
+                    {
+                      "required": [
+                        "max"
+                      ]
+                    }
+                  ]
+                }
+              }
+            }
+          ]
+        },
+        {
+          "required": [
+            "required"
+          ],
+          "properties": {
+            "required": {
+              "const": true
+            }
+          },
+          "not": {
+            "required": [
+              "default"
+            ]
+          }
+        }
+      ],
+      "allOf": [
+        {
+          "if": {
+            "not": {
+              "properties": {
+                "type": {
+                  "const": "integer"
+                }
+              },
+              "required": [
+                "type"
+              ]
+            }
+          },
+          "then": {
+            "not": {
+              "anyOf": [
+                {
+                  "required": [
+                    "min"
+                  ]
+                },
+                {
+                  "required": [
+                    "max"
+                  ]
+                }
+              ]
+            }
+          }
+        }
+      ]
+    },
+    "experiment": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "claim",
+        "varies",
+        "baseline",
+        "candidate"
+      ],
+      "properties": {
+        "claim": {
+          "type": "string",
+          "minLength": 1
+        },
+        "varies": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "$ref": "#/$defs/parameterName"
+          },
+          "uniqueItems": true
+        },
+        "baseline": {
+          "$ref": "#/$defs/parameterOverrides"
+        },
+        "candidate": {
+          "$ref": "#/$defs/parameterOverrides"
+        }
+      }
+    },
+    "parameterOverrides": {
+      "type": "object",
+      "minProperties": 1,
+      "propertyNames": {
+        "$ref": "#/$defs/parameterName"
+      },
+      "additionalProperties": {
+        "type": [
+          "string",
+          "integer",
+          "boolean"
+        ]
+      }
+    },
+    "setup": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "kafka",
+        "flink"
+      ],
+      "properties": {
+        "kafka": {
+          "$ref": "#/$defs/kafkaSetup"
+        },
+        "flink": {
+          "$ref": "#/$defs/flinkSetup"
+        },
+        "proxies": {
+          "type": "object",
+          "minProperties": 1,
+          "propertyNames": {
+            "$ref": "#/$defs/kebabName"
+          },
+          "additionalProperties": {
+            "$ref": "#/$defs/proxy"
+          }
+        }
+      }
+    },
+    "kafkaSetup": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "clusters"
+      ],
+      "properties": {
+        "clusters": {
+          "type": "object",
+          "minProperties": 1,
+          "maxProperties": 2,
+          "propertyNames": {
+            "$ref": "#/$defs/kebabName"
+          },
+          "additionalProperties": {
+            "$ref": "#/$defs/kafkaCluster"
+          }
+        }
+      }
+    },
+    "kafkaCluster": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "image",
+        "brokers",
+        "topics"
+      ],
+      "properties": {
+        "image": {
+          "$ref": "#/$defs/nonEmptyString"
+        },
+        "mode": {
+          "oneOf": [
+            {
+              "const": "kraft"
+            },
+            {
+              "$ref": "#/$defs/templatedString"
+            }
+          ],
+          "default": "kraft"
+        },
+        "brokers": {
+          "$ref": "#/$defs/positiveIntegerOrTemplate"
+        },
+        "topics": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "$ref": "#/$defs/kafkaTopic"
+          }
+        }
+      }
+    },
+    "kafkaTopic": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "name",
+        "partitions",
+        "replication_factor"
+      ],
+      "properties": {
+        "name": {
+          "$ref": "#/$defs/kafkaNameOrTemplate"
+        },
+        "partitions": {
+          "$ref": "#/$defs/positiveIntegerOrTemplate"
+        },
+        "replication_factor": {
+          "$ref": "#/$defs/positiveIntegerOrTemplate"
+        },
+        "input_source": {
+          "$ref": "#/$defs/inputSource"
+        }
+      }
+    },
+    "inputSource": {
+      "oneOf": [
+        {
+          "$ref": "#/$defs/fileInputSource"
+        },
+        {
+          "$ref": "#/$defs/generatedInputSource"
+        },
+        {
+          "$ref": "#/$defs/generatedRateInputSource"
+        },
+        {
+          "$ref": "#/$defs/customInputSource"
+        }
+      ]
+    },
+    "fileInputSource": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "mode",
+        "format",
+        "path"
+      ],
+      "properties": {
+        "mode": {
+          "const": "file"
+        },
+        "format": {
+          "$ref": "#/$defs/inputFormatOrTemplate"
+        },
+        "path": {
+          "$ref": "#/$defs/nonEmptyString"
+        },
+        "connect_via_proxy": {
+          "$ref": "#/$defs/kebabName"
+        }
+      }
+    },
+    "generatedInputSource": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "mode",
+        "format",
+        "total"
+      ],
+      "properties": {
+        "mode": {
+          "const": "generated"
+        },
+        "format": {
+          "$ref": "#/$defs/inputFormatOrTemplate"
+        },
+        "total": {
+          "$ref": "#/$defs/positiveIntegerOrTemplate"
+        },
+        "connect_via_proxy": {
+          "$ref": "#/$defs/kebabName"
+        }
+      }
+    },
+    "generatedRateInputSource": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "mode",
+        "format",
+        "total",
+        "rate_per_second"
+      ],
+      "properties": {
+        "mode": {
+          "const": "generated-rate"
+        },
+        "format": {
+          "$ref": "#/$defs/inputFormatOrTemplate"
+        },
+        "total": {
+          "$ref": "#/$defs/positiveIntegerOrTemplate"
+        },
+        "rate_per_second": {
+          "$ref": "#/$defs/positiveIntegerOrTemplate"
+        },
+        "connect_via_proxy": {
+          "$ref": "#/$defs/kebabName"
+        }
+      }
+    },
+    "customInputSource": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "mode",
+        "artifact",
+        "timeout"
+      ],
+      "properties": {
+        "mode": {
+          "const": "custom"
+        },
+        "artifact": {
+          "$ref": "#/$defs/nonEmptyString"
+        },
+        "timeout": {
+          "$ref": "#/$defs/durationOrTemplate"
+        },
+        "connect_via_proxy": {
+          "$ref": "#/$defs/kebabName"
+        },
+        "config": {
+          "type": "object",
+          "additionalProperties": {
+            "type": [
+              "string",
+              "integer",
+              "boolean"
+            ]
+          }
+        }
+      }
+    },
+    "flinkSetup": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "image"
+      ],
+      "properties": {
+        "image": {
+          "$ref": "#/$defs/nonEmptyString"
+        },
+        "jobmanagers": {
+          "$ref": "#/$defs/positiveIntegerOrTemplate",
+          "default": 1
+        },
+        "taskmanagers": {
+          "$ref": "#/$defs/positiveIntegerOrTemplate",
+          "default": 1
+        },
+        "config": {
+          "type": "object",
+          "additionalProperties": {
+            "type": [
+              "string",
+              "integer",
+              "boolean"
+            ]
+          }
+        }
+      }
+    },
+    "proxy": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "type",
+        "cluster",
+        "listen",
+        "bootstrap"
+      ],
+      "properties": {
+        "type": {
+          "const": "kroxylicious"
+        },
+        "cluster": {
+          "$ref": "#/$defs/kebabName"
+        },
+        "listen": {
+          "$ref": "#/$defs/addressOrTemplate"
+        },
+        "bootstrap": {
+          "$ref": "#/$defs/proxyBootstrap"
+        }
+      }
+    },
+    "proxyBootstrap": {
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "cluster"
+          ],
+          "properties": {
+            "cluster": {
+              "$ref": "#/$defs/kebabName"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "address"
+          ],
+          "properties": {
+            "address": {
+              "$ref": "#/$defs/addressOrTemplate"
+            }
+          }
+        }
+      ]
+    },
+    "subject": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "connectors"
+      ],
+      "properties": {
+        "connectors": {
+          "type": "object",
+          "minProperties": 1,
+          "propertyNames": {
+            "$ref": "#/$defs/kebabName"
+          },
+          "additionalProperties": {
+            "$ref": "#/$defs/subjectConnector"
+          }
+        }
+      }
+    },
+    "subjectConnector": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "artifact"
+      ],
+      "properties": {
+        "artifact": {
+          "$ref": "#/$defs/nonEmptyString"
+        }
+      }
+    },
+    "workload": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "jobs"
+      ],
+      "properties": {
+        "jobs": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "$ref": "#/$defs/job"
+          }
+        }
+      }
+    },
+    "job": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "alias",
+        "jar",
+        "parallelism",
+        "source",
+        "sink",
+        "checkpointing"
+      ],
+      "properties": {
+        "alias": {
+          "$ref": "#/$defs/kebabName"
+        },
+        "start": {
+          "type": "string",
+          "enum": [
+            "auto",
+            "manual"
+          ],
+          "default": "auto"
+        },
+        "jar": {
+          "$ref": "#/$defs/nonEmptyString"
+        },
+        "connectors": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "$ref": "#/$defs/kebabName"
+          },
+          "uniqueItems": true
+        },
+        "parallelism": {
+          "$ref": "#/$defs/positiveIntegerOrTemplate"
+        },
+        "state_backend": {
+          "$ref": "#/$defs/stateBackend"
+        },
+        "state_ttl": {
+          "$ref": "#/$defs/stateTtl"
+        },
+        "watermarks": {
+          "$ref": "#/$defs/watermarks"
+        },
+        "restart_strategy": {
+          "$ref": "#/$defs/restartStrategy"
+        },
+        "source": {
+          "$ref": "#/$defs/topicRef"
+        },
+        "sink": {
+          "$ref": "#/$defs/sink"
+        },
+        "checkpointing": {
+          "$ref": "#/$defs/checkpointing"
+        },
+        "program_args": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/nonEmptyString"
+          }
+        }
+      }
+    },
+    "topicRef": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "cluster",
+        "topic"
+      ],
+      "properties": {
+        "cluster": {
+          "$ref": "#/$defs/kebabName"
+        },
+        "topic": {
+          "$ref": "#/$defs/kafkaNameOrTemplate"
+        },
+        "connect_via_proxy": {
+          "$ref": "#/$defs/kebabName"
+        }
+      }
+    },
+    "sink": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "cluster",
+        "topic",
+        "delivery_guarantee"
+      ],
+      "properties": {
+        "cluster": {
+          "$ref": "#/$defs/kebabName"
+        },
+        "topic": {
+          "$ref": "#/$defs/kafkaNameOrTemplate"
+        },
+        "connect_via_proxy": {
+          "$ref": "#/$defs/kebabName"
+        },
+        "delivery_guarantee": {
+          "oneOf": [
+            {
+              "type": "string",
+              "enum": [
+                "NONE",
+                "AT_LEAST_ONCE",
+                "EXACTLY_ONCE"
+              ]
+            },
+            {
+              "$ref": "#/$defs/templatedString"
+            }
+          ]
+        },
+        "transactional_id_prefix": {
+          "$ref": "#/$defs/nonEmptyString"
+        },
+        "transaction_id_naming_strategy": {
+          "oneOf": [
+            {
+              "type": "string",
+              "enum": [
+                "INCREMENTING",
+                "POOLING"
+              ]
+            },
+            {
+              "$ref": "#/$defs/templatedString"
+            }
+          ]
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "delivery_guarantee": {
+                "const": "EXACTLY_ONCE"
+              }
+            },
+            "required": [
+              "delivery_guarantee"
+            ]
+          },
+          "then": {
+            "required": [
+              "transactional_id_prefix",
+              "transaction_id_naming_strategy"
+            ]
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "delivery_guarantee": {
+                "enum": [
+                  "NONE",
+                  "AT_LEAST_ONCE"
+                ]
+              }
+            },
+            "required": [
+              "delivery_guarantee"
+            ]
+          },
+          "then": {
+            "not": {
+              "anyOf": [
+                {
+                  "required": [
+                    "transactional_id_prefix"
+                  ]
+                },
+                {
+                  "required": [
+                    "transaction_id_naming_strategy"
+                  ]
+                }
+              ]
+            }
+          }
+        }
+      ]
+    },
+    "checkpointing": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "interval",
+        "mode"
+      ],
+      "properties": {
+        "interval": {
+          "$ref": "#/$defs/durationOrTemplate"
+        },
+        "mode": {
+          "oneOf": [
+            {
+              "type": "string",
+              "enum": [
+                "EXACTLY_ONCE",
+                "AT_LEAST_ONCE"
+              ]
+            },
+            {
+              "$ref": "#/$defs/templatedString"
+            }
+          ]
+        },
+        "storage": {
+          "$ref": "#/$defs/checkpointStorage"
+        }
+      }
+    },
+    "checkpointStorage": {
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "type"
+          ],
+          "properties": {
+            "type": {
+              "type": "string",
+              "enum": [
+                "jobmanager"
+              ]
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "type",
+            "path"
+          ],
+          "properties": {
+            "type": {
+              "type": "string",
+              "enum": [
+                "filesystem"
+              ]
+            },
+            "path": {
+              "$ref": "#/$defs/nonEmptyString"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "type"
+          ],
+          "properties": {
+            "type": {
+              "$ref": "#/$defs/templatedString"
+            },
+            "path": {
+              "$ref": "#/$defs/nonEmptyString"
+            }
+          }
+        }
+      ]
+    },
+    "stateBackend": {
+      "oneOf": [
+        {
+          "type": "string",
+          "enum": [
+            "hashmap",
+            "rocksdb"
+          ]
+        },
+        {
+          "$ref": "#/$defs/templatedString"
+        }
+      ]
+    },
+    "stateTtl": {
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "enabled"
+          ],
+          "properties": {
+            "enabled": {
+              "const": false
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "enabled",
+            "ttl"
+          ],
+          "properties": {
+            "enabled": {
+              "const": true
+            },
+            "ttl": {
+              "$ref": "#/$defs/durationOrTemplate"
+            },
+            "cleanup": {
+              "$ref": "#/$defs/stateTtlCleanup"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "enabled"
+          ],
+          "properties": {
+            "enabled": {
+              "$ref": "#/$defs/templateString"
+            },
+            "ttl": {
+              "$ref": "#/$defs/durationOrTemplate"
+            },
+            "cleanup": {
+              "$ref": "#/$defs/stateTtlCleanup"
+            }
+          }
+        }
+      ]
+    },
+    "stateTtlCleanup": {
+      "oneOf": [
+        {
+          "type": "string",
+          "enum": [
+            "none",
+            "incremental",
+            "rocksdb-compaction-filter"
+          ]
+        },
+        {
+          "$ref": "#/$defs/templatedString"
+        }
+      ]
+    },
+    "watermarks": {
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "strategy"
+          ],
+          "properties": {
+            "strategy": {
+              "const": "no-watermarks"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "strategy"
+          ],
+          "properties": {
+            "strategy": {
+              "const": "monotonic-timestamps"
+            },
+            "idleness": {
+              "$ref": "#/$defs/durationOrTemplate"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "strategy",
+            "max_out_of_orderness"
+          ],
+          "properties": {
+            "strategy": {
+              "const": "bounded-out-of-orderness"
+            },
+            "max_out_of_orderness": {
+              "$ref": "#/$defs/durationOrTemplate"
+            },
+            "idleness": {
+              "$ref": "#/$defs/durationOrTemplate"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "strategy"
+          ],
+          "properties": {
+            "strategy": {
+              "$ref": "#/$defs/templatedString"
+            },
+            "max_out_of_orderness": {
+              "$ref": "#/$defs/durationOrTemplate"
+            },
+            "idleness": {
+              "$ref": "#/$defs/durationOrTemplate"
+            }
+          }
+        }
+      ]
+    },
+    "restartStrategy": {
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "type"
+          ],
+          "properties": {
+            "type": {
+              "const": "none"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "type",
+            "attempts",
+            "delay"
+          ],
+          "properties": {
+            "type": {
+              "const": "fixed-delay"
+            },
+            "attempts": {
+              "$ref": "#/$defs/positiveIntegerOrTemplate"
+            },
+            "delay": {
+              "$ref": "#/$defs/durationOrTemplate"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "type",
+            "max_failures",
+            "failure_rate_interval",
+            "delay"
+          ],
+          "properties": {
+            "type": {
+              "const": "failure-rate"
+            },
+            "max_failures": {
+              "$ref": "#/$defs/positiveIntegerOrTemplate"
+            },
+            "failure_rate_interval": {
+              "$ref": "#/$defs/durationOrTemplate"
+            },
+            "delay": {
+              "$ref": "#/$defs/durationOrTemplate"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "type"
+          ],
+          "properties": {
+            "type": {
+              "$ref": "#/$defs/templatedString"
+            },
+            "attempts": {
+              "$ref": "#/$defs/positiveIntegerOrTemplate"
+            },
+            "max_failures": {
+              "$ref": "#/$defs/positiveIntegerOrTemplate"
+            },
+            "failure_rate_interval": {
+              "$ref": "#/$defs/durationOrTemplate"
+            },
+            "delay": {
+              "$ref": "#/$defs/durationOrTemplate"
+            }
+          }
+        }
+      ]
+    },
+    "phase": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "name",
+        "steps"
+      ],
+      "properties": {
+        "name": {
+          "$ref": "#/$defs/kebabName"
+        },
+        "steps": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "$ref": "#/$defs/step"
+          }
+        }
+      }
+    },
+    "step": {
+      "oneOf": [
+        {
+          "$ref": "#/$defs/awaitStep"
+        },
+        {
+          "$ref": "#/$defs/waitStep"
+        },
+        {
+          "$ref": "#/$defs/startStep"
+        },
+        {
+          "$ref": "#/$defs/stopStep"
+        },
+        {
+          "$ref": "#/$defs/killStep"
+        },
+        {
+          "$ref": "#/$defs/loopStep"
+        },
+        {
+          "$ref": "#/$defs/networkFaultStep"
+        },
+        {
+          "$ref": "#/$defs/checkpointStep"
+        },
+        {
+          "$ref": "#/$defs/savepointStep"
+        },
+        {
+          "$ref": "#/$defs/restoreStep"
+        },
+        {
+          "$ref": "#/$defs/restartStep"
+        },
+        {
+          "$ref": "#/$defs/validateStep"
+        }
+      ]
+    },
+    "awaitStep": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "await"
+      ],
+      "properties": {
+        "await": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "condition",
+            "timeout",
+            "on_timeout"
+          ],
+          "properties": {
+            "condition": {
+              "$ref": "#/$defs/awaitCondition"
+            },
+            "timeout": {
+              "$ref": "#/$defs/durationOrTemplate"
+            },
+            "on_timeout": {
+              "type": "string",
+              "enum": [
+                "fail",
+                "inconclusive"
+              ]
+            }
+          }
+        }
+      }
+    },
+    "awaitCondition": {
+      "oneOf": [
+        {
+          "$ref": "#/$defs/jobStateCondition"
+        },
+        {
+          "$ref": "#/$defs/taskmanagerCountCondition"
+        },
+        {
+          "$ref": "#/$defs/checkpointCompletedCondition"
+        },
+        {
+          "$ref": "#/$defs/savepointCompletedCondition"
+        },
+        {
+          "$ref": "#/$defs/logMarkerCondition"
+        },
+        {
+          "$ref": "#/$defs/kafkaTransactionStateCondition"
+        },
+        {
+          "$ref": "#/$defs/recordThresholdCondition"
+        }
+      ]
+    },
+    "waitStep": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "wait"
+      ],
+      "properties": {
+        "wait": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "duration"
+          ],
+          "properties": {
+            "duration": {
+              "$ref": "#/$defs/durationOrTemplate"
+            }
+          }
+        }
+      }
+    },
+    "jobStateCondition": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "type",
+        "job",
+        "state"
+      ],
+      "properties": {
+        "type": {
+          "const": "job-state"
+        },
+        "job": {
+          "$ref": "#/$defs/kebabName"
+        },
+        "state": {
+          "$ref": "#/$defs/nonEmptyString"
+        }
+      }
+    },
+    "taskmanagerCountCondition": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "type",
+        "value"
+      ],
+      "properties": {
+        "type": {
+          "const": "taskmanager-count"
+        },
+        "value": {
+          "$ref": "#/$defs/nonNegativeIntegerOrTemplate"
+        }
+      }
+    },
+    "checkpointCompletedCondition": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "type",
+        "job",
+        "count"
+      ],
+      "properties": {
+        "type": {
+          "const": "checkpoint-completed"
+        },
+        "job": {
+          "$ref": "#/$defs/kebabName"
+        },
+        "count": {
+          "$ref": "#/$defs/positiveIntegerOrTemplate"
+        }
+      }
+    },
+    "savepointCompletedCondition": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "type",
+        "job"
+      ],
+      "properties": {
+        "type": {
+          "const": "savepoint-completed"
+        },
+        "job": {
+          "$ref": "#/$defs/kebabName"
+        }
+      }
+    },
+    "logMarkerCondition": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "type",
+        "marker"
+      ],
+      "properties": {
+        "type": {
+          "const": "log-marker"
+        },
+        "job": {
+          "$ref": "#/$defs/kebabName"
+        },
+        "marker": {
+          "$ref": "#/$defs/nonEmptyString"
+        }
+      }
+    },
+    "kafkaTransactionStateCondition": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "type",
+        "cluster",
+        "transactional_id_prefix",
+        "state"
+      ],
+      "properties": {
+        "type": {
+          "const": "kafka-transaction-state"
+        },
+        "cluster": {
+          "$ref": "#/$defs/kebabName"
+        },
+        "transactional_id_prefix": {
+          "$ref": "#/$defs/nonEmptyString"
+        },
+        "state": {
+          "$ref": "#/$defs/nonEmptyString"
+        }
+      }
+    },
+    "recordThresholdCondition": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "type",
+        "cluster",
+        "topic",
+        "count"
+      ],
+      "properties": {
+        "type": {
+          "const": "record-threshold"
+        },
+        "cluster": {
+          "$ref": "#/$defs/kebabName"
+        },
+        "topic": {
+          "$ref": "#/$defs/kafkaNameOrTemplate"
+        },
+        "count": {
+          "$ref": "#/$defs/positiveIntegerOrTemplate"
+        }
+      }
+    },
+    "startStep": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "start"
+      ],
+      "properties": {
+        "start": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "job"
+          ],
+          "properties": {
+            "job": {
+              "$ref": "#/$defs/kebabName"
+            }
+          }
+        }
+      }
+    },
+    "killStep": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "kill"
+      ],
+      "properties": {
+        "kill": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "target"
+          ],
+          "properties": {
+            "target": {
+              "$ref": "#/$defs/target"
+            }
+          }
+        }
+      }
+    },
+    "stopStep": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "stop"
+      ],
+      "properties": {
+        "stop": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "target",
+            "duration",
+            "heal"
+          ],
+          "properties": {
+            "target": {
+              "$ref": "#/$defs/target"
+            },
+            "duration": {
+              "$ref": "#/$defs/durationOrTemplate"
+            },
+            "heal": {
+              "$ref": "#/$defs/nonEmptyString"
+            }
+          }
+        }
+      }
+    },
+    "loopStep": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "loop"
+      ],
+      "properties": {
+        "loop": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "times",
+            "steps"
+            ],
+            "properties": {
+              "times": {
+                "$ref": "#/$defs/positiveIntegerOrTemplate"
+              },
+              "steps": {
+              "type": "array",
+              "minItems": 1,
+              "items": {
+                "$ref": "#/$defs/step"
+              }
+            }
+          }
+        }
+      }
+    },
+    "networkFaultStep": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "network_fault"
+      ],
+      "properties": {
+        "network_fault": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "proxy",
+            "target",
+            "match",
+            "fault",
+            "duration",
+            "heal"
+          ],
+          "properties": {
+            "proxy": {
+              "$ref": "#/$defs/kebabName"
+            },
+            "target": {
+              "$ref": "#/$defs/networkTarget"
+            },
+            "match": {
+              "$ref": "#/$defs/networkMatch"
+            },
+            "fault": {
+              "$ref": "#/$defs/networkFault"
+            },
+            "duration": {
+              "$ref": "#/$defs/durationOrTemplate"
+            },
+            "heal": {
+              "const": "restore-proxy-rule"
+            }
+          }
+        }
+      }
+    },
+    "savepointStep": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "savepoint"
+      ],
+      "properties": {
+        "savepoint": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "job"
+          ],
+          "properties": {
+            "job": {
+              "$ref": "#/$defs/kebabName"
+            },
+            "as": {
+              "$ref": "#/$defs/kebabName"
+            },
+            "stop": {
+              "type": "boolean"
+            }
+          }
+        }
+      }
+    },
+    "checkpointStep": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "checkpoint"
+      ],
+      "properties": {
+        "checkpoint": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "job"
+          ],
+          "properties": {
+            "job": {
+              "$ref": "#/$defs/kebabName"
+            },
+            "as": {
+              "$ref": "#/$defs/kebabName"
+            }
+          }
+        }
+      }
+    },
+    "restoreStep": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "restore"
+      ],
+      "properties": {
+        "restore": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "job",
+            "from",
+            "mode"
+          ],
+          "properties": {
+            "job": {
+              "$ref": "#/$defs/kebabName"
+            },
+            "from": {
+              "$ref": "#/$defs/stateRef"
+            },
+            "mode": {
+              "oneOf": [
+                {
+                  "type": "string",
+                  "enum": [
+                    "claim",
+                    "no-claim"
+                  ]
+                },
+                {
+                  "$ref": "#/$defs/templatedString"
+                }
+              ]
+            }
+          }
+        }
+      }
+    },
+    "stateRef": {
+      "oneOf": [
+        {
+          "type": "string",
+          "enum": [
+            "latest-savepoint",
+            "latest-checkpoint"
+          ]
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "type",
+            "name"
+          ],
+          "properties": {
+            "type": {
+              "type": "string",
+              "enum": [
+                "savepoint",
+                "checkpoint"
+              ]
+            },
+            "name": {
+              "$ref": "#/$defs/kebabName"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "type",
+            "path"
+          ],
+          "properties": {
+            "type": {
+              "type": "string",
+              "enum": [
+                "savepoint",
+                "checkpoint"
+              ]
+            },
+            "path": {
+              "$ref": "#/$defs/nonEmptyString"
+            }
+          }
+        }
+      ]
+    },
+    "restartStep": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "restart"
+      ],
+      "properties": {
+        "restart": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "component"
+          ],
+          "properties": {
+            "component": {
+              "type": "string",
+              "enum": [
+                "flink",
+                "kafka",
+                "taskmanager",
+                "jobmanager"
+              ]
+            },
+            "image": {
+              "$ref": "#/$defs/nonEmptyString"
+            }
+          }
+        }
+      }
+    },
+    "validateStep": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "validate"
+      ],
+      "properties": {
+        "validate": {
+          "$ref": "#/$defs/terminalValidation"
+        }
+      }
+    },
+    "target": {
+      "oneOf": [
+        {
+          "$ref": "#/$defs/namedTarget"
+        },
+        {
+          "$ref": "#/$defs/selectorTarget"
+        }
+      ]
+    },
+    "namedTarget": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "kind",
+        "role",
+        "name"
+      ],
+      "properties": {
+        "kind": {
+          "const": "named"
+        },
+        "role": {
+          "type": "string",
+          "enum": [
+            "taskmanager",
+            "jobmanager",
+            "broker"
+          ]
+        },
+        "name": {
+          "$ref": "#/$defs/kebabName"
+        }
+      }
+    },
+    "selectorTarget": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "kind",
+        "role",
+        "hosting"
+      ],
+      "properties": {
+        "kind": {
+          "const": "selector"
+        },
+        "role": {
+          "type": "string",
+          "enum": [
+            "taskmanager"
+          ]
+        },
+        "hosting": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "job",
+            "vertex",
+            "subtask"
+          ],
+          "properties": {
+            "job": {
+              "$ref": "#/$defs/kebabName"
+            },
+            "vertex": {
+              "$ref": "#/$defs/nonEmptyString"
+            },
+            "subtask": {
+              "$ref": "#/$defs/nonNegativeIntegerOrTemplate"
+            }
+          }
+        }
+      }
+    },
+    "networkTarget": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "cluster"
+      ],
+      "properties": {
+        "cluster": {
+          "$ref": "#/$defs/kebabName"
+        },
+        "broker": {
+          "$ref": "#/$defs/kebabName"
+        }
+      }
+    },
+    "networkMatch": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "api"
+      ],
+      "properties": {
+        "api": {
+          "type": "string",
+          "enum": [
+            "produce",
+            "fetch",
+            "metadata",
+            "init-producer-id",
+            "add-partitions-to-txn",
+            "add-offsets-to-txn",
+            "txn-offset-commit",
+            "end-txn"
+          ]
+        },
+        "topic": {
+          "$ref": "#/$defs/kafkaNameOrTemplate"
+        },
+        "transactional_id_prefix": {
+          "$ref": "#/$defs/nonEmptyString"
+        }
+      }
+    },
+    "networkFault": {
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "type",
+            "latency"
+          ],
+          "properties": {
+            "type": {
+              "const": "delay"
+            },
+            "latency": {
+              "$ref": "#/$defs/durationOrTemplate"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "type"
+          ],
+          "properties": {
+            "type": {
+              "const": "disconnect"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "type",
+            "error"
+          ],
+          "properties": {
+            "type": {
+              "const": "error-response"
+            },
+            "error": {
+              "$ref": "#/$defs/kebabName"
+            }
+          }
+        }
+      ]
+    },
+    "terminalValidation": {
+      "oneOf": [
+        {
+          "$ref": "#/$defs/kafkaIdSetValidation"
+        },
+        {
+          "$ref": "#/$defs/kafkaNoHangingTransactionsValidation"
+        },
+        {
+          "$ref": "#/$defs/kafkaRecordCountValidation"
+        },
+        {
+          "$ref": "#/$defs/flinkLogMatchValidation"
+        },
+        {
+          "$ref": "#/$defs/customTerminalValidation"
+        }
+      ]
+    },
+    "kafkaIdSetValidation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "type",
+        "cluster",
+        "topic",
+        "expected"
+      ],
+      "properties": {
+        "type": {
+          "const": "kafka.id-set"
+        },
+        "cluster": {
+          "$ref": "#/$defs/kebabName"
+        },
+        "topic": {
+          "$ref": "#/$defs/kafkaNameOrTemplate"
+        },
+        "expected": {
+          "const": "input-manifest"
+        }
+      }
+    },
+    "kafkaNoHangingTransactionsValidation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "type",
+        "cluster",
+        "transactional_id_prefix",
+        "stabilization_timeout"
+      ],
+      "properties": {
+        "type": {
+          "const": "kafka.no-hanging-transactions"
+        },
+        "cluster": {
+          "$ref": "#/$defs/kebabName"
+        },
+        "transactional_id_prefix": {
+          "$ref": "#/$defs/nonEmptyString"
+        },
+        "stabilization_timeout": {
+          "$ref": "#/$defs/durationOrTemplate"
+        }
+      }
+    },
+    "kafkaRecordCountValidation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "type",
+        "cluster",
+        "topic",
+        "expected_records"
+      ],
+      "properties": {
+        "type": {
+          "const": "kafka.record-count"
+        },
+        "cluster": {
+          "$ref": "#/$defs/kebabName"
+        },
+        "topic": {
+          "$ref": "#/$defs/kafkaNameOrTemplate"
+        },
+        "expected_records": {
+          "$ref": "#/$defs/positiveIntegerOrTemplate"
+        }
+      }
+    },
+    "flinkLogMatchValidation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "type",
+        "job",
+        "pattern"
+      ],
+      "properties": {
+        "type": {
+          "const": "flink.log-match"
+        },
+        "job": {
+          "$ref": "#/$defs/kebabName"
+        },
+        "pattern": {
+          "$ref": "#/$defs/nonEmptyString"
+        }
+      }
+    },
+    "customTerminalValidation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "type",
+        "artifact",
+        "timeout"
+      ],
+      "properties": {
+        "type": {
+          "const": "custom"
+        },
+        "artifact": {
+          "$ref": "#/$defs/nonEmptyString"
+        },
+        "timeout": {
+          "$ref": "#/$defs/durationOrTemplate"
+        },
+        "config": {
+          "type": "object",
+          "additionalProperties": {
+            "type": [
+              "string",
+              "integer",
+              "boolean"
+            ]
+          }
+        }
+      }
+    },
+    "inputFormat": {
+      "type": "string",
+      "enum": [
+        "integer-sequence",
+        "json-lines",
+        "csv"
+      ]
+    },
+    "inputFormatOrTemplate": {
+      "oneOf": [
+        {
+          "$ref": "#/$defs/inputFormat"
+        },
+        {
+          "$ref": "#/$defs/templatedString"
+        }
+      ]
+    },
+    "durationOrTemplate": {
+      "oneOf": [
+        {
+          "$ref": "#/$defs/duration"
+        },
+        {
+          "$ref": "#/$defs/templatedString"
+        }
+      ]
+    },
+    "positiveIntegerOrTemplate": {
+      "oneOf": [
+        {
+          "type": "integer",
+          "minimum": 1
+        },
+        {
+          "$ref": "#/$defs/templateString"
+        }
+      ]
+    },
+    "nonNegativeIntegerOrTemplate": {
+      "oneOf": [
+        {
+          "type": "integer",
+          "minimum": 0
+        },
+        {
+          "$ref": "#/$defs/templateString"
+        }
+      ]
+    },
+    "booleanOrTemplate": {
+      "oneOf": [
+        {
+          "type": "boolean"
+        },
+        {
+          "$ref": "#/$defs/templateString"
+        }
+      ]
+    },
+    "duration": {
+      "type": "string",
+      "pattern": "^[1-9][0-9]*(ms|s|m|h)$"
+    },
+    "address": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9._-]+:([1-9][0-9]{0,3}|[1-5][0-9]{4}|6[0-4][0-9]{3}|65[0-4][0-9]{2}|655[0-2][0-9]|6553[0-5])$"
+    },
+    "addressOrTemplate": {
+      "oneOf": [
+        {
+          "$ref": "#/$defs/address"
+        },
+        {
+          "$ref": "#/$defs/templatedString"
+        }
+      ]
+    },
+    "templateString": {
+      "type": "string",
+      "pattern": "^\\$\\{[A-Za-z_][A-Za-z0-9_]*\\}$"
+    },
+    "templatedString": {
+      "type": "string",
+      "pattern": "^(?=.*\\$\\{[A-Za-z_][A-Za-z0-9_]*\\}).+$"
+    },
+    "nonEmptyString": {
+      "type": "string",
+      "minLength": 1
+    },
+    "parameterName": {
+      "type": "string",
+      "pattern": "^[A-Za-z_][A-Za-z0-9_]*$"
+    },
+    "kebabName": {
+      "type": "string",
+      "pattern": "^[a-z0-9]+(-[a-z0-9]+)*$"
+    },
+    "kafkaName": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9._-]+$"
+    },
+    "kafkaNameOrTemplate": {
+      "oneOf": [
+        {
+          "$ref": "#/$defs/kafkaName"
+        },
+        {
+          "$ref": "#/$defs/templatedString"
+        }
+      ]
+    }
+  }
+}

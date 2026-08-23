@@ -1,0 +1,90 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://savonitar.org/flink-stability/schema/suite-v1.schema.json",
+  "title": "Flink Stability Suite v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "format",
+    "kind",
+    "meta",
+    "scenarios"
+  ],
+  "properties": {
+    "format": {
+      "const": "v1"
+    },
+    "kind": {
+      "const": "suite"
+    },
+    "meta": {
+      "$ref": "#/$defs/meta"
+    },
+    "scenarios": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "$ref": "#/$defs/scenarioEntry"
+      }
+    }
+  },
+  "$defs": {
+    "meta": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "name"
+      ],
+      "properties": {
+        "name": {
+          "$ref": "#/$defs/kebabName"
+        },
+        "description": {
+          "type": "string",
+          "minLength": 1
+        }
+      }
+    },
+    "scenarioEntry": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "scenario"
+      ],
+      "properties": {
+        "scenario": {
+          "$ref": "#/$defs/kebabName"
+        },
+        "as": {
+          "$ref": "#/$defs/kebabName"
+        },
+        "parameters": {
+          "type": "object",
+          "minProperties": 1,
+          "propertyNames": {
+            "$ref": "#/$defs/parameterName"
+          },
+          "additionalProperties": {
+            "type": [
+              "string",
+              "integer",
+              "boolean"
+            ]
+          }
+        },
+        "runs": {
+          "type": "integer",
+          "minimum": 1
+        }
+      }
+    },
+    "kebabName": {
+      "type": "string",
+      "pattern": "^[a-z0-9]+(-[a-z0-9]+)*$"
+    },
+    "parameterName": {
+      "type": "string",
+      "pattern": "^[A-Za-z_][A-Za-z0-9_]*$"
+    }
+  }
+}
