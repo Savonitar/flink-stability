@@ -5,15 +5,36 @@ import org.testcontainers.containers.GenericContainer;
 
 import java.time.Duration;
 import java.util.Objects;
+import java.util.Optional;
 
 final class TestcontainersContainerHandle implements ContainerHandle {
     private static final Duration KILL_CONFIRMATION_TIMEOUT = Duration.ofSeconds(10);
     private static final long KILL_CONFIRMATION_POLL_MS = 100;
 
     private final GenericContainer<?> container;
+    private final String logicalName;
+    private final FlinkComponentRole role;
+    private final FlinkRuntimeTarget runtimeTarget;
+    private final VerifiedFlinkContainer verifiedContainer;
 
     TestcontainersContainerHandle(GenericContainer<?> container) {
         this.container = Objects.requireNonNull(container, "container");
+        this.logicalName = null;
+        this.role = null;
+        this.runtimeTarget = null;
+        this.verifiedContainer = null;
+    }
+
+    TestcontainersContainerHandle(
+            VerifiedFlinkContainer container,
+            String logicalName,
+            FlinkComponentRole role,
+            FlinkRuntimeTarget runtimeTarget) {
+        this.container = Objects.requireNonNull(container, "container");
+        this.logicalName = Objects.requireNonNull(logicalName, "logicalName");
+        this.role = Objects.requireNonNull(role, "role");
+        this.runtimeTarget = Objects.requireNonNull(runtimeTarget, "runtimeTarget");
+        this.verifiedContainer = container;
     }
 
     @Override
@@ -72,5 +93,35 @@ final class TestcontainersContainerHandle implements ContainerHandle {
             throw new IllegalStateException("Container has no runtime ID");
         }
         return id;
+    }
+
+    @Override
+    public Optional<FlinkComponentProvisioningEvidence> provisioningEvidence() {
+        if (runtimeTarget == null) {
+            return Optional.empty();
+        }
+        String runtimeId = runtimeId();
+        Optional<FlinkConnectorBundleInstallation> installation =
+                runtimeTarget.connectorBundle();
+        if (installation.isEmpty()) {
+            return Optional.of(FlinkComponentProvisioningEvidence.legacy(
+                    logicalName, role, runtimeId, runtimeTarget.imageReference()));
+        }
+
+        VerifiedFlinkContainer.ConnectorBundleVerification verification =
+                verifiedContainer.connectorBundleVerification();
+        if (verification == null) {
+            throw new ConnectorBundleProvisioningException(
+                    "Connector bundle has no pre-process verification evidence for "
+                            + logicalName);
+        }
+        return Optional.of(FlinkComponentProvisioningEvidence.verified(
+                logicalName,
+                role,
+                runtimeId,
+                runtimeTarget.imageReference(),
+                installation.get().targetBindingSha256(),
+                verification.classpathManifestSha256(),
+                verification.connectorArtifacts()));
     }
 }

@@ -362,8 +362,29 @@ class ClusterManagerTest {
         }
     }
 
+    @SuppressWarnings("deprecation")
     @Test
-    void jobManagerRestartRollsBackWhenItsRestPortCannotBePublished() throws Exception {
+    void retainsAFailedAdditionalTaskManagerWhenImmediateCleanupAlsoFails() throws Exception {
+        RecordingFlinkFactory flink = new RecordingFlinkFactory();
+        ClusterManager manager = manager(flink);
+        manager.startFlink("flink:1.20.0", 1, 1);
+        flink.failStart.add("taskmanager-2-runtime-1");
+        flink.failStopOnce.add("taskmanager-2-runtime-1");
+
+        IllegalStateException failure = assertThrows(
+                IllegalStateException.class, manager::startNewTaskManager);
+
+        assertEquals(1, failure.getSuppressed().length);
+        manager.close();
+        assertEquals(
+                2,
+                flink.events.stream()
+                        .filter("stop:taskmanager-2:taskmanager-2-runtime-1"::equals)
+                        .count());
+    }
+
+    @Test
+    void jobManagerStartStopsCandidateWhenItsRestPortCannotBePublished() throws Exception {
         RecordingFlinkFactory flink = new RecordingFlinkFactory();
         try (ClusterManager manager = manager(flink)) {
             manager.startFlink("flink:1.20.0", 1, 1);

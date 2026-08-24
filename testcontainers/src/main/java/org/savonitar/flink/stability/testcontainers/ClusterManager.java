@@ -12,6 +12,8 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Optional;
+import java.util.Set;
 import java.util.UUID;
 import java.util.function.Supplier;
 
@@ -34,10 +36,14 @@ public class ClusterManager implements AutoCloseable {
     private final LinkedHashMap<String, ComponentSlot> jobManagers = new LinkedHashMap<>();
     private final LinkedHashMap<String, ComponentSlot> taskManagers = new LinkedHashMap<>();
     private final List<ComponentSlot> pendingCleanup = new ArrayList<>();
+    private final List<FlinkComponentProvisioningEvidence> provisioningHistory =
+            new ArrayList<>();
 
     private KafkaCluster kafkaManager;
     private boolean kafkaReady;
     private FlinkComponentFactory flinkFactory;
+    /** Target used for legacy creation of additional logical slots; each slot owns its desired target. */
+    private FlinkRuntimeTarget defaultFlinkRuntimeTarget;
     private String jobManagerRestUrl;
     private String runningJobId;
     private int nextTaskManagerOrdinal = 1;
@@ -148,47 +154,61 @@ public class ClusterManager implements AutoCloseable {
         ensureFlinkStarted();
         for (ComponentSlot slot : taskManagers.values()) {
             if (!slot.isRunning()) {
-                slot.start();
+                record(slot.start());
                 LOG.info("TaskManager {} restarted as {}", slot.name(), slot.runtimeId());
                 return;
             }
         }
 
         String name = taskManagerName(nextTaskManagerOrdinal);
-        ComponentSlot slot = new ComponentSlot(name, () -> flinkFactory.newTaskManager(name));
-        slot.start();
+        ComponentSlot slot = new ComponentSlot(
+                name,
+                FlinkComponentRole.TASK_MANAGER,
+                defaultFlinkRuntimeTarget,
+                () -> flinkFactory.newTaskManager(name));
+        try {
+            record(slot.start());
+        } catch (RuntimeException failure) {
+            if (slot.hasHandle() && !pendingCleanup.contains(slot)) {
+                pendingCleanup.add(slot);
+            }
+            throw failure;
+        }
         taskManagers.put(name, slot);
         nextTaskManagerOrdinal++;
         LOG.info("Additional TaskManager {} started as {}", name, slot.runtimeId());
     }
 
     public synchronized void startFlink(String version) throws InterruptedException, IOException {
-        startFlink(version, 1, 1);
+        startFlink(legacyRuntimeTarget(version), 1, 1);
     }
 
     /** Starts one standalone JobManager and the requested deterministic TaskManager slots. */
     public synchronized void startFlink(
             String version, int jobManagerCount, int taskManagerCount)
             throws InterruptedException, IOException {
-        ensureOpen();
-        if (!jobManagers.isEmpty() || !taskManagers.isEmpty() || flinkFactory != null
-                || !pendingCleanup.isEmpty()) {
-            throw new IllegalStateException("Flink has already been started");
-        }
-        if (version == null || version.isBlank()) {
-            throw new IllegalArgumentException("Flink image cannot be null or blank");
-        }
-        if (jobManagerCount != 1) {
-            throw new IllegalArgumentException(
-                    "The standalone runtime supports exactly one JobManager");
-        }
-        if (taskManagerCount < 1) {
-            throw new IllegalArgumentException("At least one TaskManager is required");
-        }
+        startFlink(legacyRuntimeTarget(version), jobManagerCount, taskManagerCount);
+    }
 
-        FlinkComponentFactory candidateFactory = Objects.requireNonNull(
-                flinkFactoryProvider.create(version, network, checkpointStorageRoot),
-                "Flink component factory returned null");
+    /** Starts one standalone Flink cluster with one exact image/bundle runtime target. */
+    public synchronized void startFlink(
+            FlinkRuntimeTarget runtimeTarget,
+            int jobManagerCount,
+            int taskManagerCount)
+            throws InterruptedException, IOException {
+        validateFlinkStart(runtimeTarget, jobManagerCount, taskManagerCount);
+        FlinkComponentFactory candidateFactory = createFlinkFactory(runtimeTarget);
+        startFlink(runtimeTarget, candidateFactory, jobManagerCount, taskManagerCount);
+    }
+
+    private void startFlink(
+            FlinkRuntimeTarget runtimeTarget,
+            FlinkComponentFactory candidateFactory,
+            int jobManagerCount,
+            int taskManagerCount) {
+        validateFlinkStart(runtimeTarget, jobManagerCount, taskManagerCount);
+        Objects.requireNonNull(candidateFactory, "candidateFactory");
+
         LinkedHashMap<String, ComponentSlot> candidateJobManagers = new LinkedHashMap<>();
         LinkedHashMap<String, ComponentSlot> candidateTaskManagers = new LinkedHashMap<>();
         String candidateRestUrl;
@@ -196,16 +216,21 @@ public class ClusterManager implements AutoCloseable {
         try {
             ComponentSlot jobManager = new ComponentSlot(
                     PRIMARY_JOB_MANAGER,
+                    FlinkComponentRole.JOB_MANAGER,
+                    runtimeTarget,
                     () -> candidateFactory.newJobManager(PRIMARY_JOB_MANAGER));
             candidateJobManagers.put(PRIMARY_JOB_MANAGER, jobManager);
-            jobManager.start();
+            record(jobManager.start());
 
             for (int ordinal = 1; ordinal <= taskManagerCount; ordinal++) {
                 String name = taskManagerName(ordinal);
                 ComponentSlot taskManager = new ComponentSlot(
-                        name, () -> candidateFactory.newTaskManager(name));
+                        name,
+                        FlinkComponentRole.TASK_MANAGER,
+                        runtimeTarget,
+                        () -> candidateFactory.newTaskManager(name));
                 candidateTaskManagers.put(name, taskManager);
-                taskManager.start();
+                record(taskManager.start());
             }
 
             int restPort = jobManager.mappedPort(FlinkContainer.JOB_MANAGER_PORT);
@@ -219,6 +244,7 @@ public class ClusterManager implements AutoCloseable {
         }
 
         flinkFactory = candidateFactory;
+        defaultFlinkRuntimeTarget = runtimeTarget;
         jobManagers.putAll(candidateJobManagers);
         taskManagers.putAll(candidateTaskManagers);
         nextTaskManagerOrdinal = taskManagerCount + 1;
@@ -256,7 +282,7 @@ public class ClusterManager implements AutoCloseable {
         if (jobManager == null) {
             throw new IllegalArgumentException("Unknown component: " + name);
         }
-        jobManager.start();
+        record(jobManager.start());
         try {
             int restPort = jobManager.mappedPort(FlinkContainer.JOB_MANAGER_PORT);
             jobManagerRestUrl = "http://localhost:" + restPort;
@@ -273,12 +299,143 @@ public class ClusterManager implements AutoCloseable {
         }
     }
 
+    /** Restarts a uniform Flink cluster with the same desired runtime target. */
+    public synchronized void restartFlink() throws InterruptedException, IOException {
+        ensureOpen();
+        ensureFlinkStarted();
+        List<ComponentSlot> slots = new ArrayList<>(jobManagers.values());
+        slots.addAll(taskManagers.values());
+        Set<RuntimeTargetIdentity> identities = slots.stream()
+                .map(ComponentSlot::desiredTarget)
+                .map(ClusterManager::runtimeTargetIdentity)
+                .collect(java.util.stream.Collectors.toCollection(
+                        java.util.LinkedHashSet::new));
+        if (identities.size() != 1) {
+            throw new IllegalStateException(
+                    "Flink restart without an image is ambiguous across desired runtime targets");
+        }
+        restartFlink(slots.getFirst().desiredTarget());
+    }
+
+    /** Restarts every Flink process with an explicit target while retaining checkpoint storage. */
+    public synchronized void restartFlink(FlinkRuntimeTarget runtimeTarget)
+            throws InterruptedException, IOException {
+        ensureOpen();
+        ensureFlinkStarted();
+        FlinkComponentFactory candidateFactory = createFlinkFactory(runtimeTarget);
+        int jobManagerCount = jobManagers.size();
+        int taskManagerCount = taskManagers.size();
+        stopFlink();
+        startFlink(runtimeTarget, candidateFactory, jobManagerCount, taskManagerCount);
+    }
+
+    /**
+     * Recreates one TaskManager with its desired target. If an earlier explicit retarget failed
+     * after stopping the old process, this retries that candidate; it never restores the old
+     * target implicitly.
+     */
+    public synchronized String restartTaskManager(String name) {
+        ensureOpen();
+        ensureFlinkStarted();
+        ComponentSlot slot = requireSlot(taskManagers, name);
+        if (!slot.isRunning()) {
+            return start(taskManagers, name);
+        }
+        return restartTaskManager(name, slot.desiredTarget());
+    }
+
+    /**
+     * Retargets one running TaskManager explicitly. Candidate preflight occurs while the old
+     * process remains running. Once the old process stops successfully, {@code candidateTarget}
+     * becomes the slot's desired target. Candidate creation, start, or evidence-validation
+     * failure then leaves the slot stopped on that desired target; {@link #startTaskManager}
+     * or {@link #restartTaskManager(String)} retries it. The old target is never recreated
+     * automatically.
+     */
+    public synchronized String restartTaskManager(
+            String name, FlinkRuntimeTarget candidateTarget) {
+        ensureOpen();
+        ensureFlinkStarted();
+        ComponentSlot slot = requireSlot(taskManagers, name);
+        if (!slot.isRunning()) {
+            throw new IllegalStateException("Component is not running: " + name);
+        }
+        FlinkComponentFactory candidateFactory = createFlinkFactory(candidateTarget);
+        ensureManifestCompatible(candidateTarget, slot);
+        stopTaskManager(name);
+        slot.retarget(candidateTarget, () -> candidateFactory.newTaskManager(name));
+        record(slot.start());
+        LOG.info("Restarted {} as {} with {}", name, slot.runtimeId(), candidateTarget);
+        return slot.runtimeId();
+    }
+
+    /**
+     * Recreates one JobManager with its desired target. If an earlier explicit retarget failed,
+     * including while publishing its REST endpoint, this retries that candidate and never
+     * restores the old target implicitly.
+     */
+    public synchronized String restartJobManager(String name) {
+        ensureOpen();
+        ensureFlinkStarted();
+        ComponentSlot slot = requireSlot(jobManagers, name);
+        if (!slot.isRunning()) {
+            return startJobManager(name);
+        }
+        return restartJobManager(name, slot.desiredTarget());
+    }
+
+    /**
+     * Retargets one running JobManager explicitly. Candidate preflight occurs while the old
+     * process remains running. Once the old process stops successfully, {@code candidateTarget}
+     * becomes the slot's desired target. Candidate creation, start, evidence-validation, or REST
+     * endpoint-publication failure then leaves the slot stopped on that target;
+     * {@link #startJobManager} or {@link #restartJobManager(String)} retries it. Provisioning
+     * evidence remains recorded when only endpoint publication fails. The old target is never
+     * recreated automatically.
+     */
+    public synchronized String restartJobManager(
+            String name, FlinkRuntimeTarget candidateTarget) {
+        ensureOpen();
+        ensureFlinkStarted();
+        ComponentSlot slot = requireSlot(jobManagers, name);
+        if (!slot.isRunning()) {
+            throw new IllegalStateException("Component is not running: " + name);
+        }
+        FlinkComponentFactory candidateFactory = createFlinkFactory(candidateTarget);
+        ensureManifestCompatible(candidateTarget, slot);
+        stopJobManager(name);
+        slot.retarget(candidateTarget, () -> candidateFactory.newJobManager(name));
+        record(slot.start());
+        try {
+            int restPort = slot.mappedPort(FlinkContainer.JOB_MANAGER_PORT);
+            jobManagerRestUrl = "http://localhost:" + restPort;
+            LOG.info("Restarted {} as {} with {}", name, slot.runtimeId(), candidateTarget);
+            return slot.runtimeId();
+        } catch (RuntimeException failure) {
+            try {
+                slot.stopForCleanup();
+            } catch (RuntimeException cleanupFailure) {
+                failure.addSuppressed(cleanupFailure);
+            }
+            throw failure;
+        }
+    }
+
     public synchronized List<String> taskManagerNames() {
         return List.copyOf(taskManagers.keySet());
     }
 
     public synchronized List<String> jobManagerNames() {
         return List.copyOf(jobManagers.keySet());
+    }
+
+    /**
+     * Append-only evidence for physical Flink containers that completed process start and
+     * provisioning-evidence validation. A later JobManager endpoint-publication failure retains
+     * its entry; creation, process-start, or evidence-validation failures add no entry.
+     */
+    public synchronized List<FlinkComponentProvisioningEvidence> provisioningHistory() {
+        return List.copyOf(provisioningHistory);
     }
 
     public Path checkpointStorageRoot() {
@@ -320,6 +477,7 @@ public class ClusterManager implements AutoCloseable {
             taskManagers.clear();
             jobManagers.clear();
             flinkFactory = null;
+            defaultFlinkRuntimeTarget = null;
             nextTaskManagerOrdinal = 1;
             return;
         }
@@ -431,10 +589,98 @@ public class ClusterManager implements AutoCloseable {
         ensureOpen();
         ensureFlinkStarted();
         ComponentSlot slot = requireSlot(registry, name);
-        slot.start();
+        record(slot.start());
         LOG.info("Started {} as {}", name, slot.runtimeId());
         return slot.runtimeId();
     }
+
+    private FlinkComponentFactory createFlinkFactory(FlinkRuntimeTarget runtimeTarget) {
+        Objects.requireNonNull(runtimeTarget, "runtimeTarget");
+        runtimeTarget.connectorBundle().ifPresent(
+                installation -> installation.classpathManifest().verifyHostFiles());
+        return Objects.requireNonNull(
+                flinkFactoryProvider.create(runtimeTarget, network, checkpointStorageRoot),
+                "Flink component factory returned null");
+    }
+
+    private void validateFlinkStart(
+            FlinkRuntimeTarget runtimeTarget,
+            int jobManagerCount,
+            int taskManagerCount) {
+        ensureOpen();
+        Objects.requireNonNull(runtimeTarget, "runtimeTarget");
+        if (!jobManagers.isEmpty() || !taskManagers.isEmpty() || flinkFactory != null
+                || !pendingCleanup.isEmpty()) {
+            throw new IllegalStateException("Flink has already been started");
+        }
+        if (jobManagerCount != 1) {
+            throw new IllegalArgumentException(
+                    "The standalone runtime supports exactly one JobManager");
+        }
+        if (taskManagerCount < 1) {
+            throw new IllegalArgumentException("At least one TaskManager is required");
+        }
+    }
+
+    private void ensureManifestCompatible(
+            FlinkRuntimeTarget candidate, ComponentSlot replacedSlot) {
+        Optional<String> candidateManifest = manifestIdentity(candidate);
+        for (ComponentSlot slot : jobManagers.values()) {
+            requireSameManifest(candidateManifest, slot, replacedSlot);
+        }
+        for (ComponentSlot slot : taskManagers.values()) {
+            requireSameManifest(candidateManifest, slot, replacedSlot);
+        }
+    }
+
+    private static void requireSameManifest(
+            Optional<String> candidateManifest,
+            ComponentSlot slot,
+            ComponentSlot replacedSlot) {
+        if (slot == replacedSlot) {
+            return;
+        }
+        Optional<String> existingManifest = manifestIdentity(slot.desiredTarget());
+        if (!candidateManifest.equals(existingManifest)) {
+            throw new ConnectorBundleProvisioningException(
+                    "A component restart would create different connector classpath manifests: "
+                            + candidateManifest.orElse("legacy-disabled") + " versus "
+                            + existingManifest.orElse("legacy-disabled") + " on " + slot.name());
+        }
+    }
+
+    private static Optional<String> manifestIdentity(FlinkRuntimeTarget runtimeTarget) {
+        return runtimeTarget.connectorBundle()
+                .map(FlinkConnectorBundleInstallation::classpathManifest)
+                .map(ConnectorClasspathManifest::manifestSha256);
+    }
+
+    private static RuntimeTargetIdentity runtimeTargetIdentity(
+            FlinkRuntimeTarget runtimeTarget) {
+        Optional<FlinkConnectorBundleInstallation> installation =
+                runtimeTarget.connectorBundle();
+        return new RuntimeTargetIdentity(
+                runtimeTarget.imageReference(),
+                installation.map(FlinkConnectorBundleInstallation::targetBindingSha256),
+                installation.map(FlinkConnectorBundleInstallation::classpathManifest)
+                        .map(ConnectorClasspathManifest::manifestSha256));
+    }
+
+    private static FlinkRuntimeTarget legacyRuntimeTarget(String imageReference) {
+        if (imageReference == null || imageReference.isBlank()) {
+            throw new IllegalArgumentException("Flink image cannot be null or blank");
+        }
+        return FlinkRuntimeTarget.legacy(imageReference);
+    }
+
+    private void record(FlinkComponentProvisioningEvidence evidence) {
+        provisioningHistory.add(Objects.requireNonNull(evidence, "evidence"));
+    }
+
+    private record RuntimeTargetIdentity(
+            String imageReference,
+            Optional<String> targetBindingSha256,
+            Optional<String> classpathManifestSha256) {}
 
     private static ComponentSlot requireSlot(Map<String, ComponentSlot> registry, String name) {
         ComponentSlot slot = registry.get(name);
@@ -531,7 +777,10 @@ public class ClusterManager implements AutoCloseable {
 
     @FunctionalInterface
     interface FlinkFactoryProvider {
-        FlinkComponentFactory create(String image, Network network, Path checkpointStorageRoot);
+        FlinkComponentFactory create(
+                FlinkRuntimeTarget runtimeTarget,
+                Network network,
+                Path checkpointStorageRoot);
     }
 
     @FunctionalInterface
@@ -556,11 +805,19 @@ public class ClusterManager implements AutoCloseable {
 
     private static final class ComponentSlot {
         private final String name;
-        private final Supplier<ContainerHandle> factory;
+        private final FlinkComponentRole role;
+        private FlinkRuntimeTarget desiredTarget;
+        private Supplier<ContainerHandle> factory;
         private ContainerHandle handle;
 
-        private ComponentSlot(String name, Supplier<ContainerHandle> factory) {
+        private ComponentSlot(
+                String name,
+                FlinkComponentRole role,
+                FlinkRuntimeTarget desiredTarget,
+                Supplier<ContainerHandle> factory) {
             this.name = Objects.requireNonNull(name, "name");
+            this.role = Objects.requireNonNull(role, "role");
+            this.desiredTarget = Objects.requireNonNull(desiredTarget, "desiredTarget");
             this.factory = Objects.requireNonNull(factory, "factory");
         }
 
@@ -568,7 +825,11 @@ public class ClusterManager implements AutoCloseable {
             return name;
         }
 
-        void start() {
+        FlinkRuntimeTarget desiredTarget() {
+            return desiredTarget;
+        }
+
+        FlinkComponentProvisioningEvidence start() {
             if (handle != null && handle.isRunning()) {
                 throw new IllegalStateException("Component is already running: " + name);
             }
@@ -584,6 +845,10 @@ public class ClusterManager implements AutoCloseable {
                 if (!candidate.isRunning()) {
                     throw new IllegalStateException("Component did not remain running: " + name);
                 }
+                FlinkComponentProvisioningEvidence evidence = candidate.provisioningEvidence()
+                        .orElseGet(() -> legacyEvidence(candidate));
+                validateEvidence(evidence);
+                return evidence;
             } catch (RuntimeException failure) {
                 try {
                     stopAndRelease("after failed start");
@@ -592,6 +857,17 @@ public class ClusterManager implements AutoCloseable {
                 }
                 throw failure;
             }
+        }
+
+        void retarget(
+                FlinkRuntimeTarget desiredTarget,
+                Supplier<ContainerHandle> factory) {
+            if (handle != null) {
+                throw new IllegalStateException(
+                        "A component must be stopped before changing its runtime target: " + name);
+            }
+            this.desiredTarget = Objects.requireNonNull(desiredTarget, "desiredTarget");
+            this.factory = Objects.requireNonNull(factory, "factory");
         }
 
         String kill() {
@@ -644,6 +920,54 @@ public class ClusterManager implements AutoCloseable {
                 throw new IllegalStateException("Component is not running: " + name);
             }
             return handle;
+        }
+
+        private FlinkComponentProvisioningEvidence legacyEvidence(ContainerHandle candidate) {
+            if (desiredTarget.connectorBundleEnabled()) {
+                throw new ConnectorBundleProvisioningException(
+                        "Bundle-aware container returned no provisioning evidence: " + name);
+            }
+            return FlinkComponentProvisioningEvidence.legacy(
+                    name, role, candidate.runtimeId(), desiredTarget.imageReference());
+        }
+
+        private void validateEvidence(FlinkComponentProvisioningEvidence evidence) {
+            if (!name.equals(evidence.logicalName())
+                    || role != evidence.role()
+                    || !runtimeId().equals(evidence.runtimeId())
+                    || !desiredTarget.imageReference().equals(evidence.imageReference())) {
+                throw new ConnectorBundleProvisioningException(
+                        "Flink component provisioning evidence does not match slot " + name);
+            }
+            Optional<FlinkConnectorBundleInstallation> expected =
+                    desiredTarget.connectorBundle();
+            if (expected.isEmpty()) {
+                if (evidence.targetBindingSha256().isPresent()
+                        || evidence.classpathManifestSha256().isPresent()
+                        || !evidence.connectorArtifacts().isEmpty()
+                        || evidence.verifiedBeforeProcessStart()) {
+                    throw new ConnectorBundleProvisioningException(
+                            "Legacy component unexpectedly reported connector bundle evidence: "
+                                    + name);
+                }
+                return;
+            }
+
+            FlinkConnectorBundleInstallation installation = expected.get();
+            List<ProvisionedConnectorArtifact> expectedArtifacts =
+                    installation.classpathManifest().entries().stream()
+                            .map(entry -> new ProvisionedConnectorArtifact(
+                                    entry.index(), entry.containerPath(), entry.sha256()))
+                            .toList();
+            if (!evidence.targetBindingSha256().equals(
+                            Optional.of(installation.targetBindingSha256()))
+                    || !evidence.classpathManifestSha256().equals(Optional.of(
+                            installation.classpathManifest().manifestSha256()))
+                    || !evidence.connectorArtifacts().equals(expectedArtifacts)
+                    || !evidence.verifiedBeforeProcessStart()) {
+                throw new ConnectorBundleProvisioningException(
+                        "Connector bundle provisioning evidence does not match target for " + name);
+            }
         }
 
         private void stopAndRelease(String context) {

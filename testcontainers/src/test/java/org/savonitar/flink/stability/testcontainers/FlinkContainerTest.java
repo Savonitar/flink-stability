@@ -11,8 +11,11 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.attribute.PosixFilePermission;
 import java.util.List;
+import java.util.Set;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertInstanceOf;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class FlinkContainerTest {
@@ -71,6 +74,81 @@ class FlinkContainerTest {
         assertEquals(
                 "taskmanager-2",
                 taskManager.getLabels().get("org.savonitar.flink-stability.component"));
+    }
+
+    @Test
+    void configuresTheIdenticalByteOnlyBundleForEveryFlinkProcess() throws Exception {
+        Path jar = Files.writeString(temporaryDirectory.resolve("connector.jar"), "connector");
+        String sha256 = ConnectorClasspathManifest.sha256(Files.readAllBytes(jar));
+        ConnectorClasspathManifest manifest = new ConnectorClasspathManifest(List.of(
+                new ConnectorClasspathManifest.Entry(0, jar, sha256)));
+        FlinkRuntimeTarget target = FlinkRuntimeTarget.withConnectorBundle(
+                "flink:2.2.0",
+                new FlinkConnectorBundleInstallation(
+                        "flink:2.2.0",
+                        List.of(new FlinkConnectorBundleInstallation.ClosureLockHash(
+                                "connector", "a".repeat(64))),
+                        manifest));
+        FlinkContainer factory = new FlinkContainer(
+                target, Network.SHARED, temporaryDirectory.resolve("attempt-c"));
+
+        VerifiedFlinkContainer jobManager = assertInstanceOf(
+                VerifiedFlinkContainer.class, factory.createJobManager("jobmanager-1"));
+        VerifiedFlinkContainer taskManager = assertInstanceOf(
+                VerifiedFlinkContainer.class, factory.createTaskManager("taskmanager-1"));
+
+        List<String> expectedTargets = List.of(
+                manifest.entries().getFirst().containerPath(),
+                ConnectorClasspathManifest.CONTAINER_MANIFEST_PATH);
+        assertEquals(expectedTargets, jobManager.configuredBundleTargets());
+        assertEquals(expectedTargets, taskManager.configuredBundleTargets());
+        assertEquals(
+                Set.of(manifest.entries().getFirst().containerPath()),
+                Set.copyOf(jobManager.getCopyToFileContainerPathMap().values()));
+        assertEquals(
+                Set.of(manifest.entries().getFirst().containerPath()),
+                Set.copyOf(taskManager.getCopyToFileContainerPathMap().values()));
+        assertEquals(target, factory.runtimeTarget());
+    }
+
+    @Test
+    void legacyFactoryConfiguresNoConnectorCopies() {
+        FlinkContainer factory = new FlinkContainer(
+                "flink:2.2.0", Network.SHARED, temporaryDirectory.resolve("attempt-d"));
+
+        VerifiedFlinkContainer jobManager = assertInstanceOf(
+                VerifiedFlinkContainer.class, factory.createJobManager("jobmanager-1"));
+        VerifiedFlinkContainer taskManager = assertInstanceOf(
+                VerifiedFlinkContainer.class, factory.createTaskManager("taskmanager-1"));
+
+        assertEquals(List.of(), jobManager.configuredBundleTargets());
+        assertEquals(List.of(), taskManager.configuredBundleTargets());
+        assertEquals(0, jobManager.getCopyToFileContainerPathMap().size());
+        assertEquals(0, taskManager.getCopyToFileContainerPathMap().size());
+    }
+
+    @Test
+    void rehashesStagedBytesBeforeEachPhysicalContainerIsConfigured() throws Exception {
+        Path jar = Files.writeString(temporaryDirectory.resolve("mutable.jar"), "before");
+        ConnectorClasspathManifest manifest = new ConnectorClasspathManifest(List.of(
+                new ConnectorClasspathManifest.Entry(
+                        0, jar, ConnectorClasspathManifest.sha256(Files.readAllBytes(jar)))));
+        FlinkContainer factory = new FlinkContainer(
+                FlinkRuntimeTarget.withConnectorBundle(
+                        "flink:2.2.0",
+                        new FlinkConnectorBundleInstallation(
+                                "flink:2.2.0",
+                                List.of(new FlinkConnectorBundleInstallation.ClosureLockHash(
+                                        "connector", "a".repeat(64))),
+                                manifest)),
+                Network.SHARED,
+                temporaryDirectory.resolve("attempt-e"));
+        factory.createJobManager("jobmanager-1");
+        Files.writeString(jar, "after");
+
+        assertThrows(
+                ConnectorBundleProvisioningException.class,
+                () -> factory.createTaskManager("taskmanager-1"));
     }
 
     private static Bind onlyBind(GenericContainer<?> container) {
