@@ -151,6 +151,103 @@ class ScenarioPreflightValidatorTest {
     }
 
     @Test
+    void rejectsEveryDeclaredConnectorThatNoWorkloadJobReferences() {
+        ScenarioPreflightException exception = reject(document -> {
+            ObjectNode beta = document.withObject("subject")
+                    .withObject("connectors")
+                    .putObject("unused-beta");
+            beta.put("artifact", "unused-beta.jar");
+            beta.putArray("runtime_dependencies");
+        });
+
+        assertHasIssue(
+                exception,
+                ResolutionScope.SINGLE,
+                "preflight.reference.connector-unreferenced",
+                "$/subject/connectors/unused-beta");
+    }
+
+    @Test
+    void validatesStatefulFlinkRestartImageInheritanceIncludingNestedLoops() {
+        ScenarioPreflightException taskmanagerAmbiguous = reject(document -> {
+            document.withObject("setup").withObject("flink").put("taskmanagers", 2);
+            ArrayNode steps = ((ObjectNode) document.at("/phases/0")).putArray("steps");
+            restart(steps, "taskmanager", "flink:2.2.1");
+            restart(steps, "flink", null);
+        });
+        assertHasIssue(
+                taskmanagerAmbiguous,
+                ResolutionScope.SINGLE,
+                "preflight.restart.taskmanager-image-ambiguous",
+                "$/phases/0/steps/0/restart/image");
+        assertTrue(taskmanagerAmbiguous.issues().stream().noneMatch(issue -> issue.code().equals(
+                "preflight.restart.flink-image-inheritance-ambiguous")));
+
+        ScenarioPreflightException divergent = reject(document -> {
+            ArrayNode steps = ((ObjectNode) document.at("/phases/0")).putArray("steps");
+            restart(steps, "jobmanager", "flink:2.2.1");
+            restart(steps, "flink", null);
+        });
+        PreflightIssue divergence = assertHasIssue(
+                divergent,
+                ResolutionScope.SINGLE,
+                "preflight.restart.flink-image-inheritance-ambiguous",
+                "$/phases/0/steps/1/restart");
+        assertTrue(divergence.message().contains("jobmanager-1=flink:2.2.1"));
+        assertTrue(divergence.message().contains("taskmanagers(1)=flink:2.2.0"));
+        assertTrue(divergence.message().contains("desired targets differ"));
+
+        ScenarioPreflightException repeated = reject(document -> {
+            ArrayNode steps = ((ObjectNode) document.at("/phases/0")).putArray("steps");
+            ObjectNode loop = steps.addObject().putObject("loop");
+            loop.put("times", 2);
+            ArrayNode nested = loop.putArray("steps");
+            restart(nested, "flink", null);
+            restart(nested, "jobmanager", "flink:2.2.1");
+        });
+        assertHasIssue(
+                repeated,
+                ResolutionScope.SINGLE,
+                "preflight.restart.flink-image-inheritance-ambiguous",
+                "$/phases/0/steps/0/loop/steps/0/restart");
+
+        ScenarioPreflightException taskmanagerRetained = reject(document -> {
+            ArrayNode steps = ((ObjectNode) document.at("/phases/0")).putArray("steps");
+            restart(steps, "taskmanager", "flink:2.2.1");
+            restart(steps, "taskmanager", null);
+            restart(steps, "flink", null);
+        });
+        assertHasIssue(
+                taskmanagerRetained,
+                ResolutionScope.SINGLE,
+                "preflight.restart.flink-image-inheritance-ambiguous",
+                "$/phases/0/steps/2/restart");
+
+        ScenarioPreflightException jobmanagerRetained = reject(document -> {
+            ArrayNode steps = ((ObjectNode) document.at("/phases/0")).putArray("steps");
+            restart(steps, "jobmanager", "flink:2.2.1");
+            restart(steps, "jobmanager", null);
+            restart(steps, "flink", null);
+        });
+        assertHasIssue(
+                jobmanagerRetained,
+                ResolutionScope.SINGLE,
+                "preflight.restart.flink-image-inheritance-ambiguous",
+                "$/phases/0/steps/2/restart");
+
+        assertDoesNotThrow(() -> validator.validate(plan(
+                scenario(document -> {
+                    ArrayNode steps = ((ObjectNode) document.at("/phases/0"))
+                            .putArray("steps");
+                    restart(steps, "jobmanager", "flink:2.2.1");
+                    restart(steps, "flink", "flink:2.2.2");
+                    restart(steps, "flink", null);
+                    restart(steps, "taskmanager", "flink:2.2.1");
+                }),
+                expected(document -> {}))));
+    }
+
+    @Test
     void rejectsProxyRoutesAndManagedBootstrapAcrossKafkaClusters() {
         ScenarioPreflightException endpointMismatch = reject(document -> {
             addKafkaCluster(document, "other");
@@ -614,6 +711,14 @@ class ScenarioPreflightValidatorTest {
 
     private static JsonNode text(String value) {
         return com.fasterxml.jackson.databind.node.TextNode.valueOf(value);
+    }
+
+    private static void restart(ArrayNode steps, String component, String image) {
+        ObjectNode restart = steps.addObject().putObject("restart");
+        restart.put("component", component);
+        if (image != null) {
+            restart.put("image", image);
+        }
     }
 
     private static ArrayNode topics(ObjectNode document) {

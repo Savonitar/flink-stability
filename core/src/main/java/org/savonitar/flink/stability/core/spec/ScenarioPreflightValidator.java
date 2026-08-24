@@ -180,6 +180,7 @@ public final class ScenarioPreflightValidator {
         BigInteger taskmanagers = flink.path("taskmanagers").bigIntegerValue();
         Map<String, JobIndex> jobs = new LinkedHashMap<>();
         List<KafkaEndpoint> endpoints = new ArrayList<>();
+        Set<String> referencedConnectorAliases = new LinkedHashSet<>();
         ArrayNode jobNodes = (ArrayNode) document.at("/workload/jobs");
         for (int jobIndex = 0; jobIndex < jobNodes.size(); jobIndex++) {
             ObjectNode job = (ObjectNode) jobNodes.get(jobIndex);
@@ -214,6 +215,7 @@ public final class ScenarioPreflightValidator {
             if (job.get("connectors") instanceof ArrayNode connectors) {
                 for (int connectorIndex = 0; connectorIndex < connectors.size(); connectorIndex++) {
                     String connector = connectors.get(connectorIndex).textValue();
+                    referencedConnectorAliases.add(connector);
                     if (!connectorAliases.contains(connector)) {
                         issues.add(issue(source, scope, "preflight.reference.connector-not-found",
                                 jobPath + "/connectors/" + connectorIndex,
@@ -222,6 +224,16 @@ public final class ScenarioPreflightValidator {
                 }
             }
         }
+        connectorAliases.stream()
+                .filter(alias -> !referencedConnectorAliases.contains(alias))
+                .sorted()
+                .forEach(alias -> issues.add(issue(
+                        source,
+                        scope,
+                        "preflight.reference.connector-unreferenced",
+                        "$/subject/connectors/" + pointer(alias),
+                        "Subject connector '" + alias
+                                + "' is not referenced by any workload job")));
         inputs.forEach(input -> endpoints.add(KafkaEndpoint.input(input)));
 
         ArrayNode terminalNodes = (ArrayNode) document.get("terminal_validations");
@@ -508,6 +520,7 @@ public final class ScenarioPreflightValidator {
             }
         }
 
+        validateFlinkRestartImageState(source, scope, index, phases, issues);
         StateArtifactLedger ledger = indexStateArtifacts(source, scope, phases, issues);
         Set<StateArtifactKey> priorArtifacts = new LinkedHashSet<>();
         for (int phaseIndex = 0; phaseIndex < phases.size(); phaseIndex++) {
@@ -522,6 +535,125 @@ public final class ScenarioPreflightValidator {
                     priorArtifacts,
                     issues);
         }
+    }
+
+    private static void validateFlinkRestartImageState(
+            Path source,
+            ResolutionScope scope,
+            SideIndex index,
+            ArrayNode phases,
+            List<PreflightIssue> issues) {
+        String setupTarget = index.document().at("/setup/flink/image").textValue();
+        FlinkTargetState state = new FlinkTargetState(setupTarget, setupTarget);
+        for (int phaseIndex = 0; phaseIndex < phases.size(); phaseIndex++) {
+            ObjectNode phase = (ObjectNode) phases.get(phaseIndex);
+            state = validateFlinkRestartImageStateInSteps(
+                    source,
+                    scope,
+                    index.taskmanagers(),
+                    (ArrayNode) phase.get("steps"),
+                    "$/phases/" + phaseIndex + "/steps",
+                    state,
+                    issues);
+        }
+    }
+
+    private static FlinkTargetState validateFlinkRestartImageStateInSteps(
+            Path source,
+            ResolutionScope scope,
+            BigInteger taskmanagerCount,
+            ArrayNode steps,
+            String stepsPath,
+            FlinkTargetState initial,
+            List<PreflightIssue> issues) {
+        FlinkTargetState state = initial;
+        for (int stepIndex = 0; stepIndex < steps.size(); stepIndex++) {
+            ObjectNode step = (ObjectNode) steps.get(stepIndex);
+            String stepPath = stepsPath + "/" + stepIndex;
+            if (step.get("restart") instanceof ObjectNode restart) {
+                state = applyFlinkRestartImageState(
+                        source,
+                        scope,
+                        taskmanagerCount,
+                        restart,
+                        stepPath + "/restart",
+                        state,
+                        issues);
+            } else if (step.get("loop") instanceof ObjectNode loop) {
+                BigInteger times = loop.path("times").bigIntegerValue();
+                // Restart-image transitions consist only of retaining or assigning constants.
+                // A second pass is sufficient to expose a loop that is valid from its initial
+                // state but invalid after its own first iteration; further valid passes are
+                // state-identical to the second.
+                FlinkTargetState before = state;
+                state = validateFlinkRestartImageStateInSteps(
+                        source,
+                        scope,
+                        taskmanagerCount,
+                        (ArrayNode) loop.get("steps"),
+                        stepPath + "/loop/steps",
+                        state,
+                        issues);
+                if (times.compareTo(BigInteger.ONE) > 0 && !state.equals(before)) {
+                    state = validateFlinkRestartImageStateInSteps(
+                            source,
+                            scope,
+                            taskmanagerCount,
+                            (ArrayNode) loop.get("steps"),
+                            stepPath + "/loop/steps",
+                            state,
+                            issues);
+                }
+            }
+        }
+        return state;
+    }
+
+    private static FlinkTargetState applyFlinkRestartImageState(
+            Path source,
+            ResolutionScope scope,
+            BigInteger taskmanagerCount,
+            ObjectNode restart,
+            String path,
+            FlinkTargetState state,
+            List<PreflightIssue> issues) {
+        String component = restart.path("component").textValue();
+        String image = optionalText(restart, "image");
+        if ("jobmanager".equals(component)) {
+            return image == null ? state : state.withJobmanager(image);
+        }
+        if ("taskmanager".equals(component)) {
+            if (image == null) {
+                return state;
+            }
+            if (!BigInteger.ONE.equals(taskmanagerCount)) {
+                issues.add(issue(
+                        source,
+                        scope,
+                        "preflight.restart.taskmanager-image-ambiguous",
+                        path + "/image",
+                        "TaskManager image restart identifies no logical slot when the resolved "
+                                + "TaskManager count is " + taskmanagerCount));
+                return state;
+            }
+            return state.withTaskmanagers(image);
+        }
+        if (!"flink".equals(component)) {
+            return state;
+        }
+        if (image != null) {
+            return new FlinkTargetState(image, image);
+        }
+        if (!state.uniform()) {
+            issues.add(issue(
+                    source,
+                    scope,
+                    "preflight.restart.flink-image-inheritance-ambiguous",
+                    path,
+                    "Full Flink restart cannot inherit one image because desired targets differ: "
+                            + state.components(taskmanagerCount)));
+        }
+        return state;
     }
 
     private static StateArtifactLedger indexStateArtifacts(
@@ -1397,6 +1529,31 @@ public final class ScenarioPreflightValidator {
     private record StateArtifactLedger(
             List<StateArtifactDeclaration> declarations,
             Set<StateArtifactKey> invalidKeys) {}
+
+    private record FlinkTargetState(String jobmanager, String taskmanagers) {
+        private FlinkTargetState {
+            Objects.requireNonNull(jobmanager, "jobmanager");
+            Objects.requireNonNull(taskmanagers, "taskmanagers");
+        }
+
+        private FlinkTargetState withJobmanager(String image) {
+            return new FlinkTargetState(image, taskmanagers);
+        }
+
+        private FlinkTargetState withTaskmanagers(String image) {
+            return new FlinkTargetState(jobmanager, image);
+        }
+
+        private boolean uniform() {
+            return jobmanager.equals(taskmanagers);
+        }
+
+        private List<String> components(BigInteger taskmanagerCount) {
+            return List.of(
+                    "jobmanager-1=" + jobmanager,
+                    "taskmanagers(" + taskmanagerCount + ")=" + taskmanagers);
+        }
+    }
 
     private record SideIndex(
             ObjectNode document,

@@ -75,7 +75,7 @@ class ScenarioPlanResolverTest {
         scenarioDocument.putObject("parameters").putObject("profile")
                 .put("type", "string").put("default", "default");
         ((ObjectNode) scenarioDocument.at("/workload/jobs/0"))
-                .withArray("connectors").set(0, TextNode.valueOf("missing"));
+                .withArray("connectors").add(TextNode.valueOf("missing"));
         ScenarioSpecification scenario = loader.validateScenarioDocument(
                 baseScenario.source(), scenarioDocument);
 
@@ -96,7 +96,7 @@ class ScenarioPlanResolverTest {
         assertEquals(1, exception.issues().size());
         PreflightIssue issue = exception.issues().getFirst();
         assertEquals("preflight.reference.connector-not-found", issue.code());
-        assertEquals("$/workload/jobs/0/connectors/0", issue.path());
+        assertEquals("$/workload/jobs/0/connectors/1", issue.path());
         assertEquals(scenario.source(), issue.source());
     }
 
