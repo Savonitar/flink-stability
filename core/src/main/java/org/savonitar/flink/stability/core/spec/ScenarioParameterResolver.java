@@ -25,6 +25,7 @@ public final class ScenarioParameterResolver {
 
     private final SpecificationLoader specificationLoader;
     private final ScenarioCapabilityValidator capabilityValidator;
+    private final FlinkKafkaCompatibilityValidator compatibilityValidator;
     private final ExperimentDriftValidator driftValidator;
 
     public ScenarioParameterResolver() {
@@ -34,6 +35,7 @@ public final class ScenarioParameterResolver {
     ScenarioParameterResolver(SpecificationLoader specificationLoader) {
         this.specificationLoader = specificationLoader;
         this.capabilityValidator = new ScenarioCapabilityValidator();
+        this.compatibilityValidator = new FlinkKafkaCompatibilityValidator();
         this.driftValidator = new ExperimentDriftValidator();
     }
 
@@ -132,6 +134,14 @@ public final class ScenarioParameterResolver {
                 exception.issues().forEach(issue -> issues.add(new ResolutionIssue(source, scope,
                         issue.code(), issue.path(), "Resolved document: " + issue.message())));
             }
+        }
+        if (!issues.isEmpty()) {
+            throw new ScenarioResolutionException(issues);
+        }
+
+        for (SideMaterialization materialization : materializations) {
+            issues.addAll(compatibilityValidator.validate(
+                    source, scopeOf(materialization.side()), materialization.document()));
         }
         if (!issues.isEmpty()) {
             throw new ScenarioResolutionException(issues);

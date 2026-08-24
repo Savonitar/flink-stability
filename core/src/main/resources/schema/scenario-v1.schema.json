@@ -663,8 +663,49 @@
       "properties": {
         "artifact": {
           "$ref": "#/$defs/nonEmptyString"
+        },
+        "runtime_dependencies": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/nonEmptyString"
+          },
+          "uniqueItems": true
         }
-      }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "artifact": {
+                "$ref": "#/$defs/templatedString"
+              }
+            },
+            "required": [
+              "artifact"
+            ]
+          },
+          "else": {
+            "if": {
+              "properties": {
+                "artifact": {
+                  "type": "string",
+                  "not": {
+                    "pattern": "^maven:"
+                  }
+                }
+              },
+              "required": [
+                "artifact"
+              ]
+            },
+            "then": {
+              "required": [
+                "runtime_dependencies"
+              ]
+            }
+          }
+        }
+      ]
     },
     "workload": {
       "type": "object",

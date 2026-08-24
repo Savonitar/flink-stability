@@ -21,7 +21,7 @@ class ScenarioPlanResolverTest {
         ScenarioSpecification baseScenario = loader.loadScenario(resource("minimal.yaml"));
         ObjectNode scenarioDocument = baseScenario.document();
         scenarioDocument.putObject("parameters").putObject("version")
-                .put("type", "string").put("default", "1.19");
+                .put("type", "string").put("default", "2.2.0");
         ((ObjectNode) scenarioDocument.at("/setup/flink")).put("image", "flink:${version}");
         ScenarioSpecification scenario = loader.validateScenarioDocument(
                 baseScenario.source(), scenarioDocument);
@@ -30,7 +30,7 @@ class ScenarioPlanResolverTest {
         ObjectNode expectedDocument = baseExpected.document();
         ArrayNode cases = expectedDocument.putArray("cases");
         ObjectNode caseNode = cases.addObject();
-        caseNode.putObject("when").put("version", "1.21");
+        caseNode.putObject("when").put("version", "2.2.2");
         caseNode.put("outcome", "fail");
         caseNode.put("oracle", "kafka.id-set");
         caseNode.put("reason", "validator.kafka.id-set.missing-ids");
@@ -40,10 +40,10 @@ class ScenarioPlanResolverTest {
         ResolvedScenarioPlan plan = new ScenarioPlanResolver().resolve(
                 new ScenarioBundle(scenario, expected),
                 new ResolutionRequest(
-                        Map.of("version", TextNode.valueOf("1.20")),
-                        Map.of("version", TextNode.valueOf("1.21"))));
+                        Map.of("version", TextNode.valueOf("2.2.1")),
+                        Map.of("version", TextNode.valueOf("2.2.2"))));
 
-        assertEquals("flink:1.21", plan.scenario().side(ScenarioSide.SINGLE)
+        assertEquals("flink:2.2.2", plan.scenario().side(ScenarioSide.SINGLE)
                 .document().at("/setup/flink/image").textValue());
         assertEquals(ParameterSource.SUBMIT_OVERRIDE,
                 plan.scenario().commonEffectiveParameters().get("version").source());

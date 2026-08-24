@@ -461,7 +461,8 @@ class SuitePlanResolverTest {
     private ScenarioBundle profileBundle(String name) {
         return plainBundle(name, ONE, document -> {
             parameter(document, "profile", "string", TextNode.valueOf("blue"));
-            document.withObject("setup").withObject("flink").put("image", "flink:${profile}");
+            document.withObject("setup").withObject("flink")
+                    .put("image", "flink:2.2.0-${profile}");
         }, document -> addPlainFailCase(
                 document, Map.of("profile", TextNode.valueOf("red"))));
     }

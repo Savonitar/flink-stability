@@ -229,6 +229,96 @@ class SpecificationLoaderTest {
     }
 
     @Test
+    void localSubjectConnectorRequiresAnExplicitRuntimeDependencyDeclaration() {
+        Path source = resource("minimal.yaml");
+        ObjectNode document = loader.loadScenario(source).document();
+        ObjectNode connector = (ObjectNode) document.at("/subject/connectors/kafka");
+        connector.put("artifact", "./connector.jar");
+
+        DocumentValidationException exception = assertThrows(
+                DocumentValidationException.class,
+                () -> loader.validateScenarioDocument(source, document));
+
+        assertHasIssue(exception, "schema.required", "$/subject/connectors/kafka");
+    }
+
+    @Test
+    void emptyRuntimeDependencyListExplicitlyAcceptsASelfContainedLocalConnector() {
+        Path source = resource("minimal.yaml");
+        ObjectNode document = loader.loadScenario(source).document();
+        ObjectNode connector = (ObjectNode) document.at("/subject/connectors/kafka");
+        connector.put("artifact", "./connector.jar");
+        connector.putArray("runtime_dependencies");
+
+        ScenarioSpecification scenario = loader.validateScenarioDocument(source, document);
+
+        assertTrue(scenario.document().at(
+                "/subject/connectors/kafka/runtime_dependencies").isEmpty());
+    }
+
+    @Test
+    void mavenSubjectConnectorAcceptsAnExplicitRuntimeDependencyList() {
+        Path source = resource("minimal.yaml");
+        ObjectNode document = loader.loadScenario(source).document();
+        ((ObjectNode) document.at("/subject/connectors/kafka"))
+                .putArray("runtime_dependencies")
+                .add("maven:org.apache.kafka:kafka-clients:4.2.0");
+
+        ScenarioSpecification scenario = loader.validateScenarioDocument(source, document);
+
+        assertEquals("maven:org.apache.kafka:kafka-clients:4.2.0",
+                scenario.document().at(
+                        "/subject/connectors/kafka/runtime_dependencies/0").textValue());
+    }
+
+    @Test
+    void parameterizedConnectorDefersDependencyModeUntilResolvedValidation() {
+        Path source = resource("minimal.yaml");
+        ObjectNode raw = loader.loadScenario(source).document();
+        raw.putObject("parameters").putObject("connector_artifact")
+                .put("type", "string")
+                .put("default", "./connector.jar");
+        ((ObjectNode) raw.at("/subject/connectors/kafka"))
+                .put("artifact", "${connector_artifact}");
+
+        loader.validateScenarioDocument(source, raw);
+
+        ObjectNode resolvedMaven = raw.deepCopy();
+        resolvedMaven.remove("parameters");
+        ((ObjectNode) resolvedMaven.at("/subject/connectors/kafka"))
+                .put("artifact", "maven:org.example:connector:1.0.0");
+        loader.validateResolvedScenario(source, resolvedMaven);
+
+        ObjectNode resolved = raw.deepCopy();
+        resolved.remove("parameters");
+        ((ObjectNode) resolved.at("/subject/connectors/kafka"))
+                .put("artifact", "./connector.jar");
+        DocumentValidationException exception = assertThrows(
+                DocumentValidationException.class,
+                () -> loader.validateResolvedScenario(source, resolved));
+
+        assertHasIssue(exception, "schema.required", "$/subject/connectors/kafka");
+    }
+
+    @Test
+    void runtimeDependencyReferencesMustBeUnique() {
+        Path source = resource("minimal.yaml");
+        ObjectNode document = loader.loadScenario(source).document();
+        ObjectNode connector = (ObjectNode) document.at("/subject/connectors/kafka");
+        connector.put("artifact", "./connector.jar");
+        connector.putArray("runtime_dependencies")
+                .add("./kafka-clients.jar")
+                .add("./kafka-clients.jar");
+
+        DocumentValidationException exception = assertThrows(
+                DocumentValidationException.class,
+                () -> loader.validateScenarioDocument(source, document));
+
+        assertHasIssue(exception, "schema.unique-items",
+                "$/subject/connectors/kafka/runtime_dependencies");
+    }
+
+    @Test
     void customValidatorFailureReasonsUseTheirDedicatedNamespace() {
         Path source = resource("minimal.yaml");
         ObjectNode document = loader.loadScenario(source).document();

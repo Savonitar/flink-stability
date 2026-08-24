@@ -459,7 +459,7 @@ class ArtifactPlanResolverTest {
                 }).resolve(
                         plainPlan("snapshot-coordinate", document -> setCoreArtifacts(
                                 document,
-                                "maven:org.example:connector:1.0-SNAPSHOT",
+                                "maven:org.apache.flink:flink-connector-kafka:5.0.0-2.2-SNAPSHOT",
                                 "job.jar")),
                         ArtifactResolutionOptions.online(artifactRoot)));
         assertSingleIssue(invalidCoordinate, "artifact.maven.invalid-coordinate", CONNECTOR_PATH);
@@ -488,16 +488,25 @@ class ArtifactPlanResolverTest {
         };
 
         PreparedScenarioPlan prepared = new ArtifactPlanResolver(lookup).resolve(
-                plainPlan("offline-forwarded", document -> setCoreArtifacts(
-                        document, "maven:org.example:connector:1.2.3", "job.jar")),
+                plainPlan("offline-forwarded", document -> {
+                    setCoreArtifacts(
+                            document,
+                            "maven:org.apache.flink:flink-connector-kafka:5.0.0-2.2",
+                            "job.jar");
+                    ((ObjectNode) document.at("/subject/connectors/kafka"))
+                            .putArray("runtime_dependencies");
+                }),
                 new ArtifactResolutionOptions(artifactRoot, true));
 
         assertEquals(List.of(
-                "maven:org.example:connector:1.2.3|org.example:connector:jar:1.2.3|offline=true"),
+                "maven:org.apache.flink:flink-connector-kafka:5.0.0-2.2"
+                        + "|org.apache.flink:flink-connector-kafka:jar:5.0.0-2.2"
+                        + "|offline=true"),
                 calls);
         ResolvedArtifact artifact = prepared.artifact(
                 ScenarioSide.SINGLE, CONNECTOR_PATH).orElseThrow();
-        assertEquals("maven:org.example:connector:1.2.3", artifact.declaredReference());
+        assertEquals("maven:org.apache.flink:flink-connector-kafka:5.0.0-2.2",
+                artifact.declaredReference());
         assertStagedCopy(artifact, connector);
     }
 
@@ -508,7 +517,9 @@ class ArtifactPlanResolverTest {
                 MavenArtifactLookupException.Kind.NOT_FOUND, "artifact.maven.not-found",
                 MavenArtifactLookupException.Kind.REPOSITORY_UNAVAILABLE,
                 "artifact.maven.repository-unavailable",
-                MavenArtifactLookupException.Kind.OFFLINE_MISS, "artifact.maven.offline-miss");
+                MavenArtifactLookupException.Kind.OFFLINE_MISS, "artifact.maven.offline-miss",
+                MavenArtifactLookupException.Kind.INVALID_CLOSURE,
+                "artifact.maven.invalid-closure");
 
         for (Map.Entry<MavenArtifactLookupException.Kind, String> expectation
                 : expectations.entrySet()) {
@@ -520,11 +531,14 @@ class ArtifactPlanResolverTest {
             ArtifactResolutionException exception = assertThrows(
                     ArtifactResolutionException.class,
                     () -> new ArtifactPlanResolver(lookup).resolve(
-                            plainPlan("maven-failure-" + suffix,
-                                    document -> setCoreArtifacts(
-                                            document,
-                                            "maven:org.example:connector:1.2.3",
-                                            "job.jar")),
+                            plainPlan("maven-failure-" + suffix, document -> {
+                                setCoreArtifacts(
+                                        document,
+                                        "maven:org.apache.flink:flink-connector-kafka:5.0.0-2.2",
+                                        "job.jar");
+                                ((ObjectNode) document.at("/subject/connectors/kafka"))
+                                        .putArray("runtime_dependencies");
+                            }),
                             ArtifactResolutionOptions.online(artifactRoot)));
             assertSingleIssue(exception, expectation.getValue(), CONNECTOR_PATH);
         }
@@ -799,8 +813,13 @@ class ArtifactPlanResolverTest {
 
     private static void setCoreArtifacts(
             ObjectNode document, String connectorReference, String jobReference) {
-        ((ObjectNode) document.at("/subject/connectors/kafka"))
-                .put("artifact", connectorReference);
+        ObjectNode connector = (ObjectNode) document.at("/subject/connectors/kafka");
+        connector.put("artifact", connectorReference);
+        connector.remove("runtime_dependencies");
+        if (!connectorReference.startsWith("maven:")
+                && !connectorReference.contains("${")) {
+            connector.putArray("runtime_dependencies");
+        }
         ((ObjectNode) document.at("/workload/jobs/0")).put("jar", jobReference);
     }
 

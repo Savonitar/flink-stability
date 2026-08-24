@@ -337,6 +337,9 @@ class ValidateSpecificationsCommandTest {
             String connectorReference,
             String jobReference,
             String parameterBlock) throws IOException {
+        String connectorDependencies = connectorReference.startsWith("maven:")
+                ? ""
+                : "      runtime_dependencies: []\n";
         Files.writeString(root.resolve(name + ".yaml"), """
                 format: v1
                 kind: scenario
@@ -365,12 +368,13 @@ class ValidateSpecificationsCommandTest {
                             partitions: 1
                             replication_factor: 1
                   flink:
-                    image: flink:1.20
+                    image: flink:2.2.0
 
                 subject:
                   connectors:
                     kafka:
                       artifact: %s
+                %s
 
                 workload:
                   jobs:
@@ -402,7 +406,12 @@ class ValidateSpecificationsCommandTest {
                     cluster: main
                     topic: output
                     expected: input-manifest
-                """.formatted(name, parameterBlock, connectorReference, jobReference));
+                """.formatted(
+                        name,
+                        parameterBlock,
+                        connectorReference,
+                        connectorDependencies,
+                        jobReference));
     }
 
     private static void writeSuite(Path root, String name, List<String> scenarios)

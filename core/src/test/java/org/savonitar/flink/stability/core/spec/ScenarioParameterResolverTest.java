@@ -77,24 +77,24 @@ class ScenarioParameterResolverTest {
     @Test
     void appliesDefaultThenSuiteThenSubmitPrecedenceAndRecordsTheWinner() {
         ScenarioSpecification scenario = scenario(document -> {
-            parameterWithDefault(document, "flink_version", "string", TextNode.valueOf("1.19"));
+            parameterWithDefault(document, "flink_version", "string", TextNode.valueOf("2.2.0"));
             flink(document).put("image", "flink:${flink_version}");
         });
 
         ResolvedScenario fromDefault = resolver.resolve(scenario, ResolutionRequest.none());
-        assertEffective(fromDefault, "flink_version", "1.19", ParameterSource.SCENARIO_DEFAULT);
-        assertEquals("flink:1.19", fromDefault.side(ScenarioSide.SINGLE)
+        assertEffective(fromDefault, "flink_version", "2.2.0", ParameterSource.SCENARIO_DEFAULT);
+        assertEquals("flink:2.2.0", fromDefault.side(ScenarioSide.SINGLE)
                 .document().at("/setup/flink/image").textValue());
 
         ResolvedScenario fromSuite = resolver.resolve(scenario, new ResolutionRequest(
-                Map.of("flink_version", TextNode.valueOf("1.20")), Map.of()));
-        assertEffective(fromSuite, "flink_version", "1.20", ParameterSource.SUITE_BINDING);
+                Map.of("flink_version", TextNode.valueOf("2.2.1")), Map.of()));
+        assertEffective(fromSuite, "flink_version", "2.2.1", ParameterSource.SUITE_BINDING);
 
         ResolvedScenario fromSubmit = resolver.resolve(scenario, new ResolutionRequest(
-                Map.of("flink_version", TextNode.valueOf("1.20")),
-                Map.of("flink_version", TextNode.valueOf("1.21"))));
-        assertEffective(fromSubmit, "flink_version", "1.21", ParameterSource.SUBMIT_OVERRIDE);
-        assertEquals("flink:1.21", fromSubmit.side(ScenarioSide.SINGLE)
+                Map.of("flink_version", TextNode.valueOf("2.2.1")),
+                Map.of("flink_version", TextNode.valueOf("2.2.2"))));
+        assertEffective(fromSubmit, "flink_version", "2.2.2", ParameterSource.SUBMIT_OVERRIDE);
+        assertEquals("flink:2.2.2", fromSubmit.side(ScenarioSide.SINGLE)
                 .document().at("/setup/flink/image").textValue());
     }
 
@@ -201,12 +201,13 @@ class ScenarioParameterResolverTest {
         ScenarioSpecification scenario = scenario(document -> {
             parameterWithDefault(document, "major", "integer", IntNode.valueOf(20));
             parameterWithDefault(document, "stable", "boolean", BooleanNode.TRUE);
-            flink(document).put("image", "flink:${major}.${major}-stable-${stable}");
+            flink(document).put("image", "flink:2.2.0-major-${major}-stable-${stable}");
         });
 
         ResolvedSide side = resolver.resolve(scenario, ResolutionRequest.none()).side(ScenarioSide.SINGLE);
 
-        assertEquals("flink:20.20-stable-true", side.document().at("/setup/flink/image").textValue());
+        assertEquals("flink:2.2.0-major-20-stable-true",
+                side.document().at("/setup/flink/image").textValue());
         assertEquals(Set.of("major", "stable"),
                 side.interpolationProvenance().get("$/setup/flink/image"));
     }
@@ -489,6 +490,69 @@ class ScenarioParameterResolverTest {
                 baseline.interpolationProvenance().get("$/workload/jobs/0/state_backend"));
         assertEquals(baseline.appliedDefaults().stream().map(AppliedDefault::path).collect(Collectors.toSet()),
                 candidate.appliedDefaults().stream().map(AppliedDefault::path).collect(Collectors.toSet()));
+    }
+
+    @Test
+    void rejectsALocalExperimentSideWhenOnlyTheMavenSideCanUseAutoDependencies() {
+        String mavenConnector =
+                "maven:org.apache.flink:flink-connector-kafka:5.0.0-2.2";
+        String localConnector =
+                "./flink-connector-kafka/target/flink-connector-kafka-*.jar";
+        ScenarioSpecification scenario = scenario(document -> {
+            parameterWithDefault(document, "connector_artifact", "string",
+                    TextNode.valueOf(mavenConnector));
+            ((ObjectNode) document.at("/subject/connectors/kafka"))
+                    .put("artifact", "${connector_artifact}")
+                    .remove("runtime_dependencies");
+            experiment(document, "connector_artifact",
+                    TextNode.valueOf(mavenConnector), TextNode.valueOf(localConnector));
+        });
+
+        ScenarioResolutionException exception = assertThrows(
+                ScenarioResolutionException.class,
+                () -> resolver.resolve(scenario, ResolutionRequest.none()));
+
+        assertHasIssue(exception, "schema.required", ResolutionScope.CANDIDATE,
+                "$/subject/connectors/kafka");
+        assertTrue(exception.issues().stream()
+                .allMatch(issue -> issue.scope() == ResolutionScope.CANDIDATE),
+                () -> "Maven auto mode should produce no baseline issue: " + exception.issues());
+    }
+
+    @Test
+    void sharedExplicitDependenciesAllowMavenAndLocalExperimentSides() {
+        String mavenConnector =
+                "maven:org.apache.flink:flink-connector-kafka:5.0.0-2.2";
+        String localConnector =
+                "./flink-connector-kafka/target/flink-connector-kafka-*.jar";
+        ScenarioSpecification scenario = scenario(document -> {
+            parameterWithDefault(document, "connector_artifact", "string",
+                    TextNode.valueOf(mavenConnector));
+            ObjectNode connector = (ObjectNode) document.at("/subject/connectors/kafka");
+            connector.put("artifact", "${connector_artifact}");
+            connector.putArray("runtime_dependencies")
+                    .add("maven:org.apache.commons:commons-lang3:3.18.0")
+                    .add("maven:org.apache.kafka:kafka-clients:4.2.0");
+            experiment(document, "connector_artifact",
+                    TextNode.valueOf(mavenConnector), TextNode.valueOf(localConnector));
+        });
+
+        ResolvedScenario resolved = resolver.resolve(scenario, ResolutionRequest.none());
+        ResolvedSide baseline = resolved.side(ScenarioSide.BASELINE);
+        ResolvedSide candidate = resolved.side(ScenarioSide.CANDIDATE);
+
+        assertEquals(mavenConnector, baseline.document()
+                .at("/subject/connectors/kafka/artifact").textValue());
+        assertEquals(localConnector, candidate.document()
+                .at("/subject/connectors/kafka/artifact").textValue());
+        assertEquals(baseline.document().at("/subject/connectors/kafka/runtime_dependencies"),
+                candidate.document().at("/subject/connectors/kafka/runtime_dependencies"));
+        assertEquals(2, baseline.document()
+                .at("/subject/connectors/kafka/runtime_dependencies").size());
+        assertEquals(Set.of("connector_artifact"), baseline.interpolationProvenance()
+                .get("$/subject/connectors/kafka/artifact"));
+        assertEquals(Set.of("connector_artifact"), candidate.interpolationProvenance()
+                .get("$/subject/connectors/kafka/artifact"));
     }
 
     @Test

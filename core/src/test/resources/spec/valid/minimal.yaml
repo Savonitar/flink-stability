@@ -25,12 +25,12 @@ setup:
             partitions: 1
             replication_factor: 1
   flink:
-    image: flink:1.20
+    image: flink:2.2.0
 
 subject:
   connectors:
     kafka:
-      artifact: maven:org.apache.flink:flink-connector-kafka:3.4.0-1.20
+      artifact: maven:org.apache.flink:flink-connector-kafka:5.0.0-2.2
 
 workload:
   jobs:
