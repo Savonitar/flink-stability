@@ -2,13 +2,12 @@ package org.savonitar.flink.stability.flinkjob;
 
 import org.apache.flink.api.common.eventtime.WatermarkStrategy;
 import org.apache.flink.api.common.serialization.SimpleStringSchema;
-import org.apache.flink.configuration.CheckpointingOptions;
-import org.apache.flink.configuration.Configuration;
-import org.apache.flink.configuration.ExternalizedCheckpointRetention;
+import org.apache.flink.api.java.utils.ParameterTool;
 import org.apache.flink.connector.base.DeliveryGuarantee;
 import org.apache.flink.connector.kafka.sink.KafkaRecordSerializationSchema;
 import org.apache.flink.connector.kafka.sink.KafkaSink;
 import org.apache.flink.connector.kafka.source.KafkaSource;
+import org.apache.flink.streaming.api.environment.CheckpointConfig;
 import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
 import org.apache.kafka.clients.producer.ProducerConfig;
 import org.apache.kafka.common.serialization.ByteArraySerializer;
@@ -20,29 +19,28 @@ import java.util.Arrays;
 import java.util.Properties;
 import java.util.concurrent.atomic.AtomicInteger;
 
+/** Frozen compatibility job for the legacy Flink 1.19 runner. */
 public class FlinkKafkaEosJob {
 
     private static final Logger LOG = LoggerFactory.getLogger(FlinkKafkaEosJob.class);
 
     public static void main(String[] args) throws Exception {
         LOG.info("FlinkKafkaEosJob job starting with args={}", Arrays.toString(args));
-        FlinkKafkaEosJobArguments arguments = FlinkKafkaEosJobArguments.from(args);
-        String bootstrapServers = arguments.bootstrapServers();
-        AtomicInteger processingDelayMs = new AtomicInteger(arguments.processingDelayMs());
-        Configuration flinkConfiguration = new Configuration();
-        flinkConfiguration.set(
-                CheckpointingOptions.CHECKPOINTS_DIRECTORY,
-                "file:/flink/checkpoints");
-        StreamExecutionEnvironment env =
-                StreamExecutionEnvironment.getExecutionEnvironment(flinkConfiguration);
+        ParameterTool parameters = ParameterTool.fromArgs(args);
+        String bootstrapServers = parameters.getRequired("bootstrapServers");
+        String transactionalIdPrefix =
+                parameters.get("transactionalIdPrefix", "flink-stability-legacy");
+        AtomicInteger processingDelayMs = new AtomicInteger(parameters.getInt("processingDelayMs", 0));
+        StreamExecutionEnvironment env = StreamExecutionEnvironment.getExecutionEnvironment();
 
         env.enableCheckpointing(1000);
         env.getCheckpointConfig().setMinPauseBetweenCheckpoints(1000);
         env.getCheckpointConfig().setCheckpointTimeout(60_000);
         env.getCheckpointConfig().setMaxConcurrentCheckpoints(1);
-        env.getCheckpointConfig().setExternalizedCheckpointRetention(
-                ExternalizedCheckpointRetention.RETAIN_ON_CANCELLATION);
-
+        env.getCheckpointConfig().setExternalizedCheckpointCleanup(
+                CheckpointConfig.ExternalizedCheckpointCleanup.RETAIN_ON_CANCELLATION
+        );
+        env.getCheckpointConfig().setCheckpointStorage("file:/flink/checkpoints");
 
         Properties props = new Properties();
         props.put(
@@ -64,7 +62,16 @@ public class FlinkKafkaEosJob {
                 .setValueOnlyDeserializer(new SimpleStringSchema())
                 .build();
 
-        KafkaSink<String> sink = createSink(arguments, props);
+        KafkaSink<String> sink = KafkaSink.<String>builder()
+                .setBootstrapServers(bootstrapServers)
+                .setRecordSerializer(KafkaRecordSerializationSchema.builder()
+                        .setTopic("flink-output")
+                        .setValueSerializationSchema(new SimpleStringSchema())
+                        .build())
+                .setDeliveryGuarantee(DeliveryGuarantee.EXACTLY_ONCE)
+                .setTransactionalIdPrefix(transactionalIdPrefix)
+                .setKafkaProducerConfig(props)
+                .build();
 
         env.fromSource(source, WatermarkStrategy.noWatermarks(), "Kafka Source")
                 .map(x -> {
@@ -77,20 +84,5 @@ public class FlinkKafkaEosJob {
                 .sinkTo(sink).name("Kafka Sink");
 
         env.execute("Flink Kafka Source-Sink Job");
-    }
-
-    static KafkaSink<String> createSink(
-            FlinkKafkaEosJobArguments arguments,
-            Properties producerProperties) {
-        return KafkaSink.<String>builder()
-                .setBootstrapServers(arguments.bootstrapServers())
-                .setRecordSerializer(KafkaRecordSerializationSchema.builder()
-                        .setTopic("flink-output")
-                        .setValueSerializationSchema(new SimpleStringSchema())
-                        .build())
-                .setDeliveryGuarantee(DeliveryGuarantee.EXACTLY_ONCE)
-                .setTransactionalIdPrefix(arguments.transactionalIdPrefix())
-                .setKafkaProducerConfig(producerProperties)
-                .build();
     }
 }

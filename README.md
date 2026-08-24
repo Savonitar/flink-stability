@@ -23,9 +23,12 @@ The runner drives three things over the course of a scenario:
 - **A Kafka consumer** replays the output topic at the end and asserts record count and ID
   uniqueness.
 
-The bundled test job (`flink-job-generator`) reads `input-topic`, optionally sleeps per
-record to keep the pipeline in flight, and writes to `flink-output` with
-`DeliveryGuarantee.EXACTLY_ONCE`.
+The bundled test job (`flink-job-generator`) currently has two transition artifacts. The
+legacy runner uses the shaded Flink 1.19 JAR at
+`target/flink-job-generator-0.1.0-SNAPSHOT.jar`; v1 uses the thin Flink 2.2 JAR at
+`target/flink-job-generator.jar`, with its connector closure installed into the cluster.
+Both read `input-topic`, optionally sleep per record, and write to `flink-output` with
+`DeliveryGuarantee.EXACTLY_ONCE` while the typed v1 workload protocol is implemented.
 
 ## Requirements
 
@@ -38,10 +41,17 @@ Kafka images on first run, so expect the initial execution to take a few minutes
 
 ## Getting started
 
-Build all modules, including the shaded job JAR that scenarios submit:
+Build all modules, including both transition job artifacts:
 
 ```bash
 mvn clean install
+```
+
+To package only the two job variants, select their reactor artifact IDs rather than the
+aggregator directory:
+
+```bash
+mvn -pl :flink-job-generator-flink22,:flink-job-generator -am package
 ```
 
 Run the bundled example — a 1.19 job that takes a savepoint, restarts, survives ten
@@ -143,13 +153,14 @@ which is how an upgrade across two `image` values is expressed.
 | `cli` | picocli entry points for the legacy runner and Docker-free v1 validation |
 | `core` | v1 schema/catalog/planning/preflight plus the legacy runner and Flink REST client |
 | `testcontainers` | Flink and Kafka container lifecycle management |
-| `flink-job-generator` | The exactly-once Kafka job used as the test subject |
+| `flink-job-generator` | Transition reactor producing the legacy shaded Flink 1.19 job and thin Flink 2.2 v1 job |
 
 ## Status
 
 Early and experimental. The v1 contracts, catalog loader, parameter resolver,
-semantic preflight, suite planner, artifact preparation, and named container lifecycle have
-automated coverage. The Docker runner still executes the legacy format; wiring the first
+semantic preflight, suite planner, artifact preparation, target-specific connector bundles,
+pre-start bundle verification, and named container lifecycle have automated coverage. The
+Docker runner still executes the legacy format; wiring the typed workload protocol and first
 narrow v1 execution vertical is the next implementation stage.
 
 ## License
