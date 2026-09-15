@@ -72,8 +72,9 @@ class SpecificationLoaderTest {
 
     @Test
     void rejectsUnknownFieldsThroughTheSelectedSchema() throws IOException {
-        String valid = Files.readString(resource("minimal.yaml"));
-        Path document = write("unknown-field.yaml", valid + "unknown_field: true\n");
+        ObjectNode invalid = YamlTestDocuments.read(resource("minimal.yaml"));
+        invalid.put("unknown_field", true);
+        Path document = write("unknown-field.yaml", invalid);
 
         DocumentValidationException exception = assertThrows(
                 DocumentValidationException.class, () -> loader.load(document));
@@ -86,8 +87,10 @@ class SpecificationLoaderTest {
 
     @Test
     void rejectsMissingScenarioDescription() throws IOException {
-        String invalid = Files.readString(resource("minimal.yaml"))
-                .replace("  description: Minimal structurally valid scenario used by loader tests.\n", "");
+        ObjectNode invalid = YamlTestDocuments.read(resource("minimal.yaml"));
+        ObjectNode meta = (ObjectNode) invalid.required("meta");
+        meta.required("description");
+        meta.remove("description");
 
         DocumentValidationException exception = assertThrows(
                 DocumentValidationException.class,
@@ -98,7 +101,8 @@ class SpecificationLoaderTest {
 
     @Test
     void rejectsUnknownExpectedResultField() throws IOException {
-        String invalid = Files.readString(resource("minimal.expected.yaml")) + "unknown_field: true\n";
+        ObjectNode invalid = YamlTestDocuments.read(resource("minimal.expected.yaml"));
+        invalid.put("unknown_field", true);
 
         DocumentValidationException exception = assertThrows(
                 DocumentValidationException.class,
@@ -109,8 +113,10 @@ class SpecificationLoaderTest {
 
     @Test
     void rejectsOracleOnExpectedPass() throws IOException {
-        String invalid = Files.readString(resource("minimal.expected.yaml"))
-                .replace("  outcome: pass\n", "  outcome: pass\n  oracle: kafka.id-set\n");
+        ObjectNode invalid = YamlTestDocuments.read(resource("minimal.expected.yaml"));
+        ObjectNode expectation = (ObjectNode) invalid.required("default");
+        assertEquals("pass", expectation.required("outcome").textValue());
+        expectation.put("oracle", "kafka.id-set");
 
         DocumentValidationException exception = assertThrows(
                 DocumentValidationException.class,
@@ -169,8 +175,8 @@ class SpecificationLoaderTest {
 
     @Test
     void rejectsUnknownSuiteEntryField() throws IOException {
-        String invalid = Files.readString(resource("smoke-suite.yaml"))
-                .replace("  - scenario: minimal\n", "  - scenario: minimal\n    health_retry_limit: 2\n");
+        ObjectNode invalid = YamlTestDocuments.read(resource("smoke-suite.yaml"));
+        ((ObjectNode) invalid.requiredAt("/scenarios/0")).put("health_retry_limit", 2);
 
         DocumentValidationException exception = assertThrows(
                 DocumentValidationException.class,
@@ -181,8 +187,8 @@ class SpecificationLoaderTest {
 
     @Test
     void rejectsZeroSuiteRuns() throws IOException {
-        String invalid = Files.readString(resource("smoke-suite.yaml"))
-                .replace("  - scenario: minimal\n", "  - scenario: minimal\n    runs: 0\n");
+        ObjectNode invalid = YamlTestDocuments.read(resource("smoke-suite.yaml"));
+        ((ObjectNode) invalid.requiredAt("/scenarios/0")).put("runs", 0);
 
         DocumentValidationException exception = assertThrows(
                 DocumentValidationException.class,
@@ -193,21 +199,17 @@ class SpecificationLoaderTest {
 
     @Test
     void rejectsUnknownNestedNetworkFaultField() throws IOException {
-        String scenario = Files.readString(resource("minimal.yaml"));
-        String invalid = scenario.substring(0, scenario.indexOf("phases:")) + """
-                phases:
-                  - name: fault
-                    steps:
-                      - network_fault:
-                          proxy: traffic
-                          target: { cluster: main }
-                          match: { api: produce, topic: output }
-                          fault: { type: disconnect }
-                          duration: 1s
-                          heal: restore-proxy-rule
-                          unknown_field: true
-
-                """ + scenario.substring(scenario.indexOf("terminal_validations:"));
+        ObjectNode invalid = YamlTestDocuments.read(resource("minimal.yaml"));
+        invalid.required("phases");
+        ObjectNode phase = invalid.putArray("phases").addObject().put("name", "fault");
+        ObjectNode networkFault = phase.putArray("steps").addObject().putObject("network_fault");
+        networkFault.put("proxy", "traffic");
+        networkFault.putObject("target").put("cluster", "main");
+        networkFault.putObject("match").put("api", "produce").put("topic", "output");
+        networkFault.putObject("fault").put("type", "disconnect");
+        networkFault.put("duration", "1s");
+        networkFault.put("heal", "restore-proxy-rule");
+        networkFault.put("unknown_field", true);
 
         DocumentValidationException exception = assertThrows(
                 DocumentValidationException.class,
@@ -218,8 +220,10 @@ class SpecificationLoaderTest {
 
     @Test
     void rejectsParameterInterpolationInScenarioLocalAliases() throws IOException {
-        String invalid = Files.readString(resource("minimal.yaml"))
-                .replace("alias: eos-job", "alias: ${job_alias}");
+        ObjectNode invalid = YamlTestDocuments.read(resource("minimal.yaml"));
+        ObjectNode job = (ObjectNode) invalid.requiredAt("/workload/jobs/0");
+        job.required("alias");
+        job.put("alias", "${job_alias}");
 
         DocumentValidationException exception = assertThrows(
                 DocumentValidationException.class,
@@ -465,6 +469,10 @@ class SpecificationLoaderTest {
 
     private Path write(String filename, String content) throws IOException {
         return Files.writeString(temporaryDirectory.resolve(filename), content);
+    }
+
+    private Path write(String filename, ObjectNode document) throws IOException {
+        return YamlTestDocuments.write(temporaryDirectory.resolve(filename), document);
     }
 
     private static void assertSingleIssue(

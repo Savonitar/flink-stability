@@ -1,11 +1,15 @@
 package org.savonitar.flink.stability.cli;
 
+import com.fasterxml.jackson.databind.node.ArrayNode;
+import com.fasterxml.jackson.databind.node.ObjectNode;
+import com.fasterxml.jackson.dataformat.yaml.YAMLMapper;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import picocli.CommandLine;
 
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
+import java.io.InputStream;
 import java.io.PrintStream;
 import java.io.PrintWriter;
 import java.io.StringWriter;
@@ -13,6 +17,7 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
+import java.util.function.Consumer;
 import java.util.jar.Attributes;
 import java.util.jar.JarEntry;
 import java.util.jar.JarOutputStream;
@@ -22,9 +27,11 @@ import java.util.stream.Stream;
 import static org.junit.jupiter.api.Assertions.assertAll;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class ValidateSpecificationsCommandTest {
+    private static final YAMLMapper YAML = new YAMLMapper();
     private static final String JOB_POINTER = "$/workload/jobs/0/jar";
 
     @TempDir
@@ -211,7 +218,7 @@ class ValidateSpecificationsCommandTest {
         Path catalogRoot = Files.createDirectories(temporaryDirectory.resolve("catalog"));
         writePair(catalogRoot, "schema-bad", "unused.jar", "unused.jar", "");
         Path scenario = catalogRoot.resolve("schema-bad.yaml");
-        Files.writeString(scenario, Files.readString(scenario) + "unexpected: true\n");
+        updateDocument(scenario, document -> document.put("unexpected", true));
 
         Invocation result = execute(
                 "validate", "--catalog-root", catalogRoot.toString(),
@@ -258,9 +265,9 @@ class ValidateSpecificationsCommandTest {
         Path catalogRoot = Files.createDirectories(temporaryDirectory.resolve("catalog"));
         writePair(catalogRoot, "preflight-bad", "unused.jar", "unused.jar", "");
         Path scenario = catalogRoot.resolve("preflight-bad.yaml");
-        Files.writeString(scenario, Files.readString(scenario).replace(
-                "            replication_factor: 1\n            input_source:",
-                "            replication_factor: 2\n            input_source:"));
+        updateDocument(scenario, document ->
+                ((ObjectNode) document.requiredAt("/setup/kafka/clusters/main/topics/0"))
+                        .put("replication_factor", 2));
 
         Invocation result = execute(
                 "validate", "--catalog-root", catalogRoot.toString(),
@@ -277,9 +284,9 @@ class ValidateSpecificationsCommandTest {
         Path catalogRoot = Files.createDirectories(temporaryDirectory.resolve("catalog"));
         writePair(catalogRoot, "kafka-line", "unused.jar", "unused.jar", "");
         Path scenario = catalogRoot.resolve("kafka-line.yaml");
-        Files.writeString(scenario, Files.readString(scenario).replace(
-                "image: apache/kafka:4.0.0",
-                "image: apache/kafka:4.1.0"));
+        updateDocument(scenario, document ->
+                ((ObjectNode) document.requiredAt("/setup/kafka/clusters/main"))
+                        .put("image", "apache/kafka:4.1.0"));
 
         Invocation result = execute(
                 "validate", "--catalog-root", catalogRoot.toString(),
@@ -297,9 +304,9 @@ class ValidateSpecificationsCommandTest {
         writePair(catalogRoot, "valid-line", "unused.jar", "unused.jar", "");
         writePair(catalogRoot, "invalid-line", "unused.jar", "unused.jar", "");
         Path invalid = catalogRoot.resolve("invalid-line.yaml");
-        Files.writeString(invalid, Files.readString(invalid).replace(
-                "image: apache/kafka:4.0.0",
-                "image: custom/kafka:4.0.0"));
+        updateDocument(invalid, document ->
+                ((ObjectNode) document.requiredAt("/setup/kafka/clusters/main"))
+                        .put("image", "custom/kafka:4.0.0"));
         writeSuite(catalogRoot, "kafka-lines", List.of("valid-line", "invalid-line"));
 
         Invocation result = execute(
@@ -453,17 +460,11 @@ class ValidateSpecificationsCommandTest {
             String jobReference,
             String parameterBlock) throws IOException {
         writeScenario(root, name, connectorReference, jobReference, parameterBlock);
-        Files.writeString(root.resolve(name + ".expected.yaml"), """
-                format: v1
-                kind: expected-result
-
-                meta:
-                  name: %s.expected
-                  scenario: %s
-
-                default:
-                  outcome: pass
-                """.formatted(name, name));
+        ObjectNode expected = readFixture("scenario-v1.expected.yaml");
+        ObjectNode metadata = (ObjectNode) expected.required("meta");
+        metadata.put("name", name + ".expected");
+        metadata.put("scenario", name);
+        Files.writeString(root.resolve(name + ".expected.yaml"), YAML.writeValueAsString(expected));
     }
 
     private static void writeScenario(
@@ -472,96 +473,41 @@ class ValidateSpecificationsCommandTest {
             String connectorReference,
             String jobReference,
             String parameterBlock) throws IOException {
-        String connectorDependencies = connectorReference.startsWith("maven:")
-                ? ""
-                : "      runtime_dependencies: []\n";
-        Files.writeString(root.resolve(name + ".yaml"), """
-                format: v1
-                kind: scenario
-
-                meta:
-                  name: %s
-                  description: CLI validation fixture.
-
-                %sruns: 1
-
-                setup:
-                  kafka:
-                    clusters:
-                      main:
-                        image: apache/kafka:4.0.0
-                        brokers: 1
-                        topics:
-                          - name: input
-                            partitions: 1
-                            replication_factor: 1
-                            input_source:
-                              mode: generated
-                              format: integer-sequence
-                              total: 10
-                          - name: output
-                            partitions: 1
-                            replication_factor: 1
-                  flink:
-                    image: flink:2.2.0
-
-                subject:
-                  connectors:
-                    kafka:
-                      artifact: %s
-                %s
-
-                workload:
-                  jobs:
-                    - alias: eos-job
-                      jar: %s
-                      connectors: [kafka]
-                      parallelism: 1
-                      source: { cluster: main, topic: input }
-                      sink:
-                        cluster: main
-                        topic: output
-                        delivery_guarantee: EXACTLY_ONCE
-                        transactional_id_prefix: cli-test
-                        transaction_id_naming_strategy: INCREMENTING
-                      checkpointing:
-                        interval: 5s
-                        mode: EXACTLY_ONCE
-
-                phases:
-                  - name: verify-running
-                    steps:
-                      - await:
-                          condition: { type: job-state, job: eos-job, state: RUNNING }
-                          timeout: 2m
-                          on_timeout: inconclusive
-
-                terminal_validations:
-                  - type: kafka.id-set
-                    cluster: main
-                    topic: output
-                    expected: input-manifest
-                """.formatted(
-                        name,
-                        parameterBlock,
-                        connectorReference,
-                        connectorDependencies,
-                        jobReference));
+        ObjectNode scenario = readFixture("scenario-v1.yaml");
+        ((ObjectNode) scenario.required("meta")).put("name", name);
+        ObjectNode connector = (ObjectNode) scenario.requiredAt("/subject/connectors/kafka");
+        connector.put("artifact", connectorReference);
+        if (connectorReference.startsWith("maven:")) {
+            connector.remove("runtime_dependencies");
+        }
+        ((ObjectNode) scenario.requiredAt("/workload/jobs/0")).put("jar", jobReference);
+        if (!parameterBlock.isBlank()) {
+            scenario.set("parameters", YAML.readTree(parameterBlock).required("parameters"));
+        }
+        Files.writeString(root.resolve(name + ".yaml"), YAML.writeValueAsString(scenario));
     }
 
     private static void writeSuite(Path root, String name, List<String> scenarios)
             throws IOException {
-        StringBuilder entries = new StringBuilder();
-        scenarios.forEach(scenario -> entries.append("  - scenario: ").append(scenario).append('\n'));
-        Files.writeString(root.resolve(name + ".yaml"), """
-                format: v1
-                kind: suite
+        ObjectNode suite = readFixture("suite-v1.yaml");
+        ((ObjectNode) suite.required("meta")).put("name", name);
+        ArrayNode entries = ((ArrayNode) suite.required("scenarios")).removeAll();
+        scenarios.forEach(scenario -> entries.addObject().put("scenario", scenario));
+        Files.writeString(root.resolve(name + ".yaml"), YAML.writeValueAsString(suite));
+    }
 
-                meta:
-                  name: %s
+    private static ObjectNode readFixture(String name) throws IOException {
+        String resource = "/spec/valid/" + name;
+        try (InputStream input = ValidateSpecificationsCommandTest.class.getResourceAsStream(resource)) {
+            assertNotNull(input, "Missing YAML fixture: " + resource);
+            return YAML.readValue(input, ObjectNode.class);
+        }
+    }
 
-                scenarios:
-                %s""".formatted(name, entries));
+    private static void updateDocument(Path path, Consumer<ObjectNode> change) throws IOException {
+        ObjectNode document = YAML.readValue(path.toFile(), ObjectNode.class);
+        change.accept(document);
+        Files.writeString(path, YAML.writeValueAsString(document));
     }
 
     private static Path createJar(Path path, boolean executable) throws IOException {

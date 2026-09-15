@@ -65,6 +65,16 @@ flink-job-generator/target/flink-job-generator.jar
 It contains the workload classes and protocol marker but does not shade Flink, Kafka,
 or the connector under test.
 
+### Test fixtures
+
+Complete YAML test documents live in each module's `src/test/resources/spec/valid/`
+directory. Tests read fresh copies and edit specific fields for semantic variations;
+avoid replacements that depend on YAML indentation or field ordering. Keep short
+syntax-focused inputs, such as duplicate keys and malformed YAML, inline and pass
+their raw text to the loader. Fixtures are handwritten independently of production
+serialization. Deliberate schema changes must update the relevant fixtures and
+assertions; moving a fixture to a resource does not make it version-independent.
+
 ## Validate a scenario
 
 The Maven `exec:java` commands expect the preceding `mvn clean install` to have
