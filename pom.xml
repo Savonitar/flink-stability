@@ -10,6 +10,7 @@
     <packaging>pom</packaging>
 
     <modules>
+        <module>runtime-api</module>
         <module>cli</module>
         <module>core</module>
         <module>testcontainers</module>

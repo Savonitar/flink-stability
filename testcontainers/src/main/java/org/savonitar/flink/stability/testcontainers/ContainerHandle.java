@@ -1,14 +1,27 @@
 package org.savonitar.flink.stability.testcontainers;
 
-import java.util.Optional;
+import org.savonitar.flink.stability.runtime.api.FlinkComponentProvisioningEvidence;
 
 /** Minimal lifecycle surface used by the cluster registry. */
 interface ContainerHandle {
     void start();
 
+    /** Starts within one enclosing component-action deadline. */
+    void startWithin(ContainerOperationDeadline deadline);
+
     void stop();
 
-    void kill();
+    /** SIGKILLs, confirms termination, and removes the container within one deadline. */
+    void killAndRemoveWithin(ContainerOperationDeadline deadline);
+
+    /**
+     * SIGKILLs and confirms process termination within the shared fence deadline while retaining
+     * the physical handle for later cleanup.
+     */
+    void killProcessForWriteFence(ContainerOperationDeadline deadline);
+
+    /** Reports process liveness within the enclosing operation deadline. */
+    boolean isRunningWithin(ContainerOperationDeadline deadline);
 
     boolean isRunning();
 
@@ -16,7 +29,5 @@ interface ContainerHandle {
 
     String runtimeId();
 
-    default Optional<FlinkComponentProvisioningEvidence> provisioningEvidence() {
-        return Optional.empty();
-    }
+    FlinkComponentProvisioningEvidence provisioningEvidence();
 }

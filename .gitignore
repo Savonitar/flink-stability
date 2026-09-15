@@ -10,6 +10,14 @@ checkpoints/
 /savepoints/
 .flink-stability/
 
+### Repository specs ###
+# Keep the normative specs visible even if an older local exclude hides draft docs.
+!/docs/specs/SPEC-001-scenario-schema.md
+!/docs/specs/SPEC-002-expected-result-schema.md
+!/docs/specs/SPEC-003-suite-schema.md
+!/docs/specs/SPEC-004-kroxylicious-fault-model.md
+!/docs/specs/SPEC-005-semantic-validation-test-cases.md
+
 ### IntelliJ IDEA ###
 .idea/
 *.iws

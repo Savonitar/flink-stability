@@ -35,7 +35,7 @@ class ValidateSpecificationsCommandTest {
         Invocation result = execute();
 
         assertEquals(CommandLine.ExitCode.USAGE, result.exitCode());
-        assertTrue(result.stdout().contains("Usage: chaos-kit"));
+        assertTrue(result.stdout().contains("Usage: flink-stability"));
         assertEquals("", result.stderr());
     }
 
@@ -123,6 +123,40 @@ class ValidateSpecificationsCommandTest {
         assertEquals("valid: scenario 'typed-scenario' (2 artifacts)\n", result.stdout());
         assertEquals("", result.stderr());
         assertNoPreparedWorkspace(artifactRoot);
+    }
+
+    @Test
+    void validDockerFreeCommandDoesNotInitializeTheDockerRuntimeProvider()
+            throws IOException {
+        Path catalogRoot = Files.createDirectories(
+                temporaryDirectory.resolve("docker-free-catalog"));
+        Path artifactRoot = Files.createDirectories(
+                temporaryDirectory.resolve("docker-free-artifacts"));
+        createJar(artifactRoot.resolve("connector.jar"), false);
+        createJar(artifactRoot.resolve("job.jar"), true);
+        writePair(catalogRoot, "docker-free", "connector.jar", "job.jar", "");
+
+        String previousDockerHost = System.getProperty("docker.host");
+        System.setProperty("docker.host", "tcp://127.0.0.1:1");
+        try {
+            Invocation result = execute(
+                    "validate",
+                    "--catalog-root", catalogRoot.toString(),
+                    "--scenario", "docker-free",
+                    "--artifact-root", artifactRoot.toString(),
+                    "--offline");
+
+            assertEquals(CommandLine.ExitCode.OK, result.exitCode(), result.stderr());
+            assertEquals("valid: scenario 'docker-free' (2 artifacts)\n", result.stdout());
+            assertEquals("", result.stderr());
+            assertNoPreparedWorkspace(artifactRoot);
+        } finally {
+            if (previousDockerHost == null) {
+                System.clearProperty("docker.host");
+            } else {
+                System.setProperty("docker.host", previousDockerHost);
+            }
+        }
     }
 
     @Test
@@ -239,6 +273,47 @@ class ValidateSpecificationsCommandTest {
     }
 
     @Test
+    void rejectsAnUnsupportedKafkaLineBeforeArtifactPreparation() throws IOException {
+        Path catalogRoot = Files.createDirectories(temporaryDirectory.resolve("catalog"));
+        writePair(catalogRoot, "kafka-line", "unused.jar", "unused.jar", "");
+        Path scenario = catalogRoot.resolve("kafka-line.yaml");
+        Files.writeString(scenario, Files.readString(scenario).replace(
+                "image: apache/kafka:4.0.0",
+                "image: apache/kafka:4.1.0"));
+
+        Invocation result = execute(
+                "validate", "--catalog-root", catalogRoot.toString(),
+                "--scenario", "kafka-line");
+
+        assertValidationFailure(
+                result,
+                "kafka-line.yaml [single] runner.kafka.image-version-unsupported "
+                        + "at $/setup/kafka/clusters/main/image");
+    }
+
+    @Test
+    void suiteResolutionAttributesAnUnsupportedKafkaLineToItsEntry() throws IOException {
+        Path catalogRoot = Files.createDirectories(temporaryDirectory.resolve("catalog"));
+        writePair(catalogRoot, "valid-line", "unused.jar", "unused.jar", "");
+        writePair(catalogRoot, "invalid-line", "unused.jar", "unused.jar", "");
+        Path invalid = catalogRoot.resolve("invalid-line.yaml");
+        Files.writeString(invalid, Files.readString(invalid).replace(
+                "image: apache/kafka:4.0.0",
+                "image: custom/kafka:4.0.0"));
+        writeSuite(catalogRoot, "kafka-lines", List.of("valid-line", "invalid-line"));
+
+        Invocation result = execute(
+                "validate", "--catalog-root", catalogRoot.toString(),
+                "--suite", "kafka-lines");
+
+        assertValidationFailure(
+                result,
+                "invalid-line.yaml [entry 1 'invalid-line', single] "
+                        + "runner.kafka.image-version-unsupported "
+                        + "at $/setup/kafka/clusters/main/image");
+    }
+
+    @Test
     void artifactFailureRendersRelativeSourceScopeCodeAndPointer() throws IOException {
         Path catalogRoot = Files.createDirectories(temporaryDirectory.resolve("catalog"));
         Path artifactRoot = Files.createDirectories(temporaryDirectory.resolve("artifacts"));
@@ -252,6 +327,66 @@ class ValidateSpecificationsCommandTest {
 
         assertValidationFailure(result,
                 "artifact-bad.yaml [single] artifact.local.not-found at " + JOB_POINTER);
+        assertNoPreparedWorkspace(artifactRoot);
+    }
+
+    @Test
+    void rejectsMissingBlankUnsupportedAndDuplicateWorkloadProtocolMarkers()
+            throws IOException {
+        List<ProtocolCase> cases = List.of(
+                new ProtocolCase("missing", List.of(), "missing"),
+                new ProtocolCase("blank", List.of(
+                        "Flink-Stability-Workload-Protocol: "), "missing"),
+                new ProtocolCase("unsupported", List.of(
+                        "Flink-Stability-Workload-Protocol: v2"), "unsupported"),
+                new ProtocolCase("duplicate", List.of(
+                        "Flink-Stability-Workload-Protocol: v1",
+                        "flink-stability-workload-protocol: v1"), "duplicate"));
+
+        for (ProtocolCase protocolCase : cases) {
+            Path root = Files.createDirectories(
+                    temporaryDirectory.resolve("protocol-" + protocolCase.name()));
+            Path catalogRoot = Files.createDirectories(root.resolve("catalog"));
+            Path artifactRoot = Files.createDirectories(root.resolve("artifacts"));
+            String scenarioName = "protocol-" + protocolCase.name();
+            writePair(catalogRoot, scenarioName, "connector.jar", "job.jar", "");
+            createJar(artifactRoot.resolve("connector.jar"), false);
+            createRawWorkloadJar(artifactRoot.resolve("job.jar"), protocolCase.markerLines());
+
+            Invocation result = execute(
+                    "validate", "--catalog-root", catalogRoot.toString(),
+                    "--scenario", scenarioName,
+                    "--artifact-root", artifactRoot.toString(), "--offline");
+
+            assertValidationFailure(
+                    result,
+                    scenarioName + ".yaml [single] artifact.workload.protocol-"
+                            + protocolCase.diagnosticSuffix() + " at " + JOB_POINTER);
+            assertNoPreparedWorkspace(artifactRoot);
+        }
+    }
+
+    @Test
+    void suitePreparationRejectsAProtocolInvalidWorkloadInAnyEntry() throws IOException {
+        Path catalogRoot = Files.createDirectories(temporaryDirectory.resolve("catalog"));
+        Path artifactRoot = Files.createDirectories(temporaryDirectory.resolve("artifacts"));
+        writePair(catalogRoot, "valid", "valid-connector.jar", "valid-job.jar", "");
+        writePair(catalogRoot, "invalid", "invalid-connector.jar", "invalid-job.jar", "");
+        createJar(artifactRoot.resolve("valid-connector.jar"), false);
+        createJar(artifactRoot.resolve("valid-job.jar"), true);
+        createJar(artifactRoot.resolve("invalid-connector.jar"), false);
+        createRawWorkloadJar(artifactRoot.resolve("invalid-job.jar"), List.of());
+        writeSuite(catalogRoot, "protocol-suite", List.of("valid", "invalid"));
+
+        Invocation result = execute(
+                "validate", "--catalog-root", catalogRoot.toString(),
+                "--suite", "protocol-suite",
+                "--artifact-root", artifactRoot.toString(), "--offline");
+
+        assertValidationFailure(
+                result,
+                "invalid.yaml [entry 1 'invalid', single] "
+                        + "artifact.workload.protocol-missing at " + JOB_POINTER);
         assertNoPreparedWorkspace(artifactRoot);
     }
 
@@ -297,7 +432,7 @@ class ValidateSpecificationsCommandTest {
     private static Invocation execute(String... arguments) {
         StringWriter stdout = new StringWriter();
         StringWriter stderr = new StringWriter();
-        CommandLine commandLine = new CommandLine(new ChaosKitCommand())
+        CommandLine commandLine = new CommandLine(new FlinkStabilityCommand())
                 .setOut(new PrintWriter(stdout, true))
                 .setErr(new PrintWriter(stderr, true));
         int exitCode = commandLine.execute(arguments);
@@ -435,9 +570,30 @@ class ValidateSpecificationsCommandTest {
         manifest.getMainAttributes().put(Attributes.Name.MANIFEST_VERSION, "1.0");
         if (executable) {
             manifest.getMainAttributes().put(Attributes.Name.MAIN_CLASS, "example.Main");
+            manifest.getMainAttributes().putValue(
+                    "Flink-Stability-Workload-Protocol", "v1");
         }
         try (JarOutputStream output = new JarOutputStream(
                 Files.newOutputStream(path), manifest)) {
+            output.putNextEntry(new JarEntry("payload.txt"));
+            output.write("payload".getBytes(StandardCharsets.UTF_8));
+            output.closeEntry();
+        }
+        return path;
+    }
+
+    private static Path createRawWorkloadJar(Path path, List<String> markerLines)
+            throws IOException {
+        Files.createDirectories(path.getParent());
+        List<String> manifestLines = new java.util.ArrayList<>();
+        manifestLines.add("Manifest-Version: 1.0");
+        manifestLines.add("Main-Class: example.Main");
+        manifestLines.addAll(markerLines);
+        try (JarOutputStream output = new JarOutputStream(Files.newOutputStream(path))) {
+            output.putNextEntry(new JarEntry("META-INF/MANIFEST.MF"));
+            output.write((String.join("\r\n", manifestLines) + "\r\n\r\n")
+                    .getBytes(StandardCharsets.UTF_8));
+            output.closeEntry();
             output.putNextEntry(new JarEntry("payload.txt"));
             output.write("payload".getBytes(StandardCharsets.UTF_8));
             output.closeEntry();
@@ -457,4 +613,9 @@ class ValidateSpecificationsCommandTest {
     }
 
     private record Invocation(int exitCode, String stdout, String stderr) {}
+
+    private record ProtocolCase(
+            String name,
+            List<String> markerLines,
+            String diagnosticSuffix) {}
 }

@@ -1,13 +1,13 @@
 package org.savonitar.flink.stability.cli;
 
-import org.savonitar.flink.stability.core.spec.ArtifactResolutionException;
-import org.savonitar.flink.stability.core.spec.ArtifactResolutionOptions;
-import org.savonitar.flink.stability.core.spec.CatalogValidationException;
-import org.savonitar.flink.stability.core.spec.DocumentValidationException;
-import org.savonitar.flink.stability.core.spec.ExpectedResultSelectionException;
-import org.savonitar.flink.stability.core.spec.ScenarioPreflightException;
-import org.savonitar.flink.stability.core.spec.ScenarioResolutionException;
-import org.savonitar.flink.stability.core.spec.SuitePlanningException;
+import org.savonitar.flink.stability.core.artifact.ArtifactResolutionException;
+import org.savonitar.flink.stability.core.artifact.ArtifactResolutionOptions;
+import org.savonitar.flink.stability.core.spec.document.CatalogValidationException;
+import org.savonitar.flink.stability.core.spec.document.DocumentValidationException;
+import org.savonitar.flink.stability.core.spec.resolution.ExpectedResultSelectionException;
+import org.savonitar.flink.stability.core.spec.resolution.ScenarioPreflightException;
+import org.savonitar.flink.stability.core.spec.resolution.ScenarioResolutionException;
+import org.savonitar.flink.stability.core.spec.resolution.SuitePlanningException;
 import picocli.CommandLine;
 
 import java.io.UncheckedIOException;

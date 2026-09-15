@@ -16,7 +16,7 @@ class CliParameterParserTest {
     void preservesBooleanIntegerPlainTextAndQuotedNumericTextTypes() {
         Map<String, JsonNode> values = CliParameterParser.parse(
                 List.of("enabled=true", "count=-12", "label=plain", "code=\"42\""),
-                new CommandLine(new ChaosKitCommand()));
+                new CommandLine(new FlinkStabilityCommand()));
 
         assertTrue(values.get("enabled").isBoolean());
         assertTrue(values.get("enabled").booleanValue());

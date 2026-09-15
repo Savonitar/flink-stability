@@ -1,0 +1,9 @@
+format: v1
+kind: expected-result
+
+meta:
+  name: bounded-eos.expected
+  scenario: bounded-eos
+
+default:
+  outcome: pass
