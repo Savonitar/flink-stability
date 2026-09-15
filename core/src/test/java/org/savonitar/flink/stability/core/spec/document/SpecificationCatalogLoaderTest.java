@@ -1,5 +1,6 @@
 package org.savonitar.flink.stability.core.spec.document;
 
+import com.fasterxml.jackson.databind.node.ObjectNode;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
@@ -52,10 +53,8 @@ class SpecificationCatalogLoaderTest {
     @Test
     void rejectsExpectedResultTargetMismatch() throws IOException {
         copyResource("minimal.yaml", temporaryDirectory.resolve("minimal.yaml"));
-        String expected = resourceText("minimal.expected.yaml")
-                .replace("  scenario: minimal\n", "  scenario: another-scenario\n")
-                .replace("  name: minimal.expected\n", "  name: another-scenario.expected\n");
-        Files.writeString(temporaryDirectory.resolve("minimal.expected.yaml"), expected);
+        ObjectNode expected = expectedResultFor("another-scenario");
+        YamlTestDocuments.write(temporaryDirectory.resolve("minimal.expected.yaml"), expected);
 
         CatalogValidationException exception = assertThrows(
                 CatalogValidationException.class, () -> loader.load(temporaryDirectory));
@@ -67,9 +66,11 @@ class SpecificationCatalogLoaderTest {
     @Test
     void rejectsExpectedResultNameMismatch() throws IOException {
         copyResource("minimal.yaml", temporaryDirectory.resolve("minimal.yaml"));
-        String expected = resourceText("minimal.expected.yaml")
-                .replace("  name: minimal.expected\n", "  name: wrong.expected\n");
-        Files.writeString(temporaryDirectory.resolve("minimal.expected.yaml"), expected);
+        ObjectNode expected = YamlTestDocuments.read(resource("minimal.expected.yaml"));
+        ObjectNode meta = (ObjectNode) expected.required("meta");
+        meta.required("name");
+        meta.put("name", "wrong.expected");
+        YamlTestDocuments.write(temporaryDirectory.resolve("minimal.expected.yaml"), expected);
 
         CatalogValidationException exception = assertThrows(
                 CatalogValidationException.class, () -> loader.load(temporaryDirectory));
@@ -92,10 +93,8 @@ class SpecificationCatalogLoaderTest {
 
     @Test
     void rejectsOrphanExpectedResult() throws IOException {
-        String expected = resourceText("minimal.expected.yaml")
-                .replace("minimal.expected", "ghost.expected")
-                .replace("scenario: minimal", "scenario: ghost");
-        Files.writeString(temporaryDirectory.resolve("ghost.expected.yaml"), expected);
+        ObjectNode expected = expectedResultFor("ghost");
+        YamlTestDocuments.write(temporaryDirectory.resolve("ghost.expected.yaml"), expected);
 
         CatalogValidationException exception = assertThrows(
                 CatalogValidationException.class, () -> loader.load(temporaryDirectory));
@@ -307,35 +306,38 @@ class SpecificationCatalogLoaderTest {
     }
 
     private void copyValidPairNamed(String name) throws IOException {
-        String scenario = resourceText("minimal.yaml")
-                .replace("  name: minimal\n", "  name: " + name + "\n");
-        Files.writeString(temporaryDirectory.resolve(name + ".yaml"), scenario);
+        ObjectNode scenario = YamlTestDocuments.read(resource("minimal.yaml"));
+        ObjectNode meta = (ObjectNode) scenario.required("meta");
+        meta.required("name");
+        meta.put("name", name);
+        YamlTestDocuments.write(temporaryDirectory.resolve(name + ".yaml"), scenario);
 
-        String expected = resourceText("minimal.expected.yaml")
-                .replace("  name: minimal.expected\n", "  name: " + name + ".expected\n")
-                .replace("  scenario: minimal\n", "  scenario: " + name + "\n");
-        Files.writeString(temporaryDirectory.resolve(name + ".expected.yaml"), expected);
+        YamlTestDocuments.write(temporaryDirectory.resolve(name + ".expected.yaml"),
+                expectedResultFor(name));
+    }
+
+    private ObjectNode expectedResultFor(String scenarioName) throws IOException {
+        ObjectNode expected = YamlTestDocuments.read(resource("minimal.expected.yaml"));
+        ObjectNode meta = (ObjectNode) expected.required("meta");
+        meta.required("name");
+        meta.required("scenario");
+        meta.put("name", scenarioName + ".expected");
+        meta.put("scenario", scenarioName);
+        return expected;
     }
 
     private void writeSuite(String scenarioEntries) throws IOException {
-        Files.writeString(temporaryDirectory.resolve("membership-suite.yaml"), """
-                format: v1
-                kind: suite
-
-                meta:
-                  name: membership-suite
-
-                scenarios:
-                %s
-                """.formatted(scenarioEntries));
+        ObjectNode suite = YamlTestDocuments.read(resource("smoke-suite.yaml"));
+        ObjectNode meta = (ObjectNode) suite.required("meta");
+        meta.required("name");
+        meta.put("name", "membership-suite");
+        suite.required("scenarios");
+        suite.set("scenarios", YamlTestDocuments.readArray(scenarioEntries));
+        YamlTestDocuments.write(temporaryDirectory.resolve("membership-suite.yaml"), suite);
     }
 
     private void copyResource(String name, Path target) throws IOException {
         Files.copy(resource(name), target);
-    }
-
-    private String resourceText(String name) throws IOException {
-        return Files.readString(resource(name));
     }
 
     private Path resource(String name) {

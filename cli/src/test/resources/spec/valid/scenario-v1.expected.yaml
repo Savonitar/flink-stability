@@ -1,0 +1,9 @@
+format: v1
+kind: expected-result
+
+meta:
+  name: scenario-v1.expected
+  scenario: scenario-v1
+
+default:
+  outcome: pass

@@ -1,0 +1,8 @@
+format: v1
+kind: suite
+
+meta:
+  name: suite-v1
+
+scenarios:
+  - scenario: scenario-v1
