@@ -1,167 +1,185 @@
 # Flink Stability Testing Framework
 
-A chaos-testing harness for [Apache Flink](https://flink.apache.org/). It spins up a real
-Flink cluster and Kafka broker in Docker, subjects a running job to failures — killed
-TaskManagers, restarts, savepoint-based version upgrades, rescaling — and then verifies
-that the output topic still contains exactly the records it should: no losses, no
-duplicates.
+An experimental chaos-testing harness for [Apache Flink](https://flink.apache.org/).
+It starts a real Flink cluster and Apache Kafka broker in Docker, executes a typed
+scenario, prevents Flink from writing any more output, and then validates the final
+Kafka state.
 
-Failure scenarios are declared in YAML, so reproducing a suspected exactly-once bug is a
-matter of writing a file rather than writing code.
+The current prototype intentionally supports one narrow but real vertical: a bounded
+Flink 2.2 exactly-once job using Kafka 4.0 and Kafka connector 5.0.0-2.2. Unsupported
+topologies and scenario features fail before Docker starts.
 
-## How it works
+## Execution boundary
 
-The runner drives three things over the course of a scenario:
+The supported path is:
 
-- **Testcontainers** brings up a `confluentinc/cp-kafka` broker and one or more Flink
-  containers on a shared Docker network. The Flink image is chosen per step, which is what
-  makes cross-version upgrade testing possible.
-- **The Flink REST API** (`FlinkRestClient`) triggers savepoints and tracks job state.
-  Each manager bind-mounts one isolated `./checkpoints/attempt-*` host directory into every
-  JobManager and TaskManager, so replacement containers see the same state without sharing it
-  with another run. State is retained as run evidence and removed by `mvn clean`.
-- **A Kafka consumer** replays the output topic at the end and asserts record count and ID
-  uniqueness.
+```text
+v1 YAML
+  -> structural and semantic validation
+  -> immutable artifact/dependency preparation
+  -> Kafka topic creation and reconciled input preload
+  -> connector installation and Flink job execution
+  -> natural FINISHED
+  -> irreversible TaskManager-then-JobManager process fence
+  -> fixed read_uncommitted Kafka high-watermark boundary
+  -> read_committed traversal of that exact boundary
+  -> exact terminal oracle and structured JSON result
+```
 
-The bundled test job (`flink-job-generator`) currently has two transition artifacts. The
-legacy runner uses the shaded Flink 1.19 JAR at
-`target/flink-job-generator-0.1.0-SNAPSHOT.jar`; v1 uses the thin Flink 2.2 JAR at
-`target/flink-job-generator.jar`, with its connector closure installed into the cluster.
-Both read `input-topic`, optionally sleep per record, and write to `flink-output` with
-`DeliveryGuarantee.EXACTLY_ONCE` while the typed v1 workload protocol is implemented.
+Important properties of this boundary:
+
+- scenario and expected-result documents are selected by `meta.name` from a complete catalog;
+- connector Maven closures and local artifacts are resolved, hashed, and privately staged;
+- the connector classpath is copied and verified before each Flink process starts;
+- the bundled workload JAR is thin and declares `Flink-Stability-Workload-Protocol: v1`;
+- generated input is acknowledged and reconciled before its exclusive stopping offsets are used;
+- terminal Kafka validation never runs unless the Flink process fence succeeds;
+- timeouts, partial evidence, cleanup failures, and validation failures have stable reason codes;
+- operational logs use stderr and the command result is emitted as one JSON document on stdout.
 
 ## Requirements
 
-- **JDK 21**
-- **Maven 3.8+**
-- **Docker**, running and reachable by Testcontainers, for `run` only
+- JDK 21
+- Maven 3.8+
+- Docker Desktop or another Docker daemon reachable by Testcontainers for `run`
 
-Docker-free `validate` needs only JDK and Maven. Executed scenarios pull Flink and
-Kafka images on first run, so expect the initial execution to take a few minutes.
+`validate` is Docker-free. It checks the broad v1 document, semantic, and artifact
+contract. `run` additionally checks the narrower capabilities implemented by the current
+prototype, so a valid broad-v1 scenario may still be rejected as not yet executable. The
+first execution may need to pull Flink and Kafka images.
 
-## Getting started
+## Build
 
-Build all modules, including both transition job artifacts:
+Build and test every module, including the thin workload JAR:
 
 ```bash
 mvn clean install
 ```
 
-To package only the two job variants, select their reactor artifact IDs rather than the
-aggregator directory:
+The workload artifact is written directly to:
 
-```bash
-mvn -pl :flink-job-generator-flink22,:flink-job-generator -am package
+```text
+flink-job-generator/target/flink-job-generator.jar
 ```
 
-Run the bundled example — a 1.19 job that takes a savepoint, restarts, survives ten
-TaskManager kills, and is then validated for exactly-once delivery:
+It contains the workload classes and protocol marker but does not shade Flink, Kafka,
+or the connector under test.
+
+## Validate a scenario
+
+The Maven `exec:java` commands expect the preceding `mvn clean install` to have
+installed the same reactor version. Rebuild after source changes.
 
 ```bash
-mvn exec:java -pl cli -Dexec.args="run --scenario scenarios/example.yaml"
-```
-
-The `run` command above still uses the original executable format. The v1
-scenario/suite contract can already be checked end to end without Docker:
-
-```bash
-mvn exec:java -pl cli \
-  -Dexec.args="validate --catalog-root path/to/catalog --scenario scenario-name \
+mvn -q exec:java -pl cli \
+  -Dexec.args="validate --catalog-root scenarios --scenario bounded-eos \
   --artifact-root ."
 ```
 
-Select a suite with `--suite suite-name`. Repeat `-p NAME=VALUE` for submit-time
-scalar overrides, and add `--offline` to restrict Maven connector resolution to
-the local cache. Validation recursively loads the complete catalog, resolves
-parameters and expected results, checks semantic references and capabilities,
-then stages and checksums every local/Maven artifact. It does not start Docker.
-Exit status is `0` for a valid target, `1` for validation failure, and `2` for
-invalid command syntax or an unknown scenario/suite name.
+Select a suite with `--suite NAME`. Repeat `-p NAME=VALUE` for submit-time scalar
+overrides. Add `--offline` to restrict Maven artifact resolution to the local cache.
 
-## Writing a scenario
+Validation recursively loads the catalog, resolves parameters/defaults and expected
+results, checks semantic references and capability rules, resolves dependency closures,
+and stages and verifies every artifact. It never starts Docker.
 
-A scenario is a list of named phases, each a list of steps, executed in order. A phase with
-`repeat: N` runs its steps N times — useful for hammering a job with repeated failures.
+Exit status:
 
-```yaml
-scenario:
-  phases:
-    - name: startup
-      steps:
-        - type: start
-          component: kafka
-        - type: wait
-          wait_ms: 10000
-        - type: start
-          component: flink
-          image: flink:1.19
-          jar: ./flink-job-generator/target/flink-job-generator-0.1.0-SNAPSHOT.jar
-          args:
-            - --bootstrapServers kafka:9095
-            - --processingDelayMs 250
-          parallelism: 2
-          checkpoint_interval: 1000
+- `0`: valid
+- `1`: validation or resolution failure
+- `2`: invalid syntax or unknown target
 
-    - name: recovery_loop
-      repeat: 10
-      steps:
-        - type: kill
-          component: taskmanager
-        - type: wait
-          wait_ms: 10000
-        - type: start
-          component: taskmanager
+## Run the bounded prototype
 
-    - name: validation
-      steps:
-        - type: validate
-          validations:
-            - type: kafka-count
-              topic: flink-output
-              expected_records: 1000
-            - type: kafka-unique-ids
-              topic: flink-output
-              expected_records: 1000
+```bash
+mvn -q exec:java -pl cli \
+  -Dexec.args="run --catalog-root scenarios --scenario bounded-eos \
+  --artifact-root ."
 ```
 
-### Step types
+The result status is `pass`, `fail`, or `inconclusive`. Only `pass` exits `0`;
+execution, validation, or infrastructure failures exit `1`, and usage errors exit `2`.
 
-| `type` | Purpose | Relevant fields |
-| --- | --- | --- |
-| `start` | Start a component, or submit a job to Flink | `component`, `image`, `jar`, `args`, `parallelism`, `checkpoint_interval`, `restore_from_savepoint` |
-| `stop` | Stop a component gracefully | `component` |
-| `kill` | Kill a component abruptly | `component` |
-| `savepoint` | Trigger a savepoint and record its path | `job` |
-| `wait` | Sleep before the next step | `wait_ms` |
-| `validate` | Run assertions against Kafka | `validations` |
+The executable reference pair is:
 
-`component` is one of `kafka`, `flink`, or `taskmanager`. Setting
-`restore_from_savepoint: true` on a `start` step resumes from the most recent savepoint,
-which is how an upgrade across two `image` values is expressed.
+- [`scenarios/bounded-eos.yaml`](scenarios/bounded-eos.yaml)
+- [`scenarios/bounded-eos.expected.yaml`](scenarios/bounded-eos.expected.yaml)
 
-### Validation types
+## Current executable subset
 
-| `type` | Asserts |
-| --- | --- |
-| `kafka-count` | The topic holds exactly `expected_records` records |
-| `kafka-unique-ids` | Those records carry `expected_records` distinct IDs — i.e. no duplicates |
+The first runner accepts exactly:
+
+- one plain scenario, one run, and no health retry;
+- one Apache Kafka 4.0 broker with the input and sink topics;
+- one Flink 2.2 JobManager and one TaskManager;
+- one auto-started protocol-v1 job with parallelism `1`;
+- one verified connector closure;
+- bounded generated integer input, capped at 1,000,000 records for the in-memory runner;
+- the currently registered wait/await, loop, and named TaskManager kill/restart phase operations;
+- one terminal `kafka.id-set` validator and an expected outcome of `pass`.
+
+The schema and planning layer describe more than this execution subset. Unsupported
+features reject explicitly; they are not ignored or approximated.
+
+## Scenario structure
+
+A scenario declares:
+
+- infrastructure under `setup`;
+- connector artifacts under `subject`;
+- typed jobs under `workload`;
+- ordered actions and waits under `phases`;
+- post-fence checks under `terminal_validations`.
+
+The workload receives resolved source/sink endpoints, bounded stopping offsets, state,
+checkpoint, transaction, and watermark settings through typed Flink configuration.
+`program_args` is an ordered job-owned list and cannot override the reserved workload
+configuration namespace.
+
+See [SPEC-001](docs/specs/SPEC-001-scenario-schema.md) for the contract and
+[SPEC-005](docs/specs/SPEC-005-semantic-validation-test-cases.md) for its semantic
+validation cases.
 
 ## Modules
 
 | Module | Contents |
 | --- | --- |
-| `cli` | picocli entry points for the legacy runner and Docker-free v1 validation |
-| `core` | v1 schema/catalog/planning/preflight plus the legacy runner and Flink REST client |
-| `testcontainers` | Flink and Kafka container lifecycle management |
-| `flink-job-generator` | Transition reactor producing the legacy shaded Flink 1.19 job and thin Flink 2.2 v1 job |
+| `cli` | `run` and Docker-free `validate` entry points plus JSON/diagnostic rendering |
+| `core` | schema/catalog planning, artifact preparation, runtime-neutral execution orchestration, and terminal validation |
+| `runtime-api` | JDK-only runtime targets, lifecycle contracts, and immutable runtime evidence shared across orchestration and providers |
+| `testcontainers` | Kafka/Flink process lifecycle, connector installation, fencing, and cleanup |
+| `flink-job-generator` | thin Flink 2.2 protocol-v1 workload used by the executable example |
+
+The `core` module keeps its pre-execution stages in explicit package boundaries:
+
+| Package | Responsibility |
+| --- | --- |
+| `core.spec.document` | raw specification documents, structural validation, and catalog loading |
+| `core.spec.resolution` | parameter/default resolution, expectation and suite planning, compatibility checks, and semantic preflight |
+| `core.artifact` | artifact/Maven resolution, connector closure locks and bundles, prepared plans, and workload protocol validation |
+| `core.execution.plan` | compilation of a prepared scenario into the narrow executable-runner plan |
+
+Document value constructors remain package-private. Code outside `core.spec.document`
+creates in-memory documents through `SpecificationLoader`, preserving structural
+validation as the package boundary.
+
+## Not implemented yet
+
+- controlled-unbounded cutoff plus drain/stop;
+- executable suites and baseline/candidate experiments;
+- multi-broker or multi-job execution;
+- proxies and network faults;
+- savepoint/restore and upgrade execution;
+- broader state-backend and topology support;
+- health retries, OCI digest capture, and the complete replay-grade report;
+- automated real-Docker failure injection and the 1,000,000-record load boundary.
 
 ## Status
 
-Early and experimental. The v1 contracts, catalog loader, parameter resolver,
-semantic preflight, suite planner, artifact preparation, target-specific connector bundles,
-pre-start bundle verification, and named container lifecycle have automated coverage. The
-Docker runner still executes the legacy format; wiring the typed workload protocol and first
-narrow v1 execution vertical is the next implementation stage.
+Early and experimental. The bounded happy path is implemented and has passed against real
+Flink 2.2 and Kafka 4.0 containers, including a TaskManager kill/restart and exact
+post-fence validation. The framework is not yet a general-purpose or production-ready
+stability-testing system.
 
 ## License
 

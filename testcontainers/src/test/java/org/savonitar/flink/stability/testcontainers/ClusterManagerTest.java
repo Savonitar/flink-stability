@@ -2,542 +2,297 @@ package org.savonitar.flink.stability.testcontainers;
 
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
+import org.savonitar.flink.stability.runtime.api.ConnectorBundleProvisioningException;
+import org.savonitar.flink.stability.runtime.api.ConnectorClasspathManifest;
+import org.savonitar.flink.stability.runtime.api.FlinkComponentProvisioningEvidence;
+import org.savonitar.flink.stability.runtime.api.FlinkComponentRole;
+import org.savonitar.flink.stability.runtime.api.FlinkConnectorBundleInstallation;
+import org.savonitar.flink.stability.runtime.api.FlinkProcessWriteFenceEvidence;
+import org.savonitar.flink.stability.runtime.api.FlinkRuntimeTarget;
+import org.savonitar.flink.stability.runtime.api.ProvisionedConnectorArtifact;
 import org.testcontainers.containers.Network;
 
-import java.io.IOException;
-import java.lang.reflect.Proxy;
-import java.nio.file.Files;
 import java.nio.file.Path;
+import java.time.Duration;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.Set;
-import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicLong;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
-import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class ClusterManagerTest {
+    private static final Duration ACTION_TIMEOUT = Duration.ofSeconds(5);
 
     @TempDir
     Path temporaryDirectory;
 
     @Test
-    void startsAndTracksCanonicalNamesInOrdinalOrder() throws Exception {
-        RecordingFlinkFactory flink = new RecordingFlinkFactory();
-        try (ClusterManager manager = manager(flink)) {
-            manager.startFlink("flink:1.20.0", 1, 3);
+    void startsTheFixedV1TopologyAndReturnsItsRestEndpoint() {
+        RecordingFactory factory = new RecordingFactory();
+
+        try (ClusterManager manager = manager(factory)) {
+            assertEquals("http://localhost:18081", manager.startFlink(target()));
 
             assertEquals(List.of("jobmanager-1"), manager.jobManagerNames());
-            assertEquals(
-                    List.of("taskmanager-1", "taskmanager-2", "taskmanager-3"),
-                    manager.taskManagerNames());
-            assertTrue(manager.isJobManagerRunning("jobmanager-1"));
-            assertTrue(manager.isTaskManagerRunning("taskmanager-1"));
-            assertTrue(manager.isTaskManagerRunning("taskmanager-2"));
-            assertTrue(manager.isTaskManagerRunning("taskmanager-3"));
-            assertEquals("http://localhost:18081", manager.getJobManagerRestUrl());
-            assertEquals(
-                    List.of(
-                            "create:jobmanager-1:jobmanager-1-runtime-1",
-                            "start:jobmanager-1:jobmanager-1-runtime-1",
-                            "create:taskmanager-1:taskmanager-1-runtime-1",
-                            "start:taskmanager-1:taskmanager-1-runtime-1",
-                            "create:taskmanager-2:taskmanager-2-runtime-1",
-                            "start:taskmanager-2:taskmanager-2-runtime-1",
-                            "create:taskmanager-3:taskmanager-3-runtime-1",
-                            "start:taskmanager-3:taskmanager-3-runtime-1"),
-                    flink.events);
-        }
-    }
-
-    @Test
-    void killTerminatesOnlyTheNamedSlotAndNeverCreatesAReplacement() throws Exception {
-        RecordingFlinkFactory flink = new RecordingFlinkFactory();
-        try (ClusterManager manager = manager(flink)) {
-            manager.startFlink("flink:1.20.0", 1, 2);
-            flink.events.clear();
-
-            String killedRuntime = manager.killTaskManager("taskmanager-2");
-
-            assertEquals("taskmanager-2-runtime-1", killedRuntime);
-            assertEquals(List.of("kill:taskmanager-2:taskmanager-2-runtime-1"), flink.events);
-            assertFalse(manager.isTaskManagerRunning("taskmanager-2"));
-            assertTrue(manager.isTaskManagerRunning("taskmanager-1"));
-            assertEquals(1, flink.generationCount("taskmanager-2"));
-        }
-    }
-
-    @Test
-    void explicitStartRecreatesTheSameLogicalSlotWithANewPhysicalId() throws Exception {
-        RecordingFlinkFactory flink = new RecordingFlinkFactory();
-        try (ClusterManager manager = manager(flink)) {
-            manager.startFlink("flink:1.20.0", 1, 2);
-            String killedRuntime = manager.killTaskManager("taskmanager-2");
-            flink.events.clear();
-
-            String replacementRuntime = manager.startTaskManager("taskmanager-2");
-
-            assertNotEquals(killedRuntime, replacementRuntime);
-            assertEquals("taskmanager-2-runtime-2", replacementRuntime);
-            assertEquals(
-                    List.of(
-                            "create:taskmanager-2:taskmanager-2-runtime-2",
-                            "start:taskmanager-2:taskmanager-2-runtime-2"),
-                    flink.events);
-            assertTrue(manager.isTaskManagerRunning("taskmanager-2"));
-            assertEquals(
-                    List.of("taskmanager-1", "taskmanager-2"), manager.taskManagerNames());
-        }
-    }
-
-    @Test
-    void gracefulStopIsNotAKillAndRequiresAnExplicitStart() throws Exception {
-        RecordingFlinkFactory flink = new RecordingFlinkFactory();
-        try (ClusterManager manager = manager(flink)) {
-            manager.startFlink("flink:1.20.0", 1, 1);
-            flink.events.clear();
-
-            assertEquals(
-                    "taskmanager-1-runtime-1", manager.stopTaskManager("taskmanager-1"));
-
-            assertEquals(List.of("stop:taskmanager-1:taskmanager-1-runtime-1"), flink.events);
-            assertFalse(manager.isTaskManagerRunning("taskmanager-1"));
-            assertThrows(
-                    IllegalStateException.class,
-                    () -> manager.stopTaskManager("taskmanager-1"));
-
-            manager.startTaskManager("taskmanager-1");
-            assertTrue(manager.isTaskManagerRunning("taskmanager-1"));
-        }
-    }
-
-    @Test
-    void rejectsUnknownTargetsAndStartingAnAlreadyRunningSlotWithoutCreatingContainers()
-            throws Exception {
-        RecordingFlinkFactory flink = new RecordingFlinkFactory();
-        try (ClusterManager manager = manager(flink)) {
-            manager.startFlink("flink:1.20.0", 1, 1);
-            flink.events.clear();
-
-            assertThrows(
-                    IllegalStateException.class,
-                    () -> manager.startTaskManager("taskmanager-1"));
-            assertThrows(
-                    IllegalArgumentException.class,
-                    () -> manager.killTaskManager("taskmanager-2"));
-            manager.setRunningJobId("job-1");
-            assertThrows(
-                    IllegalArgumentException.class,
-                    () -> manager.killJobManager("jobmanager-2"));
-
-            assertEquals(List.of(), flink.events);
-            assertEquals(1, flink.generationCount("taskmanager-1"));
-            assertTrue(manager.isTaskManagerRunning("taskmanager-1"));
-            assertEquals("http://localhost:18081", manager.getJobManagerRestUrl());
-            assertEquals("job-1", manager.getRunningJobId());
-        }
-    }
-
-    @Test
-    void cleansAPartialStartInReverseOrderAndPublishesNoRegistry() {
-        RecordingFlinkFactory flink = new RecordingFlinkFactory();
-        flink.failStart.add("taskmanager-3-runtime-1");
-        ClusterManager manager = manager(flink);
-
-        IllegalStateException failure = assertThrows(
-                IllegalStateException.class,
-                () -> manager.startFlink("flink:1.20.0", 1, 3));
-
-        assertEquals("start failed: taskmanager-3-runtime-1", failure.getMessage());
-        assertEquals(
-                List.of(
-                        "create:jobmanager-1:jobmanager-1-runtime-1",
-                        "start:jobmanager-1:jobmanager-1-runtime-1",
-                        "create:taskmanager-1:taskmanager-1-runtime-1",
-                        "start:taskmanager-1:taskmanager-1-runtime-1",
-                        "create:taskmanager-2:taskmanager-2-runtime-1",
-                        "start:taskmanager-2:taskmanager-2-runtime-1",
-                        "create:taskmanager-3:taskmanager-3-runtime-1",
-                        "start:taskmanager-3:taskmanager-3-runtime-1",
-                        "stop:taskmanager-3:taskmanager-3-runtime-1",
-                        "stop:taskmanager-2:taskmanager-2-runtime-1",
-                        "stop:taskmanager-1:taskmanager-1-runtime-1",
-                        "stop:jobmanager-1:jobmanager-1-runtime-1"),
-                flink.events);
-        assertEquals(List.of(), manager.jobManagerNames());
-        assertEquals(List.of(), manager.taskManagerNames());
-        assertThrows(IllegalStateException.class, manager::getJobManagerRestUrl);
-
-        manager.close();
-    }
-
-    @Test
-    void retriesAFailedPartialStartCleanupBeforeDiscardingTheHandle() {
-        RecordingFlinkFactory flink = new RecordingFlinkFactory();
-        flink.failStart.add("taskmanager-2-runtime-1");
-        flink.failStopOnce.add("taskmanager-2-runtime-1");
-        ClusterManager manager = manager(flink);
-
-        IllegalStateException failure = assertThrows(
-                IllegalStateException.class,
-                () -> manager.startFlink("flink:1.20.0", 1, 2));
-
-        assertEquals("start failed: taskmanager-2-runtime-1", failure.getMessage());
-        assertEquals(1, failure.getSuppressed().length);
-        assertEquals(
-                2,
-                flink.events.stream()
-                        .filter("stop:taskmanager-2:taskmanager-2-runtime-1"::equals)
-                        .count());
-        assertEquals(List.of(), manager.taskManagerNames());
-        manager.close();
-    }
-
-    @Test
-    void closeIsNullSafeAndIdempotentBeforeAnyComponentStarts() {
-        ClusterManager manager = manager(new RecordingFlinkFactory());
-
-        manager.close();
-        manager.close();
-
-        assertThrows(
-                IllegalStateException.class,
-                () -> manager.startFlink("flink:1.20.0", 1, 1));
-    }
-
-    @Test
-    void closesOnlyOwnedNetworksAndRetriesAFailedNetworkClose() {
-        List<String> ownedEvents = new ArrayList<>();
-        AtomicBoolean failOwnedCloseOnce = new AtomicBoolean(true);
-        Network owned = recordingNetwork(ownedEvents, failOwnedCloseOnce);
-        ClusterManager ownedManager = new ClusterManager(
-                owned,
-                true,
-                (image, network, checkpointRoot) -> new RecordingFlinkFactory(),
-                (network, messages) -> new NoOpKafkaCluster());
-
-        assertThrows(IllegalStateException.class, ownedManager::close);
-        ownedManager.close();
-        ownedManager.close();
-        assertEquals(List.of("close", "close"), ownedEvents);
-
-        List<String> borrowedEvents = new ArrayList<>();
-        Network borrowed = recordingNetwork(borrowedEvents, new AtomicBoolean(false));
-        ClusterManager borrowedManager = new ClusterManager(
-                borrowed,
-                false,
-                (image, network, checkpointRoot) -> new RecordingFlinkFactory(),
-                (network, messages) -> new NoOpKafkaCluster());
-        borrowedManager.close();
-        assertEquals(List.of(), borrowedEvents);
-    }
-
-    @Test
-    void reusesOneCheckpointNamespaceAcrossFlinkVersionRestarts() throws Exception {
-        RecordingFlinkFactory flink = new RecordingFlinkFactory();
-        List<Path> observedRoots = new ArrayList<>();
-        Path attemptRoot = temporaryDirectory.resolve("attempt-state");
-        ClusterManager manager = new ClusterManager(
-                Network.SHARED,
-                false,
-                (image, network, checkpointRoot) -> {
-                    observedRoots.add(checkpointRoot);
-                    return flink;
-                },
-                (network, messages) -> new NoOpKafkaCluster(),
-                attemptRoot);
-
-        manager.startFlink("flink:1.19", 1, 1);
-        manager.stopFlink();
-        manager.startFlink("flink:1.20", 1, 1);
-        manager.close();
-
-        assertEquals(
-                List.of(attemptRoot.toAbsolutePath(), attemptRoot.toAbsolutePath()),
-                observedRoots);
-        assertEquals(attemptRoot.toAbsolutePath(), manager.checkpointStorageRoot());
-    }
-
-    @Test
-    void assignsUniqueDefaultCheckpointStorageAndRetainsCallerOwnedState() throws Exception {
-        ClusterManager first = new ClusterManager();
-        ClusterManager second = new ClusterManager();
-        assertNotEquals(first.checkpointStorageRoot(), second.checkpointStorageRoot());
-        first.close();
-        second.close();
-
-        Path callerRoot = temporaryDirectory.resolve("retained-state");
-        Files.createDirectories(callerRoot);
-        Files.writeString(callerRoot.resolve("state"), "caller-owned");
-        ClusterManager callerOwned = new ClusterManager(callerRoot);
-        callerOwned.close();
-        assertTrue(Files.exists(callerRoot.resolve("state")));
-    }
-
-    @Test
-    void closeStopsEveryRunningSlotOnceInReverseOrderAndIsIdempotent() throws Exception {
-        RecordingFlinkFactory flink = new RecordingFlinkFactory();
-        ClusterManager manager = manager(flink);
-        manager.startFlink("flink:1.20.0", 1, 3);
-        flink.events.clear();
-
-        manager.close();
-        manager.close();
-
-        assertEquals(
-                List.of(
-                        "stop:taskmanager-3:taskmanager-3-runtime-1",
-                        "stop:taskmanager-2:taskmanager-2-runtime-1",
-                        "stop:taskmanager-1:taskmanager-1-runtime-1",
-                        "stop:jobmanager-1:jobmanager-1-runtime-1"),
-                flink.events);
-    }
-
-    @Test
-    void failedKafkaPreloadStopsTheCandidateAndDoesNotPublishIt() {
-        RecordingKafkaCluster kafka = new RecordingKafkaCluster();
-        kafka.failPreload = true;
-        ClusterManager manager = manager(new RecordingFlinkFactory(), kafka);
-
-        IOException failure = assertThrows(IOException.class, manager::startKafka);
-
-        assertEquals("preload failed", failure.getMessage());
-        assertEquals(List.of("start", "preload", "stop"), kafka.events);
-        assertThrows(
-                IllegalStateException.class,
-                () -> manager.checkKafkaUniqueIds("output", 1));
-        manager.close();
-        assertEquals(List.of("start", "preload", "stop"), kafka.events);
-    }
-
-    @Test
-    void successfulKafkaStartupIsStoppedExactlyOnceByIdempotentClose() throws Exception {
-        RecordingKafkaCluster kafka = new RecordingKafkaCluster();
-        ClusterManager manager = manager(new RecordingFlinkFactory(), kafka);
-
-        manager.startKafka();
-        manager.close();
-        manager.close();
-
-        assertEquals(List.of("start", "preload", "bootstrap", "stop"), kafka.events);
-    }
-
-    @Test
-    void retainsKafkaForACloseRetryWhenFailureCleanupAlsoFails() {
-        RecordingKafkaCluster kafka = new RecordingKafkaCluster();
-        kafka.failPreload = true;
-        kafka.failStopOnce = true;
-        ClusterManager manager = manager(new RecordingFlinkFactory(), kafka);
-
-        IOException failure = assertThrows(IOException.class, manager::startKafka);
-
-        assertEquals(1, failure.getSuppressed().length);
-        assertThrows(
-                IllegalStateException.class,
-                () -> manager.checkKafkaUniqueIds("output", 1));
-        manager.close();
-        manager.close();
-        assertEquals(List.of("start", "preload", "stop", "stop"), kafka.events);
-    }
-
-    @SuppressWarnings("deprecation")
-    @Test
-    void failedAdditionalTaskManagerStartDoesNotSkipItsLogicalOrdinal() throws Exception {
-        RecordingFlinkFactory flink = new RecordingFlinkFactory();
-        try (ClusterManager manager = manager(flink)) {
-            manager.startFlink("flink:1.20.0", 1, 1);
-            flink.failStart.add("taskmanager-2-runtime-1");
-
-            assertThrows(IllegalStateException.class, manager::startNewTaskManager);
-            manager.startNewTaskManager();
-
-            assertEquals(List.of("taskmanager-1", "taskmanager-2"), manager.taskManagerNames());
-            assertEquals(2, flink.generationCount("taskmanager-2"));
-            assertEquals(0, flink.generationCount("taskmanager-3"));
-        }
-    }
-
-    @SuppressWarnings("deprecation")
-    @Test
-    void retainsAFailedAdditionalTaskManagerWhenImmediateCleanupAlsoFails() throws Exception {
-        RecordingFlinkFactory flink = new RecordingFlinkFactory();
-        ClusterManager manager = manager(flink);
-        manager.startFlink("flink:1.20.0", 1, 1);
-        flink.failStart.add("taskmanager-2-runtime-1");
-        flink.failStopOnce.add("taskmanager-2-runtime-1");
-
-        IllegalStateException failure = assertThrows(
-                IllegalStateException.class, manager::startNewTaskManager);
-
-        assertEquals(1, failure.getSuppressed().length);
-        manager.close();
-        assertEquals(
-                2,
-                flink.events.stream()
-                        .filter("stop:taskmanager-2:taskmanager-2-runtime-1"::equals)
-                        .count());
-    }
-
-    @Test
-    void jobManagerStartStopsCandidateWhenItsRestPortCannotBePublished() throws Exception {
-        RecordingFlinkFactory flink = new RecordingFlinkFactory();
-        try (ClusterManager manager = manager(flink)) {
-            manager.startFlink("flink:1.20.0", 1, 1);
-            manager.killJobManager("jobmanager-1");
-            flink.failMappedPort.add("jobmanager-1-runtime-2");
-            flink.events.clear();
-
-            assertThrows(
-                    IllegalStateException.class,
-                    () -> manager.startJobManager("jobmanager-1"));
-
-            assertEquals(
-                    List.of(
-                            "create:jobmanager-1:jobmanager-1-runtime-2",
-                            "start:jobmanager-1:jobmanager-1-runtime-2",
-                            "mapped-port:jobmanager-1:jobmanager-1-runtime-2",
-                            "stop:jobmanager-1:jobmanager-1-runtime-2"),
-                    flink.events);
-            assertFalse(manager.isJobManagerRunning("jobmanager-1"));
-            assertThrows(IllegalStateException.class, manager::getJobManagerRestUrl);
-
-            assertEquals("jobmanager-1-runtime-3", manager.startJobManager("jobmanager-1"));
-            assertTrue(manager.isJobManagerRunning("jobmanager-1"));
-        }
-    }
-
-    @SuppressWarnings("deprecation")
-    @Test
-    void legacyKillThenStartSequenceRestartsThePrimarySlotWithoutLeakingAnExtraWorker()
-            throws Exception {
-        RecordingFlinkFactory flink = new RecordingFlinkFactory();
-        try (ClusterManager manager = manager(flink)) {
-            manager.startFlink("flink:1.19", 1, 1);
-
-            manager.simulateTaskManagerFailureAndRecovery();
-            assertFalse(manager.isTaskManagerRunning("taskmanager-1"));
-            manager.startNewTaskManager();
-
             assertEquals(List.of("taskmanager-1"), manager.taskManagerNames());
+            assertTrue(manager.isJobManagerRunning("jobmanager-1"));
             assertTrue(manager.isTaskManagerRunning("taskmanager-1"));
-            assertEquals(2, flink.generationCount("taskmanager-1"));
+            assertEquals(
+                    List.of("jobmanager-1", "taskmanager-1"),
+                    manager.provisioningHistory().stream()
+                            .map(FlinkComponentProvisioningEvidence::logicalName)
+                            .toList());
         }
     }
 
-    private static ClusterManager manager(RecordingFlinkFactory flink) {
-        return manager(flink, new NoOpKafkaCluster());
+    @Test
+    void killDoesNotQueryTheRemovedHandleAndRestartReusesTheVerifiedTarget() {
+        RecordingFactory factory = new RecordingFactory();
+        try (ClusterManager manager = manager(factory)) {
+            manager.startFlink(target());
+
+            assertEquals("taskmanager-1-runtime-1",
+                    manager.killTaskManager("taskmanager-1", ACTION_TIMEOUT));
+            assertFalse(manager.isTaskManagerRunning("taskmanager-1"));
+            assertEquals("taskmanager-1-runtime-2",
+                    manager.restartTaskManager("taskmanager-1", ACTION_TIMEOUT));
+            assertTrue(manager.isTaskManagerRunning("taskmanager-1"));
+            assertEquals(3, manager.provisioningHistory().size());
+            assertEquals(
+                    target().connectorBundle().targetBindingSha256(),
+                    manager.provisioningHistory().getLast().targetBindingSha256());
+        }
     }
 
-    private static ClusterManager manager(
-            RecordingFlinkFactory flink, KafkaCluster kafka) {
+    @Test
+    void refusesToReplaceARunningTaskManager() {
+        try (ClusterManager manager = manager(new RecordingFactory())) {
+            manager.startFlink(target());
+
+            assertThrows(
+                    IllegalStateException.class,
+                    () -> manager.restartTaskManager("taskmanager-1", ACTION_TIMEOUT));
+        }
+    }
+
+    @Test
+    void taskManagerActionUsesOneDeadlineAndDoesNotStartTheTerminalFence() {
+        RecordingFactory factory = new RecordingFactory();
+        AtomicLong monotonicNanos = new AtomicLong();
+        try (ClusterManager manager = manager(
+                factory, () -> monotonicNanos.getAndAdd(2L))) {
+            manager.startFlink(target());
+
+            ContainerOperationTimeoutException timeout = assertThrows(
+                    ContainerOperationTimeoutException.class,
+                    () -> manager.killTaskManager(
+                            "taskmanager-1", Duration.ofNanos(5)));
+
+            assertEquals("performing TaskManager kill for taskmanager-1", timeout.scope());
+            assertEquals(Duration.ofNanos(5), timeout.timeout());
+            assertFalse(manager.isTaskManagerRunning("taskmanager-1"));
+
+            // A phase-action timeout must not set the irreversible process-fence latch. The
+            // successfully removed handle is already released, so the next action can replace it.
+            assertEquals("taskmanager-1-runtime-2", manager.restartTaskManager(
+                    "taskmanager-1", Duration.ofSeconds(1)));
+            assertTrue(manager.isTaskManagerRunning("taskmanager-1"));
+        }
+    }
+
+    @Test
+    void writeFenceKillsTaskManagerBeforeJobManagerAndDisablesRestarts() {
+        RecordingFactory factory = new RecordingFactory();
+        try (ClusterManager manager = manager(factory)) {
+            manager.startFlink(target());
+            factory.events.clear();
+
+            FlinkProcessWriteFenceEvidence evidence =
+                    manager.establishFlinkProcessWriteFence(Duration.ofSeconds(5));
+
+            assertEquals(
+                    List.of("taskmanager-1", "jobmanager-1"),
+                    evidence.components().stream()
+                            .map(FlinkProcessWriteFenceEvidence.Component::logicalName)
+                            .toList());
+            assertEquals(
+                    List.of("fence-kill:taskmanager-1", "fence-kill:jobmanager-1"),
+                    factory.events.stream().filter(event -> event.startsWith("fence-kill"))
+                            .toList());
+            assertThrows(
+                    IllegalStateException.class,
+                    () -> manager.restartTaskManager("taskmanager-1", ACTION_TIMEOUT));
+        }
+    }
+
+    @Test
+    void failedStartupCleansAlreadyCreatedComponentsAndAllowsClose() {
+        RecordingFactory factory = new RecordingFactory();
+        factory.failTaskManagerStart = true;
+        ClusterManager manager = manager(factory);
+
+        assertThrows(IllegalStateException.class, () -> manager.startFlink(target()));
+        assertEquals(
+                List.of("stop:taskmanager-1", "stop:jobmanager-1"),
+                factory.events.stream().filter(event -> event.startsWith("stop:"))
+                        .toList());
+
+        manager.close();
+        manager.close();
+    }
+
+    @Test
+    void rejectsProvisioningEvidenceThatDoesNotMatchTheTarget() {
+        RecordingFactory factory = new RecordingFactory();
+        factory.badEvidence = true;
+        ClusterManager manager = manager(factory);
+
+        assertThrows(
+                ConnectorBundleProvisioningException.class,
+                () -> manager.startFlink(target()));
+
+        manager.close();
+    }
+
+    private ClusterManager manager(RecordingFactory factory) {
+        return manager(factory, System::nanoTime);
+    }
+
+    private ClusterManager manager(
+            RecordingFactory factory,
+            java.util.function.LongSupplier monotonicNanos) {
         return new ClusterManager(
                 Network.SHARED,
                 false,
-                (image, network, checkpointRoot) -> flink,
-                (network, messages) -> kafka);
+                (runtimeTarget, network, checkpointRoot) -> factory.bind(runtimeTarget),
+                (network, runtimeTarget) -> {
+                    throw new AssertionError("Kafka must not be started");
+                },
+                temporaryDirectory.resolve("checkpoints"),
+                monotonicNanos);
     }
 
-    private static Network recordingNetwork(
-            List<String> events, AtomicBoolean failCloseOnce) {
-        return (Network) Proxy.newProxyInstance(
-                Network.class.getClassLoader(),
-                new Class<?>[]{Network.class},
-                (proxy, method, args) -> switch (method.getName()) {
-                    case "close" -> {
-                        events.add("close");
-                        if (failCloseOnce.compareAndSet(true, false)) {
-                            throw new IllegalStateException("network close failed");
-                        }
-                        yield null;
-                    }
-                    case "getId" -> "recording-network";
-                    case "apply" -> args[0];
-                    case "toString" -> "recording-network";
-                    default -> null;
-                });
+    private static FlinkRuntimeTarget target() {
+        String image = "flink:2.2.0";
+        return FlinkRuntimeTarget.withConnectorBundle(
+                image,
+                new FlinkConnectorBundleInstallation(
+                        image, List.of(), new ConnectorClasspathManifest(List.of())));
     }
 
-    private static final class RecordingFlinkFactory implements FlinkComponentFactory {
+    private static final class RecordingFactory implements FlinkComponentFactory {
         private final List<String> events = new ArrayList<>();
         private final Map<String, Integer> generations = new LinkedHashMap<>();
-        private final Set<String> failStart = new java.util.HashSet<>();
-        private final Set<String> failStopOnce = new java.util.HashSet<>();
-        private final Set<String> failMappedPort = new java.util.HashSet<>();
+        private FlinkRuntimeTarget target;
+        private boolean failTaskManagerStart;
+        private boolean badEvidence;
+
+        private RecordingFactory bind(FlinkRuntimeTarget target) {
+            this.target = target;
+            return this;
+        }
 
         @Override
         public ContainerHandle newJobManager(String logicalName) {
-            return newHandle(logicalName, 18081);
+            return newHandle(logicalName, FlinkComponentRole.JOB_MANAGER);
         }
 
         @Override
         public ContainerHandle newTaskManager(String logicalName) {
-            return newHandle(logicalName, -1);
+            return newHandle(logicalName, FlinkComponentRole.TASK_MANAGER);
         }
 
-        int generationCount(String logicalName) {
-            return generations.getOrDefault(logicalName, 0);
-        }
-
-        private ContainerHandle newHandle(String logicalName, int mappedPort) {
-            int generation = generations.merge(logicalName, 1, Integer::sum);
-            String runtimeId = logicalName + "-runtime-" + generation;
-            events.add("create:" + logicalName + ":" + runtimeId);
+        private ContainerHandle newHandle(String name, FlinkComponentRole role) {
+            int generation = generations.merge(name, 1, Integer::sum);
             return new RecordingHandle(
-                    runtimeId, mappedPort, events, failStart, failStopOnce, failMappedPort);
+                    name,
+                    role,
+                    name + "-runtime-" + generation,
+                    target,
+                    events,
+                    failTaskManagerStart && role == FlinkComponentRole.TASK_MANAGER,
+                    badEvidence);
         }
     }
 
     private static final class RecordingHandle implements ContainerHandle {
+        private final String name;
+        private final FlinkComponentRole role;
         private final String runtimeId;
-        private final int mappedPort;
+        private final FlinkRuntimeTarget target;
         private final List<String> events;
-        private final Set<String> failStart;
-        private final Set<String> failStopOnce;
-        private final Set<String> failMappedPort;
+        private final boolean failStart;
+        private final boolean badEvidence;
         private boolean running;
+        private boolean removed;
 
         private RecordingHandle(
+                String name,
+                FlinkComponentRole role,
                 String runtimeId,
-                int mappedPort,
+                FlinkRuntimeTarget target,
                 List<String> events,
-                Set<String> failStart,
-                Set<String> failStopOnce,
-                Set<String> failMappedPort) {
+                boolean failStart,
+                boolean badEvidence) {
+            this.name = name;
+            this.role = role;
             this.runtimeId = runtimeId;
-            this.mappedPort = mappedPort;
+            this.target = target;
             this.events = events;
             this.failStart = failStart;
-            this.failStopOnce = failStopOnce;
-            this.failMappedPort = failMappedPort;
+            this.badEvidence = badEvidence;
         }
 
         @Override
         public void start() {
-            events.add("start:" + logicalName() + ":" + runtimeId);
-            if (failStart.remove(runtimeId)) {
-                throw new IllegalStateException("start failed: " + runtimeId);
-            }
+            events.add("start:" + name);
+            removed = false;
             running = true;
+            if (failStart) {
+                throw new IllegalStateException("start failed");
+            }
+        }
+
+        @Override
+        public void startWithin(ContainerOperationDeadline deadline) {
+            deadline.remaining("test start");
+            start();
         }
 
         @Override
         public void stop() {
-            events.add("stop:" + logicalName() + ":" + runtimeId);
-            if (failStopOnce.remove(runtimeId)) {
-                throw new IllegalStateException("stop failed: " + runtimeId);
-            }
+            events.add("stop:" + name);
             running = false;
         }
 
         @Override
-        public void kill() {
-            events.add("kill:" + logicalName() + ":" + runtimeId);
+        public void killAndRemoveWithin(ContainerOperationDeadline deadline) {
+            deadline.remaining("test kill");
+            events.add("kill:" + name);
             running = false;
+            removed = true;
+        }
+
+        @Override
+        public void killProcessForWriteFence(ContainerOperationDeadline deadline) {
+            deadline.remaining("test fence kill");
+            events.add("fence-kill:" + name);
+            running = false;
+        }
+
+        @Override
+        public boolean isRunningWithin(ContainerOperationDeadline deadline) {
+            deadline.remaining("test liveness");
+            if (removed) {
+                throw new IllegalStateException(
+                        "Removed container has no runtime ID: " + name);
+            }
+            return running;
         }
 
         @Override
@@ -547,110 +302,29 @@ class ClusterManagerTest {
 
         @Override
         public int mappedPort(int containerPort) {
-            if (failMappedPort.remove(runtimeId)) {
-                events.add("mapped-port:" + logicalName() + ":" + runtimeId);
-                throw new IllegalStateException("mapped port failed: " + runtimeId);
-            }
-            return mappedPort;
+            return 18081;
         }
 
         @Override
         public String runtimeId() {
+            if (removed) {
+                throw new IllegalStateException(
+                        "Removed container has no runtime ID: " + name);
+            }
             return runtimeId;
         }
 
-        private String logicalName() {
-            return runtimeId.substring(0, runtimeId.indexOf("-runtime-"));
-        }
-    }
-
-    private static final class NoOpKafkaCluster implements KafkaCluster {
         @Override
-        public void start() {
-        }
-
-        @Override
-        public void stop() {
-        }
-
-        @Override
-        public String getBootstrapServers() {
-            return "kafka:9092";
-        }
-
-        @Override
-        public void createAndFillInInputTopic() {
-        }
-
-        @Override
-        public void checkKafkaUniqueIds(String topic, int expectedMessages) {
-        }
-
-        @Override
-        public boolean waitForAndValidateKafkaOutput(String topic, int expectedMessages) {
-            return true;
-        }
-
-        @Override
-        public boolean performFinalValidation(String topic, int expectedMessages) {
-            return true;
-        }
-
-        @Override
-        public void printMessages(String topic, int timeoutMs, int maxMessages)
-                throws InterruptedException, IOException {
-        }
-    }
-
-    private static final class RecordingKafkaCluster implements KafkaCluster {
-        private final List<String> events = new ArrayList<>();
-        private boolean failPreload;
-        private boolean failStopOnce;
-
-        @Override
-        public void start() {
-            events.add("start");
-        }
-
-        @Override
-        public void stop() {
-            events.add("stop");
-            if (failStopOnce) {
-                failStopOnce = false;
-                throw new IllegalStateException("stop failed");
-            }
-        }
-
-        @Override
-        public String getBootstrapServers() {
-            events.add("bootstrap");
-            return "kafka:9092";
-        }
-
-        @Override
-        public void createAndFillInInputTopic() throws IOException {
-            events.add("preload");
-            if (failPreload) {
-                throw new IOException("preload failed");
-            }
-        }
-
-        @Override
-        public void checkKafkaUniqueIds(String topic, int expectedMessages) {
-        }
-
-        @Override
-        public boolean waitForAndValidateKafkaOutput(String topic, int expectedMessages) {
-            return true;
-        }
-
-        @Override
-        public boolean performFinalValidation(String topic, int expectedMessages) {
-            return true;
-        }
-
-        @Override
-        public void printMessages(String topic, int timeoutMs, int maxMessages) {
+        public FlinkComponentProvisioningEvidence provisioningEvidence() {
+            FlinkConnectorBundleInstallation installation = target.connectorBundle();
+            return FlinkComponentProvisioningEvidence.verified(
+                    name,
+                    role,
+                    runtimeId,
+                    badEvidence ? "flink:2.2.1" : target.imageReference(),
+                    installation.targetBindingSha256(),
+                    installation.classpathManifest().manifestSha256(),
+                    List.of());
         }
     }
 }

@@ -1,17 +1,17 @@
 package org.savonitar.flink.stability.cli;
 
 import com.fasterxml.jackson.databind.JsonNode;
-import org.savonitar.flink.stability.core.spec.ArtifactPlanResolver;
-import org.savonitar.flink.stability.core.spec.ArtifactResolutionOptions;
-import org.savonitar.flink.stability.core.spec.PreparedScenarioPlan;
-import org.savonitar.flink.stability.core.spec.PreparedSuitePlan;
-import org.savonitar.flink.stability.core.spec.ResolutionRequest;
-import org.savonitar.flink.stability.core.spec.ResolvedScenarioPlan;
-import org.savonitar.flink.stability.core.spec.ResolvedSuitePlan;
-import org.savonitar.flink.stability.core.spec.ScenarioPlanResolver;
-import org.savonitar.flink.stability.core.spec.SpecificationCatalog;
-import org.savonitar.flink.stability.core.spec.SpecificationCatalogLoader;
-import org.savonitar.flink.stability.core.spec.SuitePlanResolver;
+import org.savonitar.flink.stability.core.artifact.ArtifactPlanResolver;
+import org.savonitar.flink.stability.core.artifact.ArtifactResolutionOptions;
+import org.savonitar.flink.stability.core.artifact.PreparedScenarioPlan;
+import org.savonitar.flink.stability.core.artifact.PreparedSuitePlan;
+import org.savonitar.flink.stability.core.spec.resolution.ResolutionRequest;
+import org.savonitar.flink.stability.core.spec.resolution.ResolvedScenarioPlan;
+import org.savonitar.flink.stability.core.spec.resolution.ResolvedSuitePlan;
+import org.savonitar.flink.stability.core.spec.resolution.ScenarioPlanResolver;
+import org.savonitar.flink.stability.core.spec.document.SpecificationCatalog;
+import org.savonitar.flink.stability.core.spec.document.SpecificationCatalogLoader;
+import org.savonitar.flink.stability.core.spec.resolution.SuitePlanResolver;
 
 import java.nio.file.Path;
 import java.util.Map;

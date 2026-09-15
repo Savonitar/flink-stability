@@ -8,6 +8,6 @@ public class Main {
     }
 
     static int execute(String... args) {
-        return new CommandLine(new ChaosKitCommand()).execute(args);
+        return new CommandLine(new FlinkStabilityCommand()).execute(args);
     }
 }

@@ -1,19 +1,21 @@
 package org.savonitar.flink.stability.cli;
 
-import org.savonitar.flink.stability.core.spec.ArtifactIssue;
-import org.savonitar.flink.stability.core.spec.ArtifactResolutionException;
-import org.savonitar.flink.stability.core.spec.CatalogIssue;
-import org.savonitar.flink.stability.core.spec.CatalogValidationException;
-import org.savonitar.flink.stability.core.spec.DocumentValidationException;
-import org.savonitar.flink.stability.core.spec.ExpectationIssue;
-import org.savonitar.flink.stability.core.spec.ExpectedResultSelectionException;
-import org.savonitar.flink.stability.core.spec.PreflightIssue;
-import org.savonitar.flink.stability.core.spec.ResolutionIssue;
-import org.savonitar.flink.stability.core.spec.ScenarioPreflightException;
-import org.savonitar.flink.stability.core.spec.ScenarioResolutionException;
-import org.savonitar.flink.stability.core.spec.SuitePlanningException;
-import org.savonitar.flink.stability.core.spec.SuitePlanningIssue;
-import org.savonitar.flink.stability.core.spec.ValidationIssue;
+import org.savonitar.flink.stability.core.artifact.ArtifactIssue;
+import org.savonitar.flink.stability.core.artifact.ArtifactResolutionException;
+import org.savonitar.flink.stability.core.spec.document.CatalogIssue;
+import org.savonitar.flink.stability.core.spec.document.CatalogValidationException;
+import org.savonitar.flink.stability.core.spec.document.DocumentValidationException;
+import org.savonitar.flink.stability.core.spec.resolution.ExpectationIssue;
+import org.savonitar.flink.stability.core.spec.resolution.ExpectedResultSelectionException;
+import org.savonitar.flink.stability.core.spec.resolution.PreflightIssue;
+import org.savonitar.flink.stability.core.spec.resolution.ResolutionIssue;
+import org.savonitar.flink.stability.core.spec.resolution.ScenarioPreflightException;
+import org.savonitar.flink.stability.core.spec.resolution.ScenarioResolutionException;
+import org.savonitar.flink.stability.core.spec.resolution.SuitePlanningException;
+import org.savonitar.flink.stability.core.spec.resolution.SuitePlanningIssue;
+import org.savonitar.flink.stability.core.spec.document.ValidationIssue;
+import org.savonitar.flink.stability.core.execution.plan.RunnerCapabilityException;
+import org.savonitar.flink.stability.core.execution.plan.RunnerCapabilityIssue;
 
 import java.nio.file.Path;
 import java.util.ArrayList;
@@ -65,6 +67,11 @@ final class ValidationDiagnosticRenderer {
                         + issue.entry().entryId() + "'";
                 lines.add(line(issue.source(), root, entry + ", " + scope(issue.scope()),
                         issue.code(), issue.path(), issue.message()));
+            }
+        } else if (failure instanceof RunnerCapabilityException exception) {
+            for (RunnerCapabilityIssue issue : exception.issues()) {
+                lines.add(line(issue.source(), root, scope(issue.scope()), issue.code(),
+                        issue.path(), issue.message()));
             }
         } else {
             throw new IllegalArgumentException("Unsupported validation failure", failure);

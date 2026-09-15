@@ -4,14 +4,18 @@ import com.github.dockerjava.api.model.AccessMode;
 import com.github.dockerjava.api.model.Bind;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
+import org.savonitar.flink.stability.runtime.api.ConnectorBundleProvisioningException;
+import org.savonitar.flink.stability.runtime.api.ConnectorClasspathManifest;
+import org.savonitar.flink.stability.runtime.api.FlinkConnectorBundleInstallation;
+import org.savonitar.flink.stability.runtime.api.FlinkRuntimeTarget;
 import org.testcontainers.containers.GenericContainer;
 import org.testcontainers.containers.Network;
+import org.testcontainers.containers.wait.strategy.HttpWaitStrategy;
 
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.attribute.PosixFilePermission;
 import java.util.List;
-import java.util.Set;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
@@ -26,7 +30,7 @@ class FlinkContainerTest {
     @Test
     void mountsTheSameWritableCheckpointDirectoryIntoEveryFlinkProcess() {
         FlinkContainer factory = new FlinkContainer(
-                "flink:1.20.0", Network.SHARED, temporaryDirectory.resolve("attempt-a"));
+                emptyTarget(), Network.SHARED, temporaryDirectory.resolve("attempt-a"));
 
         GenericContainer<?> jobManager = factory.createJobManager("jobmanager-1");
         GenericContainer<?> firstTaskManager = factory.createTaskManager("taskmanager-1");
@@ -56,13 +60,13 @@ class FlinkContainerTest {
     @Test
     void assignsCanonicalLogicalAliasesAndLabels() {
         FlinkContainer factory = new FlinkContainer(
-                "flink:1.20.0", Network.SHARED, temporaryDirectory.resolve("attempt-b"));
+                emptyTarget(), Network.SHARED, temporaryDirectory.resolve("attempt-b"));
 
         GenericContainer<?> jobManager = factory.createJobManager("jobmanager-1");
         GenericContainer<?> taskManager = factory.createTaskManager("taskmanager-2");
 
         // Testcontainers prepends its own generated alias; the harness aliases remain stable.
-        assertTrue(jobManager.getNetworkAliases().containsAll(List.of("jobmanager-1", "jobmanager")));
+        assertTrue(jobManager.getNetworkAliases().contains("jobmanager-1"));
         assertTrue(taskManager.getNetworkAliases().contains("taskmanager-2"));
         assertEquals(
                 "jobmanager-1", jobManager.getEnvMap().get("JOB_MANAGER_RPC_ADDRESS"));
@@ -74,6 +78,9 @@ class FlinkContainerTest {
         assertEquals(
                 "taskmanager-2",
                 taskManager.getLabels().get("org.savonitar.flink-stability.component"));
+        assertInstanceOf(
+                HttpWaitStrategy.class,
+                ((VerifiedFlinkContainer) jobManager).configuredWaitStrategy());
     }
 
     @Test
@@ -102,29 +109,25 @@ class FlinkContainerTest {
                 ConnectorClasspathManifest.CONTAINER_MANIFEST_PATH);
         assertEquals(expectedTargets, jobManager.configuredBundleTargets());
         assertEquals(expectedTargets, taskManager.configuredBundleTargets());
-        assertEquals(
-                Set.of(manifest.entries().getFirst().containerPath()),
-                Set.copyOf(jobManager.getCopyToFileContainerPathMap().values()));
-        assertEquals(
-                Set.of(manifest.entries().getFirst().containerPath()),
-                Set.copyOf(taskManager.getCopyToFileContainerPathMap().values()));
         assertEquals(target, factory.runtimeTarget());
     }
 
     @Test
-    void legacyFactoryConfiguresNoConnectorCopies() {
+    void emptyBundleStillCopiesTheCanonicalVerificationManifest() {
         FlinkContainer factory = new FlinkContainer(
-                "flink:2.2.0", Network.SHARED, temporaryDirectory.resolve("attempt-d"));
+                emptyTarget(), Network.SHARED, temporaryDirectory.resolve("attempt-d"));
 
         VerifiedFlinkContainer jobManager = assertInstanceOf(
                 VerifiedFlinkContainer.class, factory.createJobManager("jobmanager-1"));
         VerifiedFlinkContainer taskManager = assertInstanceOf(
                 VerifiedFlinkContainer.class, factory.createTaskManager("taskmanager-1"));
 
-        assertEquals(List.of(), jobManager.configuredBundleTargets());
-        assertEquals(List.of(), taskManager.configuredBundleTargets());
-        assertEquals(0, jobManager.getCopyToFileContainerPathMap().size());
-        assertEquals(0, taskManager.getCopyToFileContainerPathMap().size());
+        assertEquals(
+                List.of(ConnectorClasspathManifest.CONTAINER_MANIFEST_PATH),
+                jobManager.configuredBundleTargets());
+        assertEquals(
+                List.of(ConnectorClasspathManifest.CONTAINER_MANIFEST_PATH),
+                taskManager.configuredBundleTargets());
     }
 
     @Test
@@ -153,6 +156,14 @@ class FlinkContainerTest {
 
     private static Bind onlyBind(GenericContainer<?> container) {
         return container.getBinds().getFirst();
+    }
+
+    private static FlinkRuntimeTarget emptyTarget() {
+        String image = "flink:2.2.0";
+        return FlinkRuntimeTarget.withConnectorBundle(
+                image,
+                new FlinkConnectorBundleInstallation(
+                        image, List.of(), new ConnectorClasspathManifest(List.of())));
     }
 
     private static void assertCheckpointMount(Bind bind) {

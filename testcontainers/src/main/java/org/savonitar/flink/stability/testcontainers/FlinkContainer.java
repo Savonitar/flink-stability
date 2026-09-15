@@ -1,10 +1,13 @@
 package org.savonitar.flink.stability.testcontainers;
 
+import org.savonitar.flink.stability.runtime.api.FlinkComponentRole;
+import org.savonitar.flink.stability.runtime.api.FlinkRuntimeTarget;
 import org.slf4j.LoggerFactory;
 import org.testcontainers.containers.BindMode;
 import org.testcontainers.containers.GenericContainer;
 import org.testcontainers.containers.Network;
 import org.testcontainers.containers.output.Slf4jLogConsumer;
+import org.testcontainers.containers.wait.strategy.Wait;
 import org.testcontainers.utility.DockerImageName;
 
 import java.io.IOException;
@@ -12,38 +15,23 @@ import java.io.UncheckedIOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.attribute.PosixFilePermissions;
+import java.time.Duration;
 import java.util.Objects;
 
-public class FlinkContainer implements FlinkComponentFactory {
+final class FlinkContainer implements FlinkComponentFactory {
     private static final String CHECKPOINT_PATH = "/flink/checkpoints";
-    public static final String SAVEPOINT_PATH = "file:" + CHECKPOINT_PATH;
     private static final String TASK_SLOTS_PROPERTY = "taskmanager.numberOfTaskSlots: 2";
-    private static final String LEGACY_JOB_MANAGER_ALIAS = "jobmanager";
     private static final String PRIMARY_JOB_MANAGER_ALIAS = "jobmanager-1";
     private static final String COMPONENT_LABEL = "org.savonitar.flink-stability.component";
-    public static final int JOB_MANAGER_PORT = 8081;
+    static final int JOB_MANAGER_PORT = 8081;
 
     private final DockerImageName flinkImage;
     private final FlinkRuntimeTarget runtimeTarget;
     private final Network network;
     private final Path checkpointStorageRoot;
 
-    /** Legacy direct-construction path; prefer the explicit attempt directory overload. */
-    @Deprecated
-    public FlinkContainer(String imageName, Network network) {
-        this(FlinkRuntimeTarget.legacy(imageName), network, Path.of("checkpoints", "legacy"));
-    }
-
-    /**
-     * Creates a component factory sharing one checkpoint directory. Existing directories must be
-     * writable by the Flink container UID; a newly created isolated directory is made writable.
-     */
-    public FlinkContainer(String imageName, Network network, Path checkpointStorageRoot) {
-        this(FlinkRuntimeTarget.legacy(imageName), network, checkpointStorageRoot);
-    }
-
     /** Creates a factory for one exact image/bundle binding. */
-    public FlinkContainer(
+    FlinkContainer(
             FlinkRuntimeTarget runtimeTarget,
             Network network,
             Path checkpointStorageRoot) {
@@ -54,14 +42,10 @@ public class FlinkContainer implements FlinkComponentFactory {
         this.checkpointStorageRoot = prepareCheckpointStorage(checkpointStorageRoot);
     }
 
-    public GenericContainer<?> createJobManager() {
-        return createJobManager(PRIMARY_JOB_MANAGER_ALIAS);
-    }
-
     GenericContainer<?> createJobManager(String logicalName) {
         return new VerifiedFlinkContainer(flinkImage, runtimeTarget)
                 .withNetwork(network)
-                .withNetworkAliases(logicalName, LEGACY_JOB_MANAGER_ALIAS)
+                .withNetworkAliases(logicalName)
                 .withLabel(COMPONENT_LABEL, logicalName)
                 .withExposedPorts(JOB_MANAGER_PORT)
                 .withFileSystemBind(
@@ -69,11 +53,11 @@ public class FlinkContainer implements FlinkComponentFactory {
                 .withEnv("JOB_MANAGER_RPC_ADDRESS", PRIMARY_JOB_MANAGER_ALIAS)
                 .withEnv("FLINK_PROPERTIES", TASK_SLOTS_PROPERTY)
                 .withCommand("jobmanager")
+                .waitingFor(Wait.forHttp("/overview")
+                        .forPort(JOB_MANAGER_PORT)
+                        .forStatusCode(200)
+                        .withStartupTimeout(Duration.ofMinutes(2)))
                 .withLogConsumer(createLogConsumer("JOB_MANAGER_LOGS." + logicalName));
-    }
-
-    public GenericContainer<?> createTaskManager() {
-        return createTaskManager("taskmanager-1");
     }
 
     GenericContainer<?> createTaskManager(String logicalName) {
@@ -107,11 +91,11 @@ public class FlinkContainer implements FlinkComponentFactory {
         return new Slf4jLogConsumer(LoggerFactory.getLogger(loggerName));
     }
 
-    public Path checkpointStorageRoot() {
+    Path checkpointStorageRoot() {
         return checkpointStorageRoot;
     }
 
-    public FlinkRuntimeTarget runtimeTarget() {
+    FlinkRuntimeTarget runtimeTarget() {
         return runtimeTarget;
     }
 

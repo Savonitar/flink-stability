@@ -1,7 +1,13 @@
 package org.savonitar.flink.stability.testcontainers;
 
+import org.savonitar.flink.stability.runtime.api.ConnectorBundleProvisioningException;
+import org.savonitar.flink.stability.runtime.api.ConnectorClasspathManifest;
+import org.savonitar.flink.stability.runtime.api.FlinkConnectorBundleInstallation;
+import org.savonitar.flink.stability.runtime.api.FlinkRuntimeTarget;
+import org.savonitar.flink.stability.runtime.api.ProvisionedConnectorArtifact;
 import org.testcontainers.containers.GenericContainer;
 import org.testcontainers.images.builder.Transferable;
+import org.testcontainers.containers.wait.strategy.WaitStrategy;
 import org.testcontainers.utility.DockerImageName;
 import org.testcontainers.utility.MountableFile;
 
@@ -21,20 +27,18 @@ final class VerifiedFlinkContainer extends GenericContainer<VerifiedFlinkContain
     VerifiedFlinkContainer(DockerImageName image, FlinkRuntimeTarget runtimeTarget) {
         super(Objects.requireNonNull(image, "image"));
         this.runtimeTarget = Objects.requireNonNull(runtimeTarget, "runtimeTarget");
-        runtimeTarget.connectorBundle().ifPresent(installation -> {
-            ConnectorClasspathManifest manifest = installation.classpathManifest();
-            manifest.verifyHostFiles();
-            for (ConnectorClasspathManifest.Entry entry : manifest.entries()) {
-                withCopyFileToContainer(
-                        MountableFile.forHostPath(entry.preparedPath(), READ_ONLY_FILE_MODE),
-                        entry.containerPath());
-                configuredBundleTargets.add(entry.containerPath());
-            }
-            withCopyToContainer(
-                    Transferable.of(manifest.canonicalBytes(), READ_ONLY_FILE_MODE),
-                    ConnectorClasspathManifest.CONTAINER_MANIFEST_PATH);
-            configuredBundleTargets.add(ConnectorClasspathManifest.CONTAINER_MANIFEST_PATH);
-        });
+        ConnectorClasspathManifest manifest = runtimeTarget.connectorBundle().classpathManifest();
+        manifest.verifyHostFiles();
+        for (ConnectorClasspathManifest.Entry entry : manifest.entries()) {
+            withCopyFileToContainer(
+                    MountableFile.forHostPath(entry.preparedPath(), READ_ONLY_FILE_MODE),
+                    entry.containerPath());
+            configuredBundleTargets.add(entry.containerPath());
+        }
+        withCopyToContainer(
+                Transferable.of(manifest.canonicalBytes(), READ_ONLY_FILE_MODE),
+                ConnectorClasspathManifest.CONTAINER_MANIFEST_PATH);
+        configuredBundleTargets.add(ConnectorClasspathManifest.CONTAINER_MANIFEST_PATH);
     }
 
     @Override
@@ -42,7 +46,7 @@ final class VerifiedFlinkContainer extends GenericContainer<VerifiedFlinkContain
         super.containerIsCreated(containerId);
         // Testcontainers 1.21 invokes this hook after its configured archive copies and before
         // Docker's startContainer command. A mismatch therefore prevents the Flink entrypoint.
-        runtimeTarget.connectorBundle().ifPresent(this::verifyCopiedBundle);
+        verifyCopiedBundle(runtimeTarget.connectorBundle());
     }
 
     List<String> configuredBundleTargets() {
@@ -51,6 +55,10 @@ final class VerifiedFlinkContainer extends GenericContainer<VerifiedFlinkContain
 
     ConnectorBundleVerification connectorBundleVerification() {
         return verification;
+    }
+
+    WaitStrategy configuredWaitStrategy() {
+        return getWaitStrategy();
     }
 
     private void verifyCopiedBundle(FlinkConnectorBundleInstallation installation) {

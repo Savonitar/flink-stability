@@ -38,6 +38,11 @@
       "$ref": "#/$defs/nonNegativeIntegerOrTemplate",
       "default": 1
     },
+    "completion_timeout": {
+      "$ref": "#/$defs/durationOrTemplate",
+      "description": "Absolute time allowed for submitted bounded jobs to reach FINISHED before the runner force-fences Flink and fails verification.",
+      "default": "2m"
+    },
     "setup": {
       "$ref": "#/$defs/setup"
     },
@@ -390,7 +395,8 @@
       ],
       "properties": {
         "image": {
-          "$ref": "#/$defs/nonEmptyString"
+          "$ref": "#/$defs/nonEmptyString",
+          "description": "Resolved image must identify the registered Apache Kafka 4.0.x broker line in v1."
         },
         "mode": {
           "$ref": "#/$defs/nonEmptyString",
@@ -747,7 +753,8 @@
           "default": "auto"
         },
         "jar": {
-          "$ref": "#/$defs/nonEmptyString"
+          "$ref": "#/$defs/nonEmptyString",
+          "description": "Executable JAR whose main manifest declares Flink-Stability-Workload-Protocol: v1."
         },
         "connectors": {
           "type": "array",
@@ -761,16 +768,26 @@
           "$ref": "#/$defs/positiveIntegerOrTemplate"
         },
         "state_backend": {
-          "$ref": "#/$defs/stateBackend"
+          "$ref": "#/$defs/stateBackend",
+          "default": "hashmap"
         },
         "state_ttl": {
-          "$ref": "#/$defs/stateTtl"
+          "$ref": "#/$defs/stateTtl",
+          "default": {
+            "enabled": false
+          }
         },
         "watermarks": {
-          "$ref": "#/$defs/watermarks"
+          "$ref": "#/$defs/watermarks",
+          "default": {
+            "strategy": "no-watermarks"
+          }
         },
         "restart_strategy": {
-          "$ref": "#/$defs/restartStrategy"
+          "$ref": "#/$defs/restartStrategy",
+          "default": {
+            "type": "flink-default"
+          }
         },
         "source": {
           "$ref": "#/$defs/topicRef"
@@ -914,7 +931,10 @@
           ]
         },
         "storage": {
-          "$ref": "#/$defs/checkpointStorage"
+          "$ref": "#/$defs/checkpointStorage",
+          "default": {
+            "type": "jobmanager"
+          }
         }
       }
     },
@@ -937,10 +957,10 @@
         },
         {
           "type": "object",
+          "description": "Harness-managed filesystem storage; the runner generates file:/flink/checkpoints/attempt-<ordinal>-<nonce>/<job-alias> and no public path is accepted.",
           "additionalProperties": false,
           "required": [
-            "type",
-            "path"
+            "type"
           ],
           "properties": {
             "type": {
@@ -948,9 +968,6 @@
               "enum": [
                 "filesystem"
               ]
-            },
-            "path": {
-              "$ref": "#/$defs/nonEmptyString"
             }
           }
         },
@@ -963,9 +980,6 @@
           "properties": {
             "type": {
               "$ref": "#/$defs/templatedString"
-            },
-            "path": {
-              "$ref": "#/$defs/nonEmptyString"
             }
           }
         }
@@ -1112,6 +1126,18 @@
     },
     "restartStrategy": {
       "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "type"
+          ],
+          "properties": {
+            "type": {
+              "const": "flink-default"
+            }
+          }
+        },
         {
           "type": "object",
           "additionalProperties": false,
@@ -1992,6 +2018,11 @@
         },
         "expected": {
           "const": "input-manifest"
+        },
+        "timeout": {
+          "$ref": "#/$defs/durationOrTemplate",
+          "description": "Absolute validation deadline; for terminal invocation it begins immediately after the Flink write fence, before topic/partition discovery. A read_uncommitted high-watermark boundary is captured once as the first range-reading snapshot operation; a separate read_committed consumer must traverse that fixed boundary, and beginning-offset capture, records, decoding, and comparison share the same deadline.",
+          "default": "2m"
         }
       }
     },
@@ -2016,6 +2047,11 @@
         },
         "stabilization_timeout": {
           "$ref": "#/$defs/durationOrTemplate"
+        },
+        "timeout": {
+          "$ref": "#/$defs/durationOrTemplate",
+          "description": "Absolute validation deadline; for terminal invocation it begins immediately after the Flink write fence and transaction-state observation/stabilization share it.",
+          "default": "2m"
         }
       }
     },
@@ -2040,6 +2076,11 @@
         },
         "expected_records": {
           "$ref": "#/$defs/positiveIntegerOrTemplate"
+        },
+        "timeout": {
+          "$ref": "#/$defs/durationOrTemplate",
+          "description": "Absolute validation deadline; for terminal invocation it begins immediately after the Flink write fence, before topic/partition discovery. A read_uncommitted high-watermark boundary is captured once as the first range-reading snapshot operation; a separate read_committed consumer must traverse that fixed boundary, and beginning-offset capture, records, decoding, and comparison share the same deadline.",
+          "default": "2m"
         }
       }
     },
@@ -2060,6 +2101,11 @@
         },
         "pattern": {
           "$ref": "#/$defs/nonEmptyString"
+        },
+        "timeout": {
+          "$ref": "#/$defs/durationOrTemplate",
+          "description": "Absolute validation deadline; terminal invocation begins immediately after the Flink write fence.",
+          "default": "2m"
         }
       }
     },
@@ -2068,8 +2114,7 @@
       "additionalProperties": false,
       "required": [
         "type",
-        "artifact",
-        "timeout"
+        "artifact"
       ],
       "properties": {
         "type": {
@@ -2079,7 +2124,9 @@
           "$ref": "#/$defs/nonEmptyString"
         },
         "timeout": {
-          "$ref": "#/$defs/durationOrTemplate"
+          "$ref": "#/$defs/durationOrTemplate",
+          "description": "Absolute validation deadline; terminal invocation begins immediately after the Flink write fence.",
+          "default": "2m"
         },
         "failure_reasons": {
           "type": "array",

@@ -9,29 +9,80 @@
         <version>0.1.0-SNAPSHOT</version>
     </parent>
 
-    <artifactId>flink-job-generator-reactor</artifactId>
-    <packaging>pom</packaging>
+    <artifactId>flink-job-generator</artifactId>
 
-    <!--
-      The v1 runtime installs connector closures in /opt/flink/lib, so its job JAR must be thin.
-      The legacy runner still uploads a self-contained Flink 1.19 JAR. Build both during the
-      transition, at distinct paths consumed by their respective runners.
-    -->
-    <modules>
-        <module>flink22</module>
-        <module>legacy</module>
-    </modules>
+    <properties>
+        <!-- Keep the workload bytecode Java-11-compatible; Flink 2.2 sets the runtime JDK floor. -->
+        <maven.compiler.release>11</maven.compiler.release>
+        <flink.version>2.2.0</flink.version>
+        <flink.kafka.connector.version>5.0.0-2.2</flink.kafka.connector.version>
+        <kafka.clients.version>4.0.0</kafka.clients.version>
+    </properties>
+
+    <dependencies>
+        <!-- The Flink image and verified connector bundle supply all runtime libraries. -->
+        <dependency>
+            <groupId>org.apache.flink</groupId>
+            <artifactId>flink-streaming-java</artifactId>
+            <version>${flink.version}</version>
+            <scope>provided</scope>
+        </dependency>
+        <dependency>
+            <groupId>org.apache.flink</groupId>
+            <artifactId>flink-connector-base</artifactId>
+            <version>${flink.version}</version>
+            <scope>provided</scope>
+        </dependency>
+        <dependency>
+            <groupId>org.apache.flink</groupId>
+            <artifactId>flink-connector-kafka</artifactId>
+            <version>${flink.kafka.connector.version}</version>
+            <scope>provided</scope>
+        </dependency>
+        <dependency>
+            <groupId>org.apache.kafka</groupId>
+            <artifactId>kafka-clients</artifactId>
+            <version>${kafka.clients.version}</version>
+            <scope>provided</scope>
+        </dependency>
+        <dependency>
+            <groupId>org.slf4j</groupId>
+            <artifactId>slf4j-api</artifactId>
+            <version>${slf4j.version}</version>
+            <scope>provided</scope>
+        </dependency>
+        <dependency>
+            <groupId>org.junit.jupiter</groupId>
+            <artifactId>junit-jupiter</artifactId>
+            <version>${junit.version}</version>
+            <scope>test</scope>
+        </dependency>
+    </dependencies>
 
     <build>
-        <pluginManagement>
-            <plugins>
-                <plugin>
-                    <groupId>org.apache.maven.plugins</groupId>
-                    <artifactId>maven-compiler-plugin</artifactId>
-                    <version>3.13.0</version>
-                </plugin>
-            </plugins>
-        </pluginManagement>
+        <finalName>flink-job-generator</finalName>
+        <plugins>
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-compiler-plugin</artifactId>
+                <version>3.13.0</version>
+            </plugin>
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-jar-plugin</artifactId>
+                <version>3.4.1</version>
+                <configuration>
+                    <archive>
+                        <manifest>
+                            <mainClass>org.savonitar.flink.stability.flinkjob.FlinkKafkaEosJob</mainClass>
+                        </manifest>
+                        <manifestEntries>
+                            <Flink-Stability-Workload-Protocol>v1</Flink-Stability-Workload-Protocol>
+                        </manifestEntries>
+                    </archive>
+                </configuration>
+            </plugin>
+        </plugins>
     </build>
 
 </project>
