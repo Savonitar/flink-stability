@@ -1,0 +1,78 @@
+format: v1
+kind: scenario
+
+meta:
+  name: bounded-eos
+  description: First bounded v1 execution example with terminal Kafka verification.
+
+runs: 1
+health_retry_limit: 0
+
+setup:
+  kafka:
+    clusters:
+      main:
+        image: apache/kafka:4.0.0
+        brokers: 1
+        topics:
+          - name: input
+            partitions: 1
+            replication_factor: 1
+            input_source:
+              mode: generated
+              format: integer-sequence
+              total: 1000
+          - name: output
+            partitions: 1
+            replication_factor: 1
+  flink:
+    image: flink:2.2.0
+    jobmanagers: 1
+    taskmanagers: 1
+
+subject:
+  connectors:
+    kafka:
+      artifact: maven:org.apache.flink:flink-connector-kafka:5.0.0-2.2
+
+workload:
+  jobs:
+    - alias: eos-job
+      jar: ./flink-job-generator/target/flink-job-generator.jar
+      connectors: [kafka]
+      parallelism: 1
+      source: { cluster: main, topic: input }
+      sink:
+        cluster: main
+        topic: output
+        delivery_guarantee: EXACTLY_ONCE
+        transactional_id_prefix: bounded-eos
+        transaction_id_naming_strategy: INCREMENTING
+      checkpointing:
+        interval: 1s
+        mode: EXACTLY_ONCE
+      program_args: [--processingDelayMs, "5"]
+
+phases:
+  - name: warmup
+    steps:
+      - await:
+          condition: { type: job-state, job: eos-job, state: RUNNING }
+          timeout: 2m
+          on_timeout: inconclusive
+      - await:
+          condition: { type: checkpoint-completed, job: eos-job, count: 1 }
+          timeout: 2m
+          on_timeout: fail
+  - name: taskmanager-recovery
+    steps:
+      - kill:
+          target: { kind: named, role: taskmanager, name: taskmanager-1 }
+      - wait: { duration: 1s }
+      - restart: { component: taskmanager }
+
+terminal_validations:
+  - type: kafka.id-set
+    cluster: main
+    topic: output
+    expected: input-manifest

@@ -4,6 +4,10 @@ import picocli.CommandLine;
 
 public class Main {
     public static void main(String[] args) {
-        new CommandLine(new ChaosKitCommand()).execute(args);
+        System.exit(execute(args));
+    }
+
+    static int execute(String... args) {
+        return new CommandLine(new FlinkStabilityCommand()).execute(args);
     }
 }
