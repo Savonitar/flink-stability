@@ -1,0 +1,423 @@
+package org.savonitar.flink.stability.core.execution;
+
+import org.savonitar.flink.stability.core.flink.FlinkJobHandle;
+import org.savonitar.flink.stability.core.flink.FlinkJobState;
+import org.savonitar.flink.stability.core.flink.FlinkRestTimeoutException;
+import org.savonitar.flink.stability.core.flink.FlinkScenarioControl;
+import org.savonitar.flink.stability.core.execution.plan.ExecutableScenarioPlan;
+import org.savonitar.flink.stability.runtime.api.TaskManagerActionTimeoutException;
+import org.savonitar.flink.stability.runtime.api.TaskManagerControl;
+
+import java.io.IOException;
+import java.time.Duration;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.Objects;
+
+/** Executes the compiler-approved v1 phase subset in exact document order. */
+public final class ExecutablePhaseExecutor {
+    public static final Duration TASKMANAGER_ACTION_TIMEOUT = Duration.ofMinutes(2);
+    public static final String AWAIT_JOB_STATE_TIMEOUT = "await.job-state.timeout";
+    public static final String AWAIT_CHECKPOINT_TIMEOUT =
+            "await.checkpoint-completed.timeout";
+    public static final String AWAIT_JOB_STATE_INFRASTRUCTURE =
+            "await.job-state.infrastructure";
+    public static final String AWAIT_CHECKPOINT_INFRASTRUCTURE =
+            "await.checkpoint-completed.infrastructure";
+    public static final String WAIT_INFRASTRUCTURE = "wait.infrastructure";
+    public static final String TASKMANAGER_KILL_INFRASTRUCTURE =
+            "taskmanager.kill.infrastructure";
+    public static final String TASKMANAGER_KILL_TIMEOUT = "taskmanager.kill.timeout";
+    public static final String TASKMANAGER_RESTART_INFRASTRUCTURE =
+            "taskmanager.restart.infrastructure";
+    public static final String TASKMANAGER_RESTART_TIMEOUT = "taskmanager.restart.timeout";
+
+    private final FlinkScenarioControl flink;
+    private final TaskManagerControl taskManagers;
+    private final PhaseSleeper sleeper;
+
+    public ExecutablePhaseExecutor(
+            FlinkScenarioControl flink,
+            TaskManagerControl taskManagers) {
+        this(flink, taskManagers, ExecutablePhaseExecutor::sleep);
+    }
+
+    public ExecutablePhaseExecutor(
+            FlinkScenarioControl flink,
+            TaskManagerControl taskManagers,
+            PhaseSleeper sleeper) {
+        this.flink = Objects.requireNonNull(flink, "flink");
+        this.taskManagers = Objects.requireNonNull(taskManagers, "taskManagers");
+        this.sleeper = Objects.requireNonNull(sleeper, "sleeper");
+    }
+
+    public PhaseExecutionEvidence execute(
+            ExecutableScenarioPlan plan,
+            FlinkJobHandle job) throws PhaseExecutionException {
+        Objects.requireNonNull(plan, "plan");
+        Objects.requireNonNull(job, "job");
+        List<PhaseExecutionEvidence.StepEvidence> evidence = new ArrayList<>();
+        for (int phaseIndex = 0; phaseIndex < plan.phases().size(); phaseIndex++) {
+            ExecutableScenarioPlan.Phase phase = plan.phases().get(phaseIndex);
+            executeSteps(
+                    phaseIndex,
+                    phase.name(),
+                    "$/phases/" + phaseIndex + "/steps",
+                    phase.steps(),
+                    List.of(),
+                    job,
+                    evidence);
+        }
+        return new PhaseExecutionEvidence(evidence);
+    }
+
+    private void executeSteps(
+            int phaseIndex,
+            String phaseName,
+            String stepsPath,
+            List<ExecutableScenarioPlan.Step> steps,
+            List<PhaseExecutionEvidence.LoopIteration> loopIterations,
+            FlinkJobHandle job,
+            List<PhaseExecutionEvidence.StepEvidence> evidence)
+            throws PhaseExecutionException {
+        for (int stepIndex = 0; stepIndex < steps.size(); stepIndex++) {
+            ExecutableScenarioPlan.Step step = steps.get(stepIndex);
+            String path = stepsPath + "/" + stepIndex;
+            if (step instanceof ExecutableScenarioPlan.AwaitJobState await) {
+                awaitJobState(
+                        phaseIndex, phaseName, path, loopIterations, job, await, evidence);
+            } else if (step instanceof ExecutableScenarioPlan.AwaitCheckpoints await) {
+                awaitCheckpoints(
+                        phaseIndex, phaseName, path, loopIterations, job, await, evidence);
+            } else if (step instanceof ExecutableScenarioPlan.Wait wait) {
+                wait(phaseIndex, phaseName, path, loopIterations, wait, evidence);
+            } else if (step instanceof ExecutableScenarioPlan.KillTaskManager kill) {
+                killTaskManager(
+                        phaseIndex, phaseName, path, loopIterations, kill, evidence);
+            } else if (step instanceof ExecutableScenarioPlan.RestartTaskManager) {
+                restartTaskManager(
+                        phaseIndex, phaseName, path, loopIterations, evidence);
+            } else if (step instanceof ExecutableScenarioPlan.Loop loop) {
+                executeLoop(
+                        phaseIndex,
+                        phaseName,
+                        path,
+                        loopIterations,
+                        loop,
+                        job,
+                        evidence);
+            } else {
+                throw new IllegalStateException(
+                        "Unsupported typed phase step " + step.getClass().getName());
+            }
+        }
+    }
+
+    private void awaitJobState(
+            int phaseIndex,
+            String phaseName,
+            String path,
+            List<PhaseExecutionEvidence.LoopIteration> loopIterations,
+            FlinkJobHandle job,
+            ExecutableScenarioPlan.AwaitJobState await,
+            List<PhaseExecutionEvidence.StepEvidence> evidence)
+            throws PhaseExecutionException {
+        try {
+            FlinkJobState observed = flink.awaitState(
+                    job, FlinkJobState.RUNNING, await.timeout());
+            if (observed != FlinkJobState.RUNNING) {
+                throw new IOException("Flink returned " + observed + " while awaiting RUNNING");
+            }
+            succeeded(
+                    evidence,
+                    phaseIndex,
+                    phaseName,
+                    path,
+                    loopIterations,
+                    PhaseExecutionEvidence.StepKind.AWAIT_JOB_STATE,
+                    "state=" + observed);
+        } catch (FlinkRestTimeoutException timeout) {
+            throw failed(
+                    evidence,
+                    phaseIndex,
+                    phaseName,
+                    path,
+                    loopIterations,
+                    PhaseExecutionEvidence.StepKind.AWAIT_JOB_STATE,
+                    timeoutOutcome(await.onTimeout()),
+                    AWAIT_JOB_STATE_TIMEOUT,
+                    timeout);
+        } catch (Exception failure) {
+            throw failed(
+                    evidence,
+                    phaseIndex,
+                    phaseName,
+                    path,
+                    loopIterations,
+                    PhaseExecutionEvidence.StepKind.AWAIT_JOB_STATE,
+                    PhaseExecutionException.Outcome.INCONCLUSIVE,
+                    AWAIT_JOB_STATE_INFRASTRUCTURE,
+                    failure);
+        }
+    }
+
+    private void awaitCheckpoints(
+            int phaseIndex,
+            String phaseName,
+            String path,
+            List<PhaseExecutionEvidence.LoopIteration> loopIterations,
+            FlinkJobHandle job,
+            ExecutableScenarioPlan.AwaitCheckpoints await,
+            List<PhaseExecutionEvidence.StepEvidence> evidence)
+            throws PhaseExecutionException {
+        try {
+            long completed = flink.awaitCompletedCheckpoints(
+                    job, await.completedCount(), await.timeout());
+            if (completed < await.completedCount()) {
+                throw new IOException("Flink returned " + completed + " completed checkpoints; "
+                        + "expected at least " + await.completedCount());
+            }
+            succeeded(
+                    evidence,
+                    phaseIndex,
+                    phaseName,
+                    path,
+                    loopIterations,
+                    PhaseExecutionEvidence.StepKind.AWAIT_CHECKPOINTS,
+                    "completed=" + completed);
+        } catch (FlinkRestTimeoutException timeout) {
+            throw failed(
+                    evidence,
+                    phaseIndex,
+                    phaseName,
+                    path,
+                    loopIterations,
+                    PhaseExecutionEvidence.StepKind.AWAIT_CHECKPOINTS,
+                    timeoutOutcome(await.onTimeout()),
+                    AWAIT_CHECKPOINT_TIMEOUT,
+                    timeout);
+        } catch (Exception failure) {
+            throw failed(
+                    evidence,
+                    phaseIndex,
+                    phaseName,
+                    path,
+                    loopIterations,
+                    PhaseExecutionEvidence.StepKind.AWAIT_CHECKPOINTS,
+                    PhaseExecutionException.Outcome.INCONCLUSIVE,
+                    AWAIT_CHECKPOINT_INFRASTRUCTURE,
+                    failure);
+        }
+    }
+
+    private void wait(
+            int phaseIndex,
+            String phaseName,
+            String path,
+            List<PhaseExecutionEvidence.LoopIteration> loopIterations,
+            ExecutableScenarioPlan.Wait wait,
+            List<PhaseExecutionEvidence.StepEvidence> evidence)
+            throws PhaseExecutionException {
+        try {
+            sleeper.sleep(wait.duration());
+            succeeded(
+                    evidence,
+                    phaseIndex,
+                    phaseName,
+                    path,
+                    loopIterations,
+                    PhaseExecutionEvidence.StepKind.WAIT,
+                    "duration=" + wait.duration());
+        } catch (InterruptedException interrupted) {
+            Thread.currentThread().interrupt();
+            throw failed(
+                    evidence,
+                    phaseIndex,
+                    phaseName,
+                    path,
+                    loopIterations,
+                    PhaseExecutionEvidence.StepKind.WAIT,
+                    PhaseExecutionException.Outcome.INCONCLUSIVE,
+                    WAIT_INFRASTRUCTURE,
+                    interrupted);
+        } catch (RuntimeException failure) {
+            throw failed(
+                    evidence,
+                    phaseIndex,
+                    phaseName,
+                    path,
+                    loopIterations,
+                    PhaseExecutionEvidence.StepKind.WAIT,
+                    PhaseExecutionException.Outcome.INCONCLUSIVE,
+                    WAIT_INFRASTRUCTURE,
+                    failure);
+        }
+    }
+
+    private void killTaskManager(
+            int phaseIndex,
+            String phaseName,
+            String path,
+            List<PhaseExecutionEvidence.LoopIteration> loopIterations,
+            ExecutableScenarioPlan.KillTaskManager kill,
+            List<PhaseExecutionEvidence.StepEvidence> evidence)
+            throws PhaseExecutionException {
+        try {
+            taskManagers.killTaskManager(kill.targetName(), TASKMANAGER_ACTION_TIMEOUT);
+            succeeded(
+                    evidence,
+                    phaseIndex,
+                    phaseName,
+                    path,
+                    loopIterations,
+                    PhaseExecutionEvidence.StepKind.KILL_TASKMANAGER,
+                    "target=" + kill.targetName());
+        } catch (TaskManagerActionTimeoutException timeout) {
+            throw failed(
+                    evidence,
+                    phaseIndex,
+                    phaseName,
+                    path,
+                    loopIterations,
+                    PhaseExecutionEvidence.StepKind.KILL_TASKMANAGER,
+                    PhaseExecutionException.Outcome.INCONCLUSIVE,
+                    TASKMANAGER_KILL_TIMEOUT,
+                    timeout);
+        } catch (Exception failure) {
+            throw failed(
+                    evidence,
+                    phaseIndex,
+                    phaseName,
+                    path,
+                    loopIterations,
+                    PhaseExecutionEvidence.StepKind.KILL_TASKMANAGER,
+                    PhaseExecutionException.Outcome.INCONCLUSIVE,
+                    TASKMANAGER_KILL_INFRASTRUCTURE,
+                    failure);
+        }
+    }
+
+    private void restartTaskManager(
+            int phaseIndex,
+            String phaseName,
+            String path,
+            List<PhaseExecutionEvidence.LoopIteration> loopIterations,
+            List<PhaseExecutionEvidence.StepEvidence> evidence)
+            throws PhaseExecutionException {
+        try {
+            taskManagers.restartTaskManager(TASKMANAGER_ACTION_TIMEOUT);
+            succeeded(
+                    evidence,
+                    phaseIndex,
+                    phaseName,
+                    path,
+                    loopIterations,
+                    PhaseExecutionEvidence.StepKind.RESTART_TASKMANAGER,
+                    "component=taskmanager");
+        } catch (TaskManagerActionTimeoutException timeout) {
+            throw failed(
+                    evidence,
+                    phaseIndex,
+                    phaseName,
+                    path,
+                    loopIterations,
+                    PhaseExecutionEvidence.StepKind.RESTART_TASKMANAGER,
+                    PhaseExecutionException.Outcome.INCONCLUSIVE,
+                    TASKMANAGER_RESTART_TIMEOUT,
+                    timeout);
+        } catch (Exception failure) {
+            throw failed(
+                    evidence,
+                    phaseIndex,
+                    phaseName,
+                    path,
+                    loopIterations,
+                    PhaseExecutionEvidence.StepKind.RESTART_TASKMANAGER,
+                    PhaseExecutionException.Outcome.INCONCLUSIVE,
+                    TASKMANAGER_RESTART_INFRASTRUCTURE,
+                    failure);
+        }
+    }
+
+    private void executeLoop(
+            int phaseIndex,
+            String phaseName,
+            String path,
+            List<PhaseExecutionEvidence.LoopIteration> outerIterations,
+            ExecutableScenarioPlan.Loop loop,
+            FlinkJobHandle job,
+            List<PhaseExecutionEvidence.StepEvidence> evidence)
+            throws PhaseExecutionException {
+        for (int iteration = 1; iteration <= loop.times(); iteration++) {
+            List<PhaseExecutionEvidence.LoopIteration> iterations =
+                    new ArrayList<>(outerIterations);
+            iterations.add(new PhaseExecutionEvidence.LoopIteration(
+                    path, iteration, loop.times()));
+            executeSteps(
+                    phaseIndex,
+                    phaseName,
+                    path + "/loop/steps",
+                    loop.steps(),
+                    List.copyOf(iterations),
+                    job,
+                    evidence);
+        }
+    }
+
+    private static void succeeded(
+            List<PhaseExecutionEvidence.StepEvidence> evidence,
+            int phaseIndex,
+            String phaseName,
+            String path,
+            List<PhaseExecutionEvidence.LoopIteration> loopIterations,
+            PhaseExecutionEvidence.StepKind kind,
+            String detail) {
+        evidence.add(new PhaseExecutionEvidence.StepEvidence(
+                phaseIndex,
+                phaseName,
+                path,
+                loopIterations,
+                kind,
+                PhaseExecutionEvidence.StepStatus.SUCCEEDED,
+                detail));
+    }
+
+    private static PhaseExecutionException failed(
+            List<PhaseExecutionEvidence.StepEvidence> evidence,
+            int phaseIndex,
+            String phaseName,
+            String path,
+            List<PhaseExecutionEvidence.LoopIteration> loopIterations,
+            PhaseExecutionEvidence.StepKind kind,
+            PhaseExecutionException.Outcome outcome,
+            String reason,
+            Throwable cause) {
+        evidence.add(new PhaseExecutionEvidence.StepEvidence(
+                phaseIndex,
+                phaseName,
+                path,
+                loopIterations,
+                kind,
+                PhaseExecutionEvidence.StepStatus.FAILED,
+                reason));
+        return new PhaseExecutionException(
+                outcome,
+                reason,
+                path,
+                loopIterations,
+                new PhaseExecutionEvidence(evidence),
+                cause);
+    }
+
+    private static PhaseExecutionException.Outcome timeoutOutcome(
+            ExecutableScenarioPlan.TimeoutOutcome outcome) {
+        return switch (outcome) {
+            case FAIL -> PhaseExecutionException.Outcome.FAIL;
+            case INCONCLUSIVE -> PhaseExecutionException.Outcome.INCONCLUSIVE;
+        };
+    }
+
+    private static void sleep(Duration duration) throws InterruptedException {
+        Thread.sleep(duration.toMillis(), duration.toNanosPart() % 1_000_000);
+    }
+}

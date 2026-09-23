@@ -1,87 +1,142 @@
 package org.savonitar.flink.stability.flinkjob;
 
-import org.apache.flink.api.common.eventtime.WatermarkStrategy;
+import org.apache.flink.api.common.functions.OpenContext;
+import org.apache.flink.api.common.functions.RichMapFunction;
 import org.apache.flink.api.common.serialization.SimpleStringSchema;
-import org.apache.flink.api.java.utils.ParameterTool;
+import org.apache.flink.api.common.state.ValueState;
+import org.apache.flink.api.common.state.ValueStateDescriptor;
 import org.apache.flink.connector.base.DeliveryGuarantee;
 import org.apache.flink.connector.kafka.sink.KafkaRecordSerializationSchema;
 import org.apache.flink.connector.kafka.sink.KafkaSink;
+import org.apache.flink.connector.kafka.sink.KafkaSinkBuilder;
 import org.apache.flink.connector.kafka.source.KafkaSource;
-import org.apache.flink.streaming.api.environment.CheckpointConfig;
+import org.apache.flink.connector.kafka.source.enumerator.initializer.OffsetsInitializer;
 import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
+import org.apache.kafka.clients.consumer.ConsumerConfig;
+import org.apache.kafka.clients.consumer.OffsetResetStrategy;
 import org.apache.kafka.clients.producer.ProducerConfig;
-import org.apache.kafka.common.serialization.ByteArraySerializer;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import java.time.Duration;
 import java.util.Arrays;
 import java.util.Properties;
-import java.util.concurrent.atomic.AtomicInteger;
 
 public class FlinkKafkaEosJob {
 
     private static final Logger LOG = LoggerFactory.getLogger(FlinkKafkaEosJob.class);
 
+    static final String SOURCE_UID = "flink-stability-kafka-source-v1";
+    static final String STATEFUL_OPERATOR_UID = "flink-stability-managed-state-pass-through-v1";
+    static final String SINK_UID = "flink-stability-kafka-sink-v1";
+
     public static void main(String[] args) throws Exception {
         LOG.info("FlinkKafkaEosJob job starting with args={}", Arrays.toString(args));
-        ParameterTool parameters = ParameterTool.fromArgs(args);
-        String bootstrapServers = parameters.getRequired("bootstrapServers");
-        AtomicInteger processingDelayMs = new AtomicInteger(parameters.getInt("processingDelayMs", 0));
+        FlinkKafkaEosJobArguments arguments = FlinkKafkaEosJobArguments.from(args);
         StreamExecutionEnvironment env = StreamExecutionEnvironment.getExecutionEnvironment();
+        WorkloadProtocolV1Configuration workload =
+                WorkloadProtocolV1Configuration.from(env.getConfiguration());
 
-        env.enableCheckpointing(1000);
-        env.getCheckpointConfig().setMinPauseBetweenCheckpoints(1000);
-        env.getCheckpointConfig().setCheckpointTimeout(60_000);
-        env.getCheckpointConfig().setMaxConcurrentCheckpoints(1);
-        env.getCheckpointConfig().setExternalizedCheckpointCleanup(
-                CheckpointConfig.ExternalizedCheckpointCleanup.RETAIN_ON_CANCELLATION
-        );
-        env.getCheckpointConfig().setCheckpointStorage("file:/flink/checkpoints");
+        LOG.info(
+                "Starting workload alias={} with source={} and sink={}",
+                workload.jobAlias(),
+                workload.sourceBootstrapServers(),
+                workload.sinkBootstrapServers());
+        buildPipeline(env, workload, arguments);
+        env.execute(workload.jobAlias());
+    }
 
+    static void buildPipeline(
+            StreamExecutionEnvironment env,
+            WorkloadProtocolV1Configuration workload,
+            FlinkKafkaEosJobArguments arguments) {
+        KafkaSource<String> source = createSource(workload);
+        KafkaSink<String> sink = createSink(workload);
 
-        Properties props = new Properties();
-        props.put(
-                ProducerConfig.KEY_SERIALIZER_CLASS_CONFIG, ByteArraySerializer.class.getName());
-        props.put(
-                ProducerConfig.VALUE_SERIALIZER_CLASS_CONFIG, ByteArraySerializer.class.getName());
-        props.put(
-                ProducerConfig.TRANSACTION_TIMEOUT_CONFIG,
-                (int) Duration.ofHours(2).toMillis());
-        props.setProperty("bootstrap.servers", bootstrapServers);
-        props.setProperty("client.id", "flink-producer");
-        props.setProperty("metadata.max.age.ms", "5000");
-        LOG.info("Connecting to Kafka at: {}", bootstrapServers);
+        env.fromSource(source, workload.watermarks().toFlinkStrategy(), "Kafka Source")
+                .uid(SOURCE_UID)
+                .keyBy(value -> value)
+                .map(new ManagedStatePassThrough(
+                        arguments.processingDelayMs(), workload.stateTtl()))
+                .name("Managed State Pass-Through")
+                .uid(STATEFUL_OPERATOR_UID)
+                .sinkTo(sink)
+                .name("Kafka Sink")
+                .uid(SINK_UID);
+    }
 
-        KafkaSource<String> source = KafkaSource.<String>builder()
-                .setBootstrapServers(bootstrapServers)
-                .setTopics("input-topic")
-                .setGroupId("flink-job-test-group")
+    @SuppressWarnings("deprecation") // Flink connector 5.0 still exposes Kafka's deprecated enum.
+    static KafkaSource<String> createSource(WorkloadProtocolV1Configuration workload) {
+        return KafkaSource.<String>builder()
+                .setBootstrapServers(workload.sourceBootstrapServers())
+                .setTopics(workload.sourceTopic())
+                .setGroupId(workload.sourceGroupId())
+                .setStartingOffsets(
+                        OffsetsInitializer.committedOffsets(OffsetResetStrategy.EARLIEST))
+                .setBounded(OffsetsInitializer.offsets(workload.sourceStoppingOffsetsByTopic()))
+                .setProperty(ConsumerConfig.ISOLATION_LEVEL_CONFIG, "read_uncommitted")
                 .setValueOnlyDeserializer(new SimpleStringSchema())
                 .build();
+    }
 
-        KafkaSink<String> sink = KafkaSink.<String>builder()
-                .setBootstrapServers(bootstrapServers)
+    static KafkaSink<String> createSink(WorkloadProtocolV1Configuration workload) {
+        Properties producerProperties = new Properties();
+        if (workload.transactionTimeoutMs() != null) {
+            producerProperties.setProperty(
+                    ProducerConfig.TRANSACTION_TIMEOUT_CONFIG,
+                    workload.transactionTimeoutMs().toString());
+        }
+
+        KafkaSinkBuilder<String> builder = KafkaSink.<String>builder()
+                .setBootstrapServers(workload.sinkBootstrapServers())
                 .setRecordSerializer(KafkaRecordSerializationSchema.builder()
-                        .setTopic("flink-output")
+                        .setTopic(workload.sinkTopic())
                         .setValueSerializationSchema(new SimpleStringSchema())
                         .build())
-                .setDeliveryGuarantee(DeliveryGuarantee.EXACTLY_ONCE)
-                .setKafkaProducerConfig(props)
-                .build();
+                .setDeliveryGuarantee(workload.deliveryGuarantee())
+                .setKafkaProducerConfig(producerProperties);
 
-        env.fromSource(source, WatermarkStrategy.noWatermarks(), "Kafka Source")
-                .map(x -> {
-                    if (processingDelayMs.get() != 0) {
-                        Thread.sleep(processingDelayMs.get());
-                    } else {
-                        Thread.sleep(100);
-                    }
-                    LOG.info("FlinkKafkaEosJob Processed msg={}", x);
-                    return x;
-                })
-                .sinkTo(sink).name("Kafka Sink");
+        if (workload.deliveryGuarantee() == DeliveryGuarantee.EXACTLY_ONCE) {
+            builder.setTransactionalIdPrefix(workload.transactionalIdPrefix());
+            builder.setTransactionNamingStrategy(workload.transactionNamingStrategy());
+        }
+        return builder.build();
+    }
 
-        env.execute("Flink Kafka Source-Sink Job");
+    private static final class ManagedStatePassThrough extends RichMapFunction<String, String> {
+
+        private static final long serialVersionUID = 1L;
+        private static final String STATE_NAME = "flink-stability-last-record-v1";
+
+        private final int processingDelayMs;
+        private final WorkloadProtocolV1Configuration.StateTtlSettings stateTtl;
+
+        private transient ValueState<String> lastRecord;
+
+        private ManagedStatePassThrough(
+                int processingDelayMs,
+                WorkloadProtocolV1Configuration.StateTtlSettings stateTtl) {
+            this.processingDelayMs = processingDelayMs;
+            this.stateTtl = stateTtl;
+        }
+
+        @Override
+        public void open(OpenContext openContext) throws Exception {
+            ValueStateDescriptor<String> descriptor =
+                    new ValueStateDescriptor<>(STATE_NAME, String.class);
+            if (stateTtl.enabled()) {
+                descriptor.enableTimeToLive(stateTtl.toFlinkConfig());
+            }
+            lastRecord = getRuntimeContext().getState(descriptor);
+        }
+
+        @Override
+        public String map(String value) throws Exception {
+            if (processingDelayMs > 0) {
+                Thread.sleep(processingDelayMs);
+            }
+            lastRecord.update(value);
+            LOG.debug("FlinkKafkaEosJob processed msg={}", value);
+            return value;
+        }
     }
 }

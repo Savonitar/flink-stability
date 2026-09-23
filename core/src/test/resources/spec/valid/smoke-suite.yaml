@@ -1,0 +1,8 @@
+format: v1
+kind: suite
+
+meta:
+  name: smoke-suite
+
+scenarios:
+  - scenario: minimal

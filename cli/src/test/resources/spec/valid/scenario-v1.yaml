@@ -1,0 +1,65 @@
+format: v1
+kind: scenario
+
+meta:
+  name: scenario-v1
+  description: CLI validation fixture.
+
+runs: 1
+
+setup:
+  kafka:
+    clusters:
+      main:
+        image: apache/kafka:4.0.0
+        brokers: 1
+        topics:
+          - name: input
+            partitions: 1
+            replication_factor: 1
+            input_source:
+              mode: generated
+              format: integer-sequence
+              total: 10
+          - name: output
+            partitions: 1
+            replication_factor: 1
+  flink:
+    image: flink:2.2.0
+
+subject:
+  connectors:
+    kafka:
+      artifact: connector.jar
+      runtime_dependencies: []
+
+workload:
+  jobs:
+    - alias: eos-job
+      jar: job.jar
+      connectors: [kafka]
+      parallelism: 1
+      source: { cluster: main, topic: input }
+      sink:
+        cluster: main
+        topic: output
+        delivery_guarantee: EXACTLY_ONCE
+        transactional_id_prefix: cli-test
+        transaction_id_naming_strategy: INCREMENTING
+      checkpointing:
+        interval: 5s
+        mode: EXACTLY_ONCE
+
+phases:
+  - name: verify-running
+    steps:
+      - await:
+          condition: { type: job-state, job: eos-job, state: RUNNING }
+          timeout: 2m
+          on_timeout: inconclusive
+
+terminal_validations:
+  - type: kafka.id-set
+    cluster: main
+    topic: output
+    expected: input-manifest
