@@ -5,6 +5,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import org.savonitar.flink.stability.core.execution.PhaseExecutionEvidence;
+import org.savonitar.flink.stability.core.execution.TaskManagerKillEffect;
 import org.savonitar.flink.stability.core.execution.V1AttemptContext;
 import org.savonitar.flink.stability.core.execution.V1ScenarioExecutionResult;
 
@@ -78,6 +79,54 @@ final class V1ExecutionResultRenderer {
             writeFence.put("completed", true);
             writeFence.put("finalState", fence.finalState().name());
         });
+        ObjectNode flinkJob = evidence.putObject("flinkJob");
+        flinkJob.put("status", "not-run");
+        result.finalJobObservation().ifPresent(observed -> {
+            observed.failure().ifPresent(failure -> {
+                flinkJob.put("status", "unavailable");
+                flinkJob.put("failure", failure);
+            });
+            observed.observation().ifPresent(job -> {
+                flinkJob.put("status", "observed");
+                flinkJob.put("state", job.state().name());
+                flinkJob.put("completedCheckpoints", job.completedCheckpoints());
+                flinkJob.put("restoredCheckpoints", job.restoredCheckpoints());
+                job.latestRestore().ifPresent(restore ->
+                        flinkJob.put("latestRestoredCheckpoint", restore.checkpointId()));
+                flinkJob.put("failures", job.failures().size());
+                if (!job.failures().isEmpty()) {
+                    flinkJob.put("latestFailure", job.failures().getFirst().rootCause());
+                }
+            });
+        });
+        ArrayNode kills = evidence.putArray("taskManagerKills");
+        for (TaskManagerKillEffect effect : result.taskManagerKillEffects()) {
+            ObjectNode kill = kills.addObject();
+            kill.put("path", effect.kill().path());
+            ArrayNode iterations = kill.putArray("loopIterations");
+            effect.kill().loopIterations().forEach(iteration -> iterations.add(
+                    iteration.iteration() + "/" + iteration.totalIterations()));
+            kill.put("target", effect.kill().target());
+            kill.put("outcome", effect.outcome().name().toLowerCase(Locale.ROOT)
+                    .replace('_', '-'));
+            kill.put("confirmed", effect.outcome().confirmed());
+            effect.kill().jobBeforeKill().observation().ifPresent(before -> {
+                kill.put("jobStateBeforeKill", before.state().name());
+                kill.put("completedCheckpointsBeforeKill", before.completedCheckpoints());
+                kill.put("activeSubtasksBeforeKill", before.activeSubtasks().size());
+                effect.restore().ifPresent(restore -> {
+                    kill.put("restoredCheckpoint", restore.checkpointId());
+                    kill.put("restoredAfterKillMs",
+                            restore.restoredAtMillis() - before.jobManagerTimeMillis());
+                });
+            });
+            kill.put("failuresAfterKill", effect.failuresAfterKill().size());
+            if (!effect.failuresAfterKill().isEmpty()) {
+                kill.put("firstFailureAfterKill",
+                        effect.failuresAfterKill().getLast().rootCause());
+            }
+            kill.put("detail", effect.detail());
+        }
         ObjectNode processFence = evidence.putObject("processFence");
         processFence.put("status", "not-run");
         processFence.put("completed", false);
@@ -105,6 +154,23 @@ final class V1ExecutionResultRenderer {
                 terminal.put("unexpected", totals.unexpectedCount());
                 terminal.put("duplicates", totals.duplicateCount());
                 terminal.put("missing", totals.missingCount());
+            });
+        });
+        ObjectNode transactions = evidence.putObject("sinkTransactions");
+        transactions.put("status", "not-listed");
+        result.sinkTransactions().ifPresent(listing -> {
+            transactions.put("status", "listed");
+            transactions.put("transactionalIdPrefix", listing.transactionalIdPrefix());
+            transactions.put("total", listing.transactions().size());
+            ArrayNode unresolved = transactions.putArray("unresolved");
+            listing.unresolved().forEach(transaction -> {
+                ObjectNode open = unresolved.addObject();
+                open.put("transactionalId", transaction.transactionalId());
+                open.put("state", transaction.state());
+                open.put("producerId", transaction.producerId());
+                open.put("producerEpoch", transaction.producerEpoch());
+                ArrayNode partitions = open.putArray("partitions");
+                transaction.topicPartitions().forEach(partitions::add);
             });
         });
         evidence.put("flinkComponents", result.flinkProvisioningEvidence().size());

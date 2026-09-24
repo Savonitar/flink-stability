@@ -128,6 +128,14 @@ The first runner accepts exactly:
 - the currently registered wait/await, loop, and named TaskManager kill/restart phase operations;
 - one terminal `kafka.id-set` validator and an expected outcome of `pass`.
 
+A TaskManager kill counts only if Flink shows that it affected the job: a failure on
+a TaskManager that hosted active subtasks, followed by a checkpoint restore, or by a
+restart when no checkpoint existed yet. Otherwise a passing oracle becomes
+`inconclusive` with `taskmanager.kill.effect-unconfirmed`
+([SPEC-001 R6.12a](docs/specs/SPEC-001-scenario-schema.md)). The JSON result reports
+this under `evidence.taskManagerKills` and `evidence.flinkJob`, and lists the sink's
+unresolved Kafka transactions after the fence under `evidence.sinkTransactions`.
+
 The schema and planning layer describe more than this execution subset. Unsupported
 features reject explicitly; they are not ignored or approximated.
 
@@ -186,10 +194,12 @@ validation as the package boundary.
 
 ## Status
 
-Early and experimental. The bounded happy path is implemented and has passed against real
-Flink 2.2 and Kafka 4.0 containers, including a TaskManager kill/restart and exact
-post-fence validation. The framework is not yet a general-purpose or production-ready
-stability-testing system.
+Early and experimental. The bounded path runs against real Flink 2.2 and Kafka 4.0
+containers. An earlier version of `bounded-eos` killed its TaskManager only after the job
+had finished, so its `pass` did not show recovery. The runner now requires evidence that
+each kill disrupted the job and that Flink recovered it, and `bounded-eos` passes with a
+checkpoint restore after its mid-stream kill. The framework is not yet a general-purpose
+or production-ready stability-testing system.
 
 ## License
 

@@ -10,6 +10,7 @@ import org.savonitar.flink.stability.core.execution.kafka.KafkaInputManifest;
 import org.savonitar.flink.stability.core.execution.kafka.KafkaInputPreparationException;
 import org.savonitar.flink.stability.core.execution.kafka.PreparedKafkaInput;
 import org.savonitar.flink.stability.core.flink.FlinkJobHandle;
+import org.savonitar.flink.stability.core.flink.FlinkJobObservation;
 import org.savonitar.flink.stability.core.flink.FlinkJobState;
 import org.savonitar.flink.stability.core.flink.FlinkJobSubmission;
 import org.savonitar.flink.stability.core.flink.FlinkRestTimeoutException;
@@ -28,6 +29,7 @@ import org.savonitar.flink.stability.core.execution.plan.ExecutableScenarioPlan;
 import org.savonitar.flink.stability.core.execution.plan.ExecutableScenarioPlanCompiler;
 import org.savonitar.flink.stability.core.execution.plan.PreparedExecutableScenarioPlan;
 import org.savonitar.flink.stability.core.validation.kafka.KafkaIdSetValidationResult;
+import org.savonitar.flink.stability.core.validation.kafka.KafkaTransactionListing;
 import org.savonitar.flink.stability.runtime.api.FlinkComponentProvisioningEvidence;
 import org.savonitar.flink.stability.runtime.api.FlinkProcessWriteFenceEvidence;
 import org.savonitar.flink.stability.runtime.api.FlinkRuntimeTarget;
@@ -72,6 +74,12 @@ class V1ScenarioExecutorTest {
     @TempDir
     Path temporaryDirectory;
 
+    private V1ScenarioExecutor.TransactionListing transactionListing =
+            (bootstrapServers, prefix, timeout) -> new KafkaTransactionListing(
+                    prefix,
+                    List.of(new KafkaTransactionListing.Transaction(
+                            prefix + "-0-1", "CompleteCommit", 7, 0, List.of())));
+
     @Test
     void validatesOnlyAfterNaturalCompletionAndThePhysicalProcessFence() throws Exception {
         List<String> events = new ArrayList<>();
@@ -112,8 +120,10 @@ class V1ScenarioExecutorTest {
                             "job-submit",
                             "await-running",
                             "await-finished",
+                            "observe-job",
                             "process-fence",
                             "terminal-validation",
+                            "list-transactions",
                             "flink-close",
                             "runtime-close"),
                     events);
@@ -226,6 +236,228 @@ class V1ScenarioExecutorTest {
             assertTrue(result.terminalValidation().isEmpty());
             assertEquals("taskmanager.kill.timeout",
                     result.phaseEvidence().orElseThrow().steps().getLast().detail());
+            // The job is still observed once, to explain the stop.
+            assertTrue(result.finalJobObservation().orElseThrow().observation().isPresent());
+        }
+    }
+
+    @Test
+    void passingOracleIsInconclusiveWhenTheKillHitAnAlreadyFinishedJob() throws Exception {
+        List<String> events = new ArrayList<>();
+        try (Fixture fixture = fixture(V1ScenarioExecutorTest::killAndRestart)) {
+            FakeFlink flink = new FakeFlink(events);
+            flink.observations.add(job(1_000, FlinkJobState.FINISHED, 2, 0));
+            flink.observations.add(job(9_000, FlinkJobState.FINISHED, 2, 0));
+            V1ScenarioExecutor executor = executor(
+                    events, new FakeRuntime(events), flink,
+                    (bootstrap, topic, count, timeout) -> passResult());
+
+            V1ScenarioExecutionResult result = executor.execute(
+                    fixture.bound(), attemptContext());
+
+            assertEquals(V1ScenarioExecutionResult.Status.INCONCLUSIVE, result.status());
+            assertEquals("taskmanager.kill.effect-unconfirmed", result.reason());
+            assertTrue(result.message().contains("JOB_TERMINAL_BEFORE_KILL"), result.message());
+            assertTrue(result.terminalValidation().isPresent(),
+                    "the oracle still runs; only its pass is withheld");
+            assertEquals(
+                    List.of(TaskManagerKillEffect.Outcome.JOB_TERMINAL_BEFORE_KILL),
+                    outcomes(result));
+        }
+    }
+
+    @Test
+    void passingOracleIsInconclusiveWhenTheKilledTaskManagerHostedNoSubtask() throws Exception {
+        List<String> events = new ArrayList<>();
+        try (Fixture fixture = fixture(V1ScenarioExecutorTest::killAndRestart)) {
+            FakeFlink flink = new FakeFlink(events);
+            // The TaskManager hosted no deployed subtask, so killing it disturbed nothing.
+            flink.observations.add(new FlinkJobObservation(
+                    1_000, FlinkJobState.RUNNING, 0, 0, Optional.empty(), List.of(),
+                    List.of(new FlinkJobObservation.Subtask(
+                            "Kafka Source", 0, 0, "SCHEDULED", Optional.empty()))));
+            flink.observations.add(job(9_000, FlinkJobState.FINISHED, 3, 0));
+            V1ScenarioExecutor executor = executor(
+                    events, new FakeRuntime(events), flink,
+                    (bootstrap, topic, count, timeout) -> passResult());
+
+            V1ScenarioExecutionResult result = executor.execute(
+                    fixture.bound(), attemptContext());
+
+            assertEquals(V1ScenarioExecutionResult.Status.INCONCLUSIVE, result.status());
+            assertEquals("taskmanager.kill.effect-unconfirmed", result.reason());
+            assertEquals(
+                    List.of(TaskManagerKillEffect.Outcome.NO_ACTIVE_SUBTASK_BEFORE_KILL),
+                    outcomes(result));
+        }
+    }
+
+    @Test
+    void passingOracleIsPassWhenFlinkRestoredACheckpointAfterTheKill() throws Exception {
+        List<String> events = new ArrayList<>();
+        try (Fixture fixture = fixture(V1ScenarioExecutorTest::killAndRestart)) {
+            FakeFlink flink = new FakeFlink(events);
+            flink.observations.add(new FlinkJobObservation(
+                    1_000, FlinkJobState.RUNNING, 2, 0, Optional.empty(), List.of(),
+                    List.of(new FlinkJobObservation.Subtask(
+                            "Kafka Source", 0, 0, "RUNNING", Optional.of("tm-1")))));
+            flink.observations.add(new FlinkJobObservation(
+                    9_000, FlinkJobState.FINISHED, 6, 1,
+                    Optional.of(new FlinkJobObservation.Restore(2, 5_000)),
+                    List.of(new FlinkJobObservation.Failure(
+                            4_000, "ResourceManagerException",
+                            "TaskManager with id tm-1 is no longer reachable.",
+                            Optional.of("tm-1"))),
+                    List.of()));
+            V1ScenarioExecutor executor = executor(
+                    events, new FakeRuntime(events), flink,
+                    (bootstrap, topic, count, timeout) -> passResult());
+
+            V1ScenarioExecutionResult result = executor.execute(
+                    fixture.bound(), attemptContext());
+
+            assertEquals(V1ScenarioExecutionResult.Status.PASS, result.status());
+            TaskManagerKillEffect effect = result.taskManagerKillEffects().getFirst();
+            assertEquals(TaskManagerKillEffect.Outcome.CHECKPOINT_RESTORED, effect.outcome());
+            assertEquals(Optional.of(new FlinkJobObservation.Restore(2, 5_000)),
+                    effect.restore());
+            assertEquals(1, effect.failuresAfterKill().size());
+            assertTrue(events.indexOf("observe-job") < events.indexOf("taskmanager-kill"));
+        }
+    }
+
+    @Test
+    void failingOracleStaysFailEvenWhenTheKillWasIneffective() throws Exception {
+        List<String> events = new ArrayList<>();
+        try (Fixture fixture = fixture(V1ScenarioExecutorTest::killAndRestart)) {
+            FakeFlink flink = new FakeFlink(events);
+            flink.observations.add(job(1_000, FlinkJobState.FINISHED, 2, 0));
+            V1ScenarioExecutor executor = executor(
+                    events, new FakeRuntime(events), flink,
+                    (bootstrap, topic, count, timeout) -> missingResult());
+
+            V1ScenarioExecutionResult result = executor.execute(
+                    fixture.bound(), attemptContext());
+
+            assertEquals(V1ScenarioExecutionResult.Status.FAIL, result.status());
+            assertEquals("validator.kafka.id-set.missing-ids", result.reason());
+            assertEquals(
+                    List.of(TaskManagerKillEffect.Outcome.JOB_TERMINAL_BEFORE_KILL),
+                    outcomes(result));
+        }
+    }
+
+    @Test
+    void aPassResultCannotCarryAnUnconfirmedKill() {
+        PhaseExecutionEvidence phases = new PhaseExecutionEvidence(
+                List.of(),
+                List.of(new PhaseExecutionEvidence.TaskManagerKill(
+                        "$/phases/0/steps/0",
+                        List.of(),
+                        "taskmanager-1",
+                        new FlinkJobObservation.Attempt(
+                                Optional.of(job(1_000, FlinkJobState.FINISHED, 1, 0)),
+                                Optional.empty()))));
+        FlinkJobObservation.Attempt atFence = new FlinkJobObservation.Attempt(
+                Optional.of(job(2_000, FlinkJobState.FINISHED, 1, 0)), Optional.empty());
+        FlinkProcessWriteFenceEvidence processFence = new FlinkProcessWriteFenceEvidence(
+                List.of(), Instant.parse("2026-08-26T12:00:00Z"));
+
+        IllegalArgumentException failure = assertThrows(
+                IllegalArgumentException.class,
+                () -> new V1ScenarioExecutionResult(
+                        V1ScenarioExecutionResult.Status.PASS,
+                        "validator.kafka.id-set.match",
+                        "passed",
+                        Optional.empty(),
+                        Optional.of(phases),
+                        Optional.of(new FlinkTerminalWriteFence.Evidence(
+                                FlinkJobState.FINISHED, processFence, atFence)),
+                        Optional.of(processFence),
+                        Optional.of(atFence),
+                        Optional.of(passResult()),
+                        Optional.empty(),
+                        List.of(),
+                        List.of()));
+
+        assertTrue(failure.getMessage().contains("confirmed effect"));
+    }
+
+    private static void killAndRestart(ObjectNode document) {
+        ArrayNode steps = (ArrayNode) document.at("/phases/0/steps");
+        steps.removeAll();
+        ObjectNode target = steps.addObject().putObject("kill").putObject("target");
+        target.put("kind", "named");
+        target.put("role", "taskmanager");
+        target.put("name", "taskmanager-1");
+        steps.addObject().putObject("restart").put("component", "taskmanager");
+    }
+
+    private static FlinkJobObservation job(
+            long jobManagerTimeMillis,
+            FlinkJobState state,
+            long completedCheckpoints,
+            long restoredCheckpoints) {
+        return new FlinkJobObservation(
+                jobManagerTimeMillis, state, completedCheckpoints, restoredCheckpoints,
+                Optional.empty(), List.of(), List.of());
+    }
+
+    private static List<TaskManagerKillEffect.Outcome> outcomes(
+            V1ScenarioExecutionResult result) {
+        return result.taskManagerKillEffects().stream()
+                .map(TaskManagerKillEffect::outcome)
+                .toList();
+    }
+
+    @Test
+    void listsTheSinkTransactionsAfterTheFenceAsEvidenceOnly() throws Exception {
+        List<String> events = new ArrayList<>();
+        try (Fixture fixture = fixture()) {
+            transactionListing = (bootstrapServers, prefix, timeout) -> new KafkaTransactionListing(
+                    prefix,
+                    List.of(
+                            new KafkaTransactionListing.Transaction(
+                                    prefix + "-0-1", "CompleteCommit", 7, 0, List.of()),
+                            new KafkaTransactionListing.Transaction(
+                                    prefix + "-0-2", "Ongoing", 8, 1, List.of("output-0"))));
+            V1ScenarioExecutor executor = executor(
+                    events, new FakeRuntime(events), new FakeFlink(events),
+                    (bootstrap, topic, count, timeout) -> passResult());
+
+            V1ScenarioExecutionResult result = executor.execute(
+                    fixture.bound(), attemptContext());
+
+            KafkaTransactionListing listing = result.sinkTransactions().orElseThrow();
+            assertEquals(V1ScenarioExecutionResult.Status.PASS, result.status());
+            assertEquals(fixture.bound().executablePlan().job().sink().transactionalIdPrefix(),
+                    listing.transactionalIdPrefix());
+            assertEquals(List.of("Ongoing"), listing.unresolved().stream()
+                    .map(KafkaTransactionListing.Transaction::state)
+                    .toList());
+            assertTrue(events.indexOf("process-fence") < events.indexOf("list-transactions"));
+        }
+    }
+
+    @Test
+    void anUnavailableTransactionListingIsADiagnosticAndKeepsTheVerdict() throws Exception {
+        List<String> events = new ArrayList<>();
+        try (Fixture fixture = fixture()) {
+            transactionListing = (bootstrapServers, prefix, timeout) -> {
+                throw new java.util.concurrent.TimeoutException("admin timed out");
+            };
+            V1ScenarioExecutor executor = executor(
+                    events, new FakeRuntime(events), new FakeFlink(events),
+                    (bootstrap, topic, count, timeout) -> passResult());
+
+            V1ScenarioExecutionResult result = executor.execute(
+                    fixture.bound(), attemptContext());
+
+            assertEquals(V1ScenarioExecutionResult.Status.PASS, result.status());
+            assertTrue(result.sinkTransactions().isEmpty());
+            assertEquals(List.of("kafka.sink-transactions-unavailable: TimeoutException:"
+                            + " admin timed out"),
+                    result.diagnostics());
         }
     }
 
@@ -678,6 +910,12 @@ class V1ScenarioExecutorTest {
                     return flink;
                 },
                 validation,
+                (bootstrapServers, prefix, timeout) -> {
+                    events.add("list-transactions");
+                    assertEquals("localhost:39092", bootstrapServers);
+                    assertEquals(V1ScenarioExecutor.SINK_TRANSACTION_LISTING_TIMEOUT, timeout);
+                    return transactionListing.list(bootstrapServers, prefix, timeout);
+                },
                 cleanupTimeout);
     }
 
@@ -960,6 +1198,9 @@ class V1ScenarioExecutorTest {
 
     private static final class FakeFlink implements FlinkScenarioControl {
         private final List<String> events;
+        /** Observations served in order; an empty queue serves a finished, undisturbed job. */
+        private final java.util.Deque<FlinkJobObservation> observations =
+                new java.util.ArrayDeque<>();
         private FlinkJobSubmission submission;
         private String uploadedJarSha256;
         private IOException awaitFinishedFailure;
@@ -1014,6 +1255,13 @@ class V1ScenarioExecutorTest {
                 throw awaitFinishedFailure;
             }
             return FlinkJobState.FINISHED;
+        }
+
+        @Override
+        public FlinkJobObservation observe(FlinkJobHandle job) {
+            events.add("observe-job");
+            FlinkJobObservation next = observations.poll();
+            return next != null ? next : job(10_000, FlinkJobState.FINISHED, 1, 0);
         }
 
         @Override

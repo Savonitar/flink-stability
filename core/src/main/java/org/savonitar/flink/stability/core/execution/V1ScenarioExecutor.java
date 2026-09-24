@@ -6,13 +6,16 @@ import org.savonitar.flink.stability.core.execution.kafka.KafkaInputPreparer;
 import org.savonitar.flink.stability.core.execution.kafka.KafkaRuntimeTargetFactory;
 import org.savonitar.flink.stability.core.execution.kafka.PreparedKafkaInput;
 import org.savonitar.flink.stability.core.flink.FlinkJobHandle;
+import org.savonitar.flink.stability.core.flink.FlinkJobObservation;
 import org.savonitar.flink.stability.core.flink.FlinkJobSubmission;
 import org.savonitar.flink.stability.core.flink.FlinkRestApiClient;
 import org.savonitar.flink.stability.core.flink.FlinkScenarioControl;
 import org.savonitar.flink.stability.core.execution.plan.ExecutableScenarioPlan;
 import org.savonitar.flink.stability.core.execution.plan.PreparedExecutableScenarioPlan;
 import org.savonitar.flink.stability.core.validation.kafka.KafkaIdSetValidationResult;
+import org.savonitar.flink.stability.core.validation.kafka.KafkaAdminTransactionLister;
 import org.savonitar.flink.stability.core.validation.kafka.KafkaIdSetValidator;
+import org.savonitar.flink.stability.core.validation.kafka.KafkaTransactionListing;
 import org.savonitar.flink.stability.runtime.api.FlinkComponentProvisioningEvidence;
 import org.savonitar.flink.stability.runtime.api.FlinkProcessWriteFenceEvidence;
 import org.savonitar.flink.stability.runtime.api.KafkaRuntimeEndpoints;
@@ -28,11 +31,13 @@ import java.util.Optional;
 /** Executes the first bounded, plain v1 scenario vertical without legacy-schema fallback. */
 public final class V1ScenarioExecutor {
     static final Duration DEFAULT_ATTEMPT_CLEANUP_TIMEOUT = Duration.ofMinutes(2);
+    static final Duration SINK_TRANSACTION_LISTING_TIMEOUT = Duration.ofSeconds(30);
 
     private final V1AttemptRuntimeFactory runtimeFactory;
     private final InputPreparation inputPreparation;
     private final FlinkControlFactory flinkControlFactory;
     private final TerminalValidation terminalValidation;
+    private final TransactionListing transactionListing;
     private final AttemptCleanupBoundary cleanupBoundary;
 
     public V1ScenarioExecutor(V1AttemptRuntimeFactory runtimeFactory) {
@@ -41,6 +46,7 @@ public final class V1ScenarioExecutor {
                 new KafkaInputPreparer()::prepare,
                 FlinkRestApiClient::new,
                 new KafkaIdSetValidator()::validate,
+                new KafkaAdminTransactionLister()::list,
                 DEFAULT_ATTEMPT_CLEANUP_TIMEOUT);
     }
 
@@ -54,6 +60,8 @@ public final class V1ScenarioExecutor {
                 inputPreparation,
                 flinkControlFactory,
                 terminalValidation,
+                (bootstrapServers, prefix, timeout) -> new KafkaTransactionListing(
+                        prefix, List.of()),
                 DEFAULT_ATTEMPT_CLEANUP_TIMEOUT);
     }
 
@@ -62,6 +70,7 @@ public final class V1ScenarioExecutor {
             InputPreparation inputPreparation,
             FlinkControlFactory flinkControlFactory,
             TerminalValidation terminalValidation,
+            TransactionListing transactionListing,
             Duration cleanupTimeout) {
         this.runtimeFactory = Objects.requireNonNull(runtimeFactory, "runtimeFactory");
         this.inputPreparation = Objects.requireNonNull(
@@ -70,6 +79,8 @@ public final class V1ScenarioExecutor {
                 flinkControlFactory, "flinkControlFactory");
         this.terminalValidation = Objects.requireNonNull(
                 terminalValidation, "terminalValidation");
+        this.transactionListing = Objects.requireNonNull(
+                transactionListing, "transactionListing");
         this.cleanupBoundary = new AttemptCleanupBoundary(cleanupTimeout);
     }
 
@@ -101,12 +112,16 @@ public final class V1ScenarioExecutor {
 
         V1AttemptRuntime runtime = null;
         FlinkScenarioControl flink = null;
+        FlinkJobHandle job = null;
         PreparedKafkaInput input = null;
         KafkaInputManifest inputEvidence = null;
         PhaseExecutionEvidence phases = null;
         FlinkTerminalWriteFence.Evidence fence = null;
         FlinkProcessWriteFenceEvidence processFence = null;
+        FlinkJobObservation.Attempt finalJob = null;
         KafkaIdSetValidationResult validation = null;
+        KafkaTransactionListing sinkTransactions = null;
+        List<String> evidenceDiagnostics = new ArrayList<>();
         V1ScenarioExecutionResult result;
         Stage stage = Stage.RUNTIME_CREATION;
         try {
@@ -133,7 +148,7 @@ public final class V1ScenarioExecutor {
                     input.stoppingOffsets(),
                     context.attemptOrdinal(),
                     context.attemptNonce8());
-            FlinkJobHandle job = flink.submit(new FlinkJobSubmission(
+            job = flink.submit(new FlinkJobSubmission(
                     uploadedJarId,
                     plan.job().parallelism(),
                     configuration,
@@ -146,6 +161,7 @@ public final class V1ScenarioExecutor {
                     flink, runtime::stopAllFlinkProcesses)
                     .awaitBoundedCompletion(job, plan.jobCompletionTimeout());
             processFence = fence.processFenceEvidence();
+            finalJob = fence.jobBeforeFence();
 
             stage = Stage.TERMINAL_VALIDATION;
             validation = terminalValidation.validate(
@@ -153,29 +169,49 @@ public final class V1ScenarioExecutor {
                     plan.terminalValidation().output().topic(),
                     input.inputManifest().totalRecords(),
                     plan.terminalValidation().timeout());
-            result = validation.status() == KafkaIdSetValidationResult.Status.PASS
-                    ? result(
-                            V1ScenarioExecutionResult.Status.PASS,
-                            validation.reason(),
-                            "Expected-pass scenario matched its terminal oracle",
-                            inputEvidence,
-                            phases,
-                            fence,
-                            processFence,
-                            validation,
-                            runtime,
-                            List.of())
-                    : result(
-                            V1ScenarioExecutionResult.Status.FAIL,
-                            validation.reason(),
-                            validation.message(),
-                            inputEvidence,
-                            phases,
-                            fence,
-                            processFence,
-                            validation,
-                            runtime,
-                            List.of());
+            sinkTransactions = listSinkTransactions(
+                    endpoints.hostBootstrapServers(),
+                    plan.job().sink().transactionalIdPrefix(),
+                    evidenceDiagnostics);
+            // A failed oracle stays FAIL whatever the faults did: the output is wrong either
+            // way. A passing oracle shows recovery only if every kill disrupted the job.
+            Optional<TaskManagerKillEffect> unconfirmedKill = TaskManagerKillEffect.evaluate(
+                            phases.taskManagerKills(), Optional.of(finalJob))
+                    .stream()
+                    .filter(effect -> !effect.outcome().confirmed())
+                    .findFirst();
+            V1ScenarioExecutionResult.Status status;
+            String reason;
+            String message;
+            if (validation.status() != KafkaIdSetValidationResult.Status.PASS) {
+                status = V1ScenarioExecutionResult.Status.FAIL;
+                reason = validation.reason();
+                message = validation.message();
+            } else if (unconfirmedKill.isPresent()) {
+                TaskManagerKillEffect effect = unconfirmedKill.orElseThrow();
+                status = V1ScenarioExecutionResult.Status.INCONCLUSIVE;
+                reason = ExecutablePhaseExecutor.TASKMANAGER_KILL_EFFECT_UNCONFIRMED;
+                message = "The terminal oracle passed, but the TaskManager kill at "
+                        + effect.kill().path() + " did not observably affect the job ("
+                        + effect.outcome() + "): " + effect.detail();
+            } else {
+                status = V1ScenarioExecutionResult.Status.PASS;
+                reason = validation.reason();
+                message = "Expected-pass scenario matched its terminal oracle";
+            }
+            result = result(
+                    status,
+                    reason,
+                    message,
+                    inputEvidence,
+                    phases,
+                    fence,
+                    processFence,
+                    finalJob,
+                    validation,
+                    sinkTransactions,
+                    runtime,
+                    evidenceDiagnostics);
         } catch (KafkaInputPreparationException failure) {
             inputEvidence = failure.evidence().orElse(inputEvidence);
             result = result(
@@ -186,11 +222,15 @@ public final class V1ScenarioExecutor {
                     phases,
                     fence,
                     processFence,
+                    finalJob,
                     validation,
+                    sinkTransactions,
                     runtime,
                     diagnostics(failure));
         } catch (PhaseExecutionException failure) {
             phases = failure.evidence();
+            // Read-only: explains a failed await (e.g. a restart loop) and judges earlier kills.
+            finalJob = FlinkJobObservation.Attempt.of(flink, job);
             result = result(
                     failure.outcome() == PhaseExecutionException.Outcome.FAIL
                             ? V1ScenarioExecutionResult.Status.FAIL
@@ -201,11 +241,14 @@ public final class V1ScenarioExecutor {
                     phases,
                     fence,
                     processFence,
+                    finalJob,
                     validation,
+                    sinkTransactions,
                     runtime,
                     diagnostics(failure));
         } catch (TerminalWriteFenceException failure) {
             processFence = failure.processFenceEvidence().orElse(null);
+            finalJob = failure.jobBeforeFence();
             result = result(
                     V1ScenarioExecutionResult.Status.FAIL,
                     failure.reason(),
@@ -214,7 +257,9 @@ public final class V1ScenarioExecutor {
                     phases,
                     fence,
                     processFence,
+                    finalJob,
                     validation,
+                    sinkTransactions,
                     runtime,
                     diagnostics(failure));
         } catch (InterruptedException failure) {
@@ -227,7 +272,9 @@ public final class V1ScenarioExecutor {
                     phases,
                     fence,
                     processFence,
+                    finalJob,
                     validation,
+                    sinkTransactions,
                     runtime,
                     diagnostics(failure));
         } catch (Exception failure) {
@@ -239,12 +286,35 @@ public final class V1ScenarioExecutor {
                     phases,
                     fence,
                     processFence,
+                    finalJob,
                     validation,
+                    sinkTransactions,
                     runtime,
                     diagnostics(failure));
         }
 
         return result;
+    }
+
+    /**
+     * Evidence only: after the fence nothing but a broker timeout resolves an open transaction,
+     * so the listing names what may pin a last stable offset. A failure becomes a diagnostic.
+     */
+    private KafkaTransactionListing listSinkTransactions(
+            String bootstrapServers,
+            String transactionalIdPrefix,
+            List<String> diagnostics) {
+        try {
+            return transactionListing.list(
+                    bootstrapServers, transactionalIdPrefix, SINK_TRANSACTION_LISTING_TIMEOUT);
+        } catch (Exception unavailable) {
+            if (unavailable instanceof InterruptedException) {
+                Thread.currentThread().interrupt();
+            }
+            diagnostics.add("kafka.sink-transactions-unavailable: "
+                    + unavailable.getClass().getSimpleName() + ": " + unavailable.getMessage());
+            return null;
+        }
     }
 
     private static V1ScenarioExecutionResult result(
@@ -255,7 +325,9 @@ public final class V1ScenarioExecutor {
             PhaseExecutionEvidence phases,
             FlinkTerminalWriteFence.Evidence fence,
             FlinkProcessWriteFenceEvidence processFence,
+            FlinkJobObservation.Attempt finalJob,
             KafkaIdSetValidationResult validation,
+            KafkaTransactionListing sinkTransactions,
             V1AttemptRuntime runtime,
             List<String> diagnostics) {
         List<FlinkComponentProvisioningEvidence> provisioning = runtime == null
@@ -269,7 +341,9 @@ public final class V1ScenarioExecutor {
                 Optional.ofNullable(phases),
                 Optional.ofNullable(fence),
                 Optional.ofNullable(processFence),
+                Optional.ofNullable(finalJob),
                 Optional.ofNullable(validation),
+                Optional.ofNullable(sinkTransactions),
                 provisioning,
                 diagnostics);
     }
@@ -341,6 +415,14 @@ public final class V1ScenarioExecutor {
     @FunctionalInterface
     interface FlinkControlFactory {
         FlinkScenarioControl open(String jobManagerRestUrl);
+    }
+
+    @FunctionalInterface
+    interface TransactionListing {
+        KafkaTransactionListing list(
+                String bootstrapServers,
+                String transactionalIdPrefix,
+                Duration timeout) throws Exception;
     }
 
     @FunctionalInterface

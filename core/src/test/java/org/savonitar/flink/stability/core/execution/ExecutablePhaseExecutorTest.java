@@ -10,6 +10,7 @@ import com.fasterxml.jackson.dataformat.yaml.YAMLFactory;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import org.savonitar.flink.stability.core.flink.FlinkJobHandle;
+import org.savonitar.flink.stability.core.flink.FlinkJobObservation;
 import org.savonitar.flink.stability.core.flink.FlinkJobState;
 import org.savonitar.flink.stability.core.flink.FlinkJobSubmission;
 import org.savonitar.flink.stability.core.flink.FlinkRestTimeoutException;
@@ -30,6 +31,7 @@ import java.nio.file.Path;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Optional;
 import java.util.function.Consumer;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -224,7 +226,13 @@ class ExecutablePhaseExecutorTest {
 
         PhaseExecutionEvidence evidence = executor.execute(plan, JOB);
 
-        assertEquals(List.of("kill:taskmanager-1", "restart:taskmanager"), events);
+        assertEquals(
+                List.of("observe-job", "kill:taskmanager-1", "restart:taskmanager"), events);
+        assertEquals(1, evidence.taskManagerKills().size());
+        PhaseExecutionEvidence.TaskManagerKill kill = evidence.taskManagerKills().getFirst();
+        assertEquals("$/phases/0/steps/0", kill.path());
+        assertEquals("taskmanager-1", kill.target());
+        assertEquals(Optional.of(RUNNING_JOB), kill.jobBeforeKill().observation());
         assertEquals(
                 ExecutablePhaseExecutor.TASKMANAGER_ACTION_TIMEOUT,
                 taskManagers.killTimeout);
@@ -244,13 +252,15 @@ class ExecutablePhaseExecutorTest {
                 PhaseExecutionException.class,
                 () -> executor.execute(plan, JOB));
 
-        assertEquals(List.of("kill:taskmanager-1", "restart:taskmanager"), events);
+        assertEquals(
+                List.of("observe-job", "kill:taskmanager-1", "restart:taskmanager"), events);
         assertEquals(
                 PhaseExecutionException.Outcome.INCONCLUSIVE,
                 failure.outcome());
         assertEquals("taskmanager.restart.infrastructure", failure.reason());
         assertEquals("$/phases/0/steps/1", failure.path());
         assertEquals(2, failure.evidence().steps().size());
+        assertEquals(1, failure.evidence().taskManagerKills().size());
 
         events.clear();
         taskManagers.restartFailure = null;
@@ -259,12 +269,14 @@ class ExecutablePhaseExecutorTest {
                 PhaseExecutionException.class,
                 () -> executor.execute(plan, JOB));
 
-        assertEquals(List.of("kill:taskmanager-1"), events);
+        assertEquals(List.of("observe-job", "kill:taskmanager-1"), events);
         assertEquals(PhaseExecutionException.Outcome.INCONCLUSIVE,
                 killFailure.outcome());
         assertEquals("taskmanager.kill.infrastructure", killFailure.reason());
         assertEquals("$/phases/0/steps/0", killFailure.path());
         assertEquals(1, killFailure.evidence().steps().size());
+        assertTrue(killFailure.evidence().taskManagerKills().isEmpty(),
+                "an unconfirmed kill has no effect to judge");
 
         taskManagers.killFailure = new TaskManagerActionTimeoutException(
                 TaskManagerActionTimeoutException.Action.KILL,
@@ -291,6 +303,32 @@ class ExecutablePhaseExecutorTest {
         assertEquals(PhaseExecutionException.Outcome.INCONCLUSIVE, restartTimeout.outcome());
         assertEquals("taskmanager.restart.timeout", restartTimeout.reason());
         assertEquals("$/phases/0/steps/1", restartTimeout.path());
+    }
+
+    @Test
+    void anUnavailableJobObservationIsRecordedAndDoesNotPreventTheKill() throws Exception {
+        ExecutableScenarioPlan plan = plan(document -> {
+            ArrayNode steps = replaceSteps(document);
+            ObjectNode target = steps.addObject().putObject("kill").putObject("target");
+            target.put("kind", "named");
+            target.put("role", "taskmanager");
+            target.put("name", "taskmanager-1");
+            steps.addObject().putObject("restart").put("component", "taskmanager");
+        });
+        List<String> events = new ArrayList<>();
+        FakeFlink flink = new FakeFlink(events);
+        flink.observeFailure = new IOException("REST unavailable");
+        ExecutablePhaseExecutor executor = new ExecutablePhaseExecutor(
+                flink, new FakeTaskManagers(events), duration -> {});
+
+        PhaseExecutionEvidence evidence = executor.execute(plan, JOB);
+
+        assertEquals(
+                List.of("observe-job", "kill:taskmanager-1", "restart:taskmanager"), events);
+        FlinkJobObservation.Attempt observed =
+                evidence.taskManagerKills().getFirst().jobBeforeKill();
+        assertTrue(observed.observation().isEmpty());
+        assertEquals(Optional.of("IOException: REST unavailable"), observed.failure());
     }
 
     private ExecutablePhaseExecutor executor(FakeFlink flink) {
@@ -396,10 +434,14 @@ class ExecutablePhaseExecutorTest {
         }
     }
 
+    private static final FlinkJobObservation RUNNING_JOB = new FlinkJobObservation(
+            1_000, FlinkJobState.RUNNING, 2, 0, Optional.empty(), List.of(), List.of());
+
     private static final class FakeFlink implements FlinkScenarioControl {
         private final List<String> events;
         private IOException awaitStateFailure;
         private IOException checkpointFailure;
+        private IOException observeFailure;
 
         private FakeFlink(List<String> events) {
             this.events = events;
@@ -447,6 +489,15 @@ class ExecutablePhaseExecutorTest {
         @Override
         public FlinkJobState awaitFinished(FlinkJobHandle job, Duration timeout) {
             throw new AssertionError("not used by phase execution");
+        }
+
+        @Override
+        public FlinkJobObservation observe(FlinkJobHandle job) throws IOException {
+            events.add("observe-job");
+            if (observeFailure != null) {
+                throw observeFailure;
+            }
+            return RUNNING_JOB;
         }
 
         @Override

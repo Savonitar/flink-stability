@@ -8,4 +8,7 @@ public interface FlinkJobControl {
     FlinkJobState jobState(FlinkJobHandle job) throws IOException;
 
     FlinkJobState awaitFinished(FlinkJobHandle job, Duration timeout) throws IOException;
+
+    /** Reads the job's recovery-relevant state under one fixed internal deadline. */
+    FlinkJobObservation observe(FlinkJobHandle job) throws IOException;
 }
