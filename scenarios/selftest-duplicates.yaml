@@ -1,0 +1,85 @@
+format: v1
+kind: scenario
+
+meta:
+  name: selftest-duplicates
+  description: >-
+    Negative control for the kafka.id-set oracle. An at-least-once sink writes again the
+    records that followed its last completed checkpoint when Flink recovers from a
+    TaskManager kill, so the oracle must report duplicate IDs.
+
+runs: 1
+health_retry_limit: 0
+
+setup:
+  kafka:
+    clusters:
+      main:
+        image: apache/kafka:4.0.0
+        brokers: 1
+        topics:
+          - name: input
+            partitions: 1
+            replication_factor: 1
+            input_source:
+              mode: generated
+              format: integer-sequence
+              # About 30 s at 5 ms per record: the kill below lands mid-stream.
+              total: 6000
+          - name: output
+            partitions: 1
+            replication_factor: 1
+  flink:
+    image: flink:2.2.0
+    jobmanagers: 1
+    taskmanagers: 1
+
+subject:
+  connectors:
+    kafka:
+      artifact: maven:org.apache.flink:flink-connector-kafka:5.0.0-2.2
+
+workload:
+  jobs:
+    - alias: alo-job
+      jar: ./flink-job-generator/target/flink-job-generator.jar
+      connectors: [kafka]
+      parallelism: 1
+      source: { cluster: main, topic: input }
+      sink:
+        cluster: main
+        topic: output
+        delivery_guarantee: AT_LEAST_ONCE
+      checkpointing:
+        interval: 5s
+        mode: EXACTLY_ONCE
+      program_args: [--processingDelayMs, "5"]
+
+phases:
+  - name: warmup
+    steps:
+      - await:
+          condition: { type: job-state, job: alo-job, state: RUNNING }
+          timeout: 2m
+          on_timeout: inconclusive
+      - await:
+          condition: { type: checkpoint-completed, job: alo-job, count: 1 }
+          timeout: 2m
+          on_timeout: fail
+  - name: replay-window
+    steps:
+      # About 400 records reach Kafka after checkpoint 1; the next checkpoint is at least
+      # three seconds away. Recovery restores checkpoint 1 and writes them again.
+      - wait: { duration: 2s }
+  - name: taskmanager-recovery
+    steps:
+      - kill:
+          target: { kind: named, role: taskmanager, name: taskmanager-1 }
+      - wait: { duration: 1s }
+      - restart: { component: taskmanager }
+
+terminal_validations:
+  - type: kafka.id-set
+    cluster: main
+    topic: output
+    expected: input-manifest

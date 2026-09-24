@@ -5,9 +5,11 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import org.savonitar.flink.stability.core.execution.PhaseExecutionEvidence;
+import org.savonitar.flink.stability.core.execution.ScenarioVerdict;
 import org.savonitar.flink.stability.core.execution.TaskManagerKillEffect;
 import org.savonitar.flink.stability.core.execution.V1AttemptContext;
 import org.savonitar.flink.stability.core.execution.V1ScenarioExecutionResult;
+import org.savonitar.flink.stability.core.execution.plan.ExecutableScenarioPlan;
 
 import java.util.Locale;
 import java.util.Objects;
@@ -16,13 +18,20 @@ import java.util.Objects;
 final class V1ExecutionResultRenderer {
     private static final ObjectMapper JSON = new ObjectMapper();
 
+    /**
+     * Renders the scenario verdict at the top level and the attempt result under
+     * {@code attempt}. They differ only when the expectation is a failure.
+     */
     String render(
             String scenarioName,
             V1AttemptContext context,
+            ExecutableScenarioPlan.ExpectedOutcome expected,
             V1ScenarioExecutionResult result) {
         Objects.requireNonNull(scenarioName, "scenarioName");
         Objects.requireNonNull(context, "context");
+        Objects.requireNonNull(expected, "expected");
         Objects.requireNonNull(result, "result");
+        ScenarioVerdict verdict = ScenarioVerdict.of(expected, result);
 
         ObjectNode root = JSON.createObjectNode();
         root.put("scenario", scenarioName);
@@ -30,9 +39,17 @@ final class V1ExecutionResultRenderer {
         attempt.put("ordinal", context.attemptOrdinal());
         attempt.put("nonce", context.attemptNonce8());
         attempt.put("checkpointRoot", context.checkpointStorageRoot().toString());
-        root.put("status", result.status().name().toLowerCase(Locale.ROOT));
-        root.put("reason", result.reason());
-        root.put("message", result.message());
+        attempt.put("status", result.status().name().toLowerCase(Locale.ROOT));
+        attempt.put("reason", result.reason());
+        attempt.put("message", result.message());
+        root.put("status", verdict.status().name().toLowerCase(Locale.ROOT));
+        root.put("reason", verdict.reason());
+        root.put("message", verdict.message());
+        ObjectNode expectation = root.putObject("expectation");
+        expectation.put("outcome", expected.outcome().name().toLowerCase(Locale.ROOT));
+        expected.oracle().ifPresent(oracle -> expectation.put("oracle", oracle));
+        expected.reason().ifPresent(reason -> expectation.put("reason", reason));
+        expectation.put("matched", verdict.matched());
 
         ObjectNode evidence = root.putObject("evidence");
         ObjectNode input = evidence.putObject("input");

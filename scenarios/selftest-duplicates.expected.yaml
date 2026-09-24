@@ -1,0 +1,11 @@
+format: v1
+kind: expected-result
+
+meta:
+  name: selftest-duplicates.expected
+  scenario: selftest-duplicates
+
+default:
+  outcome: fail
+  oracle: kafka.id-set
+  reason: validator.kafka.id-set.duplicate-ids

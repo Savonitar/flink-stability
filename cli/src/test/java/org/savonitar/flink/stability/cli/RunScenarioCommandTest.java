@@ -9,6 +9,7 @@ import org.savonitar.flink.stability.core.execution.PhaseExecutionEvidence;
 import org.savonitar.flink.stability.core.execution.V1AttemptContext;
 import org.savonitar.flink.stability.core.execution.V1ScenarioExecutionResult;
 import org.savonitar.flink.stability.core.execution.kafka.KafkaInputManifest;
+import org.savonitar.flink.stability.core.execution.plan.ExecutableScenarioPlan;
 import org.savonitar.flink.stability.core.flink.FlinkJobObservation;
 import org.savonitar.flink.stability.core.flink.FlinkJobState;
 import org.savonitar.flink.stability.core.validation.kafka.KafkaIdSetValidationResult;
@@ -44,6 +45,9 @@ class RunScenarioCommandTest {
 
     @TempDir
     Path temporaryDirectory;
+
+    private ExecutableScenarioPlan.ExpectedOutcome expectation =
+            ExecutableScenarioPlan.ExpectedOutcome.pass();
 
     @Test
     void registeredCommandHelpRequiresOnlyOneScenarioTarget() {
@@ -237,7 +241,7 @@ class RunScenarioCommandTest {
                 List.of());
 
         JsonNode output = JSON.readTree(new V1ExecutionResultRenderer().render(
-                "bounded-eos", context("1234abcd"), result));
+                "bounded-eos", context("1234abcd"), expectation, result));
         JsonNode input = output.path("evidence").path("input");
         JsonNode validation = output.path("evidence").path("terminalValidation");
 
@@ -302,7 +306,7 @@ class RunScenarioCommandTest {
                 List.of());
 
         JsonNode evidence = JSON.readTree(new V1ExecutionResultRenderer().render(
-                "bounded-eos", context("1234abcd"), result)).path("evidence");
+                "bounded-eos", context("1234abcd"), expectation, result)).path("evidence");
         JsonNode job = evidence.path("flinkJob");
         JsonNode kill = evidence.path("taskManagerKills").path(0);
 
@@ -325,6 +329,63 @@ class RunScenarioCommandTest {
                 () -> assertEquals(1, kill.path("failuresAfterKill").intValue()),
                 () -> assertEquals("TaskManager with id tm-1 is no longer reachable.",
                         kill.path("firstFailureAfterKill").textValue()));
+    }
+
+    @Test
+    void aNegativeControlThatFailsAsPinnedExitsZeroWithItsAttemptReported() throws Exception {
+        expectation = ExecutableScenarioPlan.ExpectedOutcome.failure(
+                "kafka.id-set", "validator.kafka.id-set.duplicate-ids");
+        List<String> events = new ArrayList<>();
+        RunScenarioCommand command = new RunScenarioCommand(
+                (root, name, overrides, options) ->
+                        prepared(events, new AtomicInteger(), duplicateResult()),
+                () -> context("1234abcd"),
+                new V1ExecutionResultRenderer(),
+                new ValidationDiagnosticRenderer());
+
+        Invocation invocation = execute(command,
+                "--catalog-root", temporaryDirectory.toString(),
+                "--scenario", "selftest-duplicates");
+        JsonNode output = JSON.readTree(invocation.stdout());
+
+        assertAll(
+                () -> assertEquals(CommandLine.ExitCode.OK, invocation.exitCode()),
+                () -> assertEquals("pass", output.path("status").textValue()),
+                () -> assertEquals("validator.kafka.id-set.duplicate-ids",
+                        output.path("reason").textValue()),
+                () -> assertEquals("fail", output.at("/attempt/status").textValue()),
+                () -> assertEquals("validator.kafka.id-set.duplicate-ids",
+                        output.at("/attempt/reason").textValue()),
+                () -> assertEquals("fail", output.at("/expectation/outcome").textValue()),
+                () -> assertEquals("kafka.id-set",
+                        output.at("/expectation/oracle").textValue()),
+                () -> assertTrue(output.at("/expectation/matched").booleanValue()),
+                () -> assertEquals(3, output.at("/evidence/terminalValidation/duplicates")
+                        .intValue()));
+    }
+
+    @Test
+    void anExpectedFailureThatDoesNotOccurFailsTheRun() throws Exception {
+        expectation = ExecutableScenarioPlan.ExpectedOutcome.failure(
+                "kafka.id-set", "validator.kafka.id-set.duplicate-ids");
+        RunScenarioCommand command = new RunScenarioCommand(
+                (root, name, overrides, options) ->
+                        prepared(new ArrayList<>(), new AtomicInteger(), passResult()),
+                () -> context("1234abcd"),
+                new V1ExecutionResultRenderer(),
+                new ValidationDiagnosticRenderer());
+
+        Invocation invocation = execute(command,
+                "--catalog-root", temporaryDirectory.toString(),
+                "--scenario", "selftest-duplicates");
+        JsonNode output = JSON.readTree(invocation.stdout());
+
+        assertAll(
+                () -> assertEquals(CommandLine.ExitCode.SOFTWARE, invocation.exitCode()),
+                () -> assertEquals("fail", output.path("status").textValue()),
+                () -> assertEquals("expectation.mismatch", output.path("reason").textValue()),
+                () -> assertEquals("pass", output.at("/attempt/status").textValue()),
+                () -> assertFalse(output.at("/expectation/matched").booleanValue()));
     }
 
     @Test
@@ -378,6 +439,11 @@ class RunScenarioCommandTest {
         RunScenarioCommand executionFailure = new RunScenarioCommand(
                 (root, name, overrides, options) -> new RunScenarioCommand.PreparedExecution() {
                     @Override
+                    public ExecutableScenarioPlan.ExpectedOutcome expectedOutcome() {
+                        return expectation;
+                    }
+
+                    @Override
                     public V1ScenarioExecutionResult execute(V1AttemptContext context) {
                         executionEvents.add("execute");
                         throw new IllegalStateException("executor exploded");
@@ -398,6 +464,11 @@ class RunScenarioCommandTest {
         List<String> contextEvents = new ArrayList<>();
         RunScenarioCommand contextFailure = new RunScenarioCommand(
                 (root, name, overrides, options) -> new RunScenarioCommand.PreparedExecution() {
+                    @Override
+                    public ExecutableScenarioPlan.ExpectedOutcome expectedOutcome() {
+                        return expectation;
+                    }
+
                     @Override
                     public V1ScenarioExecutionResult execute(V1AttemptContext context) {
                         contextEvents.add("execute");
@@ -433,6 +504,11 @@ class RunScenarioCommandTest {
         RunScenarioCommand command = new RunScenarioCommand(
                 (root, name, overrides, options) ->
                         new RunScenarioCommand.PreparedExecution() {
+                            @Override
+                            public ExecutableScenarioPlan.ExpectedOutcome expectedOutcome() {
+                                return expectation;
+                            }
+
                             @Override
                             public V1ScenarioExecutionResult execute(
                                     V1AttemptContext context) {
@@ -474,6 +550,11 @@ class RunScenarioCommandTest {
         RunScenarioCommand command = new RunScenarioCommand(
                 (root, name, overrides, options) ->
                         new RunScenarioCommand.PreparedExecution() {
+                            @Override
+                            public ExecutableScenarioPlan.ExpectedOutcome expectedOutcome() {
+                                return expectation;
+                            }
+
                             @Override
                             public V1ScenarioExecutionResult execute(
                                     V1AttemptContext context) {
@@ -535,6 +616,11 @@ class RunScenarioCommandTest {
             AtomicInteger executions,
             V1ScenarioExecutionResult result) {
         return new RunScenarioCommand.PreparedExecution() {
+            @Override
+            public ExecutableScenarioPlan.ExpectedOutcome expectedOutcome() {
+                return expectation;
+            }
+
             @Override
             public V1ScenarioExecutionResult execute(V1AttemptContext context) {
                 events.add("execute");
@@ -614,6 +700,39 @@ class RunScenarioCommandTest {
                                 9, 0, 0, 0, 1)),
                         List.of(), List.of(), List.of(), List.of(), List.of(),
                         Map.of(0, 0L), Map.of(0, 9L), true));
+        return new V1ScenarioExecutionResult(
+                V1ScenarioExecutionResult.Status.FAIL,
+                terminal.reason(),
+                terminal.message(),
+                Optional.empty(),
+                Optional.empty(),
+                Optional.of(fence),
+                Optional.of(processes),
+                Optional.of(FINISHED_JOB),
+                Optional.of(terminal),
+                Optional.empty(),
+                List.of(),
+                List.of());
+    }
+
+    private static V1ScenarioExecutionResult duplicateResult() {
+        FlinkProcessWriteFenceEvidence processes = new FlinkProcessWriteFenceEvidence(
+                List.of(), Instant.EPOCH);
+        FlinkTerminalWriteFence.Evidence fence = new FlinkTerminalWriteFence.Evidence(
+                FlinkJobState.FINISHED,
+                processes,
+                FINISHED_JOB);
+        KafkaIdSetValidationResult terminal = new KafkaIdSetValidationResult(
+                KafkaIdSetValidationResult.Status.FAIL,
+                "validator.kafka.id-set.duplicate-ids",
+                "Three record IDs were written twice",
+                new KafkaIdSetValidationResult.Evidence(
+                        10,
+                        13,
+                        Optional.of(new KafkaIdSetValidationResult.DefectTotals(
+                                10, 0, 0, 3, 0)),
+                        List.of(), List.of(), List.of(), List.of(), List.of(),
+                        Map.of(0, 0L), Map.of(0, 13L), true));
         return new V1ScenarioExecutionResult(
                 V1ScenarioExecutionResult.Status.FAIL,
                 terminal.reason(),

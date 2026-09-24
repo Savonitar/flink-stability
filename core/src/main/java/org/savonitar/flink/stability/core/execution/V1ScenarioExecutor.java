@@ -169,10 +169,12 @@ public final class V1ScenarioExecutor {
                     plan.terminalValidation().output().topic(),
                     input.inputManifest().totalRecords(),
                     plan.terminalValidation().timeout());
-            sinkTransactions = listSinkTransactions(
-                    endpoints.hostBootstrapServers(),
-                    plan.job().sink().transactionalIdPrefix(),
-                    evidenceDiagnostics);
+            // Only a transactional (exactly-once) sink has a prefix to list.
+            String bootstrapServers = endpoints.hostBootstrapServers();
+            sinkTransactions = plan.job().sink().transactionalIdPrefix()
+                    .map(prefix -> listSinkTransactions(
+                            bootstrapServers, prefix, evidenceDiagnostics))
+                    .orElse(null);
             // A failed oracle stays FAIL whatever the faults did: the output is wrong either
             // way. A passing oracle shows recovery only if every kill disrupted the job.
             Optional<TaskManagerKillEffect> unconfirmedKill = TaskManagerKillEffect.evaluate(
@@ -197,7 +199,7 @@ public final class V1ScenarioExecutor {
             } else {
                 status = V1ScenarioExecutionResult.Status.PASS;
                 reason = validation.reason();
-                message = "Expected-pass scenario matched its terminal oracle";
+                message = "The terminal oracle passed and every fault had a confirmed effect";
             }
             result = result(
                     status,

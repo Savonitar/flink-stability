@@ -308,26 +308,48 @@ public final class ExecutableScenarioPlan {
         }
     }
 
+    /** A Kafka sink; the transaction settings exist exactly when delivery is exactly-once. */
     public record Sink(
             TopicReference topic,
             DeliveryGuarantee deliveryGuarantee,
-            String transactionalIdPrefix,
-            TransactionIdNamingStrategy transactionIdNamingStrategy) {
+            Optional<String> transactionalIdPrefix,
+            Optional<TransactionIdNamingStrategy> transactionIdNamingStrategy) {
         public Sink {
             Objects.requireNonNull(topic, "topic");
             Objects.requireNonNull(deliveryGuarantee, "deliveryGuarantee");
-            transactionalIdPrefix = requireNonBlank(
-                    transactionalIdPrefix, "transactionalIdPrefix");
+            Objects.requireNonNull(transactionalIdPrefix, "transactionalIdPrefix");
             Objects.requireNonNull(transactionIdNamingStrategy, "transactionIdNamingStrategy");
-            if (deliveryGuarantee != DeliveryGuarantee.EXACTLY_ONCE) {
+            transactionalIdPrefix.ifPresent(prefix ->
+                    requireNonBlank(prefix, "transactionalIdPrefix"));
+            boolean transactional = deliveryGuarantee == DeliveryGuarantee.EXACTLY_ONCE;
+            if (transactionalIdPrefix.isPresent() != transactional
+                    || transactionIdNamingStrategy.isPresent() != transactional) {
                 throw new IllegalArgumentException(
-                        "The first executable boundary requires exactly-once delivery");
+                        "Transaction settings are required for, and only for, exactly-once");
             }
+        }
+
+        public static Sink exactlyOnce(
+                TopicReference topic,
+                String transactionalIdPrefix,
+                TransactionIdNamingStrategy transactionIdNamingStrategy) {
+            return new Sink(topic, DeliveryGuarantee.EXACTLY_ONCE,
+                    Optional.of(transactionalIdPrefix), Optional.of(transactionIdNamingStrategy));
+        }
+
+        public static Sink atLeastOnce(TopicReference topic) {
+            return new Sink(topic, DeliveryGuarantee.AT_LEAST_ONCE,
+                    Optional.empty(), Optional.empty());
         }
     }
 
+    /**
+     * Executable delivery guarantees. {@code AT_LEAST_ONCE} exists for negative controls: after a
+     * recovery it is expected to duplicate output.
+     */
     public enum DeliveryGuarantee {
-        EXACTLY_ONCE
+        EXACTLY_ONCE,
+        AT_LEAST_ONCE
     }
 
     public enum TransactionIdNamingStrategy {
@@ -593,12 +615,15 @@ public final class ExecutableScenarioPlan {
             values.put(PREFIX + "source.stopping-offsets", canonicalOffsets);
             values.put(PREFIX + "sink.bootstrap-servers", kafkaBootstrapServers);
             values.put(PREFIX + "sink.topic", sink.topic().topic());
-            values.put(PREFIX + "sink.delivery-guarantee", "EXACTLY_ONCE");
-            values.put(PREFIX + "sink.transactional-id-prefix", sink.transactionalIdPrefix());
-            values.put(PREFIX + "sink.transaction-id-naming-strategy",
-                    sink.transactionIdNamingStrategy().name());
-            values.put(PREFIX + "sink.transaction-timeout-ms",
-                    Long.toString(transactionTimeout.toMillis()));
+            values.put(PREFIX + "sink.delivery-guarantee", sink.deliveryGuarantee().name());
+            // The workload protocol rejects transaction settings for non-transactional sinks.
+            sink.transactionalIdPrefix().ifPresent(prefix -> {
+                values.put(PREFIX + "sink.transactional-id-prefix", prefix);
+                values.put(PREFIX + "sink.transaction-id-naming-strategy",
+                        sink.transactionIdNamingStrategy().orElseThrow().name());
+                values.put(PREFIX + "sink.transaction-timeout-ms",
+                        Long.toString(transactionTimeout.toMillis()));
+            });
             values.put(PREFIX + "state-ttl.enabled", Boolean.toString(stateTtl.enabled()));
             if (stateTtl.enabled()) {
                 values.put(PREFIX + "state-ttl.ttl-ms",
@@ -739,8 +764,36 @@ public final class ExecutableScenarioPlan {
         INPUT_MANIFEST
     }
 
-    public enum ExpectedOutcome {
-        PASS
+    /**
+     * The selected expectation (SPEC-002 E4): pass, or a pinned failure of the one executable
+     * oracle with one of its registered failure reasons.
+     */
+    public record ExpectedOutcome(Outcome outcome, Optional<String> oracle, Optional<String> reason) {
+        public enum Outcome {
+            PASS,
+            FAIL
+        }
+
+        public ExpectedOutcome {
+            Objects.requireNonNull(outcome, "outcome");
+            Objects.requireNonNull(oracle, "oracle");
+            Objects.requireNonNull(reason, "reason");
+            boolean failure = outcome == Outcome.FAIL;
+            if (oracle.isPresent() != failure || reason.isPresent() != failure) {
+                throw new IllegalArgumentException(
+                        "An expected failure names its oracle and reason; a pass names neither");
+            }
+        }
+
+        public static ExpectedOutcome pass() {
+            return new ExpectedOutcome(Outcome.PASS, Optional.empty(), Optional.empty());
+        }
+
+        public static ExpectedOutcome failure(String oracle, String reason) {
+            return new ExpectedOutcome(Outcome.FAIL,
+                    Optional.of(requireNonBlank(oracle, "oracle")),
+                    Optional.of(requireNonBlank(reason, "reason")));
+        }
     }
 
     static Map<String, String> standardFlinkConfiguration(

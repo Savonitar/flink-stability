@@ -54,6 +54,8 @@ public final class ExecutableScenarioPlanCompiler {
     private static final String RESERVED_WORKLOAD_ARGUMENT_PREFIX =
             "--flink-stability.workload.";
     private static final String FORBIDDEN_BOOTSTRAP_OVERRIDE_ARGUMENT = "--bootstrapServers";
+    /** The only terminal oracle the first runner executes. */
+    static final String KAFKA_ID_SET = "kafka.id-set";
     private static final Set<String> SUPPORTED_STEP_KEYS = Set.of(
             "await", "wait", "loop", "kill", "restart");
     private static final BigInteger LONG_MAX = BigInteger.valueOf(Long.MAX_VALUE);
@@ -95,7 +97,7 @@ public final class ExecutableScenarioPlanCompiler {
         validateWorkload(source, document, issues);
         validatePhases(source, document, issues);
         validateTerminalValidation(source, document, issues);
-        validateExpectation(sourcePlan, issues);
+        ExpectationCompiler.validate(sourcePlan, issues);
         if (!issues.isEmpty()) {
             throw new RunnerCapabilityException(issues);
         }
@@ -373,15 +375,17 @@ public final class ExecutableScenarioPlanCompiler {
                     "The bounded source and terminal sink topics must be distinct"));
         }
 
-        if (!"EXACTLY_ONCE".equals(sink.path("delivery_guarantee").textValue())) {
+        String guarantee = sink.path("delivery_guarantee").textValue();
+        if (!Set.of("EXACTLY_ONCE", "AT_LEAST_ONCE").contains(guarantee)) {
             issues.add(issue(
                     source,
                     "runner.workload.delivery-guarantee-unsupported",
                     jobPath + "/sink/delivery_guarantee",
-                    "The first runner tests only EXACTLY_ONCE Kafka sinks"));
+                    "The first runner tests EXACTLY_ONCE and AT_LEAST_ONCE Kafka sinks"));
         }
         String naming = sink.path("transaction_id_naming_strategy").textValue();
-        if (!Set.of("INCREMENTING", "POOLING").contains(naming)) {
+        if ("EXACTLY_ONCE".equals(guarantee)
+                && !Set.of("INCREMENTING", "POOLING").contains(naming)) {
             issues.add(issue(
                     source,
                     "runner.workload.transaction-id-naming-unsupported",
@@ -770,7 +774,7 @@ public final class ExecutableScenarioPlanCompiler {
             return;
         }
         ObjectNode validator = (ObjectNode) validators.get(0);
-        if (!"kafka.id-set".equals(validator.path("type").textValue())) {
+        if (!KAFKA_ID_SET.equals(validator.path("type").textValue())) {
             issues.add(issue(
                     source,
                     "runner.validation.type-unsupported",
@@ -794,20 +798,6 @@ public final class ExecutableScenarioPlanCompiler {
         if (document.has("completion_timeout")) {
             requireDuration(source, document.path("completion_timeout"),
                     "$/completion_timeout", issues);
-        }
-    }
-
-    private static void validateExpectation(
-            ResolvedScenarioPlan sourcePlan,
-            List<RunnerCapabilityIssue> issues) {
-        ObjectNode expectation = sourcePlan.expectationFor(ScenarioSide.SINGLE);
-        if (!"pass".equals(expectation.path("outcome").textValue())) {
-            String path = sourcePlan.selectedExpectation().originPointer() + "/outcome";
-            issues.add(issue(
-                    sourcePlan.selectedExpectation().specification().source(),
-                    "runner.expectation.outcome-unsupported",
-                    path,
-                    "The first runner accepts only expected outcome pass"));
         }
     }
 
@@ -859,12 +849,14 @@ public final class ExecutableScenarioPlanCompiler {
         ExecutableScenarioPlan.TopicReference source = topicReference(
                 (ObjectNode) jobNode.get("source"));
         ObjectNode sinkNode = (ObjectNode) jobNode.get("sink");
-        ExecutableScenarioPlan.Sink sink = new ExecutableScenarioPlan.Sink(
-                topicReference(sinkNode),
-                ExecutableScenarioPlan.DeliveryGuarantee.EXACTLY_ONCE,
-                sinkNode.path("transactional_id_prefix").textValue(),
-                ExecutableScenarioPlan.TransactionIdNamingStrategy.valueOf(
-                        sinkNode.path("transaction_id_naming_strategy").textValue()));
+        ExecutableScenarioPlan.Sink sink = "AT_LEAST_ONCE".equals(
+                        sinkNode.path("delivery_guarantee").textValue())
+                ? ExecutableScenarioPlan.Sink.atLeastOnce(topicReference(sinkNode))
+                : ExecutableScenarioPlan.Sink.exactlyOnce(
+                        topicReference(sinkNode),
+                        sinkNode.path("transactional_id_prefix").textValue(),
+                        ExecutableScenarioPlan.TransactionIdNamingStrategy.valueOf(
+                                sinkNode.path("transaction_id_naming_strategy").textValue()));
         ExecutableScenarioPlan.StateTtl stateTtl = mapStateTtl(jobNode.get("state_ttl"));
         ExecutableScenarioPlan.Watermarks watermarks = mapWatermarks(jobNode.get("watermarks"));
         ExecutableScenarioPlan.RunScopedIdentityPolicy identityPolicy =
@@ -934,7 +926,7 @@ public final class ExecutableScenarioPlanCompiler {
                 job,
                 phases,
                 validation,
-                ExecutableScenarioPlan.ExpectedOutcome.PASS,
+                ExpectationCompiler.map(sourcePlan),
                 completionTimeout);
     }
 
