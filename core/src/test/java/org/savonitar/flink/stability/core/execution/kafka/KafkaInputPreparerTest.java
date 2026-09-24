@@ -504,7 +504,7 @@ class KafkaInputPreparerTest {
 
     @Test
     void adaptsTheCompiledBrokerPolicyWithoutReinterpretingIt() {
-        KafkaRuntimeTarget target = KafkaRuntimeTargetFactory.from(cluster());
+        KafkaRuntimeTarget target = cluster().runtimeTarget();
 
         assertEquals("main", target.clusterAlias());
         assertEquals("apache/kafka:4.0.0", target.imageReference());

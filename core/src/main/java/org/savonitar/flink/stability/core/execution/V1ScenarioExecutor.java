@@ -3,7 +3,6 @@ package org.savonitar.flink.stability.core.execution;
 import org.savonitar.flink.stability.core.execution.kafka.KafkaInputPreparationException;
 import org.savonitar.flink.stability.core.execution.kafka.KafkaInputManifest;
 import org.savonitar.flink.stability.core.execution.kafka.KafkaInputPreparer;
-import org.savonitar.flink.stability.core.execution.kafka.KafkaRuntimeTargetFactory;
 import org.savonitar.flink.stability.core.execution.kafka.PreparedKafkaInput;
 import org.savonitar.flink.stability.core.flink.FlinkJobHandle;
 import org.savonitar.flink.stability.core.flink.FlinkJobObservation;
@@ -135,8 +134,7 @@ public final class V1ScenarioExecutor {
             runtime = runtimeFactory.create(context.checkpointStorageRoot());
             resources.runtime = runtime;
             stage = Stage.KAFKA_START;
-            KafkaRuntimeEndpoints endpoints = runtime.startKafka(
-                    KafkaRuntimeTargetFactory.from(plan));
+            KafkaRuntimeEndpoints endpoints = runtime.startKafka(plan.kafka().runtimeTarget());
             stage = Stage.INPUT_PREPARATION;
             input = inputPreparation.prepare(plan, endpoints);
             inputEvidence = input.inputManifest();
