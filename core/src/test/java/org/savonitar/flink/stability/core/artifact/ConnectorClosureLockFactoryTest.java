@@ -5,7 +5,7 @@ import org.savonitar.flink.stability.core.spec.document.ScenarioBundle;
 import org.savonitar.flink.stability.core.spec.document.ScenarioSpecification;
 import org.savonitar.flink.stability.core.spec.document.SpecificationLoader;
 import org.savonitar.flink.stability.core.spec.resolution.ResolutionRequest;
-import org.savonitar.flink.stability.core.spec.resolution.ResolutionScope;
+import org.savonitar.flink.stability.core.spec.document.ResolutionScope;
 import org.savonitar.flink.stability.core.spec.resolution.ResolvedScenarioPlan;
 import org.savonitar.flink.stability.core.spec.resolution.ScenarioPlanResolver;
 import org.savonitar.flink.stability.core.spec.resolution.ScenarioSide;

@@ -1,6 +1,9 @@
 package org.savonitar.flink.stability.core.artifact;
 
-import org.savonitar.flink.stability.core.spec.resolution.ResolutionScope;
+import org.savonitar.flink.stability.core.spec.document.Diagnostic;
+import org.savonitar.flink.stability.core.spec.document.ResolutionScope;
+import org.savonitar.flink.stability.core.spec.document.SpecificationException;
+import org.savonitar.flink.stability.core.spec.document.SpecificationException.Stage;
 import org.savonitar.flink.stability.core.spec.resolution.ScenarioSide;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.node.ArrayNode;
@@ -43,7 +46,7 @@ public final class ConnectorClusterBundleBuilder {
         Objects.requireNonNull(side, "side");
         requireNonBlank(targetFlinkImageReference, "targetFlinkImageReference");
         Map<String, String> referencedAliases = referencedAliases(plan, side);
-        List<ArtifactIssue> issues = new ArrayList<>();
+        List<Diagnostic> issues = new ArrayList<>();
         validateTarget(plan, side, targetFlinkImageReference, issues);
         List<ConnectorClosureLock> selectedLocks = new ArrayList<>(referencedAliases.size());
         for (Map.Entry<String, String> reference : referencedAliases.entrySet()) {
@@ -77,8 +80,8 @@ public final class ConnectorClusterBundleBuilder {
             String targetFlinkImageReference,
             Map<String, String> referencedAliases,
             List<ConnectorClosureLock> selectedLocks,
-            List<ArtifactIssue> initialIssues) {
-        List<ArtifactIssue> issues = new ArrayList<>(initialIssues);
+            List<Diagnostic> initialIssues) {
+        List<Diagnostic> issues = new ArrayList<>(initialIssues);
         Map<String, MutableBundleEntry> entriesByDigest = new LinkedHashMap<>();
         Map<String, MavenEncounter> mavenByConflictKey = new HashMap<>();
 
@@ -110,7 +113,7 @@ public final class ConnectorClusterBundleBuilder {
         }
 
         if (!issues.isEmpty()) {
-            throw new ArtifactResolutionException(issues);
+            throw new SpecificationException(Stage.ARTIFACT, issues);
         }
 
         List<PreparedConnectorBundleEntry> entries = new ArrayList<>(entriesByDigest.size());
@@ -151,7 +154,7 @@ public final class ConnectorClusterBundleBuilder {
             PreparedScenarioPlan plan,
             ScenarioSide side,
             ConnectorClosureLock lock,
-            List<ArtifactIssue> issues) {
+            List<Diagnostic> issues) {
         String projection = ConnectorClosureLockFactory.canonicalProjection(lock);
         String actualHash = CanonicalJson.sha256(projection);
         if (!projection.equals(lock.canonicalProjectionJson())
@@ -172,7 +175,7 @@ public final class ConnectorClusterBundleBuilder {
             ScenarioSide side,
             ConnectorClosureLock lock,
             ConnectorClosureLockEntry entry,
-            List<ArtifactIssue> issues) {
+            List<Diagnostic> issues) {
         Path path = entry.stagedPath();
         if (!Files.isRegularFile(path, LinkOption.NOFOLLOW_LINKS)
                 || !Files.isReadable(path)) {
@@ -217,7 +220,7 @@ public final class ConnectorClusterBundleBuilder {
             PreparedScenarioPlan plan,
             ScenarioSide side,
             String targetFlinkImageReference,
-            List<ArtifactIssue> issues) {
+            List<Diagnostic> issues) {
         List<String> declared = lockFactory.targetFlinkImageReferences(plan, side);
         if (!declared.contains(targetFlinkImageReference)) {
             issues.add(issue(
@@ -306,13 +309,13 @@ public final class ConnectorClusterBundleBuilder {
                 + "', sha256=" + second.closureEntry().sha256();
     }
 
-    private static ArtifactIssue issue(
+    private static Diagnostic issue(
             PreparedScenarioPlan plan,
             ScenarioSide side,
             String code,
             String path,
             String message) {
-        return new ArtifactIssue(
+        return new Diagnostic(
                 plan.scenarioPlan().scenario().template().source(),
                 scope(side),
                 code,

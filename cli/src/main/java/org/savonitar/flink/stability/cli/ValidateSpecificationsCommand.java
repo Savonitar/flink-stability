@@ -1,13 +1,7 @@
 package org.savonitar.flink.stability.cli;
 
-import org.savonitar.flink.stability.core.artifact.ArtifactResolutionException;
 import org.savonitar.flink.stability.core.artifact.ArtifactResolutionOptions;
-import org.savonitar.flink.stability.core.spec.document.CatalogValidationException;
-import org.savonitar.flink.stability.core.spec.document.DocumentValidationException;
-import org.savonitar.flink.stability.core.spec.resolution.ExpectedResultSelectionException;
-import org.savonitar.flink.stability.core.spec.resolution.ScenarioPreflightException;
-import org.savonitar.flink.stability.core.spec.resolution.ScenarioResolutionException;
-import org.savonitar.flink.stability.core.spec.resolution.SuitePlanningException;
+import org.savonitar.flink.stability.core.spec.document.SpecificationException;
 import picocli.CommandLine;
 
 import java.io.UncheckedIOException;
@@ -88,13 +82,7 @@ public final class ValidateSpecificationsCommand implements Callable<Integer> {
             specification.commandLine().getErr().println(
                     "error: prepared artifact cleanup failed: " + exception.getMessage());
             return CommandLine.ExitCode.SOFTWARE;
-        } catch (DocumentValidationException
-                | CatalogValidationException
-                | ScenarioResolutionException
-                | ExpectedResultSelectionException
-                | ScenarioPreflightException
-                | ArtifactResolutionException
-                | SuitePlanningException exception) {
+        } catch (SpecificationException exception) {
             diagnosticRenderer.render(exception, catalogRoot)
                     .forEach(specification.commandLine().getErr()::println);
             return CommandLine.ExitCode.SOFTWARE;

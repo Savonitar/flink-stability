@@ -1,6 +1,6 @@
 package org.savonitar.flink.stability.core.artifact;
 
-import org.savonitar.flink.stability.core.spec.resolution.ResolutionScope;
+import org.savonitar.flink.stability.core.spec.document.ResolutionScope;
 import java.util.Objects;
 import java.util.OptionalInt;
 

@@ -1,5 +1,6 @@
 package org.savonitar.flink.stability.core.spec.resolution;
 
+import org.savonitar.flink.stability.core.spec.document.SuiteEntryIdentity;
 import org.savonitar.flink.stability.core.spec.document.SuiteSpecification;
 import com.fasterxml.jackson.databind.JsonNode;
 

@@ -5,16 +5,17 @@ import org.savonitar.flink.stability.core.spec.document.ScenarioBundle;
 import org.savonitar.flink.stability.core.spec.document.ScenarioSpecification;
 import org.savonitar.flink.stability.core.spec.document.SpecificationCatalog;
 import org.savonitar.flink.stability.core.spec.document.SpecificationCatalogTestFactory;
+import org.savonitar.flink.stability.core.spec.document.SpecificationException;
+import org.savonitar.flink.stability.core.spec.document.SpecificationException.Stage;
 import org.savonitar.flink.stability.core.spec.document.SpecificationLoader;
 import org.savonitar.flink.stability.core.spec.document.SuiteSpecification;
 import org.savonitar.flink.stability.core.spec.resolution.ResolutionRequest;
-import org.savonitar.flink.stability.core.spec.resolution.ResolutionScope;
+import org.savonitar.flink.stability.core.spec.document.ResolutionScope;
 import org.savonitar.flink.stability.core.spec.resolution.ResolvedScenarioPlan;
 import org.savonitar.flink.stability.core.spec.resolution.ResolvedSuitePlan;
 import org.savonitar.flink.stability.core.spec.resolution.ScenarioPlanResolver;
 import org.savonitar.flink.stability.core.spec.resolution.ScenarioSide;
 import org.savonitar.flink.stability.core.spec.resolution.SuitePlanResolver;
-import org.savonitar.flink.stability.core.spec.resolution.SuitePlanningException;
 import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import org.junit.jupiter.api.Test;
@@ -44,6 +45,7 @@ import static org.junit.jupiter.api.Assertions.assertNotSame;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.savonitar.flink.stability.core.spec.document.SpecificationAssertions.assertFailsAt;
 
 class ArtifactPlanResolverConnectorClosureTest {
     private static final String KAFKA_COORDINATE =
@@ -242,8 +244,8 @@ class ArtifactPlanResolverConnectorClosureTest {
         Path leaf = createJar(artifactRoot.resolve("leaf.jar"), false, "leaf");
         createJar(artifactRoot.resolve("job.jar"), true, "job");
 
-        ArtifactResolutionException duplicate = assertThrows(
-                ArtifactResolutionException.class,
+        SpecificationException duplicate = assertFailsAt(
+                Stage.ARTIFACT,
                 () -> new ArtifactPlanResolver().resolve(
                         plainPlan("duplicate-local-root", document -> {
                             setCoreArtifacts(document, "connector.jar", "job.jar");
@@ -457,15 +459,15 @@ class ArtifactPlanResolverConnectorClosureTest {
         ResolvedSuitePlan suitePlan = new SuitePlanResolver().resolve(
                 catalog(suite, auto, explicit), suite.name());
 
-        SuitePlanningException exception = assertThrows(
-                SuitePlanningException.class,
+        SpecificationException exception = assertFailsAt(
+                Stage.SUITE_PLANNING,
                 () -> new ArtifactPlanResolver(lookup).resolve(
                         suitePlan, ArtifactResolutionOptions.online(artifactRoot)));
 
-        assertEquals(1, exception.issues().size());
-        assertEquals("cache-explicit", exception.issues().getFirst().entry().entryId());
-        assertEquals("artifact.maven.invalid-closure", exception.issues().getFirst().code());
-        assertEquals(CONNECTOR_PATH, exception.issues().getFirst().path());
+        assertEquals(1, exception.diagnostics().size());
+        assertEquals("cache-explicit", exception.diagnostics().getFirst().entry().orElseThrow().entryId());
+        assertEquals("artifact.maven.invalid-closure", exception.diagnostics().getFirst().code());
+        assertEquals(CONNECTOR_PATH, exception.diagnostics().getFirst().path());
         assertPreparedWorkspacesEmpty();
     }
 
@@ -517,15 +519,15 @@ class ArtifactPlanResolverConnectorClosureTest {
         ResolvedSuitePlan suitePlan = new SuitePlanResolver().resolve(
                 catalog(suite, first, second), suite.name());
 
-        SuitePlanningException exception = assertThrows(
-                SuitePlanningException.class,
+        SpecificationException exception = assertFailsAt(
+                Stage.SUITE_PLANNING,
                 () -> new ArtifactPlanResolver(lookup).resolve(
                         suitePlan, ArtifactResolutionOptions.online(artifactRoot)));
 
-        assertEquals(1, exception.issues().size());
-        assertEquals("pom-cache-second", exception.issues().getFirst().entry().entryId());
-        assertEquals("artifact.maven.invalid-closure", exception.issues().getFirst().code());
-        assertEquals(CONNECTOR_PATH, exception.issues().getFirst().path());
+        assertEquals(1, exception.diagnostics().size());
+        assertEquals("pom-cache-second", exception.diagnostics().getFirst().entry().orElseThrow().entryId());
+        assertEquals("artifact.maven.invalid-closure", exception.diagnostics().getFirst().code());
+        assertEquals(CONNECTOR_PATH, exception.diagnostics().getFirst().path());
         assertEquals(1, lookup.closureCalls.size(), "the second entry must hit the closure cache");
         assertPreparedWorkspacesEmpty();
     }
@@ -544,8 +546,8 @@ class ArtifactPlanResolverConnectorClosureTest {
                     "invalid graph");
         });
 
-        ArtifactResolutionException invalidClosure = assertThrows(
-                ArtifactResolutionException.class,
+        SpecificationException invalidClosure = assertFailsAt(
+                Stage.ARTIFACT,
                 () -> new ArtifactPlanResolver(failedLookup).resolve(
                         plainPlan("invalid-closure", document -> setCoreArtifacts(
                                 document, KAFKA_COORDINATE, "job.jar")),
@@ -553,8 +555,8 @@ class ArtifactPlanResolverConnectorClosureTest {
         assertSingleIssue(invalidClosure, "artifact.maven.invalid-closure", CONNECTOR_PATH);
         assertPreparedWorkspacesEmpty();
 
-        ArtifactResolutionException nullPrimary = assertThrows(
-                ArtifactResolutionException.class,
+        SpecificationException nullPrimary = assertFailsAt(
+                Stage.ARTIFACT,
                 () -> new ArtifactPlanResolver((ignored, offline) -> null).resolve(
                         plainPlan("null-primary", document -> {
                             setCoreArtifacts(document, KAFKA_COORDINATE, "job.jar");
@@ -569,8 +571,8 @@ class ArtifactPlanResolverConnectorClosureTest {
                     MavenArtifactLookupException.Kind.NOT_FOUND,
                     "one jointly resolved root is missing");
         });
-        ArtifactResolutionException jointFailure = assertThrows(
-                ArtifactResolutionException.class,
+        SpecificationException jointFailure = assertFailsAt(
+                Stage.ARTIFACT,
                 () -> new ArtifactPlanResolver(jointFailureLookup).resolve(
                         plainPlan("joint-root-failure", document -> {
                             setCoreArtifacts(document, "connector.jar", "job.jar");
@@ -602,8 +604,8 @@ class ArtifactPlanResolverConnectorClosureTest {
                 List.of());
         RecordingLookup changedLookup = new RecordingLookup(
                 Map.of(), (roots, offline) -> changedGraph);
-        ArtifactResolutionException changed = assertThrows(
-                ArtifactResolutionException.class,
+        SpecificationException changed = assertFailsAt(
+                Stage.ARTIFACT,
                 () -> new ArtifactPlanResolver(changedLookup).resolve(
                         plainPlan("changed-closure-bytes", document -> setCoreArtifacts(
                                 document, KAFKA_COORDINATE, "job.jar")),
@@ -623,8 +625,8 @@ class ArtifactPlanResolverConnectorClosureTest {
                 List.of());
         RecordingLookup corruptLookup = new RecordingLookup(
                 Map.of(), (roots, offline) -> corruptGraph);
-        ArtifactResolutionException corrupt = assertThrows(
-                ArtifactResolutionException.class,
+        SpecificationException corrupt = assertFailsAt(
+                Stage.ARTIFACT,
                 () -> new ArtifactPlanResolver(corruptLookup).resolve(
                         plainPlan("corrupt-closure-jar", document -> setCoreArtifacts(
                                 document, KAFKA_COORDINATE, "job.jar")),
@@ -652,8 +654,8 @@ class ArtifactPlanResolverConnectorClosureTest {
             }
         };
 
-        ArtifactResolutionException exception = assertThrows(
-                ArtifactResolutionException.class,
+        SpecificationException exception = assertFailsAt(
+                Stage.ARTIFACT,
                 () -> new ArtifactPlanResolver(lookup).resolve(
                         plainPlan("mutated-primary-cache", document -> {
                             setCoreArtifacts(document, "connector.jar", "job.jar");
@@ -886,13 +888,13 @@ class ArtifactPlanResolverConnectorClosureTest {
     }
 
     private static void assertSingleIssue(
-            ArtifactResolutionException exception,
+            SpecificationException exception,
             String code,
             String path) {
-        assertEquals(1, exception.issues().size(), () -> exception.issues().toString());
-        assertEquals(code, exception.issues().getFirst().code());
-        assertEquals(path, exception.issues().getFirst().path());
-        assertFalse(exception.issues().getFirst().message().isBlank());
+        assertEquals(1, exception.diagnostics().size(), () -> exception.diagnostics().toString());
+        assertEquals(code, exception.diagnostics().getFirst().code());
+        assertEquals(path, exception.diagnostics().getFirst().path());
+        assertFalse(exception.diagnostics().getFirst().message().isBlank());
     }
 
     private Path resource(String name) {

@@ -17,6 +17,7 @@ import java.util.Set;
 import java.util.function.Function;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
+import org.savonitar.flink.stability.core.spec.document.SpecificationException.Stage;
 
 /** Recursively discovers v1 documents and validates their cross-file identities. */
 public final class SpecificationCatalogLoader {
@@ -36,7 +37,7 @@ public final class SpecificationCatalogLoader {
     public SpecificationCatalog load(Path root) {
         Path normalizedRoot = root.toAbsolutePath().normalize();
         if (!Files.isDirectory(normalizedRoot, LinkOption.NOFOLLOW_LINKS)) {
-            throw new CatalogValidationException(List.of(issue(normalizedRoot,
+            throw new SpecificationException(Stage.CATALOG, List.of(issue(normalizedRoot,
                     "catalog.root-not-directory", "$", "Discovery root must be a directory")));
         }
 
@@ -46,13 +47,13 @@ public final class SpecificationCatalogLoader {
                 specificationsOfType(documents, ExpectedResultSpecification.class);
         List<SuiteSpecification> suites = specificationsOfType(documents, SuiteSpecification.class);
 
-        List<CatalogIssue> issues = new ArrayList<>();
+        List<Diagnostic> issues = new ArrayList<>();
         validateScenarioIdentities(scenarios, issues);
         validateExpectedResultIdentities(scenarios, expectedResults, issues);
         validateSuiteIdentities(suites, issues);
         validateSuiteMembership(suites, scenarios, issues);
         if (!issues.isEmpty()) {
-            throw new CatalogValidationException(issues);
+            throw new SpecificationException(Stage.CATALOG, issues);
         }
 
         Map<Path, ExpectedResultSpecification> expectedByPath = expectedResults.stream()
@@ -87,7 +88,7 @@ public final class SpecificationCatalogLoader {
     }
 
     private void validateScenarioIdentities(
-            List<ScenarioSpecification> scenarios, List<CatalogIssue> issues) {
+            List<ScenarioSpecification> scenarios, List<Diagnostic> issues) {
         scenarios.forEach(scenario -> {
             String filenameName = stripSuffix(scenario.source().getFileName().toString(), YAML_SUFFIX);
             if (!scenario.name().equals(filenameName)) {
@@ -109,7 +110,7 @@ public final class SpecificationCatalogLoader {
     private void validateExpectedResultIdentities(
             List<ScenarioSpecification> scenarios,
             List<ExpectedResultSpecification> expectedResults,
-            List<CatalogIssue> issues) {
+            List<Diagnostic> issues) {
         Map<String, List<ScenarioSpecification>> scenariosByName = groupByName(scenarios);
         Map<Path, ExpectedResultSpecification> expectedByPath = expectedResults.stream()
                 .collect(Collectors.toMap(ExpectedResultSpecification::source, Function.identity()));
@@ -172,7 +173,7 @@ public final class SpecificationCatalogLoader {
                 });
     }
 
-    private void validateSuiteIdentities(List<SuiteSpecification> suites, List<CatalogIssue> issues) {
+    private void validateSuiteIdentities(List<SuiteSpecification> suites, List<Diagnostic> issues) {
         groupByName(suites).forEach((name, duplicates) -> {
             if (duplicates.size() > 1) {
                 duplicates.forEach(suite -> issues.add(issue(suite.source(), "catalog.duplicate-suite-name",
@@ -184,7 +185,7 @@ public final class SpecificationCatalogLoader {
     private void validateSuiteMembership(
             List<SuiteSpecification> suites,
             List<ScenarioSpecification> scenarios,
-            List<CatalogIssue> issues) {
+            List<Diagnostic> issues) {
         Set<String> scenarioNames = scenarios.stream()
                 .map(ScenarioSpecification::name)
                 .collect(Collectors.toSet());
@@ -273,12 +274,12 @@ public final class SpecificationCatalogLoader {
         return value.substring(0, value.length() - suffix.length());
     }
 
-    private static CatalogIssue issue(Path source, String code, String path, String message) {
-        return new CatalogIssue(source, code, path, message);
+    private static Diagnostic issue(Path source, String code, String path, String message) {
+        return new Diagnostic(source, code, path, message);
     }
 
-    private static CatalogValidationException catalogIoFailure(Path root, IOException exception) {
-        return new CatalogValidationException(List.of(issue(root, "catalog.io-error", "$",
+    private static SpecificationException catalogIoFailure(Path root, IOException exception) {
+        return new SpecificationException(Stage.CATALOG, List.of(issue(root, "catalog.io-error", "$",
                 exception.getMessage() == null ? exception.getClass().getSimpleName() : exception.getMessage())));
     }
 

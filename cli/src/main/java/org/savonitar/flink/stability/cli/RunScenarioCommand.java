@@ -5,15 +5,9 @@ import org.savonitar.flink.stability.core.execution.ScenarioVerdict;
 import org.savonitar.flink.stability.core.execution.V1AttemptContext;
 import org.savonitar.flink.stability.core.execution.V1ScenarioExecutionResult;
 import org.savonitar.flink.stability.core.execution.V1ScenarioExecutor;
-import org.savonitar.flink.stability.core.artifact.ArtifactResolutionException;
 import org.savonitar.flink.stability.core.artifact.ArtifactResolutionOptions;
-import org.savonitar.flink.stability.core.spec.document.CatalogValidationException;
-import org.savonitar.flink.stability.core.spec.document.DocumentValidationException;
-import org.savonitar.flink.stability.core.spec.resolution.ExpectedResultSelectionException;
-import org.savonitar.flink.stability.core.spec.resolution.ScenarioPreflightException;
-import org.savonitar.flink.stability.core.spec.resolution.ScenarioResolutionException;
 import org.savonitar.flink.stability.core.execution.plan.ExecutableScenarioPlan;
-import org.savonitar.flink.stability.core.execution.plan.RunnerCapabilityException;
+import org.savonitar.flink.stability.core.spec.document.SpecificationException;
 import org.savonitar.flink.stability.testcontainers.DockerV1AttemptRuntime;
 import picocli.CommandLine;
 
@@ -135,13 +129,7 @@ public final class RunScenarioCommand implements Callable<Integer> {
         } catch (UnknownSpecificationTargetException failure) {
             specification.commandLine().getErr().println("error: " + failure.getMessage());
             return CommandLine.ExitCode.USAGE;
-        } catch (DocumentValidationException
-                | CatalogValidationException
-                | ScenarioResolutionException
-                | ExpectedResultSelectionException
-                | ScenarioPreflightException
-                | ArtifactResolutionException
-                | RunnerCapabilityException failure) {
+        } catch (SpecificationException failure) {
             diagnosticRenderer.render(failure, catalogRoot)
                     .forEach(specification.commandLine().getErr()::println);
             return CommandLine.ExitCode.SOFTWARE;

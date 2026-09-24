@@ -3,7 +3,10 @@ package org.savonitar.flink.stability.core.execution.plan;
 import org.savonitar.flink.stability.core.artifact.ConnectorBundleContribution;
 import org.savonitar.flink.stability.core.artifact.PreparedConnectorBundle;
 import org.savonitar.flink.stability.core.artifact.PreparedConnectorBundleEntry;
-import org.savonitar.flink.stability.core.spec.resolution.ResolutionScope;
+import org.savonitar.flink.stability.core.spec.document.Diagnostic;
+import org.savonitar.flink.stability.core.spec.document.ResolutionScope;
+import org.savonitar.flink.stability.core.spec.document.SpecificationException;
+import org.savonitar.flink.stability.core.spec.document.SpecificationException.Stage;
 
 import java.io.IOException;
 import java.nio.file.Path;
@@ -37,7 +40,7 @@ final class SubjectEntryClassCheck {
             PreparedConnectorBundle bundle,
             Path workloadJar,
             String workloadPath) {
-        List<RunnerCapabilityIssue> issues = new ArrayList<>();
+        List<Diagnostic> issues = new ArrayList<>();
         for (String alias : bundle.aliases()) {
             String artifactPath = "$/subject/connectors/" + alias + "/artifact";
             for (PreparedConnectorBundleEntry entry : bundle.entries()) {
@@ -69,7 +72,7 @@ final class SubjectEntryClassCheck {
                             + " so its copies would run instead of the subject connector"));
         }
         if (!issues.isEmpty()) {
-            throw new RunnerCapabilityException(issues);
+            throw new SpecificationException(Stage.RUNNER_CAPABILITY, issues);
         }
     }
 
@@ -85,7 +88,7 @@ final class SubjectEntryClassCheck {
             Path jar,
             Path source,
             String path,
-            List<RunnerCapabilityIssue> issues) {
+            List<Diagnostic> issues) {
         try (JarFile jarFile = new JarFile(jar.toFile(), false)) {
             // The image reference does not establish its Java feature version. Do not use
             // the harness JVM's version to guess which versioned connector copy will load.
@@ -119,8 +122,8 @@ final class SubjectEntryClassCheck {
         }
     }
 
-    private static RunnerCapabilityIssue issue(
+    private static Diagnostic issue(
             Path source, String code, String path, String message) {
-        return new RunnerCapabilityIssue(source, ResolutionScope.SINGLE, code, path, message);
+        return new Diagnostic(source, ResolutionScope.SINGLE, code, path, message);
     }
 }

@@ -1,14 +1,15 @@
 package org.savonitar.flink.stability.core.artifact;
 
-import org.savonitar.flink.stability.core.spec.resolution.ResolutionScope;
+import org.savonitar.flink.stability.core.spec.document.Diagnostic;
+import org.savonitar.flink.stability.core.spec.document.ResolutionScope;
+import org.savonitar.flink.stability.core.spec.document.SpecificationException;
+import org.savonitar.flink.stability.core.spec.document.SpecificationException.Stage;
 import org.savonitar.flink.stability.core.spec.resolution.ResolvedScenario;
 import org.savonitar.flink.stability.core.spec.resolution.ResolvedScenarioPlan;
 import org.savonitar.flink.stability.core.spec.resolution.ResolvedSide;
 import org.savonitar.flink.stability.core.spec.resolution.ResolvedSuiteEntry;
 import org.savonitar.flink.stability.core.spec.resolution.ResolvedSuitePlan;
 import org.savonitar.flink.stability.core.spec.resolution.ScenarioSide;
-import org.savonitar.flink.stability.core.spec.resolution.SuitePlanningException;
-import org.savonitar.flink.stability.core.spec.resolution.SuitePlanningIssue;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
@@ -90,7 +91,7 @@ public final class ArtifactPlanResolver {
 
         try {
             List<PreparedSuiteEntry> prepared = new ArrayList<>();
-            List<SuitePlanningIssue> issues = new ArrayList<>();
+            List<Diagnostic> issues = new ArrayList<>();
             for (ResolvedSuiteEntry entry : plan.entries()) {
                 try {
                     prepared.add(new PreparedSuiteEntry(
@@ -99,18 +100,16 @@ public final class ArtifactPlanResolver {
                                     entry.scenarioPlan(),
                                     context,
                                     false)));
-                } catch (ArtifactResolutionException exception) {
-                    exception.issues().forEach(issue -> issues.add(new SuitePlanningIssue(
-                            entry.identity(),
-                            issue.source(),
-                            issue.scope(),
-                            issue.code(),
-                            issue.path(),
-                            issue.message())));
+                } catch (SpecificationException exception) {
+                    if (exception.stage() != Stage.ARTIFACT) {
+                        throw exception;
+                    }
+                    exception.diagnostics().forEach(diagnostic ->
+                            issues.add(diagnostic.inSuiteEntry(entry.identity())));
                 }
             }
             if (!issues.isEmpty()) {
-                throw new SuitePlanningException(issues);
+                throw new SpecificationException(Stage.SUITE_PLANNING, issues);
             }
             return new PreparedSuitePlan(plan, workspace, prepared);
         } catch (RuntimeException failure) {
@@ -124,7 +123,7 @@ public final class ArtifactPlanResolver {
             PreparationContext context,
             boolean ownsWorkspace) {
         Path source = plan.scenario().template().source();
-        List<ArtifactIssue> issues = new ArrayList<>();
+        List<Diagnostic> issues = new ArrayList<>();
         List<ResolvedArtifact> resolved = new ArrayList<>();
         for (ArtifactReference reference : references(plan.scenario())) {
             resolveReference(
@@ -137,7 +136,7 @@ public final class ArtifactPlanResolver {
         List<PreparedConnectorClosure> connectorClosures = resolveConnectorClosures(
                 plan.scenario(), source, context, resolved, issues);
         if (!issues.isEmpty()) {
-            throw new ArtifactResolutionException(issues);
+            throw new SpecificationException(Stage.ARTIFACT, issues);
         }
         resolved.sort(Comparator
                 .comparing(ResolvedArtifact::scope)
@@ -158,7 +157,7 @@ public final class ArtifactPlanResolver {
             ArtifactReference reference,
             Path source,
             PreparationContext context,
-            List<ArtifactIssue> issues) {
+            List<Diagnostic> issues) {
         Path artifactRoot = context.workspace().artifactRoot();
         Path stagingDirectory = context.workspace().preparationRoot();
         Path resolvedPath;
@@ -233,7 +232,7 @@ public final class ArtifactPlanResolver {
             Path source,
             PreparationContext context,
             List<ResolvedArtifact> resolvedArtifacts,
-            List<ArtifactIssue> issues) {
+            List<Diagnostic> issues) {
         List<PreparedConnectorClosure> closures = new ArrayList<>();
         if (!scenario.isExperiment()) {
             connectorDeclarations(scenario.side(ScenarioSide.SINGLE)).values().forEach(
@@ -271,7 +270,7 @@ public final class ArtifactPlanResolver {
             Path source,
             PreparationContext context,
             List<ResolvedArtifact> resolvedArtifacts,
-            List<ArtifactIssue> issues,
+            List<Diagnostic> issues,
             List<PreparedConnectorClosure> closures) {
         if (baseline == null) {
             Optional.ofNullable(resolveConnector(
@@ -444,7 +443,7 @@ public final class ArtifactPlanResolver {
             Path source,
             PreparationContext context,
             List<ResolvedArtifact> resolvedArtifacts,
-            List<ArtifactIssue> issues) {
+            List<Diagnostic> issues) {
         if (!declaration.explicit()) {
             return prepareAutoConnector(
                     declaration,
@@ -474,7 +473,7 @@ public final class ArtifactPlanResolver {
             Path source,
             PreparationContext context,
             List<ResolvedArtifact> resolvedArtifacts,
-            List<ArtifactIssue> issues) {
+            List<Diagnostic> issues) {
         ArtifactReference primaryReference = declaration.primaryReference(scope);
         if (!declaration.artifactReference().startsWith("maven:")) {
             issues.add(issue(
@@ -585,7 +584,7 @@ public final class ArtifactPlanResolver {
             Path source,
             PreparationContext context,
             List<ResolvedArtifact> resolvedArtifacts,
-            List<ArtifactIssue> issues) {
+            List<Diagnostic> issues) {
         ArtifactReference reference = declaration.primaryReference(scope);
         Optional<ResolvedArtifact> resolved = resolveReference(
                 reference, source, context, issues);
@@ -624,7 +623,7 @@ public final class ArtifactPlanResolver {
             List<PreparedPrimary> primaries,
             Path source,
             PreparationContext context,
-            List<ArtifactIssue> issues) {
+            List<Diagnostic> issues) {
         ResolvedDependencyRoots roots = resolveDependencyRoots(
                 declaration, scope, primaries, source, context, issues);
         return roots == null
@@ -645,7 +644,7 @@ public final class ArtifactPlanResolver {
             List<PreparedPrimary> primaries,
             Path source,
             PreparationContext context,
-            List<ArtifactIssue> issues) {
+            List<Diagnostic> issues) {
         int initialIssueCount = issues.size();
         List<ResolvedDependencyRoot> roots = new ArrayList<>();
         Set<ResolvedDependencyIdentity> identities = new HashSet<>();
@@ -721,7 +720,7 @@ public final class ArtifactPlanResolver {
             ResolvedDependencyRoots resolvedRoots,
             Path source,
             PreparationContext context,
-            List<ArtifactIssue> issues) {
+            List<Diagnostic> issues) {
         List<ResolvedDependencyRoot> roots = resolvedRoots.roots();
 
         List<MavenRuntimeRoot> mavenRoots = roots.stream()
@@ -857,7 +856,7 @@ public final class ArtifactPlanResolver {
             int classpathIndex,
             Path source,
             PreparationContext context,
-            List<ArtifactIssue> issues) {
+            List<Diagnostic> issues) {
         ArtifactReference reference = input.reference(scope);
         Optional<Path> usable = validateResolvedFile(
                 reference,
@@ -919,7 +918,7 @@ public final class ArtifactPlanResolver {
             boolean primary,
             Path source,
             PreparationContext context,
-            List<ArtifactIssue> issues) {
+            List<Diagnostic> issues) {
         Optional<Path> usable = validateResolvedFile(
                 declarationReference,
                 source,
@@ -976,7 +975,7 @@ public final class ArtifactPlanResolver {
             Set<ResolvedDependencyIdentity> selected,
             Path source,
             ArtifactReference reference,
-            List<ArtifactIssue> issues) {
+            List<Diagnostic> issues) {
         if (primaryIdentities.contains(identity) || !selected.add(identity)) {
             issues.add(issue(source, reference,
                     "artifact.connector.runtime-dependency-duplicate",
@@ -1093,7 +1092,7 @@ public final class ArtifactPlanResolver {
             PreparationContext context,
             Path source,
             ArtifactReference reference,
-            List<ArtifactIssue> issues) {
+            List<Diagnostic> issues) {
         MavenPrimaryResolution resolution = context.mavenPrimaryCache().get(coordinate);
         if (resolution == null) {
             throw new IllegalStateException("Maven primary was not cached before staging");
@@ -1214,7 +1213,7 @@ public final class ArtifactPlanResolver {
                 coordinate.version());
     }
 
-    private static ArtifactIssue mavenIssue(
+    private static Diagnostic mavenIssue(
             Path source,
             ArtifactReference reference,
             MavenArtifactLookupException exception) {
@@ -1269,7 +1268,7 @@ public final class ArtifactPlanResolver {
             ArtifactReference reference,
             Path source,
             Path artifactRoot,
-            List<ArtifactIssue> issues) {
+            List<Diagnostic> issues) {
         String declared = reference.reference();
         if (declared.startsWith("~") || declared.contains("://")) {
             issues.add(issue(source, reference, "artifact.reference.invalid",
@@ -1375,7 +1374,7 @@ public final class ArtifactPlanResolver {
             Path resolvedPath,
             Path artifactRoot,
             boolean confinedToArtifactRoot,
-            List<ArtifactIssue> issues) {
+            List<Diagnostic> issues) {
         final Path realPath;
         try {
             realPath = resolvedPath.toRealPath();
@@ -1409,7 +1408,7 @@ public final class ArtifactPlanResolver {
             Path resolvedPath,
             Path artifactRoot,
             Path stagingDirectory,
-            List<ArtifactIssue> issues) {
+            List<Diagnostic> issues) {
         Path temporary = null;
         try {
             temporary = Files.createTempFile(stagingDirectory, ".copy-", ".tmp");
@@ -1470,7 +1469,7 @@ public final class ArtifactPlanResolver {
             ArtifactReference reference,
             Path source,
             Path realPath,
-            List<ArtifactIssue> issues) {
+            List<Diagnostic> issues) {
         if (!reference.role().isJar()) {
             return true;
         }
@@ -1521,7 +1520,7 @@ public final class ArtifactPlanResolver {
             ArtifactReference reference,
             Path source,
             Path realPath,
-            List<ArtifactIssue> issues) {
+            List<Diagnostic> issues) {
         if (reference.role() != ArtifactRole.WORKLOAD_JOB) {
             return true;
         }
@@ -1710,7 +1709,7 @@ public final class ArtifactPlanResolver {
 
     private static Path canonicalArtifactRoot(Path artifactRoot, Path source) {
         if (!Files.isDirectory(artifactRoot)) {
-            throw new ArtifactResolutionException(List.of(new ArtifactIssue(
+            throw new SpecificationException(Stage.ARTIFACT, List.of(new Diagnostic(
                     source,
                     ResolutionScope.COMMON,
                     "artifact.root.not-directory",
@@ -1720,7 +1719,7 @@ public final class ArtifactPlanResolver {
         try {
             return artifactRoot.toRealPath();
         } catch (IOException exception) {
-            throw new ArtifactResolutionException(List.of(new ArtifactIssue(
+            throw new SpecificationException(Stage.ARTIFACT, List.of(new Diagnostic(
                     source,
                     ResolutionScope.COMMON,
                     "artifact.root.unavailable",
@@ -1770,7 +1769,7 @@ public final class ArtifactPlanResolver {
             }
             return new ArtifactWorkspace(artifactRoot, directory);
         } catch (IOException exception) {
-            throw new ArtifactResolutionException(List.of(new ArtifactIssue(
+            throw new SpecificationException(Stage.ARTIFACT, List.of(new Diagnostic(
                     source,
                     ResolutionScope.COMMON,
                     "artifact.staging.failed",
@@ -1826,12 +1825,12 @@ public final class ArtifactPlanResolver {
         }
     }
 
-    private static ArtifactIssue issue(
+    private static Diagnostic issue(
             Path source,
             ArtifactReference reference,
             String code,
             String message) {
-        return new ArtifactIssue(
+        return new Diagnostic(
                 source, reference.scope(), code, reference.path(), message);
     }
 

@@ -1,11 +1,14 @@
 package org.savonitar.flink.stability.core.artifact;
 
+import org.savonitar.flink.stability.core.spec.document.Diagnostic;
 import org.savonitar.flink.stability.core.spec.document.ExpectedResultSpecification;
 import org.savonitar.flink.stability.core.spec.document.ScenarioBundle;
 import org.savonitar.flink.stability.core.spec.document.ScenarioSpecification;
+import org.savonitar.flink.stability.core.spec.document.SpecificationException;
+import org.savonitar.flink.stability.core.spec.document.SpecificationException.Stage;
 import org.savonitar.flink.stability.core.spec.document.SpecificationLoader;
 import org.savonitar.flink.stability.core.spec.resolution.ResolutionRequest;
-import org.savonitar.flink.stability.core.spec.resolution.ResolutionScope;
+import org.savonitar.flink.stability.core.spec.document.ResolutionScope;
 import org.savonitar.flink.stability.core.spec.resolution.ResolvedScenarioPlan;
 import org.savonitar.flink.stability.core.spec.resolution.ScenarioPlanResolver;
 import org.savonitar.flink.stability.core.spec.resolution.ScenarioSide;
@@ -33,6 +36,7 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.savonitar.flink.stability.core.spec.document.SpecificationAssertions.assertFailsAt;
 
 class ConnectorClusterBundleBuilderTest {
     private final SpecificationLoader loader = new SpecificationLoader();
@@ -210,13 +214,13 @@ class ConnectorClusterBundleBuilderTest {
                                 List.of(mavenDependency(
                                         "beta", "2.0", conflicting, sha256(conflicting))))));
 
-        ArtifactResolutionException failure = assertThrows(
-                ArtifactResolutionException.class,
+        SpecificationException failure = assertFailsAt(
+                Stage.ARTIFACT,
                 () -> builder.build(
                         conflictingPlan, ScenarioSide.SINGLE, "flink:2.2.0"));
         assertEquals(List.of("artifact.connector.bundle-maven-conflict"),
-                failure.issues().stream().map(ArtifactIssue::code).toList());
-        String message = failure.issues().getFirst().message();
+                failure.diagnostics().stream().map(Diagnostic::code).toList());
+        String message = failure.diagnostics().getFirst().message();
         assertTrue(message.contains("org.example:shared:jar:1.0"));
         assertTrue(message.contains("org.example:shared:jar:2.0"));
         assertTrue(message.contains("alias='alpha'"));
@@ -235,24 +239,24 @@ class ConnectorClusterBundleBuilderTest {
                 resolve(scenarioDocument(
                         "bundle-failures", List.of("alpha"), false, false)),
                 List.of(closure));
-        ArtifactResolutionException targetMismatch = assertThrows(
-                ArtifactResolutionException.class,
+        SpecificationException targetMismatch = assertFailsAt(
+                Stage.ARTIFACT,
                 () -> builder.build(plan, ScenarioSide.SINGLE, "flink:2.2.9"));
         assertSingleCode(targetMismatch, "artifact.connector.bundle-target-image-mismatch");
 
         Files.writeString(alpha, "mutated", StandardCharsets.UTF_8);
-        ArtifactResolutionException digestMismatch = assertThrows(
-                ArtifactResolutionException.class,
+        SpecificationException digestMismatch = assertFailsAt(
+                Stage.ARTIFACT,
                 () -> builder.build(plan, ScenarioSide.SINGLE, "flink:2.2.0"));
         assertSingleCode(digestMismatch, "artifact.connector.staged-digest-mismatch");
-        assertTrue(digestMismatch.issues().getFirst().message().contains(recorded));
+        assertTrue(digestMismatch.diagnostics().getFirst().message().contains(recorded));
 
         Files.delete(alpha);
-        ArtifactResolutionException unreadable = assertThrows(
-                ArtifactResolutionException.class,
+        SpecificationException unreadable = assertFailsAt(
+                Stage.ARTIFACT,
                 () -> builder.build(plan, ScenarioSide.SINGLE, "flink:2.2.0"));
         assertSingleCode(unreadable, "artifact.connector.staged-unreadable");
-        assertTrue(unreadable.issues().getFirst().message().contains(recorded));
+        assertTrue(unreadable.diagnostics().getFirst().message().contains(recorded));
     }
 
     @Test
@@ -513,11 +517,11 @@ class ConnectorClusterBundleBuilderTest {
     }
 
     private static void assertSingleCode(
-            ArtifactResolutionException exception,
+            SpecificationException exception,
             String code) {
-        assertEquals(1, exception.issues().size(), () -> exception.issues().toString());
-        assertEquals(code, exception.issues().getFirst().code());
-        assertFalse(exception.issues().getFirst().message().isBlank());
+        assertEquals(1, exception.diagnostics().size(), () -> exception.diagnostics().toString());
+        assertEquals(code, exception.diagnostics().getFirst().code());
+        assertFalse(exception.diagnostics().getFirst().message().isBlank());
     }
 
     private Path resource(String name) {

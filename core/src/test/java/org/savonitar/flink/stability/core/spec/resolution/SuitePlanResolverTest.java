@@ -1,11 +1,16 @@
 package org.savonitar.flink.stability.core.spec.resolution;
 
+import org.savonitar.flink.stability.core.spec.document.Diagnostic;
 import org.savonitar.flink.stability.core.spec.document.ExpectedResultSpecification;
+import org.savonitar.flink.stability.core.spec.document.ResolutionScope;
 import org.savonitar.flink.stability.core.spec.document.ScenarioBundle;
 import org.savonitar.flink.stability.core.spec.document.ScenarioSpecification;
 import org.savonitar.flink.stability.core.spec.document.SpecificationCatalog;
 import org.savonitar.flink.stability.core.spec.document.SpecificationCatalogTestFactory;
+import org.savonitar.flink.stability.core.spec.document.SpecificationException;
+import org.savonitar.flink.stability.core.spec.document.SpecificationException.Stage;
 import org.savonitar.flink.stability.core.spec.document.SpecificationLoader;
+import org.savonitar.flink.stability.core.spec.document.SuiteEntryIdentity;
 import org.savonitar.flink.stability.core.spec.document.SuiteSpecification;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.node.ArrayNode;
@@ -32,6 +37,7 @@ import static org.junit.jupiter.api.Assertions.assertNotSame;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.savonitar.flink.stability.core.spec.document.SpecificationAssertions.assertFailsAt;
 
 class SuitePlanResolverTest {
     private static final BigInteger ONE = BigInteger.ONE;
@@ -111,17 +117,17 @@ class SuitePlanResolverTest {
             entry(scenarios, "concrete-global");
         });
 
-        SuitePlanningException exception = assertThrows(
-                SuitePlanningException.class,
+        SpecificationException exception = assertFailsAt(
+                Stage.SUITE_PLANNING,
                 () -> resolver.resolve(
                         catalog(suite, parameterized, concrete),
                         suite.name(),
                         Map.of("profile", TextNode.valueOf("red"))));
 
-        assertEquals(1, exception.issues().size());
-        SuitePlanningIssue issue = exception.issues().getFirst();
-        assertEquals(1, issue.entry().entryIndex());
-        assertEquals("concrete-global", issue.entry().entryId());
+        assertEquals(1, exception.diagnostics().size());
+        Diagnostic issue = exception.diagnostics().getFirst();
+        assertEquals(1, issue.entry().orElseThrow().entryIndex());
+        assertEquals("concrete-global", issue.entry().orElseThrow().entryId());
         assertEquals("parameter.unknown-submit-override", issue.code());
         assertEquals("$/submit-overrides/profile", issue.path());
         assertEquals(concrete.scenario().source(), issue.source());
@@ -142,14 +148,14 @@ class SuitePlanResolverTest {
             entry(scenarios, "invalid-tail");
         });
 
-        SuitePlanningException exception = assertThrows(
-                SuitePlanningException.class,
+        SpecificationException exception = assertFailsAt(
+                Stage.SUITE_PLANNING,
                 () -> resolver.resolve(catalog(suite, valid, invalid), suite.name()));
 
-        assertTrue(exception.issues().stream().allMatch(issue ->
-                issue.entry().entryIndex() == 1
-                        && issue.entry().entryId().equals("invalid-tail")));
-        assertTrue(exception.issues().stream().anyMatch(issue ->
+        assertTrue(exception.diagnostics().stream().allMatch(issue ->
+                issue.entry().orElseThrow().entryIndex() == 1
+                        && issue.entry().orElseThrow().entryId().equals("invalid-tail")));
+        assertTrue(exception.diagnostics().stream().anyMatch(issue ->
                 issue.code().equals("preflight.reference.kafka-topic-not-found")));
     }
 
@@ -236,15 +242,15 @@ class SuitePlanResolverTest {
         SuiteSpecification suite = suite(
                 "side-health-suite", scenarios -> entry(scenarios, "side-health"));
 
-        SuitePlanningException exception = assertThrows(
-                SuitePlanningException.class,
+        SpecificationException exception = assertFailsAt(
+                Stage.SUITE_PLANNING,
                 () -> resolver.resolve(catalog(suite, experiment), suite.name()));
 
-        SuitePlanningIssue issue = exception.issues().stream()
+        Diagnostic issue = exception.diagnostics().stream()
                 .filter(candidate -> candidate.code().equals(
                         "preflight.invocation.health-retry-limit-side-mismatch"))
                 .findFirst().orElseThrow();
-        assertEquals("side-health", issue.entry().entryId());
+        assertEquals("side-health", issue.entry().orElseThrow().entryId());
         assertEquals(experiment.scenario().source(), issue.source());
         assertEquals(ResolutionScope.COMMON, issue.scope());
         assertEquals("$/health_retry_limit", issue.path());
@@ -326,18 +332,18 @@ class SuitePlanResolverTest {
                     .putObject("parameters").put("second_unknown", "value");
         });
 
-        SuitePlanningException exception = assertThrows(
-                SuitePlanningException.class,
+        SpecificationException exception = assertFailsAt(
+                Stage.SUITE_PLANNING,
                 () -> resolver.resolve(catalog(suite, bundle), suite.name()));
 
-        assertEquals(2, exception.issues().size());
-        assertIssue(exception.issues().getFirst(), suite, 0, "first",
+        assertEquals(2, exception.diagnostics().size());
+        assertIssue(exception.diagnostics().getFirst(), suite, 0, "first",
                 "parameter.unknown-suite-binding",
                 "$/scenarios/0/parameters/first_unknown");
-        assertIssue(exception.issues().get(1), suite, 1, "second",
+        assertIssue(exception.diagnostics().get(1), suite, 1, "second",
                 "parameter.unknown-suite-binding",
                 "$/scenarios/1/parameters/second_unknown");
-        assertThrows(UnsupportedOperationException.class, () -> exception.issues().clear());
+        assertThrows(UnsupportedOperationException.class, () -> exception.diagnostics().clear());
         assertTrue(exception.getMessage().contains("first_unknown"));
         assertTrue(exception.getMessage().contains("second_unknown"));
     }
@@ -357,8 +363,8 @@ class SuitePlanResolverTest {
             parameters.put("retry_count", 2);
         });
 
-        SuitePlanningException exception = assertThrows(
-                SuitePlanningException.class,
+        SpecificationException exception = assertFailsAt(
+                Stage.SUITE_PLANNING,
                 () -> resolver.resolve(catalog(suite, bundle), suite.name()));
 
         assertEquals(List.of(
@@ -366,11 +372,11 @@ class SuitePlanResolverTest {
                                 + "@$/scenarios/0/parameters/retry_count",
                         "parameter.suite-binding-controls-runs"
                                 + "@$/scenarios/0/parameters/run_count"),
-                exception.issues().stream()
+                exception.diagnostics().stream()
                         .map(issue -> issue.code() + "@" + issue.path())
                         .sorted()
                         .toList());
-        assertTrue(exception.issues().stream()
+        assertTrue(exception.diagnostics().stream()
                 .allMatch(issue -> issue.source().equals(suite.source())));
     }
 
@@ -410,24 +416,24 @@ class SuitePlanResolverTest {
             entry(scenarios, "invalid-expectation");
         });
 
-        SuitePlanningException exception = assertThrows(
-                SuitePlanningException.class,
+        SpecificationException exception = assertFailsAt(
+                Stage.SUITE_PLANNING,
                 () -> resolver.resolve(
                         catalog(suite, invalidTopology, invalidExpectation), suite.name()));
 
-        SuitePlanningIssue topology = exception.issues().stream()
+        Diagnostic topology = exception.diagnostics().stream()
                 .filter(issue -> issue.code().equals(
                         "preflight.reference.kafka-topic-not-found"))
                 .findFirst().orElseThrow();
-        assertEquals("invalid-topology", topology.entry().entryId());
+        assertEquals("invalid-topology", topology.entry().orElseThrow().entryId());
         assertEquals(invalidTopology.scenario().source(), topology.source());
         assertEquals("$/workload/jobs/0/source/topic", topology.path());
 
-        SuitePlanningIssue expectation = exception.issues().stream()
+        Diagnostic expectation = exception.diagnostics().stream()
                 .filter(issue -> issue.code().equals(
                         "expectation.case-unknown-parameter"))
                 .findFirst().orElseThrow();
-        assertEquals("invalid-expectation", expectation.entry().entryId());
+        assertEquals("invalid-expectation", expectation.entry().orElseThrow().entryId());
         assertEquals(invalidExpectation.expectedResult().source(), expectation.source());
         assertEquals("$/cases/0/when/unknown", expectation.path());
     }
@@ -583,17 +589,17 @@ class SuitePlanResolverTest {
     }
 
     private static void assertIssue(
-            SuitePlanningIssue issue,
+            Diagnostic issue,
             SuiteSpecification suite,
             int index,
             String entryId,
             String code,
             String path) {
         assertEquals(suite.source(), issue.source());
-        assertEquals(suite.source(), issue.entry().suiteSource());
-        assertEquals(suite.name(), issue.entry().suiteName());
-        assertEquals(index, issue.entry().entryIndex());
-        assertEquals(entryId, issue.entry().entryId());
+        assertEquals(suite.source(), issue.entry().orElseThrow().suiteSource());
+        assertEquals(suite.name(), issue.entry().orElseThrow().suiteName());
+        assertEquals(index, issue.entry().orElseThrow().entryIndex());
+        assertEquals(entryId, issue.entry().orElseThrow().entryId());
         assertEquals(ResolutionScope.COMMON, issue.scope());
         assertEquals(code, issue.code());
         assertEquals(path, issue.path());

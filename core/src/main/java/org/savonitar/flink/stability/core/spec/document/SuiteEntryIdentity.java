@@ -1,4 +1,4 @@
-package org.savonitar.flink.stability.core.spec.resolution;
+package org.savonitar.flink.stability.core.spec.document;
 
 import java.nio.file.Path;
 import java.util.Objects;

@@ -1,6 +1,6 @@
 package org.savonitar.flink.stability.core.artifact;
 
-import org.savonitar.flink.stability.core.spec.resolution.ResolutionScope;
+import org.savonitar.flink.stability.core.spec.document.ResolutionScope;
 import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.List;

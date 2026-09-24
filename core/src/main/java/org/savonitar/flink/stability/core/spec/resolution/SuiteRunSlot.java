@@ -2,6 +2,7 @@ package org.savonitar.flink.stability.core.spec.resolution;
 
 import java.math.BigInteger;
 import java.util.Objects;
+import org.savonitar.flink.stability.core.spec.document.SuiteEntryIdentity;
 
 /** One required clean plain or candidate attempt within a suite invocation. */
 public final class SuiteRunSlot {

@@ -1,7 +1,10 @@
 package org.savonitar.flink.stability.core.spec.resolution;
 
-import org.savonitar.flink.stability.core.spec.document.DocumentValidationException;
+import org.savonitar.flink.stability.core.spec.document.Diagnostic;
+import org.savonitar.flink.stability.core.spec.document.ResolutionScope;
 import org.savonitar.flink.stability.core.spec.document.ScenarioSpecification;
+import org.savonitar.flink.stability.core.spec.document.SpecificationException;
+import org.savonitar.flink.stability.core.spec.document.SpecificationException.Stage;
 import org.savonitar.flink.stability.core.spec.document.SpecificationLoader;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.node.ArrayNode;
@@ -60,7 +63,7 @@ final class ScenarioParameterResolver {
         Objects.requireNonNull(request, "request");
         Path source = scenario.source();
         ObjectNode template = scenario.document();
-        List<ResolutionIssue> issues = new ArrayList<>();
+        List<Diagnostic> issues = new ArrayList<>();
         Map<String, Definition> definitions = readDefinitions(template, source, issues);
         Set<String> varies = readVaries(template, source, definitions, issues);
 
@@ -79,7 +82,7 @@ final class ScenarioParameterResolver {
         }
 
         if (!issues.isEmpty()) {
-            throw new ScenarioResolutionException(issues);
+            throw new SpecificationException(Stage.RESOLUTION, issues);
         }
 
         Map<String, EffectiveParameter> preSide = bindCommon(
@@ -109,7 +112,7 @@ final class ScenarioParameterResolver {
         }
 
         if (!issues.isEmpty()) {
-            throw new ScenarioResolutionException(issues);
+            throw new SpecificationException(Stage.RESOLUTION, issues);
         }
 
         if (validateInvocationPolicyBindings) {
@@ -117,7 +120,7 @@ final class ScenarioParameterResolver {
                 validateInvocationPolicyBindings(source, materialization, request, issues);
             }
             if (!issues.isEmpty()) {
-                throw new ScenarioResolutionException(issues);
+                throw new SpecificationException(Stage.RESOLUTION, issues);
             }
         }
 
@@ -126,20 +129,20 @@ final class ScenarioParameterResolver {
                     source, scopeOf(materialization.side()), materialization.document()));
         }
         if (!issues.isEmpty()) {
-            throw new ScenarioResolutionException(issues);
+            throw new SpecificationException(Stage.RESOLUTION, issues);
         }
 
         for (SideMaterialization materialization : materializations) {
             try {
                 specificationLoader.validateResolvedScenario(source, materialization.document());
-            } catch (DocumentValidationException exception) {
+            } catch (SpecificationException exception) {
                 ResolutionScope scope = scopeOf(materialization.side());
-                exception.issues().forEach(issue -> issues.add(new ResolutionIssue(source, scope,
+                exception.diagnostics().forEach(issue -> issues.add(new Diagnostic(source, scope,
                         issue.code(), issue.path(), "Resolved document: " + issue.message())));
             }
         }
         if (!issues.isEmpty()) {
-            throw new ScenarioResolutionException(issues);
+            throw new SpecificationException(Stage.RESOLUTION, issues);
         }
 
         for (SideMaterialization materialization : materializations) {
@@ -147,7 +150,7 @@ final class ScenarioParameterResolver {
                     source, scopeOf(materialization.side()), materialization.document()));
         }
         if (!issues.isEmpty()) {
-            throw new ScenarioResolutionException(issues);
+            throw new SpecificationException(Stage.RESOLUTION, issues);
         }
 
         if (materializations.size() == 2) {
@@ -164,7 +167,7 @@ final class ScenarioParameterResolver {
                     candidate.provenance()));
         }
         if (!issues.isEmpty()) {
-            throw new ScenarioResolutionException(issues);
+            throw new SpecificationException(Stage.RESOLUTION, issues);
         }
 
         List<ResolvedSide> resolvedSides = materializations.stream()
@@ -182,7 +185,7 @@ final class ScenarioParameterResolver {
             Path source,
             SideMaterialization materialization,
             ResolutionRequest request,
-            List<ResolutionIssue> issues) {
+            List<Diagnostic> issues) {
         validateInvocationPolicyBinding(
                 source, materialization, request, "$/runs", "runs", issues);
         validateInvocationPolicyBinding(
@@ -200,7 +203,7 @@ final class ScenarioParameterResolver {
             ResolutionRequest request,
             String documentPath,
             String codeSuffix,
-            List<ResolutionIssue> issues) {
+            List<Diagnostic> issues) {
         materialization.provenance().getOrDefault(documentPath, Set.of()).forEach(parameter -> {
             if (request.internalSuiteBindings().containsKey(parameter)) {
                 addInvocationPolicyBindingIssue(
@@ -219,7 +222,7 @@ final class ScenarioParameterResolver {
             String bindingKind,
             String documentPath,
             String codeSuffix,
-            List<ResolutionIssue> issues) {
+            List<Diagnostic> issues) {
         String codeSource = "suite".equals(bindingKind)
                 ? "suite-binding"
                 : "submit-override";
@@ -235,7 +238,7 @@ final class ScenarioParameterResolver {
     }
 
     private Map<String, Definition> readDefinitions(
-            ObjectNode template, Path source, List<ResolutionIssue> issues) {
+            ObjectNode template, Path source, List<Diagnostic> issues) {
         Map<String, Definition> definitions = ScenarioParameterContract.definitions(template);
         JsonNode parameters = template.get("parameters");
         if (!(parameters instanceof ObjectNode parameterObject)) {
@@ -263,7 +266,7 @@ final class ScenarioParameterResolver {
             ObjectNode template,
             Path source,
             Map<String, Definition> definitions,
-            List<ResolutionIssue> issues) {
+            List<Diagnostic> issues) {
         Set<String> varies = new LinkedHashSet<>();
         JsonNode variesNode = template.at("/experiment/varies");
         if (variesNode instanceof ArrayNode array) {
@@ -288,7 +291,7 @@ final class ScenarioParameterResolver {
             Map<String, Definition> definitions,
             Set<String> varies,
             boolean commonBinding,
-            List<ResolutionIssue> issues) {
+            List<Diagnostic> issues) {
         bindings.forEach((name, value) -> {
             Definition definition = definitions.get(name);
             String path = bindingPath(bindingKind, name);
@@ -317,7 +320,7 @@ final class ScenarioParameterResolver {
             JsonNode value,
             String path,
             String valueSource,
-            List<ResolutionIssue> issues) {
+            List<Diagnostic> issues) {
         ScenarioParameterContract.validate(definition, value).forEach(problem ->
                 issues.add(issue(source, scope, "parameter." + problem.code(), path,
                         valueSource + " for " + problem.message())));
@@ -369,7 +372,7 @@ final class ScenarioParameterResolver {
             ResolutionScope scope,
             Map<String, Definition> definitions,
             Map<String, EffectiveParameter> effective,
-            List<ResolutionIssue> issues) {
+            List<Diagnostic> issues) {
         definitions.values().stream()
                 .filter(Definition::required)
                 .filter(definition -> !effective.containsKey(definition.name()))
@@ -383,7 +386,7 @@ final class ScenarioParameterResolver {
             ObjectNode template,
             ScenarioSide side,
             Map<String, EffectiveParameter> effective,
-            List<ResolutionIssue> issues) {
+            List<Diagnostic> issues) {
         ObjectNode document = template.deepCopy();
         document.remove("parameters");
         document.remove("experiment");
@@ -398,7 +401,7 @@ final class ScenarioParameterResolver {
             ObjectNode template,
             Set<String> varies,
             Map<String, EffectiveParameter> common,
-            List<ResolutionIssue> issues) {
+            List<Diagnostic> issues) {
         String claim = template.at("/experiment/claim").textValue();
         if (!containsTemplateSyntax(claim)) {
             return resolvedExperiment(source, claim, varies, issues);
@@ -433,7 +436,7 @@ final class ScenarioParameterResolver {
             Path source,
             String claim,
             Set<String> varies,
-            List<ResolutionIssue> issues) {
+            List<Diagnostic> issues) {
         if (claim.isBlank()) {
             issues.add(issue(source, ResolutionScope.COMMON, "experiment.claim-blank", "$/experiment/claim",
                     "Resolved experiment claim must contain non-whitespace text"));
@@ -449,7 +452,7 @@ final class ScenarioParameterResolver {
             String path,
             Map<String, EffectiveParameter> effective,
             Map<String, Set<String>> provenance,
-            List<ResolutionIssue> issues) {
+            List<Diagnostic> issues) {
         if (node instanceof ObjectNode object) {
             List<String> names = new ArrayList<>();
             object.fieldNames().forEachRemaining(names::add);
@@ -484,7 +487,7 @@ final class ScenarioParameterResolver {
             String path,
             Map<String, EffectiveParameter> effective,
             Map<String, Set<String>> provenance,
-            List<ResolutionIssue> issues) {
+            List<Diagnostic> issues) {
         Matcher matcher = TEMPLATE.matcher(text);
         if (matcher.matches()) {
             String parameter = matcher.group(1);
@@ -637,7 +640,7 @@ final class ScenarioParameterResolver {
             Path source,
             JsonNode node,
             String path,
-            List<ResolutionIssue> issues) {
+            List<Diagnostic> issues) {
         if (node.isTextual() && containsTemplateSyntax(node.textValue())) {
             issues.add(issue(source, ResolutionScope.COMMON, "parameter.recursive-expansion", path,
                     "Parameter declarations may not contain templates"));
@@ -691,7 +694,7 @@ final class ScenarioParameterResolver {
             String path,
             String parameter,
             Map<String, EffectiveParameter> effective,
-            List<ResolutionIssue> issues) {
+            List<Diagnostic> issues) {
         issues.add(issue(source, scope, "parameter.unknown-reference", path,
                 "Unknown or unresolved parameter '" + parameter + "'; effective parameters: "
                         + String.join(", ", effective.keySet())));
@@ -734,13 +737,13 @@ final class ScenarioParameterResolver {
         return value.replace("~", "~0").replace("/", "~1");
     }
 
-    private static ResolutionIssue issue(
+    private static Diagnostic issue(
             Path source,
             ResolutionScope scope,
             String code,
             String path,
             String message) {
-        return new ResolutionIssue(source, scope, code, path, message);
+        return new Diagnostic(source, scope, code, path, message);
     }
 
     private record SideMaterialization(

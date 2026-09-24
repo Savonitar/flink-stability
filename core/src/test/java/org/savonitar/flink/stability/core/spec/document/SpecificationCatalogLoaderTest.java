@@ -9,11 +9,12 @@ import java.net.URISyntaxException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
+import org.savonitar.flink.stability.core.spec.document.SpecificationException.Stage;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
-import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.savonitar.flink.stability.core.spec.document.SpecificationAssertions.assertFailsAt;
 
 class SpecificationCatalogLoaderTest {
     private final SpecificationCatalogLoader loader = new SpecificationCatalogLoader();
@@ -44,8 +45,8 @@ class SpecificationCatalogLoaderTest {
     void rejectsMissingExpectedResultSibling() throws IOException {
         copyResource("minimal.yaml", temporaryDirectory.resolve("minimal.yaml"));
 
-        CatalogValidationException exception = assertThrows(
-                CatalogValidationException.class, () -> loader.load(temporaryDirectory));
+        SpecificationException exception = assertFailsAt(
+                Stage.CATALOG, () -> loader.load(temporaryDirectory));
 
         assertHasIssue(exception, "catalog.expected-result-missing", "minimal.yaml");
     }
@@ -56,8 +57,8 @@ class SpecificationCatalogLoaderTest {
         ObjectNode expected = expectedResultFor("another-scenario");
         YamlTestDocuments.write(temporaryDirectory.resolve("minimal.expected.yaml"), expected);
 
-        CatalogValidationException exception = assertThrows(
-                CatalogValidationException.class, () -> loader.load(temporaryDirectory));
+        SpecificationException exception = assertFailsAt(
+                Stage.CATALOG, () -> loader.load(temporaryDirectory));
 
         assertHasIssue(exception, "catalog.expected-result-scenario-mismatch", "minimal.expected.yaml");
         assertHasIssue(exception, "catalog.expected-result-orphan", "minimal.expected.yaml");
@@ -72,8 +73,8 @@ class SpecificationCatalogLoaderTest {
         meta.put("name", "wrong.expected");
         YamlTestDocuments.write(temporaryDirectory.resolve("minimal.expected.yaml"), expected);
 
-        CatalogValidationException exception = assertThrows(
-                CatalogValidationException.class, () -> loader.load(temporaryDirectory));
+        SpecificationException exception = assertFailsAt(
+                Stage.CATALOG, () -> loader.load(temporaryDirectory));
 
         assertHasIssue(exception, "catalog.expected-result-name-mismatch", "minimal.expected.yaml");
         assertEquals(1, countIssues(exception, "catalog.expected-result-name-mismatch",
@@ -85,8 +86,8 @@ class SpecificationCatalogLoaderTest {
         copyResource("minimal.yaml", temporaryDirectory.resolve("different-name.yaml"));
         copyResource("minimal.expected.yaml", temporaryDirectory.resolve("different-name.expected.yaml"));
 
-        CatalogValidationException exception = assertThrows(
-                CatalogValidationException.class, () -> loader.load(temporaryDirectory));
+        SpecificationException exception = assertFailsAt(
+                Stage.CATALOG, () -> loader.load(temporaryDirectory));
 
         assertHasIssue(exception, "catalog.scenario-name-filename-mismatch", "different-name.yaml");
     }
@@ -96,8 +97,8 @@ class SpecificationCatalogLoaderTest {
         ObjectNode expected = expectedResultFor("ghost");
         YamlTestDocuments.write(temporaryDirectory.resolve("ghost.expected.yaml"), expected);
 
-        CatalogValidationException exception = assertThrows(
-                CatalogValidationException.class, () -> loader.load(temporaryDirectory));
+        SpecificationException exception = assertFailsAt(
+                Stage.CATALOG, () -> loader.load(temporaryDirectory));
 
         assertHasIssue(exception, "catalog.expected-result-orphan", "ghost.expected.yaml");
     }
@@ -107,8 +108,8 @@ class SpecificationCatalogLoaderTest {
         copyValidPair(temporaryDirectory);
         copyResource("minimal.expected.yaml", temporaryDirectory.resolve("duplicate.expected.yaml"));
 
-        CatalogValidationException exception = assertThrows(
-                CatalogValidationException.class, () -> loader.load(temporaryDirectory));
+        SpecificationException exception = assertFailsAt(
+                Stage.CATALOG, () -> loader.load(temporaryDirectory));
 
         assertHasIssue(exception, "catalog.expected-result-duplicate-target", "minimal.expected.yaml");
         assertHasIssue(exception, "catalog.expected-result-duplicate-target", "duplicate.expected.yaml");
@@ -121,10 +122,10 @@ class SpecificationCatalogLoaderTest {
         copyValidPair(first);
         copyValidPair(second);
 
-        CatalogValidationException exception = assertThrows(
-                CatalogValidationException.class, () -> loader.load(temporaryDirectory));
+        SpecificationException exception = assertFailsAt(
+                Stage.CATALOG, () -> loader.load(temporaryDirectory));
 
-        assertEquals(2, exception.issues().stream()
+        assertEquals(2, exception.diagnostics().stream()
                 .filter(issue -> issue.code().equals("catalog.duplicate-scenario-name"))
                 .count());
     }
@@ -135,10 +136,10 @@ class SpecificationCatalogLoaderTest {
         Path nested = Files.createDirectories(temporaryDirectory.resolve("nested"));
         copyResource("smoke-suite.yaml", nested.resolve("second.yaml"));
 
-        CatalogValidationException exception = assertThrows(
-                CatalogValidationException.class, () -> loader.load(temporaryDirectory));
+        SpecificationException exception = assertFailsAt(
+                Stage.CATALOG, () -> loader.load(temporaryDirectory));
 
-        assertEquals(2, exception.issues().stream()
+        assertEquals(2, exception.diagnostics().stream()
                 .filter(issue -> issue.code().equals("catalog.duplicate-suite-name"))
                 .count());
     }
@@ -149,8 +150,8 @@ class SpecificationCatalogLoaderTest {
                   - scenario: missing-scenario
                 """);
 
-        CatalogValidationException exception = assertThrows(
-                CatalogValidationException.class, () -> loader.load(temporaryDirectory));
+        SpecificationException exception = assertFailsAt(
+                Stage.CATALOG, () -> loader.load(temporaryDirectory));
 
         assertExactSuiteIssues(exception,
                 "catalog.suite-scenario-not-found@$/scenarios/0/scenario");
@@ -166,8 +167,8 @@ class SpecificationCatalogLoaderTest {
                   - scenario: minimal
                 """);
 
-        CatalogValidationException exception = assertThrows(
-                CatalogValidationException.class, () -> loader.load(temporaryDirectory));
+        SpecificationException exception = assertFailsAt(
+                Stage.CATALOG, () -> loader.load(temporaryDirectory));
 
         assertExactSuiteIssues(exception,
                 "catalog.suite-entry-alias-required@$/scenarios/0/as",
@@ -185,8 +186,8 @@ class SpecificationCatalogLoaderTest {
                     as: shared-entry
                 """);
 
-        CatalogValidationException exception = assertThrows(
-                CatalogValidationException.class, () -> loader.load(temporaryDirectory));
+        SpecificationException exception = assertFailsAt(
+                Stage.CATALOG, () -> loader.load(temporaryDirectory));
 
         assertExactSuiteIssues(exception,
                 "catalog.suite-duplicate-entry-id@$/scenarios/0/as",
@@ -203,8 +204,8 @@ class SpecificationCatalogLoaderTest {
                     as: minimal
                 """);
 
-        CatalogValidationException exception = assertThrows(
-                CatalogValidationException.class, () -> loader.load(temporaryDirectory));
+        SpecificationException exception = assertFailsAt(
+                Stage.CATALOG, () -> loader.load(temporaryDirectory));
 
         assertExactSuiteIssues(exception,
                 "catalog.suite-duplicate-entry-id@$/scenarios/0/scenario",
@@ -272,8 +273,8 @@ class SpecificationCatalogLoaderTest {
         Files.createSymbolicLink(temporaryDirectory.resolve("minimal.expected.yaml"),
                 realExpected);
 
-        CatalogValidationException exception = assertThrows(
-                CatalogValidationException.class, () -> loader.load(temporaryDirectory));
+        SpecificationException exception = assertFailsAt(
+                Stage.CATALOG, () -> loader.load(temporaryDirectory));
 
         assertHasIssue(exception, "catalog.expected-result-missing", "minimal.yaml");
     }
@@ -284,8 +285,8 @@ class SpecificationCatalogLoaderTest {
         copyValidPair(realRoot);
         Path linkedRoot = Files.createSymbolicLink(temporaryDirectory.resolve("linked-root"), realRoot);
 
-        CatalogValidationException exception = assertThrows(
-                CatalogValidationException.class, () -> loader.load(linkedRoot));
+        SpecificationException exception = assertFailsAt(
+                Stage.CATALOG, () -> loader.load(linkedRoot));
 
         assertHasIssue(exception, "catalog.root-not-directory", "linked-root");
     }
@@ -294,8 +295,8 @@ class SpecificationCatalogLoaderTest {
     void rejectsNonDirectoryRootsWithoutFollowingSymlinks() throws IOException {
         Path file = Files.writeString(temporaryDirectory.resolve("scenario.yaml"), "format: v1\n");
 
-        CatalogValidationException exception = assertThrows(
-                CatalogValidationException.class, () -> loader.load(file));
+        SpecificationException exception = assertFailsAt(
+                Stage.CATALOG, () -> loader.load(file));
 
         assertHasIssue(exception, "catalog.root-not-directory", "scenario.yaml");
     }
@@ -349,28 +350,28 @@ class SpecificationCatalogLoaderTest {
     }
 
     private static void assertHasIssue(
-            CatalogValidationException exception, String code, String filename) {
-        assertTrue(exception.issues().stream()
+            SpecificationException exception, String code, String filename) {
+        assertTrue(exception.diagnostics().stream()
                         .anyMatch(issue -> issue.code().equals(code)
                                 && issue.source().getFileName().toString().equals(filename)),
-                () -> "Expected " + code + " in " + filename + " but got " + exception.issues());
+                () -> "Expected " + code + " in " + filename + " but got " + exception.diagnostics());
     }
 
     private static long countIssues(
-            CatalogValidationException exception, String code, String filename) {
-        return exception.issues().stream()
+            SpecificationException exception, String code, String filename) {
+        return exception.diagnostics().stream()
                 .filter(issue -> issue.code().equals(code)
                         && issue.source().getFileName().toString().equals(filename))
                 .count();
     }
 
     private static void assertExactSuiteIssues(
-            CatalogValidationException exception, String... expectedIssues) {
-        assertTrue(exception.issues().stream()
+            SpecificationException exception, String... expectedIssues) {
+        assertTrue(exception.diagnostics().stream()
                         .allMatch(issue -> issue.source().getFileName().toString()
                                 .equals("membership-suite.yaml")),
-                () -> "Expected only membership-suite.yaml issues but got " + exception.issues());
-        assertEquals(List.of(expectedIssues), exception.issues().stream()
+                () -> "Expected only membership-suite.yaml issues but got " + exception.diagnostics());
+        assertEquals(List.of(expectedIssues), exception.diagnostics().stream()
                 .map(issue -> issue.code() + "@" + issue.path())
                 .toList());
     }

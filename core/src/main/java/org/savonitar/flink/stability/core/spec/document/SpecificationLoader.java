@@ -13,6 +13,7 @@ import com.networknt.schema.Schema;
 import com.networknt.schema.SchemaRegistry;
 import com.networknt.schema.SpecificationVersion;
 import com.networknt.schema.path.NodePath;
+import org.savonitar.flink.stability.core.spec.document.SpecificationException.Stage;
 
 import java.io.IOException;
 import java.io.InputStream;
@@ -118,18 +119,19 @@ public final class SpecificationLoader {
     /** Re-validates a fully materialized scenario and rejects unresolved constructs. */
     public ScenarioSpecification validateResolvedScenario(Path source, ObjectNode document) {
         ScenarioSpecification validated = validateScenarioDocument(source, document);
-        List<ValidationIssue> issues = new ArrayList<>();
+        Path validatedSource = validated.source();
+        List<Diagnostic> issues = new ArrayList<>();
         if (document.has("parameters")) {
-            issues.add(new ValidationIssue("resolved.parameters-present", "$/parameters",
+            issues.add(new Diagnostic(validatedSource, "resolved.parameters-present", "$/parameters",
                     "A materialized scenario must not contain parameter declarations"));
         }
         if (document.has("experiment")) {
-            issues.add(new ValidationIssue("resolved.experiment-present", "$/experiment",
+            issues.add(new Diagnostic(validatedSource, "resolved.experiment-present", "$/experiment",
                     "An executable side must not contain the pair-level experiment block"));
         }
-        findUnresolvedTemplates(document, "$", issues);
+        findUnresolvedTemplates(validatedSource, document, "$", issues);
         if (!issues.isEmpty()) {
-            throw new DocumentValidationException(validated.source(), issues);
+            throw new SpecificationException(Stage.DOCUMENT, issues);
         }
         return validated;
     }
@@ -153,18 +155,18 @@ public final class SpecificationLoader {
                 throw failure(source, "document.root-not-object", "$", "Document root must be an object");
             }
             return objectNode;
-        } catch (DocumentValidationException exception) {
+        } catch (SpecificationException exception) {
             throw exception;
         } catch (JsonProcessingException exception) {
             JsonLocation location = exception.getLocation();
             String path = location == null
                     ? "$"
                     : "$ (line " + location.getLineNr() + ", column " + location.getColumnNr() + ")";
-            throw new DocumentValidationException(source,
-                    new ValidationIssue("document.invalid-yaml", path, exception.getOriginalMessage()), exception);
+            throw new SpecificationException(Stage.DOCUMENT, List.of(new Diagnostic(source,
+                    "document.invalid-yaml", path, exception.getOriginalMessage())), exception);
         } catch (IOException exception) {
-            throw new DocumentValidationException(source,
-                    new ValidationIssue("document.io-error", "$", exception.getMessage()), exception);
+            throw new SpecificationException(Stage.DOCUMENT, List.of(new Diagnostic(source,
+                    "document.io-error", "$", exception.getMessage())), exception);
         }
     }
 
@@ -181,15 +183,15 @@ public final class SpecificationLoader {
     }
 
     private void validateSchema(Path source, DocumentKind kind, ObjectNode document) {
-        List<ValidationIssue> issues = schemas.get(kind).validate(document).stream()
-                .map(SpecificationLoader::toIssue)
+        List<Diagnostic> issues = schemas.get(kind).validate(document).stream()
+                .map(error -> toDiagnostic(source, error))
                 .sorted((left, right) -> {
                     int pathComparison = left.path().compareTo(right.path());
                     return pathComparison != 0 ? pathComparison : left.message().compareTo(right.message());
                 })
                 .toList();
         if (!issues.isEmpty()) {
-            throw new DocumentValidationException(source, issues);
+            throw new SpecificationException(Stage.DOCUMENT, issues);
         }
     }
 
@@ -212,9 +214,9 @@ public final class SpecificationLoader {
         return Map.copyOf(loadedSchemas);
     }
 
-    private static ValidationIssue toIssue(Error error) {
-        return new ValidationIssue(schemaCode(error.getKeyword()), schemaPath(error.getInstanceLocation()),
-                error.getMessage());
+    private static Diagnostic toDiagnostic(Path source, Error error) {
+        return new Diagnostic(source, schemaCode(error.getKeyword()),
+                schemaPath(error.getInstanceLocation()), error.getMessage());
     }
 
     private static String schemaCode(String keyword) {
@@ -266,8 +268,9 @@ public final class SpecificationLoader {
         };
     }
 
-    private static DocumentValidationException failure(Path source, String code, String path, String message) {
-        return new DocumentValidationException(source, new ValidationIssue(code, path, message));
+    private static SpecificationException failure(Path source, String code, String path, String message) {
+        return new SpecificationException(
+                Stage.DOCUMENT, List.of(new Diagnostic(source, code, path, message)));
     }
 
     private static String supportedKinds() {
@@ -279,9 +282,9 @@ public final class SpecificationLoader {
     }
 
     private static void findUnresolvedTemplates(
-            JsonNode node, String path, List<ValidationIssue> issues) {
+            Path source, JsonNode node, String path, List<Diagnostic> issues) {
         if (node.isTextual() && node.textValue().contains("${")) {
-            issues.add(new ValidationIssue("resolved.unresolved-template", path,
+            issues.add(new Diagnostic(source, "resolved.unresolved-template", path,
                     "Materialized value still contains parameter template syntax"));
             return;
         }
@@ -291,14 +294,14 @@ public final class SpecificationLoader {
                 Map.Entry<String, JsonNode> field = fields.next();
                 String fieldPath = path + "/" + escapeJsonPointerElement(field.getKey());
                 if (field.getKey().contains("${")) {
-                    issues.add(new ValidationIssue("resolved.unresolved-template", fieldPath,
+                    issues.add(new Diagnostic(source, "resolved.unresolved-template", fieldPath,
                             "Materialized map key still contains parameter template syntax"));
                 }
-                findUnresolvedTemplates(field.getValue(), fieldPath, issues);
+                findUnresolvedTemplates(source, field.getValue(), fieldPath, issues);
             }
         } else if (node.isArray()) {
             for (int index = 0; index < node.size(); index++) {
-                findUnresolvedTemplates(node.get(index), path + "/" + index, issues);
+                findUnresolvedTemplates(source, node.get(index), path + "/" + index, issues);
             }
         }
     }
