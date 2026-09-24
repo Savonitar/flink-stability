@@ -419,12 +419,6 @@ final class KafkaClientInputOperations implements KafkaInputOperations {
         return Math.max(1, timeout.toMillis() / 2);
     }
 
-    static Duration remaining(long startNanos, long nowNanos, Duration timeout) {
-        Objects.requireNonNull(timeout, "timeout");
-        return KafkaInputPreparationDeadline.remaining(
-                startNanos, nowNanos, timeout.toNanos());
-    }
-
     private record PendingRecord(
             long id, int partition, Future<RecordMetadata> acknowledgement) {}
 

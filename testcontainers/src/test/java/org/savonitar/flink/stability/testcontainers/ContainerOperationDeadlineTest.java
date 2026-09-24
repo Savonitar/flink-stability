@@ -5,82 +5,37 @@ import org.junit.jupiter.api.Test;
 import java.time.Duration;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 
 class ContainerOperationDeadlineTest {
 
     @Test
-    void computesRemainingTimeAcrossNegativeAndWrappedNanoTimeOrigins() {
-        MutableNanoClock negative = new MutableNanoClock(-500L);
-        ContainerOperationDeadline negativeDeadline = ContainerOperationDeadline.start(
-                "negative-origin action", Duration.ofNanos(100), negative::nanoTime);
-        negative.advance(50L);
+    void anExpiredDeadlineNamesTheScopeTimeoutAndOperation() {
+        long[] now = {100L};
+        ContainerOperationDeadline deadline = ContainerOperationDeadline.start(
+                "stopping taskmanager-1", Duration.ofNanos(10), () -> now[0]);
+        assertEquals(Duration.ofNanos(10), deadline.remaining("checking liveness"));
+        now[0] += 10L;
 
-        assertEquals(
-                Duration.ofNanos(50),
-                negativeDeadline.remaining("checking negative-origin action"));
+        ContainerOperationTimeoutException timeout = assertThrows(
+                ContainerOperationTimeoutException.class,
+                () -> deadline.remaining("confirming process termination"));
 
-        MutableNanoClock wrapped = new MutableNanoClock(Long.MAX_VALUE - 10L);
-        ContainerOperationDeadline wrappedDeadline = ContainerOperationDeadline.start(
-                "wrapped action", Duration.ofNanos(100), wrapped::nanoTime);
-        wrapped.advance(21L);
-
-        assertEquals(
-                Duration.ofNanos(79),
-                wrappedDeadline.remaining("checking wrapped action"));
+        assertEquals("stopping taskmanager-1", timeout.scope());
+        assertEquals(Duration.ofNanos(10), timeout.timeout());
+        assertEquals("confirming process termination", timeout.operation());
     }
 
     @Test
-    void expiresAtTheExactBoundaryAndFailsClosedWhenClockMovesBackward() {
-        MutableNanoClock exact = new MutableNanoClock(100L);
-        ContainerOperationDeadline exactDeadline = ContainerOperationDeadline.start(
-                "exact action", Duration.ofNanos(10), exact::nanoTime);
-        exact.advance(10L);
+    void aTimedOutDriverCallKeepsItsCause() {
+        ContainerOperationDeadline deadline = ContainerOperationDeadline.start(
+                "starting kafka", Duration.ofSeconds(1), System::nanoTime);
+        RuntimeException cause = new RuntimeException("driver still blocked");
 
-        ContainerOperationTimeoutException exactTimeout = assertThrows(
-                ContainerOperationTimeoutException.class,
-                () -> exactDeadline.remaining("exact boundary"));
-        assertEquals("exact boundary", exactTimeout.operation());
+        ContainerOperationTimeoutException timeout = deadline.timedOut("pulling image", cause);
 
-        MutableNanoClock backwards = new MutableNanoClock(100L);
-        ContainerOperationDeadline backwardsDeadline = ContainerOperationDeadline.start(
-                "backwards action", Duration.ofNanos(10), backwards::nanoTime);
-        backwards.advance(-1L);
-
-        assertThrows(
-                ContainerOperationTimeoutException.class,
-                () -> backwardsDeadline.remaining("backwards clock"));
-    }
-
-    @Test
-    void rejectsNonPositiveAndNanosecondOverflowingTimeouts() {
-        assertThrows(
-                IllegalArgumentException.class,
-                () -> ContainerOperationDeadline.start(
-                        "zero", Duration.ZERO, System::nanoTime));
-        assertThrows(
-                IllegalArgumentException.class,
-                () -> ContainerOperationDeadline.start(
-                        "negative", Duration.ofNanos(-1), System::nanoTime));
-        assertThrows(
-                IllegalArgumentException.class,
-                () -> ContainerOperationDeadline.start(
-                        "overflow", Duration.ofSeconds(Long.MAX_VALUE), System::nanoTime));
-    }
-
-    private static final class MutableNanoClock {
-        private long now;
-
-        private MutableNanoClock(long now) {
-            this.now = now;
-        }
-
-        private long nanoTime() {
-            return now;
-        }
-
-        private void advance(long nanos) {
-            now += nanos;
-        }
+        assertEquals("pulling image", timeout.operation());
+        assertSame(cause, timeout.getCause());
     }
 }

@@ -556,35 +556,6 @@ class KafkaInputPreparerTest {
     }
 
     @Test
-    void computesKafkaReconciliationTimeFromElapsedNanosAcrossWraparound() {
-        Duration timeout = Duration.ofNanos(100);
-
-        assertEquals(Duration.ofNanos(50), KafkaClientInputOperations.remaining(
-                -500, -450, timeout));
-        assertEquals(Duration.ofNanos(79), KafkaClientInputOperations.remaining(
-                Long.MAX_VALUE - 10, Long.MIN_VALUE + 10, timeout));
-        assertEquals(Duration.ZERO, KafkaClientInputOperations.remaining(
-                100, 200, timeout));
-    }
-
-    @Test
-    void computesPreparationDeadlineAcrossNegativeAndWrappedNanoOrigins() {
-        MutableNanoClock negative = new MutableNanoClock(-500);
-        KafkaInputPreparationDeadline negativeDeadline = new KafkaInputPreparationDeadline(
-                Duration.ofNanos(100), negative::nanoTime);
-        negative.advance(Duration.ofNanos(50));
-
-        assertEquals(Duration.ofNanos(50), negativeDeadline.remaining());
-
-        MutableNanoClock wrapped = new MutableNanoClock(Long.MAX_VALUE - 10);
-        KafkaInputPreparationDeadline wrappedDeadline = new KafkaInputPreparationDeadline(
-                Duration.ofNanos(100), wrapped::nanoTime);
-        wrapped.advance(Duration.ofNanos(21));
-
-        assertEquals(Duration.ofNanos(79), wrappedDeadline.remaining());
-    }
-
-    @Test
     void clientConsumerCloseFailureCarriesTheCompletedImmutableSnapshot() {
         String topic = "input";
         TopicPartition partition = new TopicPartition(topic, 0);

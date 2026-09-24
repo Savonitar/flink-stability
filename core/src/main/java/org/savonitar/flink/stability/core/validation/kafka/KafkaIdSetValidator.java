@@ -1,6 +1,7 @@
 package org.savonitar.flink.stability.core.validation.kafka;
 
 import org.savonitar.flink.stability.core.execution.plan.ExecutableScenarioPlan;
+import org.savonitar.flink.stability.runtime.api.MonotonicDeadline;
 
 import java.time.Duration;
 import java.util.ArrayList;
@@ -60,13 +61,13 @@ public final class KafkaIdSetValidator {
             }
         }
         long expectedCount = expectedIds.length;
-        Deadline deadline = Deadline.after(timeout, nanoTime);
+        MonotonicDeadline deadline = MonotonicDeadline.start(timeout, nanoTime);
         final KafkaTopicSnapshot snapshot;
         try {
             snapshot = snapshotReader.read(
                     bootstrapServers,
                     topic,
-                    deadline.remaining(),
+                    deadline.remainingOrThrow(DeadlineExpired::new),
                     MAX_TERMINAL_RECORDS);
         } catch (DeadlineExpired expired) {
             return verificationFailure(
@@ -85,11 +86,11 @@ public final class KafkaIdSetValidator {
             int processed = 0;
             for (KafkaTopicSnapshot.ObservedRecord record : snapshot.records()) {
                 if ((processed++ % DEADLINE_CHECK_INTERVAL) == 0) {
-                    deadline.check();
+                    deadline.remainingOrThrow(DeadlineExpired::new);
                 }
                 accumulator.accept(record);
             }
-            deadline.check();
+            deadline.remainingOrThrow(DeadlineExpired::new);
             KafkaIdSetValidationResult.Evidence evidence = accumulator.evidence(
                     snapshot.beginningOffsets(), snapshot.endOffsets(), deadline);
             KafkaIdSetValidationResult.DefectTotals totals =
@@ -236,20 +237,20 @@ public final class KafkaIdSetValidator {
         private KafkaIdSetValidationResult.Evidence evidence(
                 Map<Integer, Long> beginningOffsets,
                 Map<Integer, Long> endOffsets,
-                Deadline deadline) {
+                MonotonicDeadline deadline) {
             long missingCount = expectedCount - expectedIds.size();
             List<Long> missingSamples = new ArrayList<>();
             for (int index = 0;
                     index < expected.length && missingSamples.size() < MAX_EVIDENCE_SAMPLES;
                     index++) {
                 if ((index % DEADLINE_CHECK_INTERVAL) == 0) {
-                    deadline.check();
+                    deadline.remainingOrThrow(DeadlineExpired::new);
                 }
                 if (!expectedIds.containsKey(expected[index])) {
                     missingSamples.add(expected[index]);
                 }
             }
-            deadline.check();
+            deadline.remainingOrThrow(DeadlineExpired::new);
             return new KafkaIdSetValidationResult.Evidence(
                     expectedCount,
                     observedCount,
@@ -327,50 +328,6 @@ public final class KafkaIdSetValidator {
             private KafkaIdSetValidationResult.RecordSample smallestDuplicateCoordinate() {
                 return secondSmallestCoordinate;
             }
-        }
-    }
-
-    private static final class Deadline {
-        private final long startedAtNanos;
-        private final long timeoutNanos;
-        private final LongSupplier nanoTime;
-
-        private Deadline(
-                long startedAtNanos,
-                long timeoutNanos,
-                LongSupplier nanoTime) {
-            this.startedAtNanos = startedAtNanos;
-            this.timeoutNanos = timeoutNanos;
-            this.nanoTime = nanoTime;
-        }
-
-        private static Deadline after(Duration timeout, LongSupplier nanoTime) {
-            if (timeout == null || timeout.isZero() || timeout.isNegative()) {
-                throw new IllegalArgumentException("timeout must be positive");
-            }
-            long nanos;
-            try {
-                nanos = timeout.toNanos();
-            } catch (ArithmeticException overflow) {
-                nanos = Long.MAX_VALUE;
-            }
-            return new Deadline(nanoTime.getAsLong(), nanos, nanoTime);
-        }
-
-        private Duration remaining() {
-            long elapsed = nanoTime.getAsLong() - startedAtNanos;
-            if (elapsed < 0) {
-                elapsed = 0;
-            }
-            long remaining = timeoutNanos - elapsed;
-            if (remaining <= 0) {
-                throw new DeadlineExpired();
-            }
-            return Duration.ofNanos(remaining);
-        }
-
-        private void check() {
-            remaining();
         }
     }
 
