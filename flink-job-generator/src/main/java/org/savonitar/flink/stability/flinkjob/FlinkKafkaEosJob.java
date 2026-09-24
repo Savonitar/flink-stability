@@ -1,5 +1,6 @@
 package org.savonitar.flink.stability.flinkjob;
 
+import org.apache.flink.api.common.functions.MapFunction;
 import org.apache.flink.api.common.functions.OpenContext;
 import org.apache.flink.api.common.functions.RichMapFunction;
 import org.apache.flink.api.common.serialization.SimpleStringSchema;
@@ -26,6 +27,7 @@ public class FlinkKafkaEosJob {
     private static final Logger LOG = LoggerFactory.getLogger(FlinkKafkaEosJob.class);
 
     static final String SOURCE_UID = "flink-stability-kafka-source-v1";
+    static final String THROTTLE_UID = "flink-stability-source-throttle-v1";
     static final String STATEFUL_OPERATOR_UID = "flink-stability-managed-state-pass-through-v1";
     static final String SINK_UID = "flink-stability-kafka-sink-v1";
 
@@ -52,11 +54,17 @@ public class FlinkKafkaEosJob {
         KafkaSource<String> source = createSource(workload);
         KafkaSink<String> sink = createSink(workload);
 
+        // The delay runs in an operator chained to the source, so it slows the source itself.
+        // A delay after the keyBy shuffle would let the source fill the network buffers
+        // first; every checkpoint barrier would then wait behind that backlog, and a short
+        // bounded input would finish before its first checkpoint completed.
         env.fromSource(source, workload.watermarks().toFlinkStrategy(), "Kafka Source")
                 .uid(SOURCE_UID)
+                .map(new SourceThrottle(arguments.processingDelayMs()))
+                .name("Source Throttle")
+                .uid(THROTTLE_UID)
                 .keyBy(value -> value)
-                .map(new ManagedStatePassThrough(
-                        arguments.processingDelayMs(), workload.stateTtl()))
+                .map(new ManagedStatePassThrough(workload.stateTtl()))
                 .name("Managed State Pass-Through")
                 .uid(STATEFUL_OPERATOR_UID)
                 .sinkTo(sink)
@@ -102,20 +110,36 @@ public class FlinkKafkaEosJob {
         return builder.build();
     }
 
+    private static final class SourceThrottle implements MapFunction<String, String> {
+
+        private static final long serialVersionUID = 1L;
+
+        private final int processingDelayMs;
+
+        private SourceThrottle(int processingDelayMs) {
+            this.processingDelayMs = processingDelayMs;
+        }
+
+        @Override
+        public String map(String value) throws Exception {
+            if (processingDelayMs > 0) {
+                Thread.sleep(processingDelayMs);
+            }
+            return value;
+        }
+    }
+
     private static final class ManagedStatePassThrough extends RichMapFunction<String, String> {
 
         private static final long serialVersionUID = 1L;
         private static final String STATE_NAME = "flink-stability-last-record-v1";
 
-        private final int processingDelayMs;
         private final WorkloadProtocolV1Configuration.StateTtlSettings stateTtl;
 
         private transient ValueState<String> lastRecord;
 
         private ManagedStatePassThrough(
-                int processingDelayMs,
                 WorkloadProtocolV1Configuration.StateTtlSettings stateTtl) {
-            this.processingDelayMs = processingDelayMs;
             this.stateTtl = stateTtl;
         }
 
@@ -131,9 +155,6 @@ public class FlinkKafkaEosJob {
 
         @Override
         public String map(String value) throws Exception {
-            if (processingDelayMs > 0) {
-                Thread.sleep(processingDelayMs);
-            }
             lastRecord.update(value);
             LOG.debug("FlinkKafkaEosJob processed msg={}", value);
             return value;

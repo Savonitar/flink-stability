@@ -21,7 +21,9 @@ setup:
             input_source:
               mode: generated
               format: integer-sequence
-              total: 1000
+              # 3000 records at 5 ms each keep the job running for about 15 s, so the
+              # TaskManager kill below lands mid-stream, after a completed checkpoint.
+              total: 3000
           - name: output
             partitions: 1
             replication_factor: 1
