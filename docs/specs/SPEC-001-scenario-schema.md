@@ -1032,8 +1032,20 @@ Connector pull-request gating is the same mechanism with one axis:
   class under `META-INF/versions/` rejects with
   `runner.subject.entry-class-versioned-unsupported`: the runner does not infer
   the container JVM version from the harness JVM. Unrelated versioned classes
-  do not trigger this rejection. Recording which JAR each Flink process
-  actually loaded these classes from is later work.
+  do not trigger this rejection.
+
+  The runner also proves at runtime which code ran. Every Flink JVM logs its class
+  loads (`-Xlog:class+load`, set through the per-process `env.java.opts.jobmanager`
+  or `env.java.opts.taskmanager` key so the image's `env.java.opts.all` flags stay)
+  to one file per container incarnation in the attempt directory, which survives
+  killed and replaced TaskManagers. After the process fence, the runner reads which
+  source each process loaded each entry class from. The evidence is `confirmed`
+  only if every load came from the subject primary's `lib` path and at least one
+  TaskManager loaded every entry class. Otherwise a passing oracle becomes
+  `inconclusive`: `subject.connector.origin-mismatch` when some process loaded a
+  copy from elsewhere, and `subject.connector.origin-unconfirmed` when the logs are
+  unreadable or no TaskManager loaded the classes. A failing oracle keeps its
+  `fail`. The JSON summary reports this as `evidence.subjectClasses`.
 - **R5.7** Each workload job has optional `start: auto | manual`, defaulting to
   `auto`. Auto-start jobs are submitted after infrastructure is ready and any
   preload input source has completed per R4.5a, before the first phase begins.

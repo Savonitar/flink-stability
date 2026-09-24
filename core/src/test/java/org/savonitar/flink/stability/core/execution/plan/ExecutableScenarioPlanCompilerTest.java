@@ -663,7 +663,7 @@ class ExecutableScenarioPlanCompilerTest {
         // runtime dependency. Every installed byte verifies, yet the release would be tested.
         createJar(artifactRoot.resolve("connector.jar"), List.of("example.Unrelated"));
         createJar(artifactRoot.resolve("released-connector.jar"),
-                SubjectEntryClassCheck.PROTOCOL_V1_ENTRY_CLASSES);
+                ExecutableScenarioPlan.PROTOCOL_V1_SUBJECT_ENTRY_CLASSES);
         createJar(artifactRoot.resolve("job.jar"), true, "v1");
         ResolvedScenarioPlan resolved = resolved(document -> {
             useLocalArtifacts(document);
@@ -881,7 +881,7 @@ class ExecutableScenarioPlanCompilerTest {
         List<String> classes = new ArrayList<>(List.of("example.Main"));
         if (!executable) {
             // A connector fixture supplies what the subject entry-class check requires.
-            classes.addAll(SubjectEntryClassCheck.PROTOCOL_V1_ENTRY_CLASSES);
+            classes.addAll(ExecutableScenarioPlan.PROTOCOL_V1_SUBJECT_ENTRY_CLASSES);
         }
         return createJar(path, manifest, classes);
     }

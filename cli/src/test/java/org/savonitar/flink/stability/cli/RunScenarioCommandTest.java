@@ -6,6 +6,7 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import org.savonitar.flink.stability.core.execution.FlinkTerminalWriteFence;
 import org.savonitar.flink.stability.core.execution.PhaseExecutionEvidence;
+import org.savonitar.flink.stability.core.execution.SubjectClassOrigins;
 import org.savonitar.flink.stability.core.execution.V1AttemptContext;
 import org.savonitar.flink.stability.core.execution.V1ScenarioExecutionResult;
 import org.savonitar.flink.stability.core.execution.kafka.KafkaInputManifest;
@@ -237,6 +238,7 @@ class RunScenarioCommandTest {
                 Optional.empty(),
                 Optional.of(terminal),
                 Optional.empty(),
+                SUBJECT_ORIGINS,
                 List.of(),
                 List.of());
 
@@ -302,6 +304,7 @@ class RunScenarioCommandTest {
                 Optional.of(atFence),
                 Optional.of(terminal),
                 Optional.empty(),
+                SUBJECT_ORIGINS,
                 List.of(),
                 List.of());
 
@@ -328,7 +331,11 @@ class RunScenarioCommandTest {
                         kill.path("restoredAfterKillObservationMs").longValue()),
                 () -> assertEquals(1, kill.path("failuresAfterKill").intValue()),
                 () -> assertEquals("TaskManager with id tm-1 is no longer reachable.",
-                        kill.path("firstFailureAfterKill").textValue()));
+                        kill.path("firstFailureAfterKill").textValue()),
+                () -> assertEquals("confirmed",
+                        evidence.at("/subjectClasses/status").textValue()),
+                () -> assertEquals("taskmanager-1#1",
+                        evidence.at("/subjectClasses/processes/0/process").textValue()));
     }
 
     @Test
@@ -642,6 +649,17 @@ class RunScenarioCommandTest {
                 temporaryDirectory.resolve("checkpoints/attempt-1-" + nonce));
     }
 
+    /** Runtime proof that the subject connector's classes ran; a PASS requires it. */
+    private static final Optional<SubjectClassOrigins> SUBJECT_ORIGINS = Optional.of(
+            new SubjectClassOrigins(
+                    "/opt/flink/lib/flink-stability-connector-00000000-subject.jar",
+                    List.of(new SubjectClassOrigins.ProcessOrigin("taskmanager-1#1", Map.of(
+                            "org.apache.flink.connector.kafka.source.KafkaSource",
+                            List.of("/opt/flink/lib/flink-stability-connector-00000000-subject.jar"),
+                            "org.apache.flink.connector.kafka.sink.KafkaSink",
+                            List.of("/opt/flink/lib/flink-stability-connector-00000000-subject.jar")))),
+                    Optional.empty()));
+
     private static final FlinkJobObservation.Attempt FINISHED_JOB =
             new FlinkJobObservation.Attempt(
                     Optional.of(new FlinkJobObservation(
@@ -678,6 +696,7 @@ class RunScenarioCommandTest {
                 Optional.of(FINISHED_JOB),
                 Optional.of(terminal),
                 Optional.empty(),
+                SUBJECT_ORIGINS,
                 List.of(),
                 List.of());
     }
@@ -711,6 +730,7 @@ class RunScenarioCommandTest {
                 Optional.of(FINISHED_JOB),
                 Optional.of(terminal),
                 Optional.empty(),
+                SUBJECT_ORIGINS,
                 List.of(),
                 List.of());
     }
@@ -744,6 +764,7 @@ class RunScenarioCommandTest {
                 Optional.of(FINISHED_JOB),
                 Optional.of(terminal),
                 Optional.empty(),
+                SUBJECT_ORIGINS,
                 List.of(),
                 List.of());
     }
@@ -800,6 +821,7 @@ class RunScenarioCommandTest {
                 status,
                 reason,
                 "attempt ended",
+                Optional.empty(),
                 Optional.empty(),
                 Optional.empty(),
                 Optional.empty(),

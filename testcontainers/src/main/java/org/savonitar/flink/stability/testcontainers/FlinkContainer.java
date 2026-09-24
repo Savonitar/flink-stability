@@ -16,6 +16,8 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.attribute.PosixFilePermissions;
 import java.time.Duration;
+import java.util.HashMap;
+import java.util.Map;
 import java.util.Objects;
 
 final class FlinkContainer implements FlinkComponentFactory {
@@ -29,6 +31,7 @@ final class FlinkContainer implements FlinkComponentFactory {
     private final FlinkRuntimeTarget runtimeTarget;
     private final Network network;
     private final Path checkpointStorageRoot;
+    private final Map<String, Integer> incarnations = new HashMap<>();
 
     /** Creates a factory for one exact image/bundle binding. */
     FlinkContainer(
@@ -51,7 +54,7 @@ final class FlinkContainer implements FlinkComponentFactory {
                 .withFileSystemBind(
                         checkpointStorageRoot.toString(), CHECKPOINT_PATH, BindMode.READ_WRITE)
                 .withEnv("JOB_MANAGER_RPC_ADDRESS", PRIMARY_JOB_MANAGER_ALIAS)
-                .withEnv("FLINK_PROPERTIES", TASK_SLOTS_PROPERTY)
+                .withEnv("FLINK_PROPERTIES", flinkProperties("jobmanager", logicalName))
                 .withCommand("jobmanager")
                 .waitingFor(Wait.forHttp("/overview")
                         .forPort(JOB_MANAGER_PORT)
@@ -68,7 +71,7 @@ final class FlinkContainer implements FlinkComponentFactory {
                 .withFileSystemBind(
                         checkpointStorageRoot.toString(), CHECKPOINT_PATH, BindMode.READ_WRITE)
                 .withEnv("JOB_MANAGER_RPC_ADDRESS", PRIMARY_JOB_MANAGER_ALIAS)
-                .withEnv("FLINK_PROPERTIES", TASK_SLOTS_PROPERTY)
+                .withEnv("FLINK_PROPERTIES", flinkProperties("taskmanager", logicalName))
                 .withCommand("taskmanager")
                 .withLogConsumer(createLogConsumer("TASK_MANAGER_LOGS." + logicalName));
     }
@@ -85,6 +88,20 @@ final class FlinkContainer implements FlinkComponentFactory {
         VerifiedFlinkContainer container = (VerifiedFlinkContainer) createTaskManager(logicalName);
         return new TestcontainersContainerHandle(
                 container, logicalName, FlinkComponentRole.TASK_MANAGER, runtimeTarget);
+    }
+
+    /**
+     * Every Flink JVM logs each class it loads, with the source JAR, into the attempt's host
+     * directory. One file per container incarnation, so a replaced TaskManager keeps its log.
+     */
+    private String flinkProperties(String process, String logicalName) {
+        int incarnation = incarnations.merge(logicalName, 1, Integer::sum);
+        // The per-process key is appended to env.java.opts.all, which the image uses for its
+        // required --add-opens flags. The value stays unquoted: quotes would reach the JVM.
+        return TASK_SLOTS_PROPERTY + "\n"
+                + "env.java.opts." + process + ": -Xlog:class+load=info:file="
+                + CHECKPOINT_PATH + "/" + ClassLoadLogs.fileName(logicalName, incarnation)
+                + "::filecount=0";
     }
 
     private Slf4jLogConsumer createLogConsumer(String loggerName) {

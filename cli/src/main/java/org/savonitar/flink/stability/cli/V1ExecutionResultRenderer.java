@@ -11,6 +11,7 @@ import org.savonitar.flink.stability.core.execution.V1AttemptContext;
 import org.savonitar.flink.stability.core.execution.V1ScenarioExecutionResult;
 import org.savonitar.flink.stability.core.execution.plan.ExecutableScenarioPlan;
 
+import java.util.List;
 import java.util.Locale;
 import java.util.Objects;
 
@@ -174,6 +175,25 @@ final class V1ExecutionResultRenderer {
                 terminal.put("unexpected", totals.unexpectedCount());
                 terminal.put("duplicates", totals.duplicateCount());
                 terminal.put("missing", totals.missingCount());
+            });
+        });
+        ObjectNode subjectClasses = evidence.putObject("subjectClasses");
+        subjectClasses.put("status", "not-run");
+        result.subjectClassOrigins().ifPresent(origins -> {
+            List<String> entryClasses = ExecutableScenarioPlan.PROTOCOL_V1_SUBJECT_ENTRY_CLASSES;
+            subjectClasses.put("status", origins.outcome(entryClasses).name()
+                    .toLowerCase(Locale.ROOT));
+            subjectClasses.put("expectedSource", origins.expectedSource());
+            subjectClasses.put("detail", origins.detail(entryClasses));
+            ArrayNode processes = subjectClasses.putArray("processes");
+            origins.processes().forEach(process -> {
+                ObjectNode loaded = processes.addObject();
+                loaded.put("process", process.process());
+                ObjectNode sources = loaded.putObject("sources");
+                process.sources().forEach((entryClass, found) -> {
+                    ArrayNode paths = sources.putArray(entryClass);
+                    found.forEach(paths::add);
+                });
             });
         });
         ObjectNode transactions = evidence.putObject("sinkTransactions");

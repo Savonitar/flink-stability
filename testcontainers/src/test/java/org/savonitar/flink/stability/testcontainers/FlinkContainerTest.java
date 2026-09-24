@@ -28,6 +28,44 @@ class FlinkContainerTest {
     Path temporaryDirectory;
 
     @Test
+    void everyFlinkJvmLogsItsClassLoadsToAPerIncarnationFileInTheAttemptDirectory() {
+        FlinkContainer factory = new FlinkContainer(
+                emptyTarget(), Network.SHARED, temporaryDirectory.resolve("attempt-logs"));
+
+        String jobManager = factory.createJobManager("jobmanager-1")
+                .getEnvMap().get("FLINK_PROPERTIES");
+        String firstTaskManager = factory.createTaskManager("taskmanager-1")
+                .getEnvMap().get("FLINK_PROPERTIES");
+        String replacement = factory.createTaskManager("taskmanager-1")
+                .getEnvMap().get("FLINK_PROPERTIES");
+
+        assertTrue(jobManager.contains("env.java.opts.jobmanager: -Xlog:class+load=info:file="
+                + "/flink/checkpoints/flink-stability-class-load-jobmanager-1-1.log"), jobManager);
+        assertTrue(firstTaskManager.contains("env.java.opts.taskmanager: -Xlog:class+load"
+                + "=info:file=/flink/checkpoints/flink-stability-class-load-taskmanager-1-1.log"),
+                firstTaskManager);
+        assertTrue(replacement.contains("flink-stability-class-load-taskmanager-1-2.log"),
+                replacement);
+        // The image keeps its --add-opens flags in env.java.opts.all; never override them.
+        assertTrue(!jobManager.contains("env.java.opts.all"), jobManager);
+    }
+
+    @Test
+    void listsClassLoadLogsWithTheirProcessIncarnation() throws Exception {
+        Files.writeString(temporaryDirectory.resolve(
+                ClassLoadLogs.fileName("taskmanager-1", 2)), "");
+        Files.writeString(temporaryDirectory.resolve(
+                ClassLoadLogs.fileName("jobmanager-1", 1)), "");
+        Files.writeString(temporaryDirectory.resolve("unrelated.log"), "");
+
+        assertEquals(
+                List.of("jobmanager-1#1", "taskmanager-1#2"),
+                ClassLoadLogs.list(temporaryDirectory).stream()
+                        .map(org.savonitar.flink.stability.runtime.api.FlinkClassLoadLog::process)
+                        .toList());
+    }
+
+    @Test
     void mountsTheSameWritableCheckpointDirectoryIntoEveryFlinkProcess() {
         FlinkContainer factory = new FlinkContainer(
                 emptyTarget(), Network.SHARED, temporaryDirectory.resolve("attempt-a"));

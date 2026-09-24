@@ -32,6 +32,12 @@ import java.util.Optional;
 public final class V1ScenarioExecutor {
     static final Duration DEFAULT_ATTEMPT_CLEANUP_TIMEOUT = Duration.ofMinutes(2);
     static final Duration SINK_TRANSACTION_LISTING_TIMEOUT = Duration.ofSeconds(30);
+    /** A Flink process loaded a subject entry class from anywhere but its primary (R5.6d). */
+    public static final String SUBJECT_ORIGIN_MISMATCH = "subject.connector.origin-mismatch";
+    /** The class-load logs do not show the subject's entry classes running (R5.6d). */
+    public static final String SUBJECT_ORIGIN_UNCONFIRMED = "subject.connector.origin-unconfirmed";
+    private static final List<String> ENTRY_CLASSES =
+            ExecutableScenarioPlan.PROTOCOL_V1_SUBJECT_ENTRY_CLASSES;
 
     private final V1AttemptRuntimeFactory runtimeFactory;
     private final InputPreparation inputPreparation;
@@ -121,6 +127,7 @@ public final class V1ScenarioExecutor {
         FlinkJobObservation.Attempt finalJob = null;
         KafkaIdSetValidationResult validation = null;
         KafkaTransactionListing sinkTransactions = null;
+        SubjectClassOrigins subjectOrigins = null;
         List<String> evidenceDiagnostics = new ArrayList<>();
         V1ScenarioExecutionResult result;
         Stage stage = Stage.RUNTIME_CREATION;
@@ -162,6 +169,8 @@ public final class V1ScenarioExecutor {
                     .awaitBoundedCompletion(job, plan.jobCompletionTimeout());
             processFence = fence.processFenceEvidence();
             finalJob = fence.jobBeforeFence();
+            // Every Flink JVM is dead now, so each class-load log is complete.
+            subjectOrigins = subjectOrigins(runtime, prepared);
 
             stage = Stage.TERMINAL_VALIDATION;
             validation = terminalValidation.validate(
@@ -182,6 +191,7 @@ public final class V1ScenarioExecutor {
                     .stream()
                     .filter(effect -> !effect.outcome().confirmed())
                     .findFirst();
+            SubjectClassOrigins.Outcome subjectUse = subjectOrigins.outcome(ENTRY_CLASSES);
             V1ScenarioExecutionResult.Status status;
             String reason;
             String message;
@@ -189,6 +199,14 @@ public final class V1ScenarioExecutor {
                 status = V1ScenarioExecutionResult.Status.FAIL;
                 reason = validation.reason();
                 message = validation.message();
+            } else if (subjectUse != SubjectClassOrigins.Outcome.CONFIRMED) {
+                status = V1ScenarioExecutionResult.Status.INCONCLUSIVE;
+                reason = subjectUse == SubjectClassOrigins.Outcome.MISMATCH
+                        ? SUBJECT_ORIGIN_MISMATCH
+                        : SUBJECT_ORIGIN_UNCONFIRMED;
+                message = "The terminal oracle passed, but the run does not show that the"
+                        + " subject connector's code ran: "
+                        + subjectOrigins.detail(ENTRY_CLASSES);
             } else if (unconfirmedKill.isPresent()) {
                 TaskManagerKillEffect effect = unconfirmedKill.orElseThrow();
                 status = V1ScenarioExecutionResult.Status.INCONCLUSIVE;
@@ -215,6 +233,7 @@ public final class V1ScenarioExecutor {
                     finalJob,
                     validation,
                     sinkTransactions,
+                    subjectOrigins,
                     runtime,
                     evidenceDiagnostics);
         } catch (KafkaInputPreparationException failure) {
@@ -230,6 +249,7 @@ public final class V1ScenarioExecutor {
                     finalJob,
                     validation,
                     sinkTransactions,
+                    subjectOrigins,
                     runtime,
                     diagnostics(failure));
         } catch (PhaseExecutionException failure) {
@@ -249,6 +269,7 @@ public final class V1ScenarioExecutor {
                     finalJob,
                     validation,
                     sinkTransactions,
+                    subjectOrigins,
                     runtime,
                     diagnostics(failure));
         } catch (TerminalWriteFenceException failure) {
@@ -265,6 +286,7 @@ public final class V1ScenarioExecutor {
                     finalJob,
                     validation,
                     sinkTransactions,
+                    subjectOrigins,
                     runtime,
                     diagnostics(failure));
         } catch (InterruptedException failure) {
@@ -280,6 +302,7 @@ public final class V1ScenarioExecutor {
                     finalJob,
                     validation,
                     sinkTransactions,
+                    subjectOrigins,
                     runtime,
                     diagnostics(failure));
         } catch (Exception failure) {
@@ -294,11 +317,29 @@ public final class V1ScenarioExecutor {
                     finalJob,
                     validation,
                     sinkTransactions,
+                    subjectOrigins,
                     runtime,
                     diagnostics(failure));
         }
 
         return result;
+    }
+
+    private static SubjectClassOrigins subjectOrigins(
+            V1AttemptRuntime runtime,
+            PreparedExecutableScenarioPlan prepared) {
+        String expectedSource = prepared.connectorBundle()
+                .primaryEntry(prepared.executablePlan().job().connectorAlias())
+                .map(entry -> entry.containerPath())
+                .orElseThrow(() -> new IllegalStateException(
+                        "The bound connector bundle has no subject primary entry"));
+        try {
+            return SubjectClassOrigins.read(
+                    runtime.flinkClassLoadLogs(), ENTRY_CLASSES, expectedSource);
+        } catch (RuntimeException unavailable) {
+            return new SubjectClassOrigins(expectedSource, List.of(), Optional.of(
+                    "Cannot list Flink class-load logs: " + unavailable.getMessage()));
+        }
     }
 
     /**
@@ -333,6 +374,7 @@ public final class V1ScenarioExecutor {
             FlinkJobObservation.Attempt finalJob,
             KafkaIdSetValidationResult validation,
             KafkaTransactionListing sinkTransactions,
+            SubjectClassOrigins subjectOrigins,
             V1AttemptRuntime runtime,
             List<String> diagnostics) {
         List<FlinkComponentProvisioningEvidence> provisioning = runtime == null
@@ -349,6 +391,7 @@ public final class V1ScenarioExecutor {
                 Optional.ofNullable(finalJob),
                 Optional.ofNullable(validation),
                 Optional.ofNullable(sinkTransactions),
+                Optional.ofNullable(subjectOrigins),
                 provisioning,
                 diagnostics);
     }

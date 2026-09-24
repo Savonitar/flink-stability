@@ -14,6 +14,12 @@ public interface V1AttemptRuntime extends TaskManagerControl, AutoCloseable {
     List<FlinkComponentProvisioningEvidence> flinkProvisioningEvidence();
 
     /**
+     * Class-load logs written so far by every Flink process of this attempt, including killed
+     * and replaced ones. Complete only after the process fence.
+     */
+    List<FlinkClassLoadLog> flinkClassLoadLogs();
+
+    /**
      * Releases physical attempt infrastructure only. Implementations may read prepared artifact
      * snapshots while constructing both initial and replacement Flink containers, so the prepared
      * plan owner must remain alive through phase execution. Cleanup may be detached after its
