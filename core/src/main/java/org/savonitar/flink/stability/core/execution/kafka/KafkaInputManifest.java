@@ -95,6 +95,17 @@ public record KafkaInputManifest(
         }
     }
 
+    /**
+     * The generated IDs observed in the closed input, sorted ascending: the exact set that
+     * the terminal kafka.id-set oracle expects (SPEC-001 R7.3).
+     */
+    public long[] presentIds() {
+        return records.stream()
+                .filter(record -> record.terminalDisposition() == TerminalDisposition.PRESENT)
+                .mapToLong(RecordAcknowledgement::id)
+                .toArray();
+    }
+
     public enum EvidenceStatus {
         COMPLETE,
         PARTIAL

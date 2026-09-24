@@ -375,23 +375,7 @@ public final class ExecutableScenarioPlanCompiler {
                     "The bounded source and terminal sink topics must be distinct"));
         }
 
-        String guarantee = sink.path("delivery_guarantee").textValue();
-        if (!Set.of("EXACTLY_ONCE", "AT_LEAST_ONCE").contains(guarantee)) {
-            issues.add(issue(
-                    source,
-                    "runner.workload.delivery-guarantee-unsupported",
-                    jobPath + "/sink/delivery_guarantee",
-                    "The first runner tests EXACTLY_ONCE and AT_LEAST_ONCE Kafka sinks"));
-        }
-        String naming = sink.path("transaction_id_naming_strategy").textValue();
-        if ("EXACTLY_ONCE".equals(guarantee)
-                && !Set.of("INCREMENTING", "POOLING").contains(naming)) {
-            issues.add(issue(
-                    source,
-                    "runner.workload.transaction-id-naming-unsupported",
-                    jobPath + "/sink/transaction_id_naming_strategy",
-                    "Supported transaction ID naming strategies are INCREMENTING and POOLING"));
-        }
+        SinkCompiler.validate(source, jobPath + "/sink", sink, issues);
 
         ObjectNode checkpointing = (ObjectNode) job.get("checkpointing");
         requireDuration(source, checkpointing.path("interval"),
@@ -849,14 +833,7 @@ public final class ExecutableScenarioPlanCompiler {
         ExecutableScenarioPlan.TopicReference source = topicReference(
                 (ObjectNode) jobNode.get("source"));
         ObjectNode sinkNode = (ObjectNode) jobNode.get("sink");
-        ExecutableScenarioPlan.Sink sink = "AT_LEAST_ONCE".equals(
-                        sinkNode.path("delivery_guarantee").textValue())
-                ? ExecutableScenarioPlan.Sink.atLeastOnce(topicReference(sinkNode))
-                : ExecutableScenarioPlan.Sink.exactlyOnce(
-                        topicReference(sinkNode),
-                        sinkNode.path("transactional_id_prefix").textValue(),
-                        ExecutableScenarioPlan.TransactionIdNamingStrategy.valueOf(
-                                sinkNode.path("transaction_id_naming_strategy").textValue()));
+        ExecutableScenarioPlan.Sink sink = SinkCompiler.map(sinkNode, topicReference(sinkNode));
         ExecutableScenarioPlan.StateTtl stateTtl = mapStateTtl(jobNode.get("state_ttl"));
         ExecutableScenarioPlan.Watermarks watermarks = mapWatermarks(jobNode.get("watermarks"));
         ExecutableScenarioPlan.RunScopedIdentityPolicy identityPolicy =
@@ -871,7 +848,7 @@ public final class ExecutableScenarioPlanCompiler {
                         stateTtl,
                         watermarks,
                         identityPolicy,
-                        ExecutableScenarioPlan.KAFKA_TRANSACTION_TIMEOUT);
+                        SinkCompiler.transactionTimeout(sinkNode));
         ExecutableScenarioPlan.Checkpointing checkpointing =
                 new ExecutableScenarioPlan.Checkpointing(
                         parseDuration(jobNode.at("/checkpointing/interval").textValue()),
@@ -1162,7 +1139,7 @@ public final class ExecutableScenarioPlanCompiler {
         }
     }
 
-    private static void requireDuration(
+    static void requireDuration(
             Path source,
             JsonNode value,
             String path,
@@ -1200,7 +1177,7 @@ public final class ExecutableScenarioPlanCompiler {
         }
     }
 
-    private static Duration parseDuration(String value) {
+    static Duration parseDuration(String value) {
         Matcher matcher = DURATION.matcher(value);
         if (!matcher.matches()) {
             throw new IllegalStateException("Invalid resolved duration " + value);

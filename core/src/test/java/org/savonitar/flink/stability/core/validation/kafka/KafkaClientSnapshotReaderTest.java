@@ -48,6 +48,45 @@ class KafkaClientSnapshotReaderTest {
     }
 
     @Test
+    void retainsOnlyABoundedSampleOfManyOversizedValues() throws Exception {
+        // Review finding F11: large malformed values must not exhaust the heap below the cap.
+        int records = 1_000;
+        String oversized = "x".repeat(100_000);
+        MockConsumer<String, String> consumer = configured(0, records);
+        consumer.schedulePollTask(() -> {
+            for (int offset = 0; offset < records; offset++) {
+                consumer.addRecord(new ConsumerRecord<>(TOPIC, 0, offset, null, oversized));
+            }
+        });
+
+        KafkaTopicSnapshot snapshot = reader(consumer).read(
+                "kafka:9092", TOPIC, Duration.ofSeconds(5), records);
+
+        assertEquals(records, snapshot.records().size());
+        assertTrue(snapshot.records().stream().allMatch(record -> record.value().length()
+                <= KafkaClientSnapshotReader.MAX_RETAINED_VALUE_CHARS));
+        assertEquals("x".repeat(32) + "…[100000 chars]",
+                snapshot.records().getFirst().value());
+
+        KafkaIdSetValidationResult result = new KafkaIdSetValidator(
+                (bootstrap, topic, timeout, maximumRecords) -> snapshot)
+                .validate("kafka:9092", TOPIC, new long[] {0}, Duration.ofSeconds(5));
+        assertEquals("validator.kafka.id-set.malformed-ids", result.reason());
+        assertEquals(records, result.evidence().defectTotals().orElseThrow().malformedCount());
+        assertTrue(result.evidence().malformedSamples().size() <= 100);
+    }
+
+    @Test
+    void keepsShortValuesAndTombstonesExactly() {
+        String longestCanonicalId = Long.toString(Long.MIN_VALUE);
+
+        assertEquals(longestCanonicalId,
+                KafkaClientSnapshotReader.retainedValue(longestCanonicalId));
+        assertEquals("y".repeat(64), KafkaClientSnapshotReader.retainedValue("y".repeat(64)));
+        assertEquals(null, KafkaClientSnapshotReader.retainedValue(null));
+    }
+
+    @Test
     void capturesRawHighWatermarkAndRejectsADuplicateExposedByADelayedCommitMarker()
             throws Exception {
         List<String> events = new ArrayList<>();
@@ -106,7 +145,7 @@ class KafkaClientSnapshotReaderTest {
             return "read_uncommitted".equals(isolation) ? boundary : committed;
         });
         KafkaIdSetValidationResult result = new KafkaIdSetValidator(reader)
-                .validate("kafka:9092", TOPIC, 2, Duration.ofSeconds(1));
+                .validate("kafka:9092", TOPIC, new long[] {0, 1}, Duration.ofSeconds(1));
 
         assertEquals(List.of("read_uncommitted", "read_committed"), isolationLevels);
         assertEquals(List.of(

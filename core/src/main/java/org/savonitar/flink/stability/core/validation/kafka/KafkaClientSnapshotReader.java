@@ -29,6 +29,9 @@ import java.util.function.LongSupplier;
 public final class KafkaClientSnapshotReader implements KafkaSnapshotReader {
     private static final Duration MAX_POLL = Duration.ofSeconds(1);
     private static final int MAX_FAILURE_EVIDENCE_SAMPLES = 100;
+    /** Far above the 20 characters of any canonical long ID (review finding F11). */
+    static final int MAX_RETAINED_VALUE_CHARS = 64;
+    private static final int OVERSIZED_VALUE_SAMPLE_CHARS = 32;
     private static final int DEADLINE_CHECK_INTERVAL = 256;
     private static final Comparator<KafkaTopicSnapshot.ObservedRecord> COORDINATE_ORDER =
             Comparator.comparingInt(KafkaTopicSnapshot.ObservedRecord::partition)
@@ -130,7 +133,9 @@ public final class KafkaClientSnapshotReader implements KafkaSnapshotReader {
                     if (record.offset() < exclusiveEnd) {
                         KafkaTopicSnapshot.ObservedRecord observed =
                                 new KafkaTopicSnapshot.ObservedRecord(
-                                        record.partition(), record.offset(), record.value());
+                                        record.partition(),
+                                        record.offset(),
+                                        retainedValue(record.value()));
                         failureProgress.observe(observed);
                         if (failureProgress.observedCount() > maximumRecords) {
                             throw new KafkaSnapshotException(
@@ -176,6 +181,18 @@ public final class KafkaClientSnapshotReader implements KafkaSnapshotReader {
                 closeQuietly(boundaryConsumer);
             }
         }
+    }
+
+    /**
+     * Bounds what a record keeps in memory until validation. A value too long to be a canonical
+     * ID keeps a short prefix plus its length; the ID-set oracle reports it as malformed.
+     */
+    static String retainedValue(String value) {
+        if (value == null || value.length() <= MAX_RETAINED_VALUE_CHARS) {
+            return value;
+        }
+        return value.substring(0, OVERSIZED_VALUE_SAMPLE_CHARS)
+                + "…[" + value.length() + " chars]";
     }
 
     private static void closeQuietly(Consumer<String, String> consumer) {

@@ -18,7 +18,7 @@ class KafkaIdSetValidatorTest {
     @Test
     void completeExactSnapshotPasses() {
         KafkaIdSetValidationResult result = validator(List.of("0", "1", "2"))
-                .validate("kafka:9092", "output", 3, Duration.ofMinutes(2));
+                .validate("kafka:9092", "output", ids(3), Duration.ofMinutes(2));
 
         assertEquals(KafkaIdSetValidationResult.Status.PASS, result.status());
         assertEquals("validator.kafka.id-set.match", result.reason());
@@ -31,7 +31,7 @@ class KafkaIdSetValidatorTest {
     void malformedIdsHaveDeterministicPrecedence() {
         KafkaIdSetValidationResult result = validator(
                 List.of("0", "01", "7", "0"))
-                .validate("kafka:9092", "output", 2, Duration.ofMinutes(2));
+                .validate("kafka:9092", "output", ids(2), Duration.ofMinutes(2));
 
         assertEquals("validator.kafka.id-set.malformed-ids", result.reason());
         assertEquals(1, totals(result).malformedCount());
@@ -45,7 +45,7 @@ class KafkaIdSetValidatorTest {
     @Test
     void unexpectedIdsPrecedeDuplicatesAndMissingIds() {
         KafkaIdSetValidationResult result = validator(List.of("0", "0", "4"))
-                .validate("kafka:9092", "output", 3, Duration.ofMinutes(2));
+                .validate("kafka:9092", "output", ids(3), Duration.ofMinutes(2));
 
         assertEquals("validator.kafka.id-set.unexpected-ids", result.reason());
         assertEquals(
@@ -56,9 +56,43 @@ class KafkaIdSetValidatorTest {
     }
 
     @Test
+    void expectsTheManifestPresentSetRatherThanANumericRange() {
+        // ID 1 was conclusively absent from the input, so the job cannot owe it.
+        long[] present = {0, 2};
+
+        KafkaIdSetValidationResult exact = validator(List.of("0", "2"))
+                .validate("kafka:9092", "output", present, Duration.ofMinutes(2));
+        KafkaIdSetValidationResult invented = validator(List.of("0", "1", "2"))
+                .validate("kafka:9092", "output", present, Duration.ofMinutes(2));
+        KafkaIdSetValidationResult lost = validator(List.of("0"))
+                .validate("kafka:9092", "output", present, Duration.ofMinutes(2));
+
+        assertEquals(KafkaIdSetValidationResult.Status.PASS, exact.status());
+        assertEquals(2, exact.evidence().expectedCount());
+        assertEquals("validator.kafka.id-set.unexpected-ids", invented.reason());
+        assertEquals(
+                List.of(new KafkaIdSetValidationResult.RecordSample(0, 1, "1")),
+                invented.evidence().unexpectedSamples());
+        assertEquals("validator.kafka.id-set.missing-ids", lost.reason());
+        assertEquals(List.of(2L), lost.evidence().missingSamples());
+    }
+
+    @Test
+    void rejectsExpectedIdsThatAreUnsortedOrRepeated() {
+        KafkaIdSetValidator validator = validator(List.of("0"));
+
+        assertThrows(IllegalArgumentException.class, () -> validator.validate(
+                "kafka:9092", "output", new long[] {2, 1}, Duration.ofMinutes(2)));
+        assertThrows(IllegalArgumentException.class, () -> validator.validate(
+                "kafka:9092", "output", new long[] {1, 1}, Duration.ofMinutes(2)));
+        assertThrows(IllegalArgumentException.class, () -> validator.validate(
+                "kafka:9092", "output", new long[0], Duration.ofMinutes(2)));
+    }
+
+    @Test
     void duplicateIdsPrecedeMissingIds() {
         KafkaIdSetValidationResult result = validator(List.of("0", "0", "2"))
-                .validate("kafka:9092", "output", 3, Duration.ofMinutes(2));
+                .validate("kafka:9092", "output", ids(3), Duration.ofMinutes(2));
 
         assertEquals("validator.kafka.id-set.duplicate-ids", result.reason());
         assertEquals(
@@ -93,7 +127,7 @@ class KafkaIdSetValidatorTest {
                     "output", Map.of(0, 0L, 1, 0L), Map.of(0, 2L, 1, 2L), records);
             KafkaIdSetValidationResult result = new KafkaIdSetValidator(
                             (bootstrap, topic, timeout, maximumRecords) -> snapshot)
-                    .validate("kafka:9092", "output", 1, Duration.ofMinutes(2));
+                    .validate("kafka:9092", "output", ids(1), Duration.ofMinutes(2));
 
             assertEquals(
                     List.of(new KafkaIdSetValidationResult.RecordSample(1, 0, "0")),
@@ -107,7 +141,7 @@ class KafkaIdSetValidatorTest {
     @Test
     void completeSnapshotWithMissingIdsFailsAuthoritatively() {
         KafkaIdSetValidationResult result = validator(List.of("0", "3"))
-                .validate("kafka:9092", "output", 5, Duration.ofMinutes(2));
+                .validate("kafka:9092", "output", ids(5), Duration.ofMinutes(2));
 
         assertEquals("validator.kafka.id-set.missing-ids", result.reason());
         assertEquals(3, totals(result).missingCount());
@@ -123,7 +157,7 @@ class KafkaIdSetValidatorTest {
         };
 
         KafkaIdSetValidationResult result = new KafkaIdSetValidator(unreachable)
-                .validate("kafka:9092", "output", 100, Duration.ofMinutes(2));
+                .validate("kafka:9092", "output", ids(100), Duration.ofMinutes(2));
 
         assertEquals(KafkaIdSetValidationResult.Status.FAIL, result.status());
         assertEquals("verification.kafka.unreachable-after-timeout", result.reason());
@@ -145,7 +179,7 @@ class KafkaIdSetValidatorTest {
                         () -> clockCalls.getAndIncrement() == 0
                                 ? 0L
                                 : Duration.ofMillis(1).toNanos())
-                .validate("kafka:9092", "output", 1, Duration.ofMillis(1));
+                .validate("kafka:9092", "output", ids(1), Duration.ofMillis(1));
 
         assertEquals("verification.kafka.unreachable-after-timeout", result.reason());
         assertFalse(readerCalled.get());
@@ -163,7 +197,7 @@ class KafkaIdSetValidatorTest {
 
         KafkaIdSetValidationResult result = new KafkaIdSetValidator(
                         (bootstrap, topic, timeout, maximumRecords) -> snapshot)
-                .validate("kafka:9092", "output", 1, Duration.ofMinutes(2));
+                .validate("kafka:9092", "output", ids(1), Duration.ofMinutes(2));
 
         assertEquals("validator.kafka.id-set.malformed-ids", result.reason());
         assertEquals(
@@ -188,7 +222,7 @@ class KafkaIdSetValidatorTest {
         };
 
         KafkaIdSetValidationResult result = new KafkaIdSetValidator(incomplete)
-                .validate("kafka:9092", "output", 5, Duration.ofMinutes(2));
+                .validate("kafka:9092", "output", ids(5), Duration.ofMinutes(2));
 
         assertEquals("verification.kafka.incomplete-after-timeout", result.reason());
         assertEquals(Map.of(0, 5L), result.evidence().endOffsets());
@@ -221,7 +255,7 @@ class KafkaIdSetValidatorTest {
         };
 
         KafkaIdSetValidationResult result = new KafkaIdSetValidator(incomplete)
-                .validate("kafka:9092", "output", 1_000_000, Duration.ofMinutes(2));
+                .validate("kafka:9092", "output", ids(1_000_000), Duration.ofMinutes(2));
 
         assertEquals(1_000_000, result.evidence().observedCount());
         assertEquals(100, result.evidence().observedSamples().size());
@@ -242,7 +276,7 @@ class KafkaIdSetValidatorTest {
         };
 
         KafkaIdSetValidationResult result = new KafkaIdSetValidator(reader, clock::get)
-                .validate("kafka:9092", "output", 1, Duration.ofSeconds(1));
+                .validate("kafka:9092", "output", ids(1), Duration.ofSeconds(1));
 
         assertEquals("verification.kafka.incomplete-after-timeout", result.reason());
         assertEquals(Map.of(0, 1L), result.evidence().endOffsets());
@@ -256,7 +290,7 @@ class KafkaIdSetValidatorTest {
         KafkaIdSetValidationResult result = new KafkaIdSetValidator(
                         (bootstrap, topic, timeout, maximumRecords) -> snapshot(List.of("0")),
                         clock::get)
-                .validate("kafka:9092", "output", 1, Duration.ofSeconds(1));
+                .validate("kafka:9092", "output", ids(1), Duration.ofSeconds(1));
 
         assertEquals(KafkaIdSetValidationResult.Status.PASS, result.status());
     }
@@ -264,7 +298,7 @@ class KafkaIdSetValidatorTest {
     @Test
     void evidenceCollectionsAreImmutable() {
         KafkaIdSetValidationResult result = validator(List.of("0", "0"))
-                .validate("kafka:9092", "output", 1, Duration.ofMinutes(2));
+                .validate("kafka:9092", "output", ids(1), Duration.ofMinutes(2));
 
         assertThrows(
                 UnsupportedOperationException.class,
@@ -273,6 +307,10 @@ class KafkaIdSetValidatorTest {
         assertThrows(
                 UnsupportedOperationException.class,
                 () -> result.evidence().endOffsets().put(1, 2L));
+    }
+
+    private static long[] ids(int count) {
+        return java.util.stream.LongStream.range(0, count).toArray();
     }
 
     private static KafkaIdSetValidator validator(List<String> values) {

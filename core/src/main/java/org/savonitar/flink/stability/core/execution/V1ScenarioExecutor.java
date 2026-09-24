@@ -167,7 +167,7 @@ public final class V1ScenarioExecutor {
             validation = terminalValidation.validate(
                     endpoints.hostBootstrapServers(),
                     plan.terminalValidation().output().topic(),
-                    input.inputManifest().totalRecords(),
+                    input.inputManifest().presentIds(),
                     plan.terminalValidation().timeout());
             // Only a transactional (exactly-once) sink has a prefix to list.
             String bootstrapServers = endpoints.hostBootstrapServers();
@@ -199,7 +199,10 @@ public final class V1ScenarioExecutor {
             } else {
                 status = V1ScenarioExecutionResult.Status.PASS;
                 reason = validation.reason();
-                message = "The terminal oracle passed and every fault had a confirmed effect";
+                message = phases.taskManagerKills().isEmpty()
+                        ? "The terminal oracle passed"
+                        : "The terminal oracle passed and every TaskManager kill had a"
+                                + " confirmed effect";
             }
             result = result(
                     status,
@@ -432,7 +435,7 @@ public final class V1ScenarioExecutor {
         KafkaIdSetValidationResult validate(
                 String bootstrapServers,
                 String topic,
-                long expectedCount,
+                long[] expectedIds,
                 java.time.Duration timeout);
     }
 

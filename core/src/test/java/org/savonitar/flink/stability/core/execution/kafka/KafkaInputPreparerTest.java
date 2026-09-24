@@ -265,6 +265,77 @@ class KafkaInputPreparerTest {
     }
 
     @Test
+    void retainsPartialManifestWhenReconciliationFailsMidTraversal() {
+        // Review finding F12: three acknowledged records with closed bounds, only ID 0
+        // observed, then the consumer throws.
+        List<String> events = new ArrayList<>();
+        FakeOperations operations = new FakeOperations(events, 2, 3);
+        operations.observed.subList(1, 3).clear();
+        IllegalStateException pollFailure = new IllegalStateException("poll failed");
+        operations.reconciliationTraversalFailure = pollFailure;
+
+        KafkaInputPreparationException failure = assertThrows(
+                KafkaInputPreparationException.class,
+                () -> preparer(events, operations).prepare(cluster(), input(3), endpoints()));
+
+        assertEquals(KafkaInputPreparationException.INFRASTRUCTURE_SETUP_FAILED,
+                failure.reasonCode());
+        assertSame(pollFailure, failure.getCause().getCause(),
+                "the consumer failure stays primary");
+        KafkaInputManifest evidence = failure.evidence().orElseThrow();
+        assertEquals(KafkaInputManifest.EvidenceStatus.PARTIAL, evidence.evidenceStatus());
+        assertEquals(Map.of(0, 2L, 1, 1L), evidence.exclusiveEndOffsets());
+        assertEquals(List.of(0L), evidence.reconciliation().observedIds());
+        assertFalse(evidence.reconciliation().reachedEveryExclusiveEnd());
+        assertEquals(
+                List.of(
+                        KafkaInputManifest.TerminalDisposition.PRESENT,
+                        KafkaInputManifest.TerminalDisposition.INDETERMINATE,
+                        KafkaInputManifest.TerminalDisposition.INDETERMINATE),
+                evidence.records().stream()
+                        .map(KafkaInputManifest.RecordAcknowledgement::terminalDisposition)
+                        .toList());
+        assertEquals("close", events.getLast());
+    }
+
+    @Test
+    void clientPollFailureCarriesThePartialSnapshotObservedSoFar() {
+        String topic = "input";
+        TopicPartition partition = new TopicPartition(topic, 0);
+        org.apache.kafka.common.KafkaException pollFailure =
+                new org.apache.kafka.common.KafkaException("broker connection lost");
+        MockConsumer<byte[], byte[]> consumer = new MockConsumer<>("earliest");
+        consumer.updateBeginningOffsets(Map.of(partition, 0L));
+        consumer.updateEndOffsets(Map.of(partition, 3L));
+        consumer.schedulePollTask(() -> consumer.addRecord(new ConsumerRecord<>(
+                topic, 0, 0, null, "0".getBytes(StandardCharsets.UTF_8))));
+        consumer.schedulePollTask(() -> consumer.setPollException(pollFailure));
+        KafkaClientInputOperations operations = new KafkaClientInputOperations(
+                "localhost:19093",
+                Duration.ofSeconds(1),
+                unusedAdmin(),
+                configuration -> consumer);
+
+        KafkaInputOperations.ReconciliationSnapshotException failure = assertThrows(
+                KafkaInputOperations.ReconciliationSnapshotException.class,
+                () -> operations.reconcileFromZeroThrough(
+                        topic,
+                        Map.of(0, 3L),
+                        new KafkaInputPreparationDeadline(
+                                Duration.ofSeconds(1), System::nanoTime)));
+
+        assertSame(pollFailure, failure.getCause());
+        KafkaInputOperations.ReconciliationSnapshot snapshot = failure.snapshot();
+        assertFalse(snapshot.reachedEveryExclusiveEnd());
+        assertEquals(1, snapshot.records().size());
+        assertEquals("0", new String(
+                snapshot.records().getFirst().value(), StandardCharsets.UTF_8));
+        assertEquals("flink-stability-input-reconciliation",
+                snapshot.consumerConfiguration().get("client.id"));
+        assertTrue(consumer.closed());
+    }
+
+    @Test
     void retainsCompleteManifestWhenAdminCloseFails() {
         List<String> events = new ArrayList<>();
         FakeOperations operations = new FakeOperations(events, 2, 5);
@@ -539,8 +610,8 @@ class KafkaInputPreparerTest {
                 unusedAdmin(),
                 configuration -> consumer);
 
-        KafkaInputOperations.ReconciliationCloseException failure = assertThrows(
-                KafkaInputOperations.ReconciliationCloseException.class,
+        KafkaInputOperations.ReconciliationSnapshotException failure = assertThrows(
+                KafkaInputOperations.ReconciliationSnapshotException.class,
                 () -> operations.reconcileFromZeroThrough(
                         topic,
                         Map.of(0, 1L),
@@ -722,6 +793,7 @@ class KafkaInputPreparerTest {
         private Exception createFailure;
         private Exception closeFailure;
         private RuntimeException reconciliationCloseFailure;
+        private RuntimeException reconciliationTraversalFailure;
         private boolean interruptProduce;
         private boolean reachedEveryEnd = true;
         private Runnable afterCreate = () -> {};
@@ -805,10 +877,17 @@ class KafkaInputPreparerTest {
             events.add("reconcile");
             stageBudgets.add(deadline.remaining());
             reconciledBounds = Map.copyOf(exclusiveEndOffsets);
+            if (reconciliationTraversalFailure != null) {
+                throw new ReconciliationSnapshotException(
+                        "Kafka input reconciliation failed after observing " + observed.size()
+                                + " records",
+                        reconciliationTraversalFailure,
+                        new ReconciliationSnapshot(observed, false, consumerConfiguration));
+            }
             ReconciliationSnapshot snapshot = new ReconciliationSnapshot(
                     observed, reachedEveryEnd, consumerConfiguration);
             if (reconciliationCloseFailure != null) {
-                throw new ReconciliationCloseException(
+                throw new ReconciliationSnapshotException(
                         "Kafka reconciliation consumer failed to close after its snapshot was "
                                 + "captured",
                         reconciliationCloseFailure,
