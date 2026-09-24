@@ -39,7 +39,7 @@ Important properties of this boundary:
 
 ## Requirements
 
-- JDK 21
+- JDK 21 (the build fails in the `validate` phase on an older JDK)
 - Maven 3.8+
 - Docker Desktop or another Docker daemon reachable by Testcontainers for `run`
 
@@ -64,6 +64,14 @@ flink-job-generator/target/flink-job-generator.jar
 
 It contains the workload classes and protocol marker but does not shade Flink, Kafka,
 or the connector under test.
+
+### Continuous integration
+
+GitHub Actions runs `mvn -B verify` on JDK 21 for pushes to `main` and for pull
+requests ([`ci.yml`](.github/workflows/ci.yml)). These tests do not start Docker.
+The real-container `bounded-eos` run is a separate, manually triggered workflow
+([`bounded-eos.yml`](.github/workflows/bounded-eos.yml)) that uploads the JSON result
+and the runner log.
 
 ### Test fixtures
 
