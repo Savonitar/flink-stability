@@ -1,11 +1,10 @@
 package org.savonitar.flink.stability.core.execution.kafka;
 
 import org.savonitar.flink.stability.core.execution.plan.ExecutableScenarioPlan;
+import org.savonitar.flink.stability.runtime.api.Digests;
 import org.savonitar.flink.stability.runtime.api.KafkaRuntimeEndpoints;
 
 import java.nio.charset.StandardCharsets;
-import java.security.MessageDigest;
-import java.security.NoSuchAlgorithmException;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -404,7 +403,7 @@ public final class KafkaInputPreparer {
             }
             acknowledgements.add(new KafkaInputManifest.RecordAcknowledgement(
                     expectedId,
-                    sha256(Long.toString(expectedId).getBytes(StandardCharsets.UTF_8)),
+                    Digests.sha256(Long.toString(expectedId).getBytes(StandardCharsets.UTF_8)),
                     attempts,
                     expectedPartition,
                     expectedOffset,
@@ -577,15 +576,6 @@ public final class KafkaInputPreparer {
         long quotient = total / partitions;
         long remainder = total % partitions;
         return quotient + (partition < remainder ? 1 : 0);
-    }
-
-    private static String sha256(byte[] value) {
-        try {
-            return java.util.HexFormat.of().formatHex(
-                    MessageDigest.getInstance("SHA-256").digest(value));
-        } catch (NoSuchAlgorithmException impossible) {
-            throw new IllegalStateException("SHA-256 is unavailable", impossible);
-        }
     }
 
     private record ValidatedOffsets(

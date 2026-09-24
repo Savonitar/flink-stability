@@ -5,17 +5,15 @@ import org.savonitar.flink.stability.core.spec.document.ResolutionScope;
 import org.savonitar.flink.stability.core.spec.document.SpecificationException;
 import org.savonitar.flink.stability.core.spec.document.SpecificationException.Stage;
 import org.savonitar.flink.stability.core.spec.resolution.ScenarioSide;
+import org.savonitar.flink.stability.runtime.api.Digests;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 
 import java.io.IOException;
-import java.io.InputStream;
 import java.nio.file.Files;
 import java.nio.file.LinkOption;
 import java.nio.file.Path;
-import java.security.MessageDigest;
-import java.security.NoSuchAlgorithmException;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
@@ -24,6 +22,8 @@ import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
 import java.util.TreeMap;
+
+import static org.savonitar.flink.stability.runtime.api.Checks.requireNonBlank;
 
 /** Builds and verifies one deterministic multi-connector cluster bundle. */
 public final class ConnectorClusterBundleBuilder {
@@ -135,7 +135,7 @@ public final class ConnectorClusterBundleBuilder {
         }
         List<String> aliases = List.copyOf(referencedAliases.keySet());
         String classpathManifest = canonicalClasspathManifest(entries);
-        String classpathManifestSha256 = CanonicalJson.sha256(classpathManifest);
+        String classpathManifestSha256 = Digests.sha256(classpathManifest);
         String targetBinding = canonicalTargetBinding(
                 targetFlinkImageReference, selectedLocks, classpathManifestSha256);
         return new PreparedConnectorBundle(
@@ -145,7 +145,7 @@ public final class ConnectorClusterBundleBuilder {
                 selectedLocks,
                 entries,
                 targetBinding,
-                CanonicalJson.sha256(targetBinding),
+                Digests.sha256(targetBinding),
                 classpathManifest,
                 classpathManifestSha256);
     }
@@ -156,7 +156,7 @@ public final class ConnectorClusterBundleBuilder {
             ConnectorClosureLock lock,
             List<Diagnostic> issues) {
         String projection = ConnectorClosureLockFactory.canonicalProjection(lock);
-        String actualHash = CanonicalJson.sha256(projection);
+        String actualHash = Digests.sha256(projection);
         if (!projection.equals(lock.canonicalProjectionJson())
                 || !actualHash.equals(lock.closureSha256())) {
             issues.add(issue(
@@ -191,7 +191,7 @@ public final class ConnectorClusterBundleBuilder {
         }
         String actual;
         try {
-            actual = sha256(path);
+            actual = Digests.sha256(path);
         } catch (IOException exception) {
             issues.add(issue(
                     plan,
@@ -331,35 +331,10 @@ public final class ConnectorClusterBundleBuilder {
         };
     }
 
-    private static String sha256(Path path) throws IOException {
-        try {
-            MessageDigest digest = MessageDigest.getInstance("SHA-256");
-            try (InputStream input = Files.newInputStream(path)) {
-                byte[] buffer = new byte[8192];
-                for (int read; (read = input.read(buffer)) >= 0;) {
-                    if (read > 0) {
-                        digest.update(buffer, 0, read);
-                    }
-                }
-            }
-            return java.util.HexFormat.of().formatHex(digest.digest());
-        } catch (NoSuchAlgorithmException impossible) {
-            throw new IllegalStateException("Java must provide SHA-256", impossible);
-        }
-    }
-
     private static String safeMessage(Throwable throwable) {
         return throwable.getMessage() == null
                 ? throwable.getClass().getSimpleName()
                 : throwable.getMessage();
-    }
-
-    private static String requireNonBlank(String value, String name) {
-        Objects.requireNonNull(value, name);
-        if (value.isBlank()) {
-            throw new IllegalArgumentException(name + " must not be blank");
-        }
-        return value;
     }
 
     private record MavenEncounter(

@@ -10,6 +10,8 @@ import java.util.Set;
 import java.util.TreeMap;
 import java.util.regex.Pattern;
 
+import static org.savonitar.flink.stability.runtime.api.Checks.requireNonBlank;
+
 /** Immutable evidence for generated records and the source topic's closed input bounds. */
 public record KafkaInputManifest(
         String clusterAlias,
@@ -244,13 +246,5 @@ public record KafkaInputManifest(
             }
         });
         return Collections.unmodifiableMap(new LinkedHashMap<>(sorted));
-    }
-
-    private static String requireNonBlank(String value, String name) {
-        Objects.requireNonNull(value, name);
-        if (value.isBlank()) {
-            throw new IllegalArgumentException(name + " must not be blank");
-        }
-        return value;
     }
 }

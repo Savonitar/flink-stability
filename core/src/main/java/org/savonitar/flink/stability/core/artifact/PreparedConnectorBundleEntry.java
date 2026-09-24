@@ -5,6 +5,8 @@ import java.util.List;
 import java.util.Objects;
 import java.util.regex.Pattern;
 
+import static org.savonitar.flink.stability.runtime.api.Checks.requireNonBlank;
+
 /** One unique, verified JAR in the deterministic cluster-level connector bundle. */
 public final class PreparedConnectorBundleEntry {
     private static final Pattern SHA_256 = Pattern.compile("[0-9a-f]{64}");
@@ -82,13 +84,5 @@ public final class PreparedConnectorBundleEntry {
 
     public List<ConnectorBundleContribution> contributions() {
         return contributions;
-    }
-
-    private static String requireNonBlank(String value, String name) {
-        Objects.requireNonNull(value, name);
-        if (value.isBlank()) {
-            throw new IllegalArgumentException(name + " must not be blank");
-        }
-        return value;
     }
 }

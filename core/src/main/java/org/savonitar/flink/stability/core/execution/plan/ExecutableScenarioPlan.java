@@ -14,6 +14,8 @@ import java.util.Optional;
 import java.util.TreeMap;
 import java.util.regex.Pattern;
 
+import static org.savonitar.flink.stability.runtime.api.Checks.requireNonBlank;
+
 /**
  * Immutable, fully typed description of the subset a first-version runner can execute.
  *
@@ -833,14 +835,6 @@ public final class ExecutableScenarioPlan {
         Objects.requireNonNull(value, name);
         if (value.isZero() || value.isNegative()) {
             throw new IllegalArgumentException(name + " must be positive");
-        }
-        return value;
-    }
-
-    private static String requireNonBlank(String value, String name) {
-        Objects.requireNonNull(value, name);
-        if (value.isBlank()) {
-            throw new IllegalArgumentException(name + " must not be blank");
         }
         return value;
     }

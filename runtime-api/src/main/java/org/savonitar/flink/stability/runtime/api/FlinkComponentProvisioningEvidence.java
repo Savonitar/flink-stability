@@ -4,6 +4,8 @@ import java.util.List;
 import java.util.Objects;
 import java.util.regex.Pattern;
 
+import static org.savonitar.flink.stability.runtime.api.Checks.requireNonBlank;
+
 /** Immutable evidence for one successfully started physical Flink container. */
 public final class FlinkComponentProvisioningEvidence {
     private static final Pattern SHA_256 = Pattern.compile("[0-9a-f]{64}");
@@ -81,13 +83,5 @@ public final class FlinkComponentProvisioningEvidence {
 
     public List<ProvisionedConnectorArtifact> connectorArtifacts() {
         return connectorArtifacts;
-    }
-
-    private static String requireNonBlank(String value, String name) {
-        value = Objects.requireNonNull(value, name);
-        if (value.isBlank()) {
-            throw new IllegalArgumentException(name + " must not be blank");
-        }
-        return value;
     }
 }

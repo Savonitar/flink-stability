@@ -4,6 +4,8 @@ import org.savonitar.flink.stability.core.spec.document.ResolutionScope;
 import java.util.Objects;
 import java.util.OptionalInt;
 
+import static org.savonitar.flink.stability.runtime.api.Checks.requireNonBlank;
+
 /** One declared connector artifact or dependency root that introduced a classpath entry. */
 public record PreparedConnectorOrigin(
         ResolutionScope scope,
@@ -44,14 +46,6 @@ public record PreparedConnectorOrigin(
         value = requireNonBlank(value, name);
         if (!value.startsWith("$/")) {
             throw new IllegalArgumentException(name + " must be a root-relative JSON pointer");
-        }
-        return value;
-    }
-
-    private static String requireNonBlank(String value, String name) {
-        Objects.requireNonNull(value, name);
-        if (value.isBlank()) {
-            throw new IllegalArgumentException(name + " must not be blank");
         }
         return value;
     }

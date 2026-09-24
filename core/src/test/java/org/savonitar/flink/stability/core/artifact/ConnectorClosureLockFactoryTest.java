@@ -15,6 +15,7 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.EnumSource;
+import org.savonitar.flink.stability.runtime.api.Digests;
 
 import java.net.URISyntaxException;
 import java.nio.file.Path;
@@ -729,7 +730,7 @@ class ConnectorClosureLockFactoryTest {
                 draft.descriptors(),
                 draft.mediationDecisions(),
                 projection,
-                CanonicalJson.sha256(projection));
+                Digests.sha256(projection));
     }
 
     private static ConnectorClosureLock withPrimaryDeclaredReference(

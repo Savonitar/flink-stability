@@ -2,15 +2,13 @@ package org.savonitar.flink.stability.core.artifact;
 
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
+import org.savonitar.flink.stability.runtime.api.Digests;
 
 import java.io.IOException;
 import java.net.URI;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.security.MessageDigest;
-import java.security.NoSuchAlgorithmException;
 import java.util.ArrayList;
-import java.util.HexFormat;
 import java.util.List;
 import java.util.Set;
 import java.util.jar.Attributes;
@@ -99,10 +97,10 @@ class MavenRuntimeClosureTest {
         sortedEvidence.sort(null);
         assertEquals(sortedEvidence, evidenceIdentities);
         for (MavenPomEvidence evidence : closure.consultedPoms()) {
-            assertEquals(sha256(evidence.sourcePath()), evidence.sha256());
+            assertEquals(Digests.sha256(evidence.sourcePath()), evidence.sha256());
         }
         for (ResolvedMavenJar artifact : closure.classpath()) {
-            assertEquals(sha256(artifact.sourcePath()), artifact.sha256());
+            assertEquals(Digests.sha256(artifact.sourcePath()), artifact.sha256());
         }
 
         assertThrows(UnsupportedOperationException.class, closure.classpath()::clear);
@@ -705,22 +703,7 @@ class MavenRuntimeClosureTest {
         }
     }
 
-    private static String sha256(Path path) throws IOException {
-        try {
-            return HexFormat.of().formatHex(
-                    MessageDigest.getInstance("SHA-256").digest(Files.readAllBytes(path)));
-        } catch (NoSuchAlgorithmException impossible) {
-            throw new IllegalStateException("SHA-256 unavailable", impossible);
-        }
-    }
-
     private static String fixedRepositoryId(URI uri, int index) {
-        try {
-            byte[] digest = MessageDigest.getInstance("SHA-256").digest(
-                    uri.toASCIIString().getBytes(java.nio.charset.StandardCharsets.UTF_8));
-            return "v1-repository-" + index + "-" + HexFormat.of().formatHex(digest);
-        } catch (NoSuchAlgorithmException impossible) {
-            throw new IllegalStateException("SHA-256 unavailable", impossible);
-        }
+        return "v1-repository-" + index + "-" + Digests.sha256(uri.toASCIIString());
     }
 }

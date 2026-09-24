@@ -2,6 +2,7 @@ package org.savonitar.flink.stability.core.artifact;
 
 import org.savonitar.flink.stability.core.spec.document.ResolutionScope;
 import org.savonitar.flink.stability.core.spec.resolution.ScenarioSide;
+import org.savonitar.flink.stability.runtime.api.Digests;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
@@ -16,6 +17,8 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
 import java.util.TreeMap;
+
+import static org.savonitar.flink.stability.runtime.api.Checks.requireNonBlank;
 
 /** Creates deterministic target-specific locks from prepared connector closures. */
 final class ConnectorClosureLockFactory {
@@ -69,7 +72,7 @@ final class ConnectorClosureLockFactory {
                 descriptors,
                 mediationDecisions,
                 projection,
-                CanonicalJson.sha256(projection));
+                Digests.sha256(projection));
     }
 
     /**
@@ -329,13 +332,5 @@ final class ConnectorClosureLockFactory {
             case PRIMARY -> "primary";
             case RUNTIME_DEPENDENCY -> "runtime_dependency";
         };
-    }
-
-    private static String requireNonBlank(String value, String name) {
-        Objects.requireNonNull(value, name);
-        if (value.isBlank()) {
-            throw new IllegalArgumentException(name + " must not be blank");
-        }
-        return value;
     }
 }

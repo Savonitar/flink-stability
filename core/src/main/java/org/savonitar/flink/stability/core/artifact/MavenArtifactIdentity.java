@@ -5,6 +5,8 @@ import org.eclipse.aether.artifact.Artifact;
 import java.util.Comparator;
 import java.util.Objects;
 
+import static org.savonitar.flink.stability.runtime.api.Checks.requireNonBlank;
+
 /** Immutable identity used for Maven conflict mediation and evidence. */
 public record MavenArtifactIdentity(
         String groupId,
@@ -50,13 +52,5 @@ public record MavenArtifactIdentity(
     @Override
     public int compareTo(MavenArtifactIdentity other) {
         return ORDER.compare(this, Objects.requireNonNull(other, "other"));
-    }
-
-    private static String requireNonBlank(String value, String name) {
-        Objects.requireNonNull(value, name);
-        if (value.isBlank()) {
-            throw new IllegalArgumentException(name + " must not be blank");
-        }
-        return value;
     }
 }

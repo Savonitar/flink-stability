@@ -4,14 +4,13 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.savonitar.flink.stability.runtime.api.Digests;
 
 import java.io.IOException;
 import java.net.SocketTimeoutException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.security.MessageDigest;
-import java.security.NoSuchAlgorithmException;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
@@ -78,7 +77,7 @@ class FlinkRestApiClientTest {
         Path jar = Files.createTempFile("flink-workload-", ".jar");
         Files.writeString(jar, "prepared bytes", StandardCharsets.UTF_8);
 
-        String jarId = client.uploadJar(jar, sha256(jar));
+        String jarId = client.uploadJar(jar, Digests.sha256(jar));
 
         assertEquals("uploaded-workload.jar", jarId);
         assertFalse(jar.toAbsolutePath().normalize().equals(uploadedJar));
@@ -90,7 +89,7 @@ class FlinkRestApiClientTest {
     void refusesChangedPreparedWorkloadBytesBeforeTransportUpload() throws Exception {
         Path jar = Files.createTempFile("flink-workload-", ".jar");
         Files.writeString(jar, "original bytes", StandardCharsets.UTF_8);
-        String expectedSha256 = sha256(jar);
+        String expectedSha256 = Digests.sha256(jar);
         Files.writeString(jar, "changed bytes", StandardCharsets.UTF_8);
 
         IOException failure = assertThrows(
@@ -106,7 +105,7 @@ class FlinkRestApiClientTest {
             throws Exception {
         Path jar = Files.createTempFile("flink-workload-", ".jar");
         Files.writeString(jar, "verified bytes", StandardCharsets.UTF_8);
-        String expectedSha256 = sha256(jar);
+        String expectedSha256 = Digests.sha256(jar);
         AtomicReference<byte[]> uploaded = new AtomicReference<>();
         FlinkRestApiClient snapshotClient = new FlinkRestApiClient(
                 new FlinkRestApiClient.Transport() {
@@ -379,15 +378,6 @@ class FlinkRestApiClientTest {
         List<String> values = new ArrayList<>();
         array.forEach(value -> values.add(value.asText()));
         return values;
-    }
-
-    private static String sha256(Path path) throws IOException {
-        try {
-            return java.util.HexFormat.of().formatHex(
-                    MessageDigest.getInstance("SHA-256").digest(Files.readAllBytes(path)));
-        } catch (NoSuchAlgorithmException impossible) {
-            throw new IllegalStateException(impossible);
-        }
     }
 
     private record CapturedRequest(String method, String path, String body) {}

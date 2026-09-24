@@ -3,6 +3,8 @@ package org.savonitar.flink.stability.testcontainers;
 import java.time.Duration;
 import java.util.Objects;
 
+import static org.savonitar.flink.stability.runtime.api.Checks.requireNonBlank;
+
 /** A synchronous container-driver operation exhausted its one shared monotonic deadline. */
 public final class ContainerOperationTimeoutException extends IllegalStateException {
     private final String scope;
@@ -32,13 +34,5 @@ public final class ContainerOperationTimeoutException extends IllegalStateExcept
 
     public String operation() {
         return operation;
-    }
-
-    private static String requireNonBlank(String value, String name) {
-        Objects.requireNonNull(value, name);
-        if (value.isBlank()) {
-            throw new IllegalArgumentException(name + " must not be blank");
-        }
-        return value;
     }
 }

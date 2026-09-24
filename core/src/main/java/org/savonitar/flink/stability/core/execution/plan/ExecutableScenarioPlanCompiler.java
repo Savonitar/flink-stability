@@ -17,17 +17,15 @@ import org.savonitar.flink.stability.core.artifact.ResolvedArtifact;
 import org.savonitar.flink.stability.core.spec.resolution.ResolvedScenarioPlan;
 import org.savonitar.flink.stability.core.spec.resolution.ScenarioSide;
 import org.savonitar.flink.stability.core.artifact.WorkloadProtocolArtifactValidator;
+import org.savonitar.flink.stability.runtime.api.Digests;
 import org.savonitar.flink.stability.runtime.api.FlinkRuntimeTarget;
 import org.savonitar.flink.stability.runtime.api.KafkaBrokerPolicy;
 
 import java.io.IOException;
-import java.io.InputStream;
 import java.math.BigInteger;
 import java.nio.file.Files;
 import java.nio.file.LinkOption;
 import java.nio.file.Path;
-import java.security.MessageDigest;
-import java.security.NoSuchAlgorithmException;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
@@ -1029,7 +1027,7 @@ public final class ExecutableScenarioPlanCompiler {
             if (!Files.isRegularFile(jar, LinkOption.NOFOLLOW_LINKS) || !Files.isReadable(jar)) {
                 throw new IOException("prepared workload JAR is unavailable");
             }
-            String actualSha256 = sha256(jar);
+            String actualSha256 = Digests.sha256(jar, LinkOption.NOFOLLOW_LINKS);
             if (!artifact.sha256().equals(actualSha256)) {
                 throw capability(
                         preparedPlan,
@@ -1054,23 +1052,6 @@ public final class ExecutableScenarioPlanCompiler {
                     path,
                     "Cannot inspect prepared workload protocol marker: "
                             + safeMessage(exception));
-        }
-    }
-
-    private static String sha256(Path path) throws IOException {
-        try {
-            MessageDigest digest = MessageDigest.getInstance("SHA-256");
-            try (InputStream input = Files.newInputStream(path, LinkOption.NOFOLLOW_LINKS)) {
-                byte[] buffer = new byte[8192];
-                for (int read; (read = input.read(buffer)) >= 0;) {
-                    if (read > 0) {
-                        digest.update(buffer, 0, read);
-                    }
-                }
-            }
-            return java.util.HexFormat.of().formatHex(digest.digest());
-        } catch (NoSuchAlgorithmException impossible) {
-            throw new IllegalStateException("Java must provide SHA-256", impossible);
         }
     }
 

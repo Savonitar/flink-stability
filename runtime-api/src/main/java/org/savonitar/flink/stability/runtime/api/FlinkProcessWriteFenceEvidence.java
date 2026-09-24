@@ -5,6 +5,8 @@ import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
 
+import static org.savonitar.flink.stability.runtime.api.Checks.requireNonBlank;
+
 /** Immutable proof that every known Flink process was observed stopped. */
 public record FlinkProcessWriteFenceEvidence(
         List<Component> components,
@@ -31,13 +33,5 @@ public record FlinkProcessWriteFenceEvidence(
     public enum Outcome {
         SIGKILLED,
         ALREADY_STOPPED
-    }
-
-    private static String requireNonBlank(String value, String name) {
-        Objects.requireNonNull(value, name);
-        if (value.isBlank()) {
-            throw new IllegalArgumentException(name + " must not be blank");
-        }
-        return value;
     }
 }

@@ -6,6 +6,8 @@ import java.util.List;
 import java.util.Objects;
 import java.util.OptionalLong;
 
+import static org.savonitar.flink.stability.runtime.api.Checks.requireNonBlank;
+
 /**
  * Immutable ordered evidence for every atomic typed phase step that was attempted, plus the job
  * as observed just before each confirmed TaskManager kill.
@@ -93,13 +95,5 @@ public record PhaseExecutionEvidence(
     public enum StepStatus {
         SUCCEEDED,
         FAILED
-    }
-
-    private static String requireNonBlank(String value, String name) {
-        Objects.requireNonNull(value, name);
-        if (value.isBlank()) {
-            throw new IllegalArgumentException(name + " must not be blank");
-        }
-        return value;
     }
 }

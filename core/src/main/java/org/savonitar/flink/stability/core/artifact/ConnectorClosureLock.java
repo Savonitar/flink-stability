@@ -5,6 +5,8 @@ import java.util.List;
 import java.util.Objects;
 import java.util.regex.Pattern;
 
+import static org.savonitar.flink.stability.runtime.api.Checks.requireNonBlank;
+
 /** Immutable target-specific connector closure lock and its canonical hash projection. */
 public final class ConnectorClosureLock {
     public static final String FORMAT = "flink-stability.connector-closure-lock/v1";
@@ -112,14 +114,6 @@ public final class ConnectorClosureLock {
         value = requireNonBlank(value, name);
         if (!value.startsWith("$/")) {
             throw new IllegalArgumentException(name + " must be a root-relative JSON pointer");
-        }
-        return value;
-    }
-
-    private static String requireNonBlank(String value, String name) {
-        Objects.requireNonNull(value, name);
-        if (value.isBlank()) {
-            throw new IllegalArgumentException(name + " must not be blank");
         }
         return value;
     }

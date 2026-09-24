@@ -1,6 +1,6 @@
 package org.savonitar.flink.stability.runtime.api;
 
-import java.util.Objects;
+import static org.savonitar.flink.stability.runtime.api.Checks.requireNonBlank;
 
 /** Published Kafka endpoints and their resolved runtime identity. */
 public record KafkaRuntimeEndpoints(
@@ -15,13 +15,5 @@ public record KafkaRuntimeEndpoints(
         internalBootstrapServers = requireNonBlank(
                 internalBootstrapServers, "internalBootstrapServers");
         hostBootstrapServers = requireNonBlank(hostBootstrapServers, "hostBootstrapServers");
-    }
-
-    private static String requireNonBlank(String value, String name) {
-        Objects.requireNonNull(value, name);
-        if (value.isBlank()) {
-            throw new IllegalArgumentException(name + " must not be blank");
-        }
-        return value;
     }
 }
