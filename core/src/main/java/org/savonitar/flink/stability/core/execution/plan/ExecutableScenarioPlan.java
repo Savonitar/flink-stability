@@ -23,6 +23,7 @@ import java.util.regex.Pattern;
 public final class ExecutableScenarioPlan {
     public static final Duration DEFAULT_JOB_COMPLETION_TIMEOUT = Duration.ofMinutes(2);
     public static final Duration DEFAULT_TERMINAL_VALIDATION_TIMEOUT = Duration.ofMinutes(2);
+    /** The exactly-once transaction timeout when a scenario declares none. */
     public static final Duration KAFKA_TRANSACTION_TIMEOUT = Duration.ofHours(2);
     public static final long FIRST_RUNNER_IN_MEMORY_MAX_GENERATED_INPUT_RECORDS = 1_000_000L;
 
@@ -585,9 +586,9 @@ public final class ExecutableScenarioPlan {
                 throw new IllegalArgumentException(
                         "The first workload protocol requires one Kafka cluster");
             }
-            if (!transactionTimeout.equals(KAFKA_TRANSACTION_TIMEOUT)) {
+            if (transactionTimeout.compareTo(KafkaBrokerPolicy.V1_TRANSACTION_MAX_TIMEOUT) > 0) {
                 throw new IllegalArgumentException(
-                        "Workload transaction timeout must equal the fixed v1 policy");
+                        "Workload transaction timeout must not exceed the broker maximum");
             }
         }
 

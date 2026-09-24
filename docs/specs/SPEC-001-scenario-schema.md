@@ -682,9 +682,13 @@ Connector pull-request gating is the same mechanism with one axis:
   consumer configuration, and captured bound is reconciled. Once acknowledgements
   and closed bounds exist, acknowledged-missing or incomplete reconciliation
   retains an immutable `partial` manifest with the available per-ID and
-  reconciliation evidence. A failure before closed bounds and reconciliation
-  configuration exist carries no partial manifest; the runner must not fabricate
-  evidence that was never observed. A consumer or Admin close failure after a
+  reconciliation evidence. This includes a reconciliation consumer that fails
+  while polling, querying positions, or waiting on the stage deadline: the IDs it
+  observed so far, the captured bounds, and its configuration are retained,
+  unobserved IDs are `indeterminate`, and the consumer failure stays primary
+  (`infrastructure.kafka-input-setup-failed`). A failure before closed bounds and
+  reconciliation configuration exist carries no partial manifest; the runner must
+  not fabricate evidence that was never observed. A consumer or Admin close failure after a
   reconciliation snapshot or manifest exists makes the attempt infrastructure-
   inconclusive but does not erase those facts: the failure retains the manifest
   with its observed `complete` or `partial` evidence status. When a substantive
@@ -710,14 +714,14 @@ Connector pull-request gating is the same mechanism with one axis:
 
 - **R5.1** The job's options are first-class scenario fields, not opaque args:
   delivery guarantee, Kafka transactional-ID prefix, Kafka transaction ID naming
-  strategy, parallelism, checkpoint interval and mode, checkpoint storage, state
-  backend, state TTL, watermark settings, restart strategy. In v1 these live on
-  `workload.jobs[]` and its nested `source`, `sink`, and `checkpointing` fields:
-  `parallelism`, `state_backend`, `state_ttl`, `watermarks`,
-  `restart_strategy`, `sink.delivery_guarantee`,
+  strategy, Kafka transaction timeout, parallelism, checkpoint interval and mode,
+  checkpoint storage, state backend, state TTL, watermark settings, restart
+  strategy. In v1 these live on `workload.jobs[]` and its nested `source`,
+  `sink`, and `checkpointing` fields: `parallelism`, `state_backend`,
+  `state_ttl`, `watermarks`, `restart_strategy`, `sink.delivery_guarantee`,
   `sink.transactional_id_prefix`, `sink.transaction_id_naming_strategy`,
-  `checkpointing.interval`, `checkpointing.mode`, and
-  `checkpointing.storage`.
+  `sink.transaction_timeout`, `checkpointing.interval`, `checkpointing.mode`,
+  and `checkpointing.storage`.
 - **R5.1a** Omission is deterministic. Before execution, the resolver
   materializes these effective values for every job:
 
@@ -757,7 +761,11 @@ Connector pull-request gating is the same mechanism with one axis:
   `transactional_id_prefix` and `transaction_id_naming_strategy` are required
   only when the resolved `sink.delivery_guarantee` is `EXACTLY_ONCE`; they are
   invalid for `NONE` and `AT_LEAST_ONCE`, because no Kafka transactions should
-  exist in those modes.
+  exist in those modes. The optional `transaction_timeout` duration follows the
+  same rule: it is valid only for `EXACTLY_ONCE` and defaults to `2h`. It may be
+  shorter than the checkpoint interval or an expected outage; that is how a
+  scenario expresses the documented loss when a transaction times out before its
+  commit, which is itself a negative-control shape.
 - **R5.4a** First-class workload option shapes are intentionally small in v1:
   - `checkpointing.storage` is an object, never a scalar:
     `{ type: jobmanager }` or `{ type: filesystem }`. Filesystem storage is
@@ -968,10 +976,12 @@ Connector pull-request gating is the same mechanism with one axis:
   newer protocol's meaning.
   Boolean values are lowercase `true`/`false`; millisecond fields are canonical
   non-negative base-10 integers. For an exactly-once sink, the effective
-  transaction timeout is `7200000` ms and both transaction-ID fields are present.
-  The runner configures Kafka `transaction.max.timeout.ms` to permit that same
-  two-hour producer timeout; a shorter broker maximum is a planning error, not a
-  late producer-init surprise.
+  transaction timeout is the declared `transaction_timeout` in milliseconds, or
+  `7200000` when omitted, and both transaction-ID fields are present. The runner
+  configures Kafka `transaction.max.timeout.ms` to a fixed two hours; a declared
+  timeout above that maximum is a planning error
+  (`runner.workload.transaction-timeout-unsupported`), not a late producer-init
+  surprise.
   The v1 built-in source uses `starting-offsets=committed-or-earliest` and
   `isolation-level=read_uncommitted`, matching the non-transactional harness input
   producer.
@@ -1427,7 +1437,11 @@ Connector pull-request gating is the same mechanism with one axis:
   closed with `verification.kafka.output-limit-exceeded`, while retaining the
   fixed partition bounds and bounded record-coordinate evidence already
   observed. Tombstones count toward this observation limit. This verification
-  failure cannot satisfy an expected data-integrity oracle. Lifting the cap
+  failure cannot satisfy an expected data-integrity oracle. Each retained record
+  keeps at most 64 characters of its value: a longer value cannot be a canonical
+  ID, so it keeps a 32-character prefix marked with its length and counts as a
+  malformed ID. Retained memory is thus bounded by the record cap, not by the
+  size of what the job wrote. Lifting the cap
   requires streaming or spill-backed snapshot and validator evidence; it does
   not narrow the broad v1 scenario schema.
 - **R7.4** Savepoint self-containment is assertable (no dangling references to

@@ -4,6 +4,7 @@ import org.savonitar.flink.stability.core.execution.plan.ExecutableScenarioPlan;
 
 import java.time.Duration;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Comparator;
 import java.util.HashMap;
 import java.util.List;
@@ -13,7 +14,10 @@ import java.util.TreeMap;
 import java.util.TreeSet;
 import java.util.function.LongSupplier;
 
-/** Exact integer-sequence id-set oracle over one complete, fenced Kafka snapshot. */
+/**
+ * Exact ID-set oracle over one complete, fenced Kafka snapshot. It compares output IDs with the
+ * input manifest's present set, not a numeric range (SPEC-001 R7.3).
+ */
 public final class KafkaIdSetValidator {
     private static final int MAX_EVIDENCE_SAMPLES = 100;
     private static final long MAX_TERMINAL_RECORDS =
@@ -40,14 +44,22 @@ public final class KafkaIdSetValidator {
         this.nanoTime = Objects.requireNonNull(nanoTime, "nanoTime");
     }
 
+    /** {@code expectedIds} must be sorted, unique, and non-empty. */
     public KafkaIdSetValidationResult validate(
             String bootstrapServers,
             String topic,
-            long expectedCount,
+            long[] expectedIds,
             Duration timeout) {
-        if (expectedCount < 1) {
-            throw new IllegalArgumentException("expectedCount must be positive");
+        Objects.requireNonNull(expectedIds, "expectedIds");
+        if (expectedIds.length == 0) {
+            throw new IllegalArgumentException("expectedIds must not be empty");
         }
+        for (int index = 1; index < expectedIds.length; index++) {
+            if (expectedIds[index] <= expectedIds[index - 1]) {
+                throw new IllegalArgumentException("expectedIds must be sorted and unique");
+            }
+        }
+        long expectedCount = expectedIds.length;
         Deadline deadline = Deadline.after(timeout, nanoTime);
         final KafkaTopicSnapshot snapshot;
         try {
@@ -68,7 +80,7 @@ public final class KafkaIdSetValidator {
                     partialEvidence(expectedCount, unavailable.partialEvidence()));
         }
 
-        Accumulator accumulator = new Accumulator(expectedCount);
+        Accumulator accumulator = new Accumulator(expectedIds);
         try {
             int processed = 0;
             for (KafkaTopicSnapshot.ObservedRecord record : snapshot.records()) {
@@ -175,6 +187,7 @@ public final class KafkaIdSetValidator {
     }
 
     private static final class Accumulator {
+        private final long[] expected;
         private final long expectedCount;
         private final Map<Long, ExpectedIdState> expectedIds = new HashMap<>();
         private final TreeSet<KafkaIdSetValidationResult.RecordSample> observedSamples =
@@ -190,8 +203,9 @@ public final class KafkaIdSetValidator {
         private long unexpectedCount;
         private long duplicateCount;
 
-        private Accumulator(long expectedCount) {
-            this.expectedCount = expectedCount;
+        private Accumulator(long[] expected) {
+            this.expected = expected;
+            this.expectedCount = expected.length;
         }
 
         private void accept(KafkaTopicSnapshot.ObservedRecord record) {
@@ -204,7 +218,7 @@ public final class KafkaIdSetValidator {
                 retainSmallest(malformedSamples, coordinate);
                 return;
             }
-            if (id < 0 || id >= expectedCount) {
+            if (Arrays.binarySearch(expected, id) < 0) {
                 unexpectedCount++;
                 retainSmallest(unexpectedSamples, id, coordinate);
                 return;
@@ -225,13 +239,14 @@ public final class KafkaIdSetValidator {
                 Deadline deadline) {
             long missingCount = expectedCount - expectedIds.size();
             List<Long> missingSamples = new ArrayList<>();
-            for (long id = 0; id < expectedCount && missingSamples.size() < MAX_EVIDENCE_SAMPLES;
-                    id++) {
-                if ((id % DEADLINE_CHECK_INTERVAL) == 0) {
+            for (int index = 0;
+                    index < expected.length && missingSamples.size() < MAX_EVIDENCE_SAMPLES;
+                    index++) {
+                if ((index % DEADLINE_CHECK_INTERVAL) == 0) {
                     deadline.check();
                 }
-                if (!expectedIds.containsKey(id)) {
-                    missingSamples.add(id);
+                if (!expectedIds.containsKey(expected[index])) {
+                    missingSamples.add(expected[index]);
                 }
             }
             deadline.check();

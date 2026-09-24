@@ -851,6 +851,9 @@
         },
         "transaction_id_naming_strategy": {
           "$ref": "#/$defs/nonEmptyString"
+        },
+        "transaction_timeout": {
+          "$ref": "#/$defs/durationOrTemplate"
         }
       },
       "allOf": [
@@ -897,6 +900,11 @@
                 {
                   "required": [
                     "transaction_id_naming_strategy"
+                  ]
+                },
+                {
+                  "required": [
+                    "transaction_timeout"
                   ]
                 }
               ]

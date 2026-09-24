@@ -107,22 +107,32 @@ public final class KafkaInputPreparer {
                 deadline.requireRemaining("reconciling generated Kafka input");
                 reconciliation = operations.reconcileFromZeroThrough(
                         input.topic(), validatedOffsets.exclusiveEnds(), deadline);
-            } catch (KafkaInputOperations.ReconciliationCloseException closeFailure) {
+            } catch (KafkaInputOperations.ReconciliationSnapshotException consumerFailure) {
+                boolean traversalFailed =
+                        !consumerFailure.snapshot().reachedEveryExclusiveEnd();
                 try {
                     inputEvidence = validateAndCreateManifest(
                             input,
                             acknowledgedRecords,
                             validatedOffsets,
-                            closeFailure.snapshot());
-                } catch (KafkaInputPreparationException substantiveFailure) {
-                    substantiveFailure.addSuppressed(closeFailure);
-                    throw substantiveFailure;
+                            consumerFailure.snapshot());
+                } catch (KafkaInputPreparationException evidenced) {
+                    if (!traversalFailed) {
+                        evidenced.addSuppressed(consumerFailure);
+                        throw evidenced;
+                    }
+                    // The consumer failure stays primary; its partial manifest is retained.
+                    throw new KafkaInputPreparationException(
+                            KafkaInputPreparationException.INFRASTRUCTURE_SETUP_FAILED,
+                            consumerFailure.getMessage(),
+                            consumerFailure,
+                            evidenced.evidence().orElseThrow());
                 }
                 throw new KafkaInputPreparationException(
                         KafkaInputPreparationException.INFRASTRUCTURE_SETUP_FAILED,
                         "Kafka input reconciliation consumer failed to close after its "
                                 + "evidence was captured",
-                        closeFailure,
+                        consumerFailure,
                         inputEvidence);
             }
             inputEvidence = validateAndCreateManifest(

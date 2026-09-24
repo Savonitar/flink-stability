@@ -252,6 +252,7 @@ final class KafkaClientInputOperations implements KafkaInputOperations {
                 bootstrapServers,
                 deadline.requireRemaining("creating the Kafka reconciliation consumer"));
         Consumer<byte[], byte[]> consumer = consumerFactory.create(configuration);
+        List<ObservedRecord> observed = new ArrayList<>();
         ReconciliationSnapshot completed = null;
         Exception operationFailure = null;
         try {
@@ -262,7 +263,6 @@ final class KafkaClientInputOperations implements KafkaInputOperations {
             consumer.assign(assigned);
             assigned.forEach(partition -> consumer.seek(partition, 0));
 
-            List<ObservedRecord> observed = new ArrayList<>();
             boolean reachedEveryEnd = exclusiveEndOffsets.values().stream()
                     .allMatch(offset -> offset == 0);
             while (!reachedEveryEnd) {
@@ -296,8 +296,14 @@ final class KafkaClientInputOperations implements KafkaInputOperations {
                     reachedEveryEnd,
                     configurationEvidence(configuration));
         } catch (Exception failure) {
-            operationFailure = failure;
-            throw failure;
+            // Keep what was observed as partial evidence; never fabricate completeness.
+            operationFailure = new ReconciliationSnapshotException(
+                    "Kafka input reconciliation failed after observing " + observed.size()
+                            + " records",
+                    failure,
+                    new ReconciliationSnapshot(
+                            observed, false, configurationEvidence(configuration)));
+            throw operationFailure;
         } finally {
             try {
                 consumer.close(deadline.remaining());
@@ -305,7 +311,7 @@ final class KafkaClientInputOperations implements KafkaInputOperations {
                 if (operationFailure != null) {
                     operationFailure.addSuppressed(closeFailure);
                 } else if (completed != null) {
-                    throw new ReconciliationCloseException(
+                    throw new ReconciliationSnapshotException(
                             "Kafka reconciliation consumer failed to close after its snapshot "
                                     + "was captured",
                             closeFailure,

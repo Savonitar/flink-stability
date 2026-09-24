@@ -4,6 +4,7 @@ import org.savonitar.flink.stability.core.artifact.ArtifactPlanResolver;
 import org.savonitar.flink.stability.core.artifact.ArtifactResolutionException;
 import org.savonitar.flink.stability.core.artifact.ArtifactResolutionOptions;
 import org.savonitar.flink.stability.core.artifact.PreparedScenarioPlan;
+import org.savonitar.flink.stability.core.spec.document.DocumentValidationException;
 import org.savonitar.flink.stability.core.spec.document.ExpectedResultSpecification;
 import org.savonitar.flink.stability.core.spec.document.ScenarioBundle;
 import org.savonitar.flink.stability.core.spec.document.ScenarioSpecification;
@@ -539,6 +540,42 @@ class ExecutableScenarioPlanCompilerTest {
                 values.get("flink-stability.workload.v1.sink.delivery-guarantee"));
         assertTrue(values.keySet().stream().noneMatch(key -> key.startsWith(
                 "flink-stability.workload.v1.sink.transaction")));
+    }
+
+    @Test
+    void mapsADeclaredExactlyOnceTransactionTimeout() {
+        ExecutableScenarioPlan plan = compiler.compile(resolved(document ->
+                ((ObjectNode) document.at("/workload/jobs/0/sink"))
+                        .put("transaction_timeout", "3s")));
+
+        assertEquals("3000", plan.job().materializeFlinkConfiguration(
+                        "kafka:9092", Map.of(0, 10L), 1, "a1b2c3d4")
+                .get("flink-stability.workload.v1.sink.transaction-timeout-ms"));
+    }
+
+    @Test
+    void rejectsATransactionTimeoutAboveTheBrokerMaximum() {
+        ResolvedScenarioPlan resolved = resolved(document ->
+                ((ObjectNode) document.at("/workload/jobs/0/sink"))
+                        .put("transaction_timeout", "3h"));
+
+        RunnerCapabilityException exception = assertThrows(
+                RunnerCapabilityException.class, () -> compiler.compile(resolved));
+
+        RunnerCapabilityIssue issue = exception.issues().getFirst();
+        assertEquals("runner.workload.transaction-timeout-unsupported", issue.code());
+        assertEquals("$/workload/jobs/0/sink/transaction_timeout", issue.path());
+    }
+
+    @Test
+    void schemaRejectsATransactionTimeoutOnANonTransactionalSink() {
+        assertThrows(DocumentValidationException.class, () -> resolved(document -> {
+            ObjectNode sink = (ObjectNode) document.at("/workload/jobs/0/sink");
+            sink.put("delivery_guarantee", "AT_LEAST_ONCE");
+            sink.remove("transactional_id_prefix");
+            sink.remove("transaction_id_naming_strategy");
+            sink.put("transaction_timeout", "10s");
+        }));
     }
 
     @Test

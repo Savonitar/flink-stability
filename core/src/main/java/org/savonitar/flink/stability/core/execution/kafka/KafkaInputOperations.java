@@ -109,11 +109,15 @@ interface KafkaInputOperations {
         }
     }
 
-    /** Retains a completed reconciliation snapshot when only consumer cleanup failed. */
-    final class ReconciliationCloseException extends RuntimeException {
+    /**
+     * Retains what reconciliation observed before a consumer failure (SPEC-001 R4.18): a
+     * complete snapshot when only cleanup failed, or a partial one ({@code
+     * reachedEveryExclusiveEnd == false}) when polling or a position query failed.
+     */
+    final class ReconciliationSnapshotException extends RuntimeException {
         private final ReconciliationSnapshot snapshot;
 
-        ReconciliationCloseException(
+        ReconciliationSnapshotException(
                 String message,
                 Throwable cause,
                 ReconciliationSnapshot snapshot) {

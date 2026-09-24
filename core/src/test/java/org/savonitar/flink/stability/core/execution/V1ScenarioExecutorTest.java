@@ -61,6 +61,7 @@ import java.util.jar.JarOutputStream;
 import java.util.jar.Manifest;
 import java.util.function.Consumer;
 
+import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNull;
@@ -97,7 +98,8 @@ class V1ScenarioExecutorTest {
                         validationObservedFence.set(runtime.fenced);
                         assertEquals("localhost:39092", bootstrap);
                         assertEquals("output", topic);
-                        assertEquals(10, count);
+                        assertArrayEquals(
+                                java.util.stream.LongStream.range(0, 10).toArray(), count);
                         assertEquals(Duration.ofMinutes(2), timeout);
                         return passResult();
                     });
