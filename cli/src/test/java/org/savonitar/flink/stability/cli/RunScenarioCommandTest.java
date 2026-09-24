@@ -5,9 +5,11 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import org.savonitar.flink.stability.core.execution.FlinkTerminalWriteFence;
+import org.savonitar.flink.stability.core.execution.PhaseExecutionEvidence;
 import org.savonitar.flink.stability.core.execution.V1AttemptContext;
 import org.savonitar.flink.stability.core.execution.V1ScenarioExecutionResult;
 import org.savonitar.flink.stability.core.execution.kafka.KafkaInputManifest;
+import org.savonitar.flink.stability.core.flink.FlinkJobObservation;
 import org.savonitar.flink.stability.core.flink.FlinkJobState;
 import org.savonitar.flink.stability.core.validation.kafka.KafkaIdSetValidationResult;
 import org.savonitar.flink.stability.runtime.api.FlinkProcessWriteFenceEvidence;
@@ -228,7 +230,9 @@ class RunScenarioCommandTest {
                 Optional.empty(),
                 Optional.empty(),
                 Optional.of(processFence),
+                Optional.empty(),
                 Optional.of(terminal),
+                Optional.empty(),
                 List.of(),
                 List.of());
 
@@ -238,6 +242,10 @@ class RunScenarioCommandTest {
         JsonNode validation = output.path("evidence").path("terminalValidation");
 
         assertAll(
+                () -> assertEquals("not-run",
+                        output.at("/evidence/flinkJob/status").textValue()),
+                () -> assertTrue(output.at("/evidence/taskManagerKills").isArray()),
+                () -> assertTrue(output.at("/evidence/taskManagerKills").isEmpty()),
                 () -> assertEquals("partial", input.path("status").textValue()),
                 () -> assertEquals(1, input.path("observed").longValue()),
                 () -> assertFalse(input.path("reconciliationComplete").booleanValue()),
@@ -247,6 +255,73 @@ class RunScenarioCommandTest {
                 () -> assertFalse(validation.has("unexpected")),
                 () -> assertFalse(validation.has("duplicates")),
                 () -> assertFalse(validation.has("missing")));
+    }
+
+    @Test
+    void rendersTheJobObservationAndTheEffectOfEachTaskManagerKill() throws Exception {
+        FlinkJobObservation.Failure lostTaskManager = new FlinkJobObservation.Failure(
+                12_000, "ResourceManagerException",
+                "TaskManager with id tm-1 is no longer reachable.", Optional.of("tm-1"));
+        PhaseExecutionEvidence phases = new PhaseExecutionEvidence(
+                List.of(),
+                List.of(new PhaseExecutionEvidence.TaskManagerKill(
+                        "$/phases/1/steps/0",
+                        List.of(),
+                        "taskmanager-1",
+                        new FlinkJobObservation.Attempt(
+                                Optional.of(new FlinkJobObservation(
+                                        1_000, FlinkJobState.RUNNING, 4, 0, Optional.empty(),
+                                        List.of(),
+                                        List.of(new FlinkJobObservation.Subtask(
+                                                "Kafka Source", 0, 0, "RUNNING",
+                                                Optional.of("tm-1"))))),
+                                Optional.empty()))));
+        FlinkJobObservation.Attempt atFence = new FlinkJobObservation.Attempt(
+                Optional.of(new FlinkJobObservation(
+                        20_000, FlinkJobState.FINISHED, 20, 1,
+                        Optional.of(new FlinkJobObservation.Restore(4, 13_000)),
+                        List.of(lostTaskManager), List.of())),
+                Optional.empty());
+        FlinkProcessWriteFenceEvidence processes = new FlinkProcessWriteFenceEvidence(
+                List.of(), Instant.EPOCH);
+        KafkaIdSetValidationResult terminal = passResult().terminalValidation().orElseThrow();
+        V1ScenarioExecutionResult result = new V1ScenarioExecutionResult(
+                V1ScenarioExecutionResult.Status.PASS,
+                terminal.reason(),
+                terminal.message(),
+                Optional.empty(),
+                Optional.of(phases),
+                Optional.of(new FlinkTerminalWriteFence.Evidence(
+                        FlinkJobState.FINISHED, processes, atFence)),
+                Optional.of(processes),
+                Optional.of(atFence),
+                Optional.of(terminal),
+                Optional.empty(),
+                List.of(),
+                List.of());
+
+        JsonNode evidence = JSON.readTree(new V1ExecutionResultRenderer().render(
+                "bounded-eos", context("1234abcd"), result)).path("evidence");
+        JsonNode job = evidence.path("flinkJob");
+        JsonNode kill = evidence.path("taskManagerKills").path(0);
+
+        assertAll(
+                () -> assertEquals("observed", job.path("status").textValue()),
+                () -> assertEquals("FINISHED", job.path("state").textValue()),
+                () -> assertEquals(1, job.path("restoredCheckpoints").longValue()),
+                () -> assertEquals(4, job.path("latestRestoredCheckpoint").longValue()),
+                () -> assertEquals(1, job.path("failures").intValue()),
+                () -> assertEquals("$/phases/1/steps/0", kill.path("path").textValue()),
+                () -> assertEquals("checkpoint-restored", kill.path("outcome").textValue()),
+                () -> assertTrue(kill.path("confirmed").booleanValue()),
+                () -> assertEquals("RUNNING", kill.path("jobStateBeforeKill").textValue()),
+                () -> assertEquals(4, kill.path("completedCheckpointsBeforeKill").longValue()),
+                () -> assertEquals(1, kill.path("activeSubtasksBeforeKill").longValue()),
+                () -> assertEquals(4, kill.path("restoredCheckpoint").longValue()),
+                () -> assertEquals(12_000, kill.path("restoredAfterKillMs").longValue()),
+                () -> assertEquals(1, kill.path("failuresAfterKill").intValue()),
+                () -> assertEquals("TaskManager with id tm-1 is no longer reachable.",
+                        kill.path("firstFailureAfterKill").textValue()));
     }
 
     @Test
@@ -478,12 +553,20 @@ class RunScenarioCommandTest {
                 temporaryDirectory.resolve("checkpoints/attempt-1-" + nonce));
     }
 
+    private static final FlinkJobObservation.Attempt FINISHED_JOB =
+            new FlinkJobObservation.Attempt(
+                    Optional.of(new FlinkJobObservation(
+                            20_000, FlinkJobState.FINISHED, 6, 0, Optional.empty(),
+                            List.of(), List.of())),
+                    Optional.empty());
+
     private static V1ScenarioExecutionResult passResult() {
         FlinkProcessWriteFenceEvidence processes = new FlinkProcessWriteFenceEvidence(
                 List.of(), Instant.EPOCH);
         FlinkTerminalWriteFence.Evidence fence = new FlinkTerminalWriteFence.Evidence(
                 FlinkJobState.FINISHED,
-                processes);
+                processes,
+                FINISHED_JOB);
         KafkaIdSetValidationResult terminal = new KafkaIdSetValidationResult(
                 KafkaIdSetValidationResult.Status.PASS,
                 "validator.kafka.id-set.match",
@@ -503,7 +586,9 @@ class RunScenarioCommandTest {
                 Optional.empty(),
                 Optional.of(fence),
                 Optional.of(processes),
+                Optional.of(FINISHED_JOB),
                 Optional.of(terminal),
+                Optional.empty(),
                 List.of(),
                 List.of());
     }
@@ -513,7 +598,8 @@ class RunScenarioCommandTest {
                 List.of(), Instant.EPOCH);
         FlinkTerminalWriteFence.Evidence fence = new FlinkTerminalWriteFence.Evidence(
                 FlinkJobState.FINISHED,
-                processes);
+                processes,
+                FINISHED_JOB);
         KafkaIdSetValidationResult terminal = new KafkaIdSetValidationResult(
                 KafkaIdSetValidationResult.Status.FAIL,
                 "verification.kafka.missing-records",
@@ -533,7 +619,9 @@ class RunScenarioCommandTest {
                 Optional.empty(),
                 Optional.of(fence),
                 Optional.of(processes),
+                Optional.of(FINISHED_JOB),
                 Optional.of(terminal),
+                Optional.empty(),
                 List.of(),
                 List.of());
     }
@@ -590,6 +678,8 @@ class RunScenarioCommandTest {
                 status,
                 reason,
                 "attempt ended",
+                Optional.empty(),
+                Optional.empty(),
                 Optional.empty(),
                 Optional.empty(),
                 Optional.empty(),

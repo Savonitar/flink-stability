@@ -1,7 +1,9 @@
 package org.savonitar.flink.stability.core.execution;
 
 import org.savonitar.flink.stability.core.execution.kafka.KafkaInputManifest;
+import org.savonitar.flink.stability.core.flink.FlinkJobObservation;
 import org.savonitar.flink.stability.core.validation.kafka.KafkaIdSetValidationResult;
+import org.savonitar.flink.stability.core.validation.kafka.KafkaTransactionListing;
 import org.savonitar.flink.stability.runtime.api.FlinkComponentProvisioningEvidence;
 import org.savonitar.flink.stability.runtime.api.FlinkProcessWriteFenceEvidence;
 
@@ -18,7 +20,9 @@ public record V1ScenarioExecutionResult(
         Optional<PhaseExecutionEvidence> phaseEvidence,
         Optional<FlinkTerminalWriteFence.Evidence> writeFenceEvidence,
         Optional<FlinkProcessWriteFenceEvidence> processFenceEvidence,
+        Optional<FlinkJobObservation.Attempt> finalJobObservation,
         Optional<KafkaIdSetValidationResult> terminalValidation,
+        Optional<KafkaTransactionListing> sinkTransactions,
         List<FlinkComponentProvisioningEvidence> flinkProvisioningEvidence,
         List<String> diagnostics) {
 
@@ -32,8 +36,11 @@ public record V1ScenarioExecutionResult(
                 writeFenceEvidence, "writeFenceEvidence");
         processFenceEvidence = Objects.requireNonNull(
                 processFenceEvidence, "processFenceEvidence");
+        finalJobObservation = Objects.requireNonNull(
+                finalJobObservation, "finalJobObservation");
         terminalValidation = Objects.requireNonNull(
                 terminalValidation, "terminalValidation");
+        sinkTransactions = Objects.requireNonNull(sinkTransactions, "sinkTransactions");
         flinkProvisioningEvidence = List.copyOf(Objects.requireNonNull(
                 flinkProvisioningEvidence, "flinkProvisioningEvidence"));
         diagnostics = List.copyOf(Objects.requireNonNull(diagnostics, "diagnostics"));
@@ -46,6 +53,14 @@ public record V1ScenarioExecutionResult(
             throw new IllegalArgumentException(
                     "PASS requires both write-fence and terminal-validation evidence");
         }
+        if (status == Status.PASS && TaskManagerKillEffect.evaluate(
+                        phaseEvidence.map(PhaseExecutionEvidence::taskManagerKills)
+                                .orElse(List.of()),
+                        finalJobObservation).stream()
+                .anyMatch(effect -> !effect.outcome().confirmed())) {
+            throw new IllegalArgumentException(
+                    "PASS requires every TaskManager kill to have a confirmed effect");
+        }
         if (reason.startsWith("verification.") && status != Status.FAIL) {
             throw new IllegalArgumentException(
                     "Every verification.* outcome is an authoritative FAIL");
@@ -55,6 +70,12 @@ public record V1ScenarioExecutionResult(
                         writeFenceEvidence.orElseThrow().processFenceEvidence()))) {
             throw new IllegalArgumentException(
                     "Write-fence and process-fence evidence must identify the same fence");
+        }
+        if (writeFenceEvidence.isPresent()
+                && !finalJobObservation.equals(Optional.of(
+                        writeFenceEvidence.orElseThrow().jobBeforeFence()))) {
+            throw new IllegalArgumentException(
+                    "Write-fence evidence and the result must carry the same job observation");
         }
         if (terminalValidation.isPresent() && processFenceEvidence.isEmpty()) {
             throw new IllegalArgumentException(
@@ -66,6 +87,13 @@ public record V1ScenarioExecutionResult(
         PASS,
         FAIL,
         INCONCLUSIVE
+    }
+
+    /** Effect evidence for every confirmed TaskManager kill, in execution order. */
+    public List<TaskManagerKillEffect> taskManagerKillEffects() {
+        return TaskManagerKillEffect.evaluate(
+                phaseEvidence.map(PhaseExecutionEvidence::taskManagerKills).orElse(List.of()),
+                finalJobObservation);
     }
 
     public V1ScenarioExecutionResult withCleanupFailure(Throwable failure) {
@@ -105,7 +133,9 @@ public record V1ScenarioExecutionResult(
                     phaseEvidence,
                     writeFenceEvidence,
                     processFenceEvidence,
+                    finalJobObservation,
                     terminalValidation,
+                    sinkTransactions,
                     flinkProvisioningEvidence,
                     updated);
         }
@@ -117,7 +147,9 @@ public record V1ScenarioExecutionResult(
                 phaseEvidence,
                 writeFenceEvidence,
                 processFenceEvidence,
+                finalJobObservation,
                 terminalValidation,
+                sinkTransactions,
                 flinkProvisioningEvidence,
                 updated);
     }

@@ -3,6 +3,7 @@ package org.savonitar.flink.stability.core.execution;
 import org.junit.jupiter.api.Test;
 import org.savonitar.flink.stability.core.flink.FlinkJobControl;
 import org.savonitar.flink.stability.core.flink.FlinkJobHandle;
+import org.savonitar.flink.stability.core.flink.FlinkJobObservation;
 import org.savonitar.flink.stability.core.flink.FlinkJobState;
 import org.savonitar.flink.stability.core.flink.FlinkRestTimeoutException;
 import org.savonitar.flink.stability.runtime.api.FlinkComponentRole;
@@ -32,9 +33,27 @@ class FlinkTerminalWriteFenceTest {
         FlinkTerminalWriteFence.Evidence evidence =
                 fence.awaitBoundedCompletion(JOB, Duration.ofMinutes(2));
 
-        assertEquals(List.of("await-finished", "fence-processes"), events);
+        assertEquals(List.of("await-finished", "observe-job", "fence-processes"), events);
         assertEquals(FlinkJobState.FINISHED, evidence.finalState());
         assertEquals(processFenceEvidence(), evidence.processFenceEvidence());
+        assertEquals(Optional.of(FINISHED_JOB), evidence.jobBeforeFence().observation());
+    }
+
+    @Test
+    void unavailableJobObservationIsEvidenceAndNeverBlocksTheFence() throws Exception {
+        List<String> events = new ArrayList<>();
+        FakeJobs jobs = new FakeJobs(events);
+        jobs.observeFailure = new IOException("REST unavailable");
+        FlinkTerminalWriteFence fence = new FlinkTerminalWriteFence(
+                jobs, timeout -> recordProcessFence(events, timeout));
+
+        FlinkTerminalWriteFence.Evidence evidence =
+                fence.awaitBoundedCompletion(JOB, Duration.ofMinutes(2));
+
+        assertEquals(List.of("await-finished", "observe-job", "fence-processes"), events);
+        assertTrue(evidence.jobBeforeFence().observation().isEmpty());
+        assertEquals(Optional.of("IOException: REST unavailable"),
+                evidence.jobBeforeFence().failure());
     }
 
     @Test
@@ -50,9 +69,11 @@ class FlinkTerminalWriteFenceTest {
                 () -> fence.awaitBoundedCompletion(JOB, Duration.ofMinutes(2)));
 
         assertEquals("verification.flink.job-completion-timeout", failure.reason());
-        assertEquals(List.of("await-finished", "fence-processes"), events);
+        assertEquals(List.of("await-finished", "observe-job", "fence-processes"), events);
         assertEquals(Optional.of(processFenceEvidence()),
                 failure.processFenceEvidence());
+        // A job stuck in a restart loop shows its failures in this observation.
+        assertEquals(Optional.of(FINISHED_JOB), failure.jobBeforeFence().observation());
     }
 
     @Test
@@ -68,7 +89,7 @@ class FlinkTerminalWriteFenceTest {
                 () -> fence.awaitBoundedCompletion(JOB, Duration.ofMinutes(2)));
 
         assertEquals("verification.flink.job-terminalization-failed", failure.reason());
-        assertEquals(List.of("await-finished", "fence-processes"), events);
+        assertEquals(List.of("await-finished", "observe-job", "fence-processes"), events);
         assertEquals(Optional.of(processFenceEvidence()), failure.processFenceEvidence());
         assertTrue(failure.getCause().getMessage().contains("CANCELED instead of FINISHED"));
     }
@@ -88,7 +109,7 @@ class FlinkTerminalWriteFenceTest {
                 () -> fence.awaitBoundedCompletion(JOB, Duration.ofMinutes(2)));
 
         assertEquals("verification.flink.process-fence-failed", failure.reason());
-        assertEquals(List.of("await-finished", "fence-processes"), events);
+        assertEquals(List.of("await-finished", "observe-job", "fence-processes"), events);
         assertTrue(failure.processFenceEvidence().isEmpty());
     }
 
@@ -147,9 +168,13 @@ class FlinkTerminalWriteFenceTest {
                 Instant.parse("2026-08-26T12:00:00Z"));
     }
 
+    private static final FlinkJobObservation FINISHED_JOB = new FlinkJobObservation(
+            1_000, FlinkJobState.FINISHED, 3, 1, Optional.empty(), List.of(), List.of());
+
     private static final class FakeJobs implements FlinkJobControl {
         private final List<String> events;
         private IOException awaitFailure;
+        private IOException observeFailure;
         private FlinkJobState awaitResult = FlinkJobState.FINISHED;
 
         private FakeJobs(List<String> events) {
@@ -171,5 +196,13 @@ class FlinkTerminalWriteFenceTest {
             return awaitResult;
         }
 
+        @Override
+        public FlinkJobObservation observe(FlinkJobHandle job) throws IOException {
+            events.add("observe-job");
+            if (observeFailure != null) {
+                throw observeFailure;
+            }
+            return FINISHED_JOB;
+        }
     }
 }

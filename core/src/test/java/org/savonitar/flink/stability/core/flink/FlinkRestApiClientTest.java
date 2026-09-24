@@ -17,6 +17,7 @@ import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
@@ -29,6 +30,8 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class FlinkRestApiClientTest {
+    private static final String JOB_ID = "0123456789abcdef0123456789abcdef";
+
     private final ObjectMapper mapper = new ObjectMapper();
     private final List<CapturedRequest> requests = new CopyOnWriteArrayList<>();
     private final AtomicReference<String> jobState = new AtomicReference<>("FINISHED");
@@ -216,6 +219,126 @@ class FlinkRestApiClientTest {
                 timingClient.awaitFinished(
                         new FlinkJobHandle("0123456789abcdef0123456789abcdef"),
                         Duration.ofSeconds(1)));
+    }
+
+    @Test
+    void observesRecoveryEvidenceFromFlink22RestShapes() throws Exception {
+        // Field names and shapes recorded from a Flink 2.2.0 JobManager after a TaskManager kill.
+        Map<String, String> responses = Map.of(
+                "/jobs/" + JOB_ID, """
+                        {"jid":"%s","state":"RUNNING","now":1790275134494,
+                         "vertices":[{"id":"v1","name":"Source: Kafka Source -> Source Throttle"},
+                                     {"id":"v2","name":"Managed State Pass-Through"}]}
+                        """.formatted(JOB_ID),
+                "/jobs/" + JOB_ID + "/checkpoints", """
+                        {"counts":{"restored":1,"total":22,"in_progress":0,"completed":6,
+                                   "failed":16},
+                         "latest":{"restored":{"id":4,"restore_timestamp":1790275131762,
+                                   "is_savepoint":false}}}
+                        """,
+                "/jobs/" + JOB_ID + "/exceptions?maxExceptions=20", """
+                        {"exceptionHistory":{"entries":[{
+                           "exceptionName":"org.apache.flink.runtime.resourcemanager.exceptions.ResourceManagerException",
+                           "stacktrace":"org.apache.flink.runtime.resourcemanager.exceptions.ResourceManagerException: TaskManager with id tm-old is no longer reachable.\\n\\tat org.apache.flink.X.y(X.java:1)\\n",
+                           "timestamp":1790275130739,
+                           "taskName":"Managed State Pass-Through (1/1) - execution #0",
+                           "taskManagerId":"tm-old",
+                           "failureLabels":{},"concurrentExceptions":[]}],
+                         "truncated":false}}
+                        """,
+                "/jobs/" + JOB_ID + "/vertices/v1", """
+                        {"subtasks":[{"subtask":0,"attempt":1,"status":"RUNNING",
+                                      "taskmanager-id":"tm-new"}]}
+                        """,
+                "/jobs/" + JOB_ID + "/vertices/v2", """
+                        {"subtasks":[{"subtask":0,"attempt":1,"status":"RUNNING",
+                                      "taskmanager-id":"tm-new"}]}
+                        """);
+        FlinkRestApiClient observing = new FlinkRestApiClient(
+                cannedTransport(responses), mapper);
+
+        FlinkJobObservation observed = observing.observe(new FlinkJobHandle(JOB_ID));
+
+        assertEquals(1790275134494L, observed.jobManagerTimeMillis());
+        assertEquals(FlinkJobState.RUNNING, observed.state());
+        assertEquals(6, observed.completedCheckpoints());
+        assertEquals(1, observed.restoredCheckpoints());
+        assertEquals(Optional.of(new FlinkJobObservation.Restore(4, 1790275131762L)),
+                observed.latestRestore());
+        assertEquals(List.of(new FlinkJobObservation.Failure(
+                        1790275130739L,
+                        "org.apache.flink.runtime.resourcemanager.exceptions."
+                                + "ResourceManagerException",
+                        "org.apache.flink.runtime.resourcemanager.exceptions."
+                                + "ResourceManagerException: TaskManager with id tm-old is no"
+                                + " longer reachable.",
+                        Optional.of("tm-old"))),
+                observed.failures());
+        assertEquals(List.of(
+                        new FlinkJobObservation.Subtask("Source: Kafka Source -> Source Throttle",
+                                0, 1, "RUNNING", Optional.of("tm-new")),
+                        new FlinkJobObservation.Subtask("Managed State Pass-Through",
+                                0, 1, "RUNNING", Optional.of("tm-new"))),
+                observed.subtasks());
+        assertEquals(2, observed.activeSubtasks().size());
+    }
+
+    @Test
+    void observationKeepsTheInnermostCauseAndUnassignedSubtasks() throws Exception {
+        Map<String, String> responses = Map.of(
+                "/jobs/" + JOB_ID, """
+                        {"state":"RESTARTING","now":2000,"vertices":[{"id":"v1","name":"Src"}]}
+                        """,
+                "/jobs/" + JOB_ID + "/checkpoints", """
+                        {"counts":{"restored":0,"completed":1},"latest":{"restored":null}}
+                        """,
+                "/jobs/" + JOB_ID + "/exceptions?maxExceptions=20", """
+                        {"exceptionHistory":{"entries":[{"exceptionName":"FlinkRuntimeException",
+                         "timestamp":1500,
+                         "stacktrace":"FlinkRuntimeException: tolerable failure threshold\\n\\tat a\\nCaused by: CheckpointException: async failed\\n\\tat b\\nCaused by: java.io.IOException: Size of the state is larger than the maximum permitted memory-backed state.\\n\\tat c\\n"}],
+                         "truncated":false}}
+                        """,
+                "/jobs/" + JOB_ID + "/vertices/v1", """
+                        {"subtasks":[{"subtask":0,"attempt":0,"status":"SCHEDULED",
+                                      "taskmanager-id":"(unassigned)"}]}
+                        """);
+
+        FlinkJobObservation observed = new FlinkRestApiClient(cannedTransport(responses), mapper)
+                .observe(new FlinkJobHandle(JOB_ID));
+
+        assertEquals(FlinkJobState.RESTARTING, observed.state());
+        assertEquals(Optional.empty(), observed.latestRestore());
+        assertEquals("java.io.IOException: Size of the state is larger than the maximum"
+                        + " permitted memory-backed state.",
+                observed.failures().getFirst().rootCause());
+        assertEquals(Optional.empty(), observed.failures().getFirst().taskManagerId());
+        assertEquals(Optional.empty(), observed.subtasks().getFirst().taskManagerId());
+        assertTrue(observed.activeSubtasks().isEmpty());
+    }
+
+    @Test
+    void observationWithoutJobManagerTimeIsRejected() {
+        Map<String, String> responses = Map.of(
+                "/jobs/" + JOB_ID, "{\"state\":\"RUNNING\",\"vertices\":[]}",
+                "/jobs/" + JOB_ID + "/checkpoints", "{\"counts\":{\"restored\":0,\"completed\":0}}",
+                "/jobs/" + JOB_ID + "/exceptions?maxExceptions=20",
+                "{\"exceptionHistory\":{\"entries\":[]}}");
+
+        IOException failure = assertThrows(IOException.class,
+                () -> new FlinkRestApiClient(cannedTransport(responses), mapper)
+                        .observe(new FlinkJobHandle(JOB_ID)));
+
+        assertTrue(failure.getMessage().contains("now"), failure.getMessage());
+    }
+
+    private static FlinkRestApiClient.Transport cannedTransport(Map<String, String> responses) {
+        return (method, path, body, timeout) -> {
+            String response = responses.get(path);
+            if (!method.equals("GET") || response == null) {
+                throw new IOException("Unexpected fake request: " + method + " " + path);
+            }
+            return response.getBytes(StandardCharsets.UTF_8);
+        };
     }
 
     private CapturedRequest only(String method, String path) {

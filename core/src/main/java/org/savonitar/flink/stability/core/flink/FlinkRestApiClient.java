@@ -19,8 +19,11 @@ import java.nio.file.Path;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.time.Duration;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Locale;
 import java.util.Objects;
+import java.util.Optional;
 import java.util.concurrent.TimeUnit;
 import java.util.function.LongSupplier;
 
@@ -34,8 +37,11 @@ public final class FlinkRestApiClient implements FlinkScenarioControl {
     private static final MediaType JSON = MediaType.get("application/json");
     private static final MediaType JAR = MediaType.get("application/java-archive");
     private static final Duration DEFAULT_CALL_TIMEOUT = Duration.ofSeconds(60);
+    private static final Duration OBSERVATION_TIMEOUT = Duration.ofSeconds(30);
     private static final long POLL_INTERVAL_MILLIS = 250;
     private static final int MAX_ERROR_BODY_CHARS = 4096;
+    private static final int MAX_OBSERVED_FAILURES = 20;
+    private static final int MAX_ROOT_CAUSE_CHARS = 300;
 
     private final Transport transport;
     private final ObjectMapper mapper;
@@ -225,12 +231,111 @@ public final class FlinkRestApiClient implements FlinkScenarioControl {
             Deadline deadline) throws IOException {
         JsonNode response = get(
                 "/jobs/" + pathSegment(job.jobId()) + "/checkpoints", deadline);
-        JsonNode completedNode = response.path("counts").path("completed");
-        if (!completedNode.canConvertToLong() || completedNode.asLong() < 0) {
-            throw new IOException(
-                    "Flink checkpoint response did not contain a valid completed count");
+        return count(response, "completed");
+    }
+
+    @Override
+    public FlinkJobObservation observe(FlinkJobHandle job) throws IOException {
+        Objects.requireNonNull(job, "job");
+        Deadline deadline = Deadline.after(OBSERVATION_TIMEOUT, nanoTime);
+        String jobPath = "/jobs/" + pathSegment(job.jobId());
+        JsonNode details = get(jobPath, deadline);
+        JsonNode checkpoints = get(jobPath + "/checkpoints", deadline);
+        JsonNode exceptions = get(
+                jobPath + "/exceptions?maxExceptions=" + MAX_OBSERVED_FAILURES, deadline);
+
+        List<FlinkJobObservation.Subtask> subtasks = new ArrayList<>();
+        for (JsonNode vertex : details.path("vertices")) {
+            String vertexName = vertex.path("name").asText();
+            JsonNode vertexDetails = get(
+                    jobPath + "/vertices/" + pathSegment(requiredText(vertex, "id")), deadline);
+            for (JsonNode subtask : vertexDetails.path("subtasks")) {
+                subtasks.add(new FlinkJobObservation.Subtask(
+                        vertexName,
+                        requiredInt(subtask, "subtask"),
+                        requiredInt(subtask, "attempt"),
+                        requiredText(subtask, "status"),
+                        taskManagerId(subtask.path("taskmanager-id"))));
+            }
         }
-        return completedNode.asLong();
+
+        List<FlinkJobObservation.Failure> failures = new ArrayList<>();
+        for (JsonNode entry : exceptions.path("exceptionHistory").path("entries")) {
+            failures.add(new FlinkJobObservation.Failure(
+                    requiredLong(entry, "timestamp"),
+                    entry.path("exceptionName").asText(),
+                    rootCause(entry.path("stacktrace").asText()),
+                    taskManagerId(entry.path("taskManagerId"))));
+        }
+
+        JsonNode restore = checkpoints.path("latest").path("restored");
+        Optional<FlinkJobObservation.Restore> latestRestore = restore.isObject()
+                ? Optional.of(new FlinkJobObservation.Restore(
+                        requiredLong(restore, "id"), requiredLong(restore, "restore_timestamp")))
+                : Optional.empty();
+        return new FlinkJobObservation(
+                requiredLong(details, "now"),
+                parseState(details.path("state").asText()),
+                count(checkpoints, "completed"),
+                count(checkpoints, "restored"),
+                latestRestore,
+                failures,
+                subtasks);
+    }
+
+    private static long count(JsonNode checkpoints, String name) throws IOException {
+        JsonNode count = checkpoints.path("counts").path(name);
+        if (!count.canConvertToLong() || count.asLong() < 0) {
+            throw new IOException(
+                    "Flink checkpoint response did not contain a valid " + name + " count");
+        }
+        return count.asLong();
+    }
+
+    private static long requiredLong(JsonNode node, String field) throws IOException {
+        JsonNode value = node.path(field);
+        if (!value.canConvertToLong()) {
+            throw new IOException("Flink REST response did not contain numeric " + field);
+        }
+        return value.asLong();
+    }
+
+    private static int requiredInt(JsonNode node, String field) throws IOException {
+        JsonNode value = node.path(field);
+        if (!value.canConvertToInt()) {
+            throw new IOException("Flink REST response did not contain integer " + field);
+        }
+        return value.asInt();
+    }
+
+    private static String requiredText(JsonNode node, String field) throws IOException {
+        String value = node.path(field).asText();
+        if (value.isBlank()) {
+            throw new IOException("Flink REST response did not contain " + field);
+        }
+        return value;
+    }
+
+    /** Flink reports an undeployed subtask's TaskManager as "(unassigned)". */
+    private static Optional<String> taskManagerId(JsonNode node) {
+        String value = node.asText();
+        return value.isBlank() || value.equals("(unassigned)")
+                ? Optional.empty()
+                : Optional.of(value);
+    }
+
+    /** The innermost "Caused by:" line, or the first line when there is no cause chain. */
+    private static String rootCause(String stackTrace) {
+        List<String> lines = stackTrace.lines().toList();
+        String rootCause = lines.isEmpty() ? "" : lines.getFirst();
+        for (String line : lines) {
+            if (line.startsWith("Caused by: ")) {
+                rootCause = line.substring("Caused by: ".length());
+            }
+        }
+        return rootCause.length() <= MAX_ROOT_CAUSE_CHARS
+                ? rootCause
+                : rootCause.substring(0, MAX_ROOT_CAUSE_CHARS) + "…";
     }
 
     @Override
@@ -259,7 +364,10 @@ public final class FlinkRestApiClient implements FlinkScenarioControl {
     private FlinkJobState jobState(FlinkJobHandle job, Deadline deadline) throws IOException {
         Objects.requireNonNull(job, "job");
         JsonNode response = get("/jobs/" + pathSegment(job.jobId()), deadline);
-        String state = response.path("state").asText();
+        return parseState(response.path("state").asText());
+    }
+
+    private static FlinkJobState parseState(String state) throws IOException {
         try {
             return FlinkJobState.valueOf(state.toUpperCase(Locale.ROOT));
         } catch (IllegalArgumentException failure) {

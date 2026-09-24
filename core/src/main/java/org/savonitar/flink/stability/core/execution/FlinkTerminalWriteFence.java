@@ -2,6 +2,7 @@ package org.savonitar.flink.stability.core.execution;
 
 import org.savonitar.flink.stability.core.flink.FlinkJobControl;
 import org.savonitar.flink.stability.core.flink.FlinkJobHandle;
+import org.savonitar.flink.stability.core.flink.FlinkJobObservation;
 import org.savonitar.flink.stability.core.flink.FlinkJobState;
 import org.savonitar.flink.stability.core.flink.FlinkRestTimeoutException;
 import org.savonitar.flink.stability.runtime.api.FlinkProcessWriteFenceEvidence;
@@ -11,8 +12,8 @@ import java.util.Objects;
 import java.util.Optional;
 
 /**
- * Establishes the v1 terminal write fence: finish the bounded job, then stop every Flink process.
- * Kafka validation may begin only after this object returns successfully.
+ * Establishes the v1 terminal write fence: finish the bounded job, observe it once, then stop
+ * every Flink process. Kafka validation may begin only after this object returns successfully.
  */
 public final class FlinkTerminalWriteFence {
     static final Duration PROCESS_FENCE_TIMEOUT = Duration.ofMinutes(2);
@@ -32,21 +33,26 @@ public final class FlinkTerminalWriteFence {
         try {
             state = jobs.awaitFinished(job, timeout);
         } catch (Exception failure) {
-            throw terminalizationFailure(failure, "Flink bounded completion failed");
+            throw terminalizationFailure(job, failure, "Flink bounded completion failed");
         }
         if (state != FlinkJobState.FINISHED) {
             throw terminalizationFailure(
+                    job,
                     new IllegalStateException(
                             "Flink bounded completion returned " + state + " instead of FINISHED"),
                     "Flink bounded completion did not establish FINISHED");
         }
-        FlinkProcessWriteFenceEvidence processEvidence = stopProcesses();
-        return new Evidence(state, processEvidence);
+        // Read-only recovery evidence; the job is terminal, so this cannot admit new writes.
+        FlinkJobObservation.Attempt jobBeforeFence = FlinkJobObservation.Attempt.of(jobs, job);
+        FlinkProcessWriteFenceEvidence processEvidence = stopProcesses(jobBeforeFence);
+        return new Evidence(state, processEvidence, jobBeforeFence);
     }
 
     private TerminalWriteFenceException terminalizationFailure(
+            FlinkJobHandle job,
             Exception primary,
             String message) {
+        FlinkJobObservation.Attempt jobBeforeFence = FlinkJobObservation.Attempt.of(jobs, job);
         boolean processFenceFailed = false;
         FlinkProcessWriteFenceEvidence processEvidence = null;
         try {
@@ -66,11 +72,12 @@ public final class FlinkTerminalWriteFence {
                 reason,
                 message,
                 primary,
-                Optional.ofNullable(processEvidence));
+                Optional.ofNullable(processEvidence),
+                jobBeforeFence);
     }
 
-    private FlinkProcessWriteFenceEvidence stopProcesses()
-            throws TerminalWriteFenceException {
+    private FlinkProcessWriteFenceEvidence stopProcesses(
+            FlinkJobObservation.Attempt jobBeforeFence) throws TerminalWriteFenceException {
         try {
             return Objects.requireNonNull(
                     processes.stopAllFlinkProcesses(PROCESS_FENCE_TIMEOUT),
@@ -79,7 +86,9 @@ public final class FlinkTerminalWriteFence {
             throw new TerminalWriteFenceException(
                     "verification.flink.process-fence-failed",
                     "Flink reached a terminal state but its processes could not be fenced",
-                    failure);
+                    failure,
+                    Optional.empty(),
+                    jobBeforeFence);
         }
     }
 
@@ -94,10 +103,12 @@ public final class FlinkTerminalWriteFence {
 
     public record Evidence(
             FlinkJobState finalState,
-            FlinkProcessWriteFenceEvidence processFenceEvidence) {
+            FlinkProcessWriteFenceEvidence processFenceEvidence,
+            FlinkJobObservation.Attempt jobBeforeFence) {
         public Evidence {
             Objects.requireNonNull(finalState, "finalState");
             Objects.requireNonNull(processFenceEvidence, "processFenceEvidence");
+            Objects.requireNonNull(jobBeforeFence, "jobBeforeFence");
             if (finalState != FlinkJobState.FINISHED) {
                 throw new IllegalArgumentException("A successful write fence requires FINISHED");
             }

@@ -1,12 +1,40 @@
 package org.savonitar.flink.stability.core.execution;
 
+import org.savonitar.flink.stability.core.flink.FlinkJobObservation;
+
 import java.util.List;
 import java.util.Objects;
 
-/** Immutable ordered evidence for every atomic typed phase step that was attempted. */
-public record PhaseExecutionEvidence(List<StepEvidence> steps) {
+/**
+ * Immutable ordered evidence for every atomic typed phase step that was attempted, plus the job
+ * as observed just before each confirmed TaskManager kill.
+ */
+public record PhaseExecutionEvidence(
+        List<StepEvidence> steps,
+        List<TaskManagerKill> taskManagerKills) {
     public PhaseExecutionEvidence {
         steps = List.copyOf(Objects.requireNonNull(steps, "steps"));
+        taskManagerKills = List.copyOf(Objects.requireNonNull(
+                taskManagerKills, "taskManagerKills"));
+    }
+
+    public PhaseExecutionEvidence(List<StepEvidence> steps) {
+        this(steps, List.of());
+    }
+
+    /** A kill whose process exit was confirmed, and the job observed right before it. */
+    public record TaskManagerKill(
+            String path,
+            List<LoopIteration> loopIterations,
+            String target,
+            FlinkJobObservation.Attempt jobBeforeKill) {
+        public TaskManagerKill {
+            path = requireNonBlank(path, "path");
+            loopIterations = List.copyOf(Objects.requireNonNull(
+                    loopIterations, "loopIterations"));
+            target = requireNonBlank(target, "target");
+            Objects.requireNonNull(jobBeforeKill, "jobBeforeKill");
+        }
     }
 
     public record StepEvidence(

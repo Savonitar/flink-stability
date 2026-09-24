@@ -1,6 +1,7 @@
 package org.savonitar.flink.stability.core.execution;
 
 import org.savonitar.flink.stability.core.flink.FlinkJobHandle;
+import org.savonitar.flink.stability.core.flink.FlinkJobObservation;
 import org.savonitar.flink.stability.core.flink.FlinkJobState;
 import org.savonitar.flink.stability.core.flink.FlinkRestTimeoutException;
 import org.savonitar.flink.stability.core.flink.FlinkScenarioControl;
@@ -28,6 +29,9 @@ public final class ExecutablePhaseExecutor {
     public static final String TASKMANAGER_KILL_INFRASTRUCTURE =
             "taskmanager.kill.infrastructure";
     public static final String TASKMANAGER_KILL_TIMEOUT = "taskmanager.kill.timeout";
+    /** A passing oracle, but a kill that did not observably disrupt the job (R6.12a). */
+    public static final String TASKMANAGER_KILL_EFFECT_UNCONFIRMED =
+            "taskmanager.kill.effect-unconfirmed";
     public static final String TASKMANAGER_RESTART_INFRASTRUCTURE =
             "taskmanager.restart.infrastructure";
     public static final String TASKMANAGER_RESTART_TIMEOUT = "taskmanager.restart.timeout";
@@ -56,7 +60,7 @@ public final class ExecutablePhaseExecutor {
             FlinkJobHandle job) throws PhaseExecutionException {
         Objects.requireNonNull(plan, "plan");
         Objects.requireNonNull(job, "job");
-        List<PhaseExecutionEvidence.StepEvidence> evidence = new ArrayList<>();
+        Recorder evidence = new Recorder();
         for (int phaseIndex = 0; phaseIndex < plan.phases().size(); phaseIndex++) {
             ExecutableScenarioPlan.Phase phase = plan.phases().get(phaseIndex);
             executeSteps(
@@ -68,7 +72,7 @@ public final class ExecutablePhaseExecutor {
                     job,
                     evidence);
         }
-        return new PhaseExecutionEvidence(evidence);
+        return evidence.snapshot();
     }
 
     private void executeSteps(
@@ -78,7 +82,7 @@ public final class ExecutablePhaseExecutor {
             List<ExecutableScenarioPlan.Step> steps,
             List<PhaseExecutionEvidence.LoopIteration> loopIterations,
             FlinkJobHandle job,
-            List<PhaseExecutionEvidence.StepEvidence> evidence)
+            Recorder evidence)
             throws PhaseExecutionException {
         for (int stepIndex = 0; stepIndex < steps.size(); stepIndex++) {
             ExecutableScenarioPlan.Step step = steps.get(stepIndex);
@@ -93,7 +97,7 @@ public final class ExecutablePhaseExecutor {
                 wait(phaseIndex, phaseName, path, loopIterations, wait, evidence);
             } else if (step instanceof ExecutableScenarioPlan.KillTaskManager kill) {
                 killTaskManager(
-                        phaseIndex, phaseName, path, loopIterations, kill, evidence);
+                        phaseIndex, phaseName, path, loopIterations, job, kill, evidence);
             } else if (step instanceof ExecutableScenarioPlan.RestartTaskManager) {
                 restartTaskManager(
                         phaseIndex, phaseName, path, loopIterations, evidence);
@@ -120,7 +124,7 @@ public final class ExecutablePhaseExecutor {
             List<PhaseExecutionEvidence.LoopIteration> loopIterations,
             FlinkJobHandle job,
             ExecutableScenarioPlan.AwaitJobState await,
-            List<PhaseExecutionEvidence.StepEvidence> evidence)
+            Recorder evidence)
             throws PhaseExecutionException {
         try {
             FlinkJobState observed = flink.awaitState(
@@ -168,7 +172,7 @@ public final class ExecutablePhaseExecutor {
             List<PhaseExecutionEvidence.LoopIteration> loopIterations,
             FlinkJobHandle job,
             ExecutableScenarioPlan.AwaitCheckpoints await,
-            List<PhaseExecutionEvidence.StepEvidence> evidence)
+            Recorder evidence)
             throws PhaseExecutionException {
         try {
             long completed = flink.awaitCompletedCheckpoints(
@@ -216,7 +220,7 @@ public final class ExecutablePhaseExecutor {
             String path,
             List<PhaseExecutionEvidence.LoopIteration> loopIterations,
             ExecutableScenarioPlan.Wait wait,
-            List<PhaseExecutionEvidence.StepEvidence> evidence)
+            Recorder evidence)
             throws PhaseExecutionException {
         try {
             sleeper.sleep(wait.duration());
@@ -259,11 +263,16 @@ public final class ExecutablePhaseExecutor {
             String phaseName,
             String path,
             List<PhaseExecutionEvidence.LoopIteration> loopIterations,
+            FlinkJobHandle job,
             ExecutableScenarioPlan.KillTaskManager kill,
-            List<PhaseExecutionEvidence.StepEvidence> evidence)
+            Recorder evidence)
             throws PhaseExecutionException {
+        // Observe first: whether the kill affected the job is judged against this baseline.
+        FlinkJobObservation.Attempt jobBeforeKill = FlinkJobObservation.Attempt.of(flink, job);
         try {
             taskManagers.killTaskManager(kill.targetName(), TASKMANAGER_ACTION_TIMEOUT);
+            evidence.kills.add(new PhaseExecutionEvidence.TaskManagerKill(
+                    path, loopIterations, kill.targetName(), jobBeforeKill));
             succeeded(
                     evidence,
                     phaseIndex,
@@ -302,7 +311,7 @@ public final class ExecutablePhaseExecutor {
             String phaseName,
             String path,
             List<PhaseExecutionEvidence.LoopIteration> loopIterations,
-            List<PhaseExecutionEvidence.StepEvidence> evidence)
+            Recorder evidence)
             throws PhaseExecutionException {
         try {
             taskManagers.restartTaskManager(TASKMANAGER_ACTION_TIMEOUT);
@@ -346,7 +355,7 @@ public final class ExecutablePhaseExecutor {
             List<PhaseExecutionEvidence.LoopIteration> outerIterations,
             ExecutableScenarioPlan.Loop loop,
             FlinkJobHandle job,
-            List<PhaseExecutionEvidence.StepEvidence> evidence)
+            Recorder evidence)
             throws PhaseExecutionException {
         for (int iteration = 1; iteration <= loop.times(); iteration++) {
             List<PhaseExecutionEvidence.LoopIteration> iterations =
@@ -365,14 +374,14 @@ public final class ExecutablePhaseExecutor {
     }
 
     private static void succeeded(
-            List<PhaseExecutionEvidence.StepEvidence> evidence,
+            Recorder evidence,
             int phaseIndex,
             String phaseName,
             String path,
             List<PhaseExecutionEvidence.LoopIteration> loopIterations,
             PhaseExecutionEvidence.StepKind kind,
             String detail) {
-        evidence.add(new PhaseExecutionEvidence.StepEvidence(
+        evidence.steps.add(new PhaseExecutionEvidence.StepEvidence(
                 phaseIndex,
                 phaseName,
                 path,
@@ -383,7 +392,7 @@ public final class ExecutablePhaseExecutor {
     }
 
     private static PhaseExecutionException failed(
-            List<PhaseExecutionEvidence.StepEvidence> evidence,
+            Recorder evidence,
             int phaseIndex,
             String phaseName,
             String path,
@@ -392,7 +401,7 @@ public final class ExecutablePhaseExecutor {
             PhaseExecutionException.Outcome outcome,
             String reason,
             Throwable cause) {
-        evidence.add(new PhaseExecutionEvidence.StepEvidence(
+        evidence.steps.add(new PhaseExecutionEvidence.StepEvidence(
                 phaseIndex,
                 phaseName,
                 path,
@@ -405,7 +414,7 @@ public final class ExecutablePhaseExecutor {
                 reason,
                 path,
                 loopIterations,
-                new PhaseExecutionEvidence(evidence),
+                evidence.snapshot(),
                 cause);
     }
 
@@ -419,5 +428,15 @@ public final class ExecutablePhaseExecutor {
 
     private static void sleep(Duration duration) throws InterruptedException {
         Thread.sleep(duration.toMillis(), duration.toNanosPart() % 1_000_000);
+    }
+
+    /** Evidence accumulated by one {@link #execute} call. */
+    private static final class Recorder {
+        private final List<PhaseExecutionEvidence.StepEvidence> steps = new ArrayList<>();
+        private final List<PhaseExecutionEvidence.TaskManagerKill> kills = new ArrayList<>();
+
+        private PhaseExecutionEvidence snapshot() {
+            return new PhaseExecutionEvidence(steps, kills);
+        }
     }
 }

@@ -1171,6 +1171,39 @@ Connector pull-request gating is the same mechanism with one axis:
   and attempted target.
 - **R6.12** Every fault records **evidence that it actually occurred**. A run
   where the fault cannot be confirmed is `inconclusive`, never `pass`.
+- **R6.12a** For the first runner's named TaskManager `kill`, a confirmed
+  process exit proves only the injection. The runner also records whether the
+  kill affected the job:
+
+  1. Immediately before the kill, it takes one read-only observation of the job
+     through the Flink REST API: JobManager time, job state, completed and
+     restored checkpoint counts, the latest restored checkpoint, the exception
+     history, and each subtask's state and TaskManager.
+  2. It takes one more observation when execution ends: after the job reaches a
+     terminal state or its completion timeout expires, before the process fence
+     (R7.1c), or when phase execution stops with a failure (R6.9a). The last one
+     also explains the failure, for example a job in a restart loop.
+  3. Each kill is judged against the next observation: the one before the next
+     kill, or the final observation of item 2 for the last kill. Only values
+     from the JobManager clock are compared with each other.
+
+  The effect is confirmed only when Flink recorded a failure after the kill on a
+  TaskManager that hosted a deployed, initializing, or running subtask just before
+  it, and either Flink restored a checkpoint after the kill (`checkpoint-restored`)
+  or no checkpoint had completed before it (`restarted-without-checkpoint`). It is
+  unconfirmed when the job was already terminal (`job-terminal-before-kill`), when
+  no subtask was active (`no-active-subtask-before-kill`), when no such failure or
+  no required restore follows (`no-recovery-observed`), or when an observation
+  failed (`evidence-unavailable`). A job that is already failing over for another
+  reason therefore does not confirm a kill that found no active subtask. Each
+  observation has one fixed internal `30s` deadline; its failure is recorded as
+  evidence and never blocks the kill or the process fence.
+
+  An unconfirmed effect never hides a failure: a failing terminal oracle keeps its
+  `fail` result. A passing oracle with any unconfirmed kill makes the attempt
+  `inconclusive` with `taskmanager.kill.effect-unconfirmed`, because that pass does
+  not show recovery. A scenario whose bounded input finishes before its kill, or
+  whose TaskManager hosts no active subtask, therefore cannot pass.
 - **R6.13** A suite entry is `{ scenario, as?, parameters?, runs? }`. `as`
   defaults to the scenario name and is **required** when the same scenario
   appears more than once in a suite. `runs`, when present, is a positive integer
@@ -1218,7 +1251,9 @@ Connector pull-request gating is the same mechanism with one axis:
      have completed and the input manifest is closed.
   2. Establish the irreversible physical process fence in R7.1d. A terminal job
      state alone is not the process fence, and its fixed internal deadline is
-     separate from `completion_timeout`.
+     separate from `completion_timeout`. Immediately before the fence, the runner
+     takes the read-only job observation of R6.12a, also after a completion
+     timeout. It only reads REST state, so it cannot admit writes.
   3. Declare the write fence established and start each terminal validator's one
      absolute deadline **before** its Kafka metadata, topic, and partition
      discovery. Immediately after discovery, a topic-reading validator uses a
@@ -1249,6 +1284,15 @@ Connector pull-request gating is the same mechanism with one axis:
   `verification.flink.process-fence-failed`. A non-timeout failure while querying
   or waiting for terminal job state similarly fails with
   `verification.flink.job-terminalization-failed` before any oracle can match.
+
+  After the terminal validators finish, the first runner lists the Kafka
+  transactions whose transactional ID starts with the sink's
+  `transactional_id_prefix` through the Kafka Admin API (fixed internal `30s` per
+  call) and records every one that is not `Empty`, `CompleteCommit`, or
+  `CompleteAbort`. Once Flink is fenced, only the broker's transaction timeout can
+  resolve such a transaction, so this names what may pin a last stable offset. The
+  listing is evidence only: its failure is a diagnostic and never changes the
+  attempt result.
 
   This order prevents a delayed checkpoint notification, TaskManager recovery,
   or producer transaction from committing after a terminal validator has passed.
@@ -1458,11 +1502,19 @@ Connector pull-request gating is the same mechanism with one axis:
   includes scenario and attempt identity, retained checkpoint root,
   attempt status, reason and message, summarized input and phase evidence,
   write/process-fence completion evidence, terminal-validation status/counts/
-  completeness, Flink provisioning count, and diagnostics. Input evidence names
-  `complete` or `partial` status and reconciliation completion explicitly;
-  a stage that never started remains present as `not-started` or `not-run` with
-  `completed: false`, and terminal `snapshotComplete: false`; terminal defect
-  totals appear only for a complete snapshot. This is
+  completeness, Flink provisioning count, and diagnostics. It also includes the
+  last job observation of R6.12a as `evidence.flinkJob` (`observed`,
+  `unavailable` with its failure, or `not-run`) and one `evidence.taskManagerKills`
+  entry per confirmed kill: step path and loop iterations, target, effect outcome,
+  whether it is confirmed, job state, checkpoint and active-subtask counts before
+  the kill, the restored checkpoint and its delay after the pre-kill observation,
+  the failures recorded after the kill, and a one-sentence detail. The R7.1c sink
+  transaction listing appears as `evidence.sinkTransactions`: `listed` with the
+  prefix, the total, and each unresolved transaction, or `not-listed`. Input
+  evidence names `complete` or `partial` status and reconciliation completion
+  explicitly; a stage that never started remains present as `not-started` or
+  `not-run` with `completed: false`, and terminal `snapshotComplete: false`;
+  terminal defect totals appear only for a complete snapshot. This is
   useful executable evidence but is **not** the complete replay-grade R8.2 run
   report. Environment-health sampling, independently resolved OCI digests, and
   the full resolved/artifact/configuration/provenance report remain roadmap work;
@@ -1757,6 +1809,9 @@ phases:
             # is reserved and rejected with unsupported-capability.
             - kill:
                 target: { kind: named, role: taskmanager, name: taskmanager-2 }
+            # These awaits check capacity, not recovery: the job can report RUNNING
+            # before the JobManager notices the loss. R6.12a judges the kill's effect
+            # from Flink's own restore and failure records.
             - await:
                 condition: { type: taskmanager-count, value: 3 }
                 timeout: 2m
@@ -2578,7 +2633,7 @@ The execution decisions formerly recorded as review proposals are now normative:
 | Baseline and expected-failure semantics | R3.6–R3.7 |
 | Job auto-start semantics | R5.7 and R6.3a |
 | Proxy routing for network faults | R5.5a and R6.8b |
-| Fault lifecycle and instantaneous vs held faults | R6.9, R6.12, and §12.6 |
+| Fault lifecycle, instantaneous vs held faults, and TaskManager-kill effect | R6.9, R6.12–R6.12a, and §12.6 |
 | Suite-specific repetition | R6.13 |
 | Artifact-under-test declaration, dependency closure, and deployment | R4.13–R4.13d and R5.6–R5.6b |
 | Workload defaults, runner capability/storage boundary, and protocol | R5.1a, R5.4a–R5.4b, and R5.6c |
