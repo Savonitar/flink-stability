@@ -4,12 +4,14 @@ import org.apache.flink.api.connector.source.Boundedness;
 import org.apache.flink.configuration.Configuration;
 import org.apache.flink.connector.base.DeliveryGuarantee;
 import org.apache.flink.connector.kafka.sink.TransactionNamingStrategy;
+import org.apache.flink.runtime.jobgraph.JobVertex;
 import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
 import org.apache.flink.streaming.api.graph.StreamGraph;
 import org.apache.flink.streaming.api.graph.StreamNode;
 import org.junit.jupiter.api.Test;
 
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.stream.Collectors;
@@ -85,11 +87,34 @@ class WorkloadProtocolV1ConfigurationTest {
                 .filter(uid -> uid != null)
                 .collect(Collectors.toSet());
         assertTrue(uids.contains(FlinkKafkaEosJob.SOURCE_UID));
+        assertTrue(uids.contains(FlinkKafkaEosJob.THROTTLE_UID));
         assertTrue(uids.contains(FlinkKafkaEosJob.STATEFUL_OPERATOR_UID));
         assertTrue(uids.contains(FlinkKafkaEosJob.SINK_UID));
         assertDoesNotThrow(() -> {
             streamGraph.getJobGraph();
         });
+    }
+
+    @Test
+    void chainsTheProcessingDelayToTheSourceBeforeTheKeyedShuffle() {
+        Configuration configuration = Configuration.fromMap(baseExactlyOnceValues());
+        StreamExecutionEnvironment env =
+                StreamExecutionEnvironment.getExecutionEnvironment(configuration);
+        WorkloadProtocolV1Configuration workload =
+                WorkloadProtocolV1Configuration.from(env.getConfiguration());
+
+        FlinkKafkaEosJob.buildPipeline(
+                env,
+                workload,
+                FlinkKafkaEosJobArguments.from(new String[]{"--processingDelayMs", "5"}));
+
+        List<JobVertex> vertices =
+                env.getStreamGraph().getJobGraph().getVerticesSortedTopologicallyFromSources();
+        // The module compiles for Java 11, so no List.getFirst()/getLast().
+        assertEquals(2, vertices.size());
+        assertTrue(vertices.get(0).getName().contains("Kafka Source"));
+        assertTrue(vertices.get(0).getName().contains("Source Throttle"));
+        assertTrue(vertices.get(1).getName().contains("Managed State Pass-Through"));
     }
 
     @Test
