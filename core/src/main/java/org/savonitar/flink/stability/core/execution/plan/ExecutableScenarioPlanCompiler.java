@@ -130,6 +130,11 @@ public final class ExecutableScenarioPlanCompiler {
                 preparedPlan,
                 ScenarioSide.SINGLE,
                 executablePlan.flink().imageReference());
+        SubjectEntryClassCheck.verify(
+                preparedPlan.scenarioPlan().scenario().template().source(),
+                connectorBundle,
+                workloadArtifact.preparedPath(),
+                jobPath);
         FlinkRuntimeTarget runtimeTarget = runtimeTargetFactory.create(connectorBundle);
         return new PreparedExecutableScenarioPlan(
                 preparedPlan,
