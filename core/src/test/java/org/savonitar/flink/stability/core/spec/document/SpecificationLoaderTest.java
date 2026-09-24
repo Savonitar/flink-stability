@@ -8,12 +8,13 @@ import java.io.IOException;
 import java.net.URISyntaxException;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import org.savonitar.flink.stability.core.spec.document.SpecificationException.Stage;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
-import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.savonitar.flink.stability.core.spec.document.SpecificationAssertions.assertFailsAt;
 
 class SpecificationLoaderTest {
     private final SpecificationLoader loader = new SpecificationLoader();
@@ -44,8 +45,8 @@ class SpecificationLoaderTest {
     void rejectsMissingFormatBeforeKindDispatch() throws IOException {
         Path document = write("missing-format.yaml", "kind: unknown\n");
 
-        DocumentValidationException exception = assertThrows(
-                DocumentValidationException.class, () -> loader.load(document));
+        SpecificationException exception = assertFailsAt(
+                Stage.DOCUMENT, () -> loader.load(document));
 
         assertSingleIssue(exception, "document.missing-format", "$/format");
     }
@@ -54,8 +55,8 @@ class SpecificationLoaderTest {
     void rejectsUnsupportedFormatBeforeKindDispatch() throws IOException {
         Path document = write("unsupported-format.yaml", "format: v2\nkind: unknown\n");
 
-        DocumentValidationException exception = assertThrows(
-                DocumentValidationException.class, () -> loader.load(document));
+        SpecificationException exception = assertFailsAt(
+                Stage.DOCUMENT, () -> loader.load(document));
 
         assertSingleIssue(exception, "document.unsupported-format", "$/format");
     }
@@ -64,8 +65,8 @@ class SpecificationLoaderTest {
     void rejectsUnknownKindBeforeSchemaValidation() throws IOException {
         Path document = write("unknown-kind.yaml", "format: v1\nkind: experiment\n");
 
-        DocumentValidationException exception = assertThrows(
-                DocumentValidationException.class, () -> loader.load(document));
+        SpecificationException exception = assertFailsAt(
+                Stage.DOCUMENT, () -> loader.load(document));
 
         assertSingleIssue(exception, "document.unknown-kind", "$/kind");
     }
@@ -76,10 +77,10 @@ class SpecificationLoaderTest {
         invalid.put("unknown_field", true);
         Path document = write("unknown-field.yaml", invalid);
 
-        DocumentValidationException exception = assertThrows(
-                DocumentValidationException.class, () -> loader.load(document));
+        SpecificationException exception = assertFailsAt(
+                Stage.DOCUMENT, () -> loader.load(document));
 
-        assertTrue(exception.issues().stream()
+        assertTrue(exception.diagnostics().stream()
                 .anyMatch(issue -> issue.code().equals("schema.additional-properties")
                         && issue.path().equals("$")));
         assertTrue(exception.getMessage().contains("unknown_field"));
@@ -92,8 +93,8 @@ class SpecificationLoaderTest {
         meta.required("description");
         meta.remove("description");
 
-        DocumentValidationException exception = assertThrows(
-                DocumentValidationException.class,
+        SpecificationException exception = assertFailsAt(
+                Stage.DOCUMENT,
                 () -> loader.load(write("missing-description.yaml", invalid)));
 
         assertHasIssue(exception, "schema.required", "$/meta");
@@ -104,8 +105,8 @@ class SpecificationLoaderTest {
         ObjectNode invalid = YamlTestDocuments.read(resource("minimal.expected.yaml"));
         invalid.put("unknown_field", true);
 
-        DocumentValidationException exception = assertThrows(
-                DocumentValidationException.class,
+        SpecificationException exception = assertFailsAt(
+                Stage.DOCUMENT,
                 () -> loader.load(write("unknown-expected-field.yaml", invalid)));
 
         assertHasIssue(exception, "schema.additional-properties", "$");
@@ -118,8 +119,8 @@ class SpecificationLoaderTest {
         assertEquals("pass", expectation.required("outcome").textValue());
         expectation.put("oracle", "kafka.id-set");
 
-        DocumentValidationException exception = assertThrows(
-                DocumentValidationException.class,
+        SpecificationException exception = assertFailsAt(
+                Stage.DOCUMENT,
                 () -> loader.load(write("pass-with-oracle.expected.yaml", invalid)));
 
         assertHasIssue(exception, "schema.one-of", "$/default");
@@ -134,8 +135,8 @@ class SpecificationLoaderTest {
         expectation.put("outcome", "fail");
         expectation.put("reason", "validator.kafka.id-set.missing-ids");
 
-        DocumentValidationException exception = assertThrows(
-                DocumentValidationException.class,
+        SpecificationException exception = assertFailsAt(
+                Stage.DOCUMENT,
                 () -> loader.validateExpectedResultDocument(source, document));
 
         assertHasIssue(exception, "schema.one-of", "$/default");
@@ -150,8 +151,8 @@ class SpecificationLoaderTest {
         expectation.put("outcome", "fail");
         expectation.put("oracle", "kafka.id-set");
 
-        DocumentValidationException exception = assertThrows(
-                DocumentValidationException.class,
+        SpecificationException exception = assertFailsAt(
+                Stage.DOCUMENT,
                 () -> loader.validateExpectedResultDocument(source, document));
 
         assertHasIssue(exception, "schema.one-of", "$/default");
@@ -166,8 +167,8 @@ class SpecificationLoaderTest {
         expectation.putObject("baseline").put("outcome", "fail");
         expectation.putObject("candidate").put("outcome", "pass");
 
-        DocumentValidationException exception = assertThrows(
-                DocumentValidationException.class,
+        SpecificationException exception = assertFailsAt(
+                Stage.DOCUMENT,
                 () -> loader.validateExpectedResultDocument(source, document));
 
         assertHasIssue(exception, "schema.one-of", "$/default");
@@ -178,8 +179,8 @@ class SpecificationLoaderTest {
         ObjectNode invalid = YamlTestDocuments.read(resource("smoke-suite.yaml"));
         ((ObjectNode) invalid.requiredAt("/scenarios/0")).put("health_retry_limit", 2);
 
-        DocumentValidationException exception = assertThrows(
-                DocumentValidationException.class,
+        SpecificationException exception = assertFailsAt(
+                Stage.DOCUMENT,
                 () -> loader.load(write("unknown-suite-field.yaml", invalid)));
 
         assertHasIssue(exception, "schema.additional-properties", "$/scenarios/0");
@@ -190,8 +191,8 @@ class SpecificationLoaderTest {
         ObjectNode invalid = YamlTestDocuments.read(resource("smoke-suite.yaml"));
         ((ObjectNode) invalid.requiredAt("/scenarios/0")).put("runs", 0);
 
-        DocumentValidationException exception = assertThrows(
-                DocumentValidationException.class,
+        SpecificationException exception = assertFailsAt(
+                Stage.DOCUMENT,
                 () -> loader.load(write("zero-runs-suite.yaml", invalid)));
 
         assertHasIssue(exception, "schema.minimum", "$/scenarios/0/runs");
@@ -211,8 +212,8 @@ class SpecificationLoaderTest {
         networkFault.put("heal", "restore-proxy-rule");
         networkFault.put("unknown_field", true);
 
-        DocumentValidationException exception = assertThrows(
-                DocumentValidationException.class,
+        SpecificationException exception = assertFailsAt(
+                Stage.DOCUMENT,
                 () -> loader.load(write("unknown-network-fault-field.yaml", invalid)));
 
         assertHasIssue(exception, "schema.additional-properties", "$/phases/0/steps/0/network_fault");
@@ -225,8 +226,8 @@ class SpecificationLoaderTest {
         job.required("alias");
         job.put("alias", "${job_alias}");
 
-        DocumentValidationException exception = assertThrows(
-                DocumentValidationException.class,
+        SpecificationException exception = assertFailsAt(
+                Stage.DOCUMENT,
                 () -> loader.load(write("templated-alias.yaml", invalid)));
 
         assertHasIssue(exception, "schema.pattern", "$/workload/jobs/0/alias");
@@ -239,8 +240,8 @@ class SpecificationLoaderTest {
         ObjectNode connector = (ObjectNode) document.at("/subject/connectors/kafka");
         connector.put("artifact", "./connector.jar");
 
-        DocumentValidationException exception = assertThrows(
-                DocumentValidationException.class,
+        SpecificationException exception = assertFailsAt(
+                Stage.DOCUMENT,
                 () -> loader.validateScenarioDocument(source, document));
 
         assertHasIssue(exception, "schema.required", "$/subject/connectors/kafka");
@@ -297,8 +298,8 @@ class SpecificationLoaderTest {
         resolved.remove("parameters");
         ((ObjectNode) resolved.at("/subject/connectors/kafka"))
                 .put("artifact", "./connector.jar");
-        DocumentValidationException exception = assertThrows(
-                DocumentValidationException.class,
+        SpecificationException exception = assertFailsAt(
+                Stage.DOCUMENT,
                 () -> loader.validateResolvedScenario(source, resolved));
 
         assertHasIssue(exception, "schema.required", "$/subject/connectors/kafka");
@@ -314,8 +315,8 @@ class SpecificationLoaderTest {
                 .add("./kafka-clients.jar")
                 .add("./kafka-clients.jar");
 
-        DocumentValidationException exception = assertThrows(
-                DocumentValidationException.class,
+        SpecificationException exception = assertFailsAt(
+                Stage.DOCUMENT,
                 () -> loader.validateScenarioDocument(source, document));
 
         assertHasIssue(exception, "schema.unique-items",
@@ -332,8 +333,8 @@ class SpecificationLoaderTest {
         custom.put("timeout", "30s");
         custom.putArray("failure_reasons").add("await.job-state.timeout");
 
-        DocumentValidationException exception = assertThrows(
-                DocumentValidationException.class,
+        SpecificationException exception = assertFailsAt(
+                Stage.DOCUMENT,
                 () -> loader.validateScenarioDocument(source, document));
 
         assertHasIssue(exception, "schema.pattern", "$/terminal_validations/1/failure_reasons/0");
@@ -347,8 +348,8 @@ class SpecificationLoaderTest {
                 .put("type", "integer").put("default", 1);
         ((ObjectNode) raw.at("/setup/kafka/clusters/main")).put("brokers", "${brokers}");
 
-        DocumentValidationException exception = assertThrows(
-                DocumentValidationException.class,
+        SpecificationException exception = assertFailsAt(
+                Stage.DOCUMENT,
                 () -> loader.validateResolvedScenario(source, raw));
 
         assertHasIssue(exception, "resolved.parameters-present", "$/parameters");
@@ -359,27 +360,27 @@ class SpecificationLoaderTest {
     void rejectsDuplicateYamlKeysWithSourceLocation() throws IOException {
         Path document = write("duplicate-key.yaml", "format: v1\nformat: v1\nkind: scenario\n");
 
-        DocumentValidationException exception = assertThrows(
-                DocumentValidationException.class, () -> loader.load(document));
+        SpecificationException exception = assertFailsAt(
+                Stage.DOCUMENT, () -> loader.load(document));
 
-        assertEquals("document.invalid-yaml", exception.issues().getFirst().code());
-        assertTrue(exception.issues().getFirst().path().contains("line"));
+        assertEquals("document.invalid-yaml", exception.diagnostics().getFirst().code());
+        assertTrue(exception.diagnostics().getFirst().path().contains("line"));
     }
 
     @Test
     void rejectsMultipleYamlDocuments() throws IOException {
         Path document = write("multiple.yaml", "format: v1\nkind: suite\n---\nformat: v1\nkind: suite\n");
 
-        DocumentValidationException exception = assertThrows(
-                DocumentValidationException.class, () -> loader.load(document));
+        SpecificationException exception = assertFailsAt(
+                Stage.DOCUMENT, () -> loader.load(document));
 
         assertSingleIssue(exception, "document.multiple-documents", "$");
     }
 
     @Test
     void rejectsMissingKindBeforeSchemaValidation() throws IOException {
-        DocumentValidationException exception = assertThrows(
-                DocumentValidationException.class,
+        SpecificationException exception = assertFailsAt(
+                Stage.DOCUMENT,
                 () -> loader.load(write("missing-kind.yaml", "format: v1\n")));
 
         assertSingleIssue(exception, "document.missing-kind", "$/kind");
@@ -387,8 +388,8 @@ class SpecificationLoaderTest {
 
     @Test
     void rejectsNonStringFormatBeforeKindDispatch() throws IOException {
-        DocumentValidationException exception = assertThrows(
-                DocumentValidationException.class,
+        SpecificationException exception = assertFailsAt(
+                Stage.DOCUMENT,
                 () -> loader.load(write("numeric-format.yaml", "format: 1\nkind: scenario\n")));
 
         assertSingleIssue(exception, "document.invalid-format", "$/format");
@@ -396,8 +397,8 @@ class SpecificationLoaderTest {
 
     @Test
     void rejectsNonStringKindBeforeSchemaValidation() throws IOException {
-        DocumentValidationException exception = assertThrows(
-                DocumentValidationException.class,
+        SpecificationException exception = assertFailsAt(
+                Stage.DOCUMENT,
                 () -> loader.load(write("numeric-kind.yaml", "format: v1\nkind: 1\n")));
 
         assertSingleIssue(exception, "document.invalid-kind", "$/kind");
@@ -405,8 +406,8 @@ class SpecificationLoaderTest {
 
     @Test
     void rejectsEmptyDocuments() throws IOException {
-        DocumentValidationException exception = assertThrows(
-                DocumentValidationException.class,
+        SpecificationException exception = assertFailsAt(
+                Stage.DOCUMENT,
                 () -> loader.load(write("empty.yaml", "")));
 
         assertSingleIssue(exception, "document.empty", "$");
@@ -414,8 +415,8 @@ class SpecificationLoaderTest {
 
     @Test
     void rejectsNonObjectRoots() throws IOException {
-        DocumentValidationException exception = assertThrows(
-                DocumentValidationException.class,
+        SpecificationException exception = assertFailsAt(
+                Stage.DOCUMENT,
                 () -> loader.load(write("array.yaml", "- item\n")));
 
         assertSingleIssue(exception, "document.root-not-object", "$");
@@ -423,17 +424,17 @@ class SpecificationLoaderTest {
 
     @Test
     void rejectsMalformedYaml() throws IOException {
-        DocumentValidationException exception = assertThrows(
-                DocumentValidationException.class,
+        SpecificationException exception = assertFailsAt(
+                Stage.DOCUMENT,
                 () -> loader.load(write("malformed.yaml", "format: [\n")));
 
-        assertEquals("document.invalid-yaml", exception.issues().getFirst().code());
+        assertEquals("document.invalid-yaml", exception.diagnostics().getFirst().code());
     }
 
     @Test
     void rejectsAValidDocumentWhenItsCallerExpectsAnotherKind() {
-        DocumentValidationException exception = assertThrows(
-                DocumentValidationException.class,
+        SpecificationException exception = assertFailsAt(
+                Stage.DOCUMENT,
                 () -> loader.load(resource("minimal.expected.yaml"), DocumentKind.SCENARIO));
 
         assertSingleIssue(exception, "document.kind-mismatch", "$/kind");
@@ -453,8 +454,8 @@ class SpecificationLoaderTest {
     void rejectsMissingFilesBeforeParsing() {
         Path missing = temporaryDirectory.resolve("missing.yaml");
 
-        DocumentValidationException exception = assertThrows(
-                DocumentValidationException.class, () -> loader.load(missing));
+        SpecificationException exception = assertFailsAt(
+                Stage.DOCUMENT, () -> loader.load(missing));
 
         assertSingleIssue(exception, "document.not-found", "$");
     }
@@ -476,16 +477,16 @@ class SpecificationLoaderTest {
     }
 
     private static void assertSingleIssue(
-            DocumentValidationException exception, String code, String path) {
-        assertEquals(1, exception.issues().size());
-        assertEquals(code, exception.issues().getFirst().code());
-        assertEquals(path, exception.issues().getFirst().path());
+            SpecificationException exception, String code, String path) {
+        assertEquals(1, exception.diagnostics().size());
+        assertEquals(code, exception.diagnostics().getFirst().code());
+        assertEquals(path, exception.diagnostics().getFirst().path());
     }
 
     private static void assertHasIssue(
-            DocumentValidationException exception, String code, String path) {
-        assertTrue(exception.issues().stream()
+            SpecificationException exception, String code, String path) {
+        assertTrue(exception.diagnostics().stream()
                         .anyMatch(issue -> issue.code().equals(code) && issue.path().equals(path)),
-                () -> "Expected " + code + " at " + path + " but got " + exception.issues());
+                () -> "Expected " + code + " at " + path + " but got " + exception.diagnostics());
     }
 }

@@ -1,20 +1,19 @@
 package org.savonitar.flink.stability.core.execution.plan;
 
 import org.savonitar.flink.stability.core.artifact.ArtifactPlanResolver;
-import org.savonitar.flink.stability.core.artifact.ArtifactResolutionException;
 import org.savonitar.flink.stability.core.artifact.ArtifactResolutionOptions;
 import org.savonitar.flink.stability.core.artifact.PreparedScenarioPlan;
-import org.savonitar.flink.stability.core.spec.document.DocumentValidationException;
+import org.savonitar.flink.stability.core.spec.document.Diagnostic;
 import org.savonitar.flink.stability.core.spec.document.ExpectedResultSpecification;
 import org.savonitar.flink.stability.core.spec.document.ScenarioBundle;
 import org.savonitar.flink.stability.core.spec.document.ScenarioSpecification;
+import org.savonitar.flink.stability.core.spec.document.SpecificationException;
+import org.savonitar.flink.stability.core.spec.document.SpecificationException.Stage;
 import org.savonitar.flink.stability.core.spec.document.SpecificationLoader;
-import org.savonitar.flink.stability.core.spec.resolution.ResolutionIssue;
 import org.savonitar.flink.stability.core.spec.resolution.ResolutionRequest;
-import org.savonitar.flink.stability.core.spec.resolution.ResolutionScope;
+import org.savonitar.flink.stability.core.spec.document.ResolutionScope;
 import org.savonitar.flink.stability.core.spec.resolution.ResolvedScenarioPlan;
 import org.savonitar.flink.stability.core.spec.resolution.ScenarioPlanResolver;
-import org.savonitar.flink.stability.core.spec.resolution.ScenarioResolutionException;
 import org.savonitar.flink.stability.core.spec.resolution.ScenarioSide;
 import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
@@ -23,8 +22,6 @@ import org.junit.jupiter.api.io.TempDir;
 import org.savonitar.flink.stability.core.execution.plan.ExecutableScenarioPlan;
 import org.savonitar.flink.stability.core.execution.plan.ExecutableScenarioPlanCompiler;
 import org.savonitar.flink.stability.core.execution.plan.PreparedExecutableScenarioPlan;
-import org.savonitar.flink.stability.core.execution.plan.RunnerCapabilityException;
-import org.savonitar.flink.stability.core.execution.plan.RunnerCapabilityIssue;
 
 import java.io.IOException;
 import java.net.URISyntaxException;
@@ -45,6 +42,7 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.savonitar.flink.stability.core.spec.document.SpecificationAssertions.assertFailsAt;
 
 class ExecutableScenarioPlanCompilerTest {
     private final SpecificationLoader loader = new SpecificationLoader();
@@ -183,16 +181,16 @@ class ExecutableScenarioPlanCompilerTest {
 
     @Test
     void resolvedSemanticBoundaryRejectsACustomKafkaImageBeforeCompilation() {
-        ScenarioResolutionException exception = assertThrows(
-                ScenarioResolutionException.class,
+        SpecificationException exception = assertFailsAt(
+                Stage.RESOLUTION,
                 () -> resolved(document ->
                         ((ObjectNode) document.at("/setup/kafka/clusters/main"))
                                 .put("image", "custom/kafka:4.0.0")));
 
         assertEquals(List.of("runner.kafka.image-version-unsupported"),
-                exception.issues().stream().map(ResolutionIssue::code).toList());
+                exception.diagnostics().stream().map(Diagnostic::code).toList());
         assertEquals(List.of("$/setup/kafka/clusters/main/image"),
-                exception.issues().stream().map(ResolutionIssue::path).toList());
+                exception.diagnostics().stream().map(Diagnostic::path).toList());
     }
 
     @Test
@@ -228,16 +226,16 @@ class ExecutableScenarioPlanCompilerTest {
                         .put("total",
                                 ExecutableScenarioPlan
                                         .FIRST_RUNNER_IN_MEMORY_MAX_GENERATED_INPUT_RECORDS + 1));
-        RunnerCapabilityException failure = assertThrows(
-                RunnerCapabilityException.class,
+        SpecificationException failure = assertFailsAt(
+                Stage.RUNNER_CAPABILITY,
                 () -> compiler.compile(tooLarge));
 
-        assertEquals(1, failure.issues().size());
+        assertEquals(1, failure.diagnostics().size());
         assertEquals("runner.input.total-unsupported",
-                failure.issues().getFirst().code());
+                failure.diagnostics().getFirst().code());
         assertEquals(
                 "$/setup/kafka/clusters/main/topics/0/input_source/total",
-                failure.issues().getFirst().path());
+                failure.diagnostics().getFirst().path());
     }
 
     @Test
@@ -307,14 +305,14 @@ class ExecutableScenarioPlanCompilerTest {
             ttl.put("cleanup", "rocksdb-compaction-filter");
         });
 
-        RunnerCapabilityException failure = assertThrows(
-                RunnerCapabilityException.class,
+        SpecificationException failure = assertFailsAt(
+                Stage.RUNNER_CAPABILITY,
                 () -> compiler.compile(resolved));
 
         assertEquals("runner.workload.state-ttl-cleanup-unsupported",
-                failure.issues().getFirst().code());
+                failure.diagnostics().getFirst().code());
         assertEquals("$/workload/jobs/0/state_ttl/cleanup",
-                failure.issues().getFirst().path());
+                failure.diagnostics().getFirst().path());
     }
 
     @Test
@@ -345,15 +343,15 @@ class ExecutableScenarioPlanCompilerTest {
                             .putArray("program_args")
                             .add(token));
 
-            RunnerCapabilityException failure = assertThrows(
-                    RunnerCapabilityException.class,
+            SpecificationException failure = assertFailsAt(
+                    Stage.RUNNER_CAPABILITY,
                     () -> compiler.compile(resolved),
                     token);
 
             assertEquals("runner.workload.program-args-conflict",
-                    failure.issues().getFirst().code(), token);
+                    failure.diagnostics().getFirst().code(), token);
             assertEquals("$/workload/jobs/0/program_args",
-                    failure.issues().getFirst().path(), token);
+                    failure.diagnostics().getFirst().path(), token);
         }
     }
 
@@ -374,8 +372,8 @@ class ExecutableScenarioPlanCompilerTest {
             job.putArray("program_args").add("--bootstrapServers").add("wrong:9092");
         });
 
-        RunnerCapabilityException exception = assertThrows(
-                RunnerCapabilityException.class, () -> compiler.compile(resolved));
+        SpecificationException exception = assertFailsAt(
+                Stage.RUNNER_CAPABILITY, () -> compiler.compile(resolved));
 
         assertEquals(List.of(
                         "$/health_retry_limit",
@@ -386,14 +384,14 @@ class ExecutableScenarioPlanCompilerTest {
                         "$/workload/jobs/0/restart_strategy/type",
                         "$/workload/jobs/0/start",
                         "$/workload/jobs/0/state_backend"),
-                exception.issues().stream().map(RunnerCapabilityIssue::path).toList());
-        assertEquals(exception.issues(), exception.issues().stream()
+                exception.diagnostics().stream().map(Diagnostic::path).toList());
+        assertEquals(exception.diagnostics(), exception.diagnostics().stream()
                 .sorted(java.util.Comparator
-                        .comparing((RunnerCapabilityIssue issue) -> issue.source().toString())
-                        .thenComparing(RunnerCapabilityIssue::scope)
-                        .thenComparing(RunnerCapabilityIssue::path)
-                        .thenComparing(RunnerCapabilityIssue::code)
-                        .thenComparing(RunnerCapabilityIssue::message))
+                        .comparing((Diagnostic issue) -> issue.source().toString())
+                        .thenComparing(Diagnostic::scope)
+                        .thenComparing(Diagnostic::path)
+                        .thenComparing(Diagnostic::code)
+                        .thenComparing(Diagnostic::message))
                 .toList());
     }
 
@@ -432,12 +430,12 @@ class ExecutableScenarioPlanCompilerTest {
                                 .put("taskmanager.numberOfTaskSlots", 1)));
 
         for (CapabilityCase capabilityCase : cases) {
-            RunnerCapabilityException failure = assertThrows(
-                    RunnerCapabilityException.class,
+            SpecificationException failure = assertFailsAt(
+                    Stage.RUNNER_CAPABILITY,
                     () -> compiler.compile(resolved(capabilityCase.mutation())),
                     capabilityCase.code());
 
-            assertTrue(failure.issues().stream().anyMatch(issue ->
+            assertTrue(failure.diagnostics().stream().anyMatch(issue ->
                     issue.code().equals(capabilityCase.code())
                             && issue.path().equals(capabilityCase.path())),
                     capabilityCase.code());
@@ -456,10 +454,10 @@ class ExecutableScenarioPlanCompilerTest {
             stop.put("duration", "1s");
             stop.put("heal", "restart-same-container");
         });
-        RunnerCapabilityException unsupportedFailure = assertThrows(
-                RunnerCapabilityException.class, () -> compiler.compile(unsupported));
+        SpecificationException unsupportedFailure = assertFailsAt(
+                Stage.RUNNER_CAPABILITY, () -> compiler.compile(unsupported));
         assertEquals("runner.phase.step-unsupported",
-                unsupportedFailure.issues().getFirst().code());
+                unsupportedFailure.diagnostics().getFirst().code());
 
         ResolvedScenarioPlan danglingKill = resolved(document -> {
             ObjectNode target = replaceSteps(document).addObject()
@@ -468,9 +466,9 @@ class ExecutableScenarioPlanCompilerTest {
             target.put("role", "taskmanager");
             target.put("name", "taskmanager-1");
         });
-        RunnerCapabilityException lifecycleFailure = assertThrows(
-                RunnerCapabilityException.class, () -> compiler.compile(danglingKill));
-        assertTrue(lifecycleFailure.issues().stream().anyMatch(issue ->
+        SpecificationException lifecycleFailure = assertFailsAt(
+                Stage.RUNNER_CAPABILITY, () -> compiler.compile(danglingKill));
+        assertTrue(lifecycleFailure.diagnostics().stream().anyMatch(issue ->
                 issue.code().equals("runner.phase.taskmanager-kill-unhealed")
                         && issue.path().equals("$/phases/0/steps/0/kill")));
     }
@@ -510,10 +508,10 @@ class ExecutableScenarioPlanCompilerTest {
             transactions.put("stabilization_timeout", "30s");
         }, expected);
 
-        RunnerCapabilityException exception = assertThrows(
-                RunnerCapabilityException.class, () -> compiler.compile(resolved));
+        SpecificationException exception = assertFailsAt(
+                Stage.RUNNER_CAPABILITY, () -> compiler.compile(resolved));
 
-        RunnerCapabilityIssue issue = exception.issues().stream()
+        Diagnostic issue = exception.diagnostics().stream()
                 .filter(candidate -> candidate.code()
                         .equals("runner.expectation.outcome-unsupported"))
                 .findFirst()
@@ -559,17 +557,17 @@ class ExecutableScenarioPlanCompilerTest {
                 ((ObjectNode) document.at("/workload/jobs/0/sink"))
                         .put("transaction_timeout", "3h"));
 
-        RunnerCapabilityException exception = assertThrows(
-                RunnerCapabilityException.class, () -> compiler.compile(resolved));
+        SpecificationException exception = assertFailsAt(
+                Stage.RUNNER_CAPABILITY, () -> compiler.compile(resolved));
 
-        RunnerCapabilityIssue issue = exception.issues().getFirst();
+        Diagnostic issue = exception.diagnostics().getFirst();
         assertEquals("runner.workload.transaction-timeout-unsupported", issue.code());
         assertEquals("$/workload/jobs/0/sink/transaction_timeout", issue.path());
     }
 
     @Test
     void schemaRejectsATransactionTimeoutOnANonTransactionalSink() {
-        assertThrows(DocumentValidationException.class, () -> resolved(document -> {
+        assertFailsAt(Stage.DOCUMENT, () -> resolved(document -> {
             ObjectNode sink = (ObjectNode) document.at("/workload/jobs/0/sink");
             sink.put("delivery_guarantee", "AT_LEAST_ONCE");
             sink.remove("transactional_id_prefix");
@@ -587,11 +585,11 @@ class ExecutableScenarioPlanCompilerTest {
             sink.remove("transaction_id_naming_strategy");
         });
 
-        RunnerCapabilityException exception = assertThrows(
-                RunnerCapabilityException.class, () -> compiler.compile(resolved));
+        SpecificationException exception = assertFailsAt(
+                Stage.RUNNER_CAPABILITY, () -> compiler.compile(resolved));
 
         assertEquals(List.of("runner.workload.delivery-guarantee-unsupported"),
-                exception.issues().stream().map(RunnerCapabilityIssue::code).toList());
+                exception.diagnostics().stream().map(Diagnostic::code).toList());
     }
 
     @Test
@@ -618,14 +616,14 @@ class ExecutableScenarioPlanCompilerTest {
         ResolvedScenarioPlan resolved = new ScenarioPlanResolver().resolve(
                 new ScenarioBundle(scenario, expected), ResolutionRequest.none());
 
-        RunnerCapabilityException exception = assertThrows(
-                RunnerCapabilityException.class, () -> compiler.compile(resolved));
+        SpecificationException exception = assertFailsAt(
+                Stage.RUNNER_CAPABILITY, () -> compiler.compile(resolved));
 
-        assertEquals(1, exception.issues().size());
+        assertEquals(1, exception.diagnostics().size());
         assertEquals("runner.topology.experiment-unsupported",
-                exception.issues().getFirst().code());
-        assertEquals(ResolutionScope.COMMON, exception.issues().getFirst().scope());
-        assertEquals("$/experiment", exception.issues().getFirst().path());
+                exception.diagnostics().getFirst().code());
+        assertEquals(ResolutionScope.COMMON, exception.diagnostics().getFirst().scope());
+        assertEquals("$/experiment", exception.diagnostics().getFirst().path());
     }
 
     @Test
@@ -674,17 +672,17 @@ class ExecutableScenarioPlanCompilerTest {
         PreparedScenarioPlan prepared = new ArtifactPlanResolver().resolve(
                 resolved, ArtifactResolutionOptions.online(artifactRoot));
         try {
-            RunnerCapabilityException exception = assertThrows(
-                    RunnerCapabilityException.class,
+            SpecificationException exception = assertFailsAt(
+                    Stage.RUNNER_CAPABILITY,
                     () -> compiler.bind(prepared, executable));
 
             assertEquals(
                     List.of("runner.subject.entry-class-conflict",
                             "runner.subject.entry-class-missing"),
-                    exception.issues().stream().map(RunnerCapabilityIssue::code).toList());
-            assertTrue(exception.issues().stream().allMatch(issue ->
+                    exception.diagnostics().stream().map(Diagnostic::code).toList());
+            assertTrue(exception.diagnostics().stream().allMatch(issue ->
                     issue.path().equals("$/subject/connectors/kafka/artifact")));
-            assertTrue(exception.issues().getFirst().message()
+            assertTrue(exception.diagnostics().getFirst().message()
                     .contains("$/subject/connectors/kafka/runtime_dependencies/0"));
         } finally {
             prepared.close();
@@ -706,11 +704,11 @@ class ExecutableScenarioPlanCompilerTest {
         PreparedScenarioPlan prepared = new ArtifactPlanResolver().resolve(
                 resolved, ArtifactResolutionOptions.online(artifactRoot));
         try {
-            RunnerCapabilityException exception = assertThrows(
-                    RunnerCapabilityException.class,
+            SpecificationException exception = assertFailsAt(
+                    Stage.RUNNER_CAPABILITY,
                     () -> compiler.bind(prepared, executable));
 
-            RunnerCapabilityIssue issue = exception.issues().getFirst();
+            Diagnostic issue = exception.diagnostics().getFirst();
             assertEquals("runner.subject.entry-class-conflict", issue.code());
             assertEquals("$/workload/jobs/0/jar", issue.path());
             assertTrue(issue.message().contains("child-first"), issue.message());
@@ -742,12 +740,12 @@ class ExecutableScenarioPlanCompilerTest {
             ExecutableScenarioPlan executable = compiler.compile(resolved);
             try (PreparedScenarioPlan prepared = new ArtifactPlanResolver().resolve(
                     resolved, ArtifactResolutionOptions.online(artifactRoot))) {
-                RunnerCapabilityException exception = assertThrows(
-                        RunnerCapabilityException.class, () -> compiler.bind(prepared, executable));
+                SpecificationException exception = assertFailsAt(
+                        Stage.RUNNER_CAPABILITY, () -> compiler.bind(prepared, executable));
 
-                assertTrue(exception.issues().stream().anyMatch(issue -> issue.code()
+                assertTrue(exception.diagnostics().stream().anyMatch(issue -> issue.code()
                                 .equals("runner.subject.entry-class-versioned-unsupported")),
-                        artifact + ": " + exception.issues());
+                        artifact + ": " + exception.diagnostics());
             }
         }
     }
@@ -779,14 +777,14 @@ class ExecutableScenarioPlanCompilerTest {
         createJar(artifactRoot.resolve("job.jar"), true, null);
         ResolvedScenarioPlan resolved = resolved(this::useLocalArtifacts);
 
-        ArtifactResolutionException exception = assertThrows(
-                ArtifactResolutionException.class,
+        SpecificationException exception = assertFailsAt(
+                Stage.ARTIFACT,
                 () -> new ArtifactPlanResolver().resolve(
                         resolved, ArtifactResolutionOptions.online(artifactRoot)));
 
         assertEquals("artifact.workload.protocol-missing",
-                exception.issues().getFirst().code());
-        assertEquals("$/workload/jobs/0/jar", exception.issues().getFirst().path());
+                exception.diagnostics().getFirst().code());
+        assertEquals("$/workload/jobs/0/jar", exception.diagnostics().getFirst().path());
     }
 
     @Test
@@ -805,11 +803,11 @@ class ExecutableScenarioPlanCompilerTest {
                     .preparedPath();
             createJar(snapshot, true, "v2");
 
-            RunnerCapabilityException exception = assertThrows(
-                    RunnerCapabilityException.class,
+            SpecificationException exception = assertFailsAt(
+                    Stage.RUNNER_CAPABILITY,
                     () -> compiler.bind(prepared, executable));
             assertEquals("runner.workload.artifact-changed",
-                    exception.issues().getFirst().code());
+                    exception.diagnostics().getFirst().code());
         }
     }
 

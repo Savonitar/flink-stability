@@ -1,7 +1,8 @@
 package org.savonitar.flink.stability.core.execution.plan;
 
 import com.fasterxml.jackson.databind.node.ObjectNode;
-import org.savonitar.flink.stability.core.spec.resolution.ResolutionScope;
+import org.savonitar.flink.stability.core.spec.document.Diagnostic;
+import org.savonitar.flink.stability.core.spec.document.ResolutionScope;
 import org.savonitar.flink.stability.core.spec.resolution.ResolvedScenarioPlan;
 import org.savonitar.flink.stability.core.spec.resolution.ScenarioSide;
 
@@ -16,11 +17,11 @@ final class ExpectationCompiler {
      * Semantic validation already pairs every expected failure with a registered reason of a
      * declared validator; the runner can evaluate only its one kafka.id-set oracle.
      */
-    static void validate(ResolvedScenarioPlan sourcePlan, List<RunnerCapabilityIssue> issues) {
+    static void validate(ResolvedScenarioPlan sourcePlan, List<Diagnostic> issues) {
         ObjectNode expectation = sourcePlan.expectationFor(ScenarioSide.SINGLE);
         if (isFailure(expectation) && !ExecutableScenarioPlanCompiler.KAFKA_ID_SET.equals(
                 expectation.path("oracle").textValue())) {
-            issues.add(new RunnerCapabilityIssue(
+            issues.add(new Diagnostic(
                     sourcePlan.selectedExpectation().specification().source(),
                     ResolutionScope.SINGLE,
                     "runner.expectation.outcome-unsupported",

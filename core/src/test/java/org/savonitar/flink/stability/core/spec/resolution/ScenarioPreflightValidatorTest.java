@@ -1,8 +1,12 @@
 package org.savonitar.flink.stability.core.spec.resolution;
 
+import org.savonitar.flink.stability.core.spec.document.Diagnostic;
 import org.savonitar.flink.stability.core.spec.document.ExpectedResultSpecification;
+import org.savonitar.flink.stability.core.spec.document.ResolutionScope;
 import org.savonitar.flink.stability.core.spec.document.ScenarioBundle;
 import org.savonitar.flink.stability.core.spec.document.ScenarioSpecification;
+import org.savonitar.flink.stability.core.spec.document.SpecificationException;
+import org.savonitar.flink.stability.core.spec.document.SpecificationException.Stage;
 import org.savonitar.flink.stability.core.spec.document.SpecificationLoader;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.node.ArrayNode;
@@ -20,6 +24,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.savonitar.flink.stability.core.spec.document.SpecificationAssertions.assertFailsAt;
 
 class ScenarioPreflightValidatorTest {
     private static final String ID_SET_REASON = "validator.kafka.id-set.missing-ids";
@@ -44,28 +49,28 @@ class ScenarioPreflightValidatorTest {
 
     @Test
     void exposesDeterministicallySortedImmutableDiagnostics() {
-        ScenarioPreflightException exception = reject(document -> {
+        SpecificationException exception = reject(document -> {
             topic(document, 0).put("replication_factor", 2);
             job(document).withArray("connectors").set(0, text("missing"));
         });
 
-        Comparator<PreflightIssue> order = Comparator
-                .comparing((PreflightIssue issue) -> issue.source().toString())
-                .thenComparing(PreflightIssue::scope)
-                .thenComparing(PreflightIssue::path)
-                .thenComparing(PreflightIssue::code)
-                .thenComparing(PreflightIssue::message);
-        ArrayList<PreflightIssue> sorted = new ArrayList<>(exception.issues());
+        Comparator<Diagnostic> order = Comparator
+                .comparing((Diagnostic issue) -> issue.source().toString())
+                .thenComparing(Diagnostic::scope)
+                .thenComparing(Diagnostic::path)
+                .thenComparing(Diagnostic::code)
+                .thenComparing(Diagnostic::message);
+        ArrayList<Diagnostic> sorted = new ArrayList<>(exception.diagnostics());
         sorted.sort(order);
 
-        assertEquals(sorted, exception.issues());
+        assertEquals(sorted, exception.diagnostics());
         assertThrows(UnsupportedOperationException.class,
-                () -> exception.issues().add(exception.issues().getFirst()));
+                () -> exception.diagnostics().add(exception.diagnostics().getFirst()));
     }
 
     @Test
     void rejectsReplicationFactorGreaterThanTheClusterBrokerCount() {
-        ScenarioPreflightException exception = reject(
+        SpecificationException exception = reject(
                 document -> topic(document, 0).put("replication_factor", 2));
 
         assertHasIssue(
@@ -77,7 +82,7 @@ class ScenarioPreflightValidatorTest {
 
     @Test
     void rejectsDuplicateTopicNamesAndJobAliases() {
-        ScenarioPreflightException duplicateTopic = reject(document ->
+        SpecificationException duplicateTopic = reject(document ->
                 topics(document).add(topic(document, 1).deepCopy()));
         assertHasIssue(
                 duplicateTopic,
@@ -85,7 +90,7 @@ class ScenarioPreflightValidatorTest {
                 "preflight.topic.duplicate-name",
                 "$/setup/kafka/clusters/main/topics/2/name");
 
-        ScenarioPreflightException duplicateJob = reject(document ->
+        SpecificationException duplicateJob = reject(document ->
                 jobs(document).add(job(document).deepCopy()));
         assertHasIssue(
                 duplicateJob,
@@ -96,7 +101,7 @@ class ScenarioPreflightValidatorTest {
 
     @Test
     void rejectsMissingSourceSinkConnectorAndProxyReferences() {
-        ScenarioPreflightException sourceCluster = reject(document ->
+        SpecificationException sourceCluster = reject(document ->
                 job(document).withObject("source").put("cluster", "missing"));
         assertHasIssue(
                 sourceCluster,
@@ -104,7 +109,7 @@ class ScenarioPreflightValidatorTest {
                 "preflight.reference.kafka-cluster-not-found",
                 "$/workload/jobs/0/source/cluster");
 
-        ScenarioPreflightException sourceTopic = reject(document ->
+        SpecificationException sourceTopic = reject(document ->
                 job(document).withObject("source").put("topic", "missing"));
         assertHasIssue(
                 sourceTopic,
@@ -112,7 +117,7 @@ class ScenarioPreflightValidatorTest {
                 "preflight.reference.kafka-topic-not-found",
                 "$/workload/jobs/0/source/topic");
 
-        ScenarioPreflightException sinkCluster = reject(document ->
+        SpecificationException sinkCluster = reject(document ->
                 job(document).withObject("sink").put("cluster", "missing"));
         assertHasIssue(
                 sinkCluster,
@@ -120,7 +125,7 @@ class ScenarioPreflightValidatorTest {
                 "preflight.reference.kafka-cluster-not-found",
                 "$/workload/jobs/0/sink/cluster");
 
-        ScenarioPreflightException sinkTopic = reject(document ->
+        SpecificationException sinkTopic = reject(document ->
                 job(document).withObject("sink").put("topic", "missing"));
         assertHasIssue(
                 sinkTopic,
@@ -128,7 +133,7 @@ class ScenarioPreflightValidatorTest {
                 "preflight.reference.kafka-topic-not-found",
                 "$/workload/jobs/0/sink/topic");
 
-        ScenarioPreflightException connector = reject(document ->
+        SpecificationException connector = reject(document ->
                 job(document).withArray("connectors").set(0, text("missing")));
         assertHasIssue(
                 connector,
@@ -136,7 +141,7 @@ class ScenarioPreflightValidatorTest {
                 "preflight.reference.connector-not-found",
                 "$/workload/jobs/0/connectors/0");
 
-        ScenarioPreflightException proxy = reject(document ->
+        SpecificationException proxy = reject(document ->
                 job(document).withObject("source").put("connect_via_proxy", "missing"));
         assertHasIssue(
                 proxy,
@@ -144,7 +149,7 @@ class ScenarioPreflightValidatorTest {
                 "preflight.reference.proxy-not-found",
                 "$/workload/jobs/0/source/connect_via_proxy");
 
-        ScenarioPreflightException inputProxy = reject(document ->
+        SpecificationException inputProxy = reject(document ->
                 topic(document, 0).withObject("input_source")
                         .put("connect_via_proxy", "missing"));
         assertHasIssue(
@@ -156,7 +161,7 @@ class ScenarioPreflightValidatorTest {
 
     @Test
     void rejectsEveryDeclaredConnectorThatNoWorkloadJobReferences() {
-        ScenarioPreflightException exception = reject(document -> {
+        SpecificationException exception = reject(document -> {
             ObjectNode beta = document.withObject("subject")
                     .withObject("connectors")
                     .putObject("unused-beta");
@@ -173,7 +178,7 @@ class ScenarioPreflightValidatorTest {
 
     @Test
     void validatesStatefulFlinkRestartImageInheritanceIncludingNestedLoops() {
-        ScenarioPreflightException taskmanagerAmbiguous = reject(document -> {
+        SpecificationException taskmanagerAmbiguous = reject(document -> {
             document.withObject("setup").withObject("flink").put("taskmanagers", 2);
             ArrayNode steps = ((ObjectNode) document.at("/phases/0")).putArray("steps");
             restart(steps, "taskmanager", "flink:2.2.1");
@@ -184,15 +189,15 @@ class ScenarioPreflightValidatorTest {
                 ResolutionScope.SINGLE,
                 "preflight.restart.taskmanager-image-ambiguous",
                 "$/phases/0/steps/0/restart/image");
-        assertTrue(taskmanagerAmbiguous.issues().stream().noneMatch(issue -> issue.code().equals(
+        assertTrue(taskmanagerAmbiguous.diagnostics().stream().noneMatch(issue -> issue.code().equals(
                 "preflight.restart.flink-image-inheritance-ambiguous")));
 
-        ScenarioPreflightException divergent = reject(document -> {
+        SpecificationException divergent = reject(document -> {
             ArrayNode steps = ((ObjectNode) document.at("/phases/0")).putArray("steps");
             restart(steps, "jobmanager", "flink:2.2.1");
             restart(steps, "flink", null);
         });
-        PreflightIssue divergence = assertHasIssue(
+        Diagnostic divergence = assertHasIssue(
                 divergent,
                 ResolutionScope.SINGLE,
                 "preflight.restart.flink-image-inheritance-ambiguous",
@@ -201,7 +206,7 @@ class ScenarioPreflightValidatorTest {
         assertTrue(divergence.message().contains("taskmanagers(1)=flink:2.2.0"));
         assertTrue(divergence.message().contains("desired targets differ"));
 
-        ScenarioPreflightException repeated = reject(document -> {
+        SpecificationException repeated = reject(document -> {
             ArrayNode steps = ((ObjectNode) document.at("/phases/0")).putArray("steps");
             ObjectNode loop = steps.addObject().putObject("loop");
             loop.put("times", 2);
@@ -215,7 +220,7 @@ class ScenarioPreflightValidatorTest {
                 "preflight.restart.flink-image-inheritance-ambiguous",
                 "$/phases/0/steps/0/loop/steps/0/restart");
 
-        ScenarioPreflightException taskmanagerRetained = reject(document -> {
+        SpecificationException taskmanagerRetained = reject(document -> {
             ArrayNode steps = ((ObjectNode) document.at("/phases/0")).putArray("steps");
             restart(steps, "taskmanager", "flink:2.2.1");
             restart(steps, "taskmanager", null);
@@ -227,7 +232,7 @@ class ScenarioPreflightValidatorTest {
                 "preflight.restart.flink-image-inheritance-ambiguous",
                 "$/phases/0/steps/2/restart");
 
-        ScenarioPreflightException jobmanagerRetained = reject(document -> {
+        SpecificationException jobmanagerRetained = reject(document -> {
             ArrayNode steps = ((ObjectNode) document.at("/phases/0")).putArray("steps");
             restart(steps, "jobmanager", "flink:2.2.1");
             restart(steps, "jobmanager", null);
@@ -253,7 +258,7 @@ class ScenarioPreflightValidatorTest {
 
     @Test
     void rejectsProxyRoutesAndManagedBootstrapAcrossKafkaClusters() {
-        ScenarioPreflightException endpointMismatch = reject(document -> {
+        SpecificationException endpointMismatch = reject(document -> {
             addKafkaCluster(document, "other");
             addManagedProxy(document, "other-proxy", "other", "other");
             job(document).withObject("sink")
@@ -265,7 +270,7 @@ class ScenarioPreflightValidatorTest {
                 "preflight.proxy.endpoint-cluster-mismatch",
                 "$/workload/jobs/0/sink/connect_via_proxy");
 
-        ScenarioPreflightException bootstrapMismatch = reject(document -> {
+        SpecificationException bootstrapMismatch = reject(document -> {
             addKafkaCluster(document, "other");
             addManagedProxy(document, "main-proxy", "main", "other");
         });
@@ -278,7 +283,7 @@ class ScenarioPreflightValidatorTest {
 
     @Test
     void rejectsAmbiguousOrIncompatibleInputContracts() {
-        ScenarioPreflightException multipleSources = reject(document ->
+        SpecificationException multipleSources = reject(document ->
                 topic(document, 1).set(
                         "input_source",
                         topic(document, 0).get("input_source").deepCopy()));
@@ -292,10 +297,10 @@ class ScenarioPreflightValidatorTest {
                 ResolutionScope.SINGLE,
                 "preflight.input.multiple-sources",
                 "$/setup/kafka/clusters/main/topics/1/input_source");
-        assertTrue(multipleSources.issues().stream()
+        assertTrue(multipleSources.diagnostics().stream()
                 .noneMatch(issue -> issue.code().equals("preflight.input.manifest-not-available")));
 
-        ScenarioPreflightException generatedWithoutIdSet = reject(document -> {
+        SpecificationException generatedWithoutIdSet = reject(document -> {
             ArrayNode terminal = document.putArray("terminal_validations");
             addRecordCountValidator(terminal, "main", "output");
         });
@@ -305,7 +310,7 @@ class ScenarioPreflightValidatorTest {
                 "preflight.input.built-in-validator-required",
                 "$/setup/kafka/clusters/main/topics/0/input_source");
 
-        ScenarioPreflightException customWithBuiltIn = reject(document -> {
+        SpecificationException customWithBuiltIn = reject(document -> {
             ObjectNode input = topic(document, 0).withObject("input_source");
             input.removeAll();
             input.put("mode", "custom");
@@ -326,7 +331,7 @@ class ScenarioPreflightValidatorTest {
 
     @Test
     void rejectsMissingInputManifestAndValidatorLineageMismatch() {
-        ScenarioPreflightException missingManifest = reject(document ->
+        SpecificationException missingManifest = reject(document ->
                 topic(document, 0).remove("input_source"));
         assertHasIssue(
                 missingManifest,
@@ -334,7 +339,7 @@ class ScenarioPreflightValidatorTest {
                 "preflight.input.manifest-not-available",
                 "$/terminal_validations/0/expected");
 
-        ScenarioPreflightException detachedOutput = reject(document -> {
+        SpecificationException detachedOutput = reject(document -> {
             topics(document).addObject()
                     .put("name", "detached-output")
                     .put("partitions", 1)
@@ -347,7 +352,7 @@ class ScenarioPreflightValidatorTest {
                 "preflight.input.validator-source-mismatch",
                 "$/terminal_validations/0");
 
-        ScenarioPreflightException sharedOutput = reject(document -> {
+        SpecificationException sharedOutput = reject(document -> {
             topics(document).addObject()
                     .put("name", "other-input")
                     .put("partitions", 1)
@@ -357,7 +362,7 @@ class ScenarioPreflightValidatorTest {
             secondJob.withObject("source").put("topic", "other-input");
             jobs(document).add(secondJob);
         });
-        PreflightIssue sharedOutputIssue = assertHasIssue(
+        Diagnostic sharedOutputIssue = assertHasIssue(
                 sharedOutput,
                 ResolutionScope.SINGLE,
                 "preflight.input.validator-source-mismatch",
@@ -367,7 +372,7 @@ class ScenarioPreflightValidatorTest {
 
     @Test
     void rejectsBrokenTerminalValidatorReferences() {
-        ScenarioPreflightException topic = reject(document ->
+        SpecificationException topic = reject(document ->
                 addRecordCountValidator(
                         (ArrayNode) document.get("terminal_validations"),
                         "main",
@@ -378,7 +383,7 @@ class ScenarioPreflightValidatorTest {
                 "preflight.reference.kafka-topic-not-found",
                 "$/terminal_validations/1/topic");
 
-        ScenarioPreflightException transactionCluster = reject(document ->
+        SpecificationException transactionCluster = reject(document ->
                 addTransactionValidator(
                         (ArrayNode) document.get("terminal_validations"),
                         "missing",
@@ -389,7 +394,7 @@ class ScenarioPreflightValidatorTest {
                 "preflight.reference.kafka-cluster-not-found",
                 "$/terminal_validations/1/cluster");
 
-        ScenarioPreflightException transactionSink = reject(document ->
+        SpecificationException transactionSink = reject(document ->
                 addTransactionValidator(
                         (ArrayNode) document.get("terminal_validations"),
                         "main",
@@ -400,7 +405,7 @@ class ScenarioPreflightValidatorTest {
                 "preflight.validator.transactional-sink-not-found",
                 "$/terminal_validations/1/transactional_id_prefix");
 
-        ScenarioPreflightException job = reject(document ->
+        SpecificationException job = reject(document ->
                 addLogValidator(
                         (ArrayNode) document.get("terminal_validations"),
                         "missing"));
@@ -413,7 +418,7 @@ class ScenarioPreflightValidatorTest {
 
     @Test
     void rejectsDuplicateTerminalValidatorTypes() {
-        ScenarioPreflightException exception = reject(document ->
+        SpecificationException exception = reject(document ->
                 ((ArrayNode) document.get("terminal_validations"))
                         .add(terminal(document, 0).deepCopy()));
 
@@ -426,7 +431,7 @@ class ScenarioPreflightValidatorTest {
 
     @Test
     void rejectsExpectedFailureOracleDeclaredOnlyAsAnInlineValidation() {
-        ScenarioPreflightException exception = reject(
+        SpecificationException exception = reject(
                 document -> {
                     ObjectNode inline = ((ArrayNode) document.at("/phases/0/steps"))
                             .addObject().putObject("validate");
@@ -448,7 +453,7 @@ class ScenarioPreflightValidatorTest {
 
     @Test
     void rejectsUnknownAndOracleMismatchedFailureReasons() {
-        ScenarioPreflightException unknown = reject(
+        SpecificationException unknown = reject(
                 document -> {},
                 document -> setPlainFailure(
                         document,
@@ -460,7 +465,7 @@ class ScenarioPreflightValidatorTest {
                 "preflight.expectation.reason-not-declared",
                 "$/default/reason");
 
-        ScenarioPreflightException mismatched = reject(
+        SpecificationException mismatched = reject(
                 document -> addTransactionValidator(
                         (ArrayNode) document.get("terminal_validations"),
                         "main",
@@ -510,7 +515,7 @@ class ScenarioPreflightValidatorTest {
                         "validator.custom.output-mismatch")));
         assertDoesNotThrow(() -> validator.validate(declared));
 
-        ScenarioPreflightException undeclared = reject(
+        SpecificationException undeclared = reject(
                 customValidator,
                 document -> setPlainFailure(
                         document,
@@ -540,8 +545,8 @@ class ScenarioPreflightValidatorTest {
         ResolvedScenarioPlan plan = plan(scenario, expected);
         assertEquals(ExpectationSelectionKind.DEFAULT, plan.selectedExpectation().kind());
 
-        ScenarioPreflightException exception = assertThrows(
-                ScenarioPreflightException.class,
+        SpecificationException exception = assertFailsAt(
+                Stage.PREFLIGHT,
                 () -> validator.validate(plan));
 
         assertHasIssue(
@@ -577,8 +582,8 @@ class ScenarioPreflightValidatorTest {
             defaultNode.putObject("candidate").put("outcome", "pass");
         });
 
-        ScenarioPreflightException exception = assertThrows(
-                ScenarioPreflightException.class,
+        SpecificationException exception = assertFailsAt(
+                Stage.PREFLIGHT,
                 () -> validator.validate(plan(experiment, expectation)));
 
         assertHasIssue(
@@ -586,7 +591,7 @@ class ScenarioPreflightValidatorTest {
                 ResolutionScope.CANDIDATE,
                 "preflight.kafka.replication-exceeds-brokers",
                 "$/setup/kafka/clusters/main/topics/0/replication_factor");
-        assertTrue(exception.issues().stream()
+        assertTrue(exception.diagnostics().stream()
                 .filter(issue -> issue.code().equals(
                         "preflight.kafka.replication-exceeds-brokers"))
                 .allMatch(issue -> issue.scope() == ResolutionScope.CANDIDATE));
@@ -616,8 +621,8 @@ class ScenarioPreflightValidatorTest {
             defaultNode.putObject("candidate").put("outcome", "pass");
         });
 
-        ScenarioPreflightException exception = assertThrows(
-                ScenarioPreflightException.class,
+        SpecificationException exception = assertFailsAt(
+                Stage.PREFLIGHT,
                 () -> validator.validate(plan(experiment, expectation)));
 
         assertHasIssue(
@@ -627,15 +632,15 @@ class ScenarioPreflightValidatorTest {
                 "$/health_retry_limit");
     }
 
-    private ScenarioPreflightException reject(Consumer<ObjectNode> scenarioChanges) {
+    private SpecificationException reject(Consumer<ObjectNode> scenarioChanges) {
         return reject(scenarioChanges, document -> {});
     }
 
-    private ScenarioPreflightException reject(
+    private SpecificationException reject(
             Consumer<ObjectNode> scenarioChanges,
             Consumer<ObjectNode> expectedChanges) {
         ResolvedScenarioPlan plan = plan(scenario(scenarioChanges), expected(expectedChanges));
-        return assertThrows(ScenarioPreflightException.class, () -> validator.validate(plan));
+        return assertFailsAt(Stage.PREFLIGHT, () -> validator.validate(plan));
     }
 
     private ResolvedScenarioPlan plan(
@@ -745,19 +750,19 @@ class ScenarioPreflightValidatorTest {
         return (ObjectNode) document.at("/terminal_validations/" + index);
     }
 
-    private static PreflightIssue assertHasIssue(
-            ScenarioPreflightException exception,
+    private static Diagnostic assertHasIssue(
+            SpecificationException exception,
             ResolutionScope scope,
             String code,
             String path) {
-        return exception.issues().stream()
+        return exception.diagnostics().stream()
                 .filter(issue -> issue.scope() == scope
                         && issue.code().equals(code)
                         && issue.path().equals(path))
                 .findFirst()
                 .orElseThrow(() -> new AssertionError(
                         "Expected " + scope + ":" + code + " at " + path
-                                + " but got " + exception.issues()));
+                                + " but got " + exception.diagnostics()));
     }
 
     private Path resource(String name) {

@@ -1,6 +1,10 @@
 package org.savonitar.flink.stability.core.spec.resolution;
 
+import org.savonitar.flink.stability.core.spec.document.Diagnostic;
+import org.savonitar.flink.stability.core.spec.document.ResolutionScope;
 import org.savonitar.flink.stability.core.spec.document.ScenarioSpecification;
+import org.savonitar.flink.stability.core.spec.document.SpecificationException;
+import org.savonitar.flink.stability.core.spec.document.SpecificationException.Stage;
 import org.savonitar.flink.stability.core.spec.document.SpecificationLoader;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.node.ArrayNode;
@@ -23,6 +27,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.savonitar.flink.stability.core.spec.document.SpecificationAssertions.assertFailsAt;
 
 class ScenarioParameterResolverTest {
     private static final JsonNodeFactory NODES = JsonNodeFactory.instance;
@@ -170,8 +175,8 @@ class ScenarioParameterResolverTest {
         assertEquals(1, fromScenarioDefaults.document()
                 .path("health_retry_limit").intValue());
 
-        ScenarioResolutionException suiteRuns = assertThrows(
-                ScenarioResolutionException.class,
+        SpecificationException suiteRuns = assertFailsAt(
+                Stage.RESOLUTION,
                 () -> resolver.resolve(scenario, new ResolutionRequest(
                         Map.of("run_count", IntNode.valueOf(2)), Map.of())));
         assertHasIssue(
@@ -180,8 +185,8 @@ class ScenarioParameterResolverTest {
                 ResolutionScope.COMMON,
                 "$/suite-bindings/run_count");
 
-        ScenarioResolutionException submitRuns = assertThrows(
-                ScenarioResolutionException.class,
+        SpecificationException submitRuns = assertFailsAt(
+                Stage.RESOLUTION,
                 () -> resolver.resolve(scenario, new ResolutionRequest(
                         Map.of(), Map.of("run_count", IntNode.valueOf(2)))));
         assertHasIssue(
@@ -190,8 +195,8 @@ class ScenarioParameterResolverTest {
                 ResolutionScope.COMMON,
                 "$/submit-overrides/run_count");
 
-        ScenarioResolutionException suiteHealth = assertThrows(
-                ScenarioResolutionException.class,
+        SpecificationException suiteHealth = assertFailsAt(
+                Stage.RESOLUTION,
                 () -> resolver.resolve(scenario, new ResolutionRequest(
                         Map.of("retry_count", IntNode.valueOf(2)), Map.of())));
         assertHasIssue(
@@ -200,8 +205,8 @@ class ScenarioParameterResolverTest {
                 ResolutionScope.COMMON,
                 "$/suite-bindings/retry_count");
 
-        ScenarioResolutionException submitHealth = assertThrows(
-                ScenarioResolutionException.class,
+        SpecificationException submitHealth = assertFailsAt(
+                Stage.RESOLUTION,
                 () -> resolver.resolve(scenario, new ResolutionRequest(
                         Map.of(), Map.of("retry_count", IntNode.valueOf(2)))));
         assertHasIssue(
@@ -210,8 +215,8 @@ class ScenarioParameterResolverTest {
                 ResolutionScope.COMMON,
                 "$/submit-overrides/retry_count");
 
-        ScenarioResolutionException bothRunBindings = assertThrows(
-                ScenarioResolutionException.class,
+        SpecificationException bothRunBindings = assertFailsAt(
+                Stage.RESOLUTION,
                 () -> resolver.resolve(scenario, new ResolutionRequest(
                         Map.of("run_count", IntNode.valueOf(2)),
                         Map.of("run_count", IntNode.valueOf(3)))));
@@ -285,7 +290,7 @@ class ScenarioParameterResolverTest {
             parameterWithDefault(document, "suffix", "string", TextNode.valueOf("/bad"));
             inputTopic(document).put("name", "input-${suffix}");
         });
-        ScenarioResolutionException exception = assertThrows(ScenarioResolutionException.class,
+        SpecificationException exception = assertFailsAt(Stage.RESOLUTION,
                 () -> resolver.resolve(invalid, ResolutionRequest.none()));
 
         assertHasIssue(exception, "schema.one-of", ResolutionScope.SINGLE,
@@ -314,7 +319,7 @@ class ScenarioParameterResolverTest {
             ttl.put("ttl", "10s");
         });
 
-        ScenarioResolutionException exception = assertThrows(ScenarioResolutionException.class,
+        SpecificationException exception = assertFailsAt(Stage.RESOLUTION,
                 () -> resolver.resolve(scenario, ResolutionRequest.none()));
 
         assertHasIssue(exception, "schema.one-of", ResolutionScope.SINGLE,
@@ -327,22 +332,22 @@ class ScenarioParameterResolverTest {
             parameterWithDefault(document, "backend", "string", TextNode.valueOf("forst"));
             job(document).put("state_backend", "${backend}");
         });
-        ScenarioResolutionException backendException = assertThrows(ScenarioResolutionException.class,
+        SpecificationException backendException = assertFailsAt(Stage.RESOLUTION,
                 () -> resolver.resolve(stateBackend, ResolutionRequest.none()));
         assertHasIssue(backendException, "capability.state-backend.unsupported", ResolutionScope.SINGLE,
                 "$/workload/jobs/0/state_backend");
-        assertTrue(backendException.issues().stream().noneMatch(issue -> issue.code().startsWith("schema.")));
+        assertTrue(backendException.diagnostics().stream().noneMatch(issue -> issue.code().startsWith("schema.")));
 
         ScenarioSpecification kafkaMode = scenario(document ->
                 kafkaCluster(document).put("mode", "zookeeper"));
-        ScenarioResolutionException kafkaException = assertThrows(ScenarioResolutionException.class,
+        SpecificationException kafkaException = assertFailsAt(Stage.RESOLUTION,
                 () -> resolver.resolve(kafkaMode, ResolutionRequest.none()));
         assertHasIssue(kafkaException, "capability.kafka-mode.unsupported", ResolutionScope.SINGLE,
                 "$/setup/kafka/clusters/main/mode");
 
         ScenarioSpecification multipleJobManagers = scenario(document ->
                 flink(document).put("jobmanagers", 2));
-        ScenarioResolutionException jobManagerException = assertThrows(ScenarioResolutionException.class,
+        SpecificationException jobManagerException = assertFailsAt(Stage.RESOLUTION,
                 () -> resolver.resolve(multipleJobManagers, ResolutionRequest.none()));
         assertHasIssue(jobManagerException, "capability.multiple-jobmanagers.unsupported", ResolutionScope.SINGLE,
                 "$/setup/flink/jobmanagers");
@@ -356,26 +361,26 @@ class ScenarioParameterResolverTest {
             experiment(document, "backend", TextNode.valueOf("rocksdb"), TextNode.valueOf("forst"));
         });
 
-        ScenarioResolutionException exception = assertThrows(ScenarioResolutionException.class,
+        SpecificationException exception = assertFailsAt(Stage.RESOLUTION,
                 () -> resolver.resolve(scenario, ResolutionRequest.none()));
 
         assertHasIssue(exception, "capability.state-backend.unsupported", ResolutionScope.CANDIDATE,
                 "$/workload/jobs/0/state_backend");
-        assertFalse(exception.issues().stream().anyMatch(issue -> issue.scope() == ResolutionScope.BASELINE));
+        assertFalse(exception.diagnostics().stream().anyMatch(issue -> issue.scope() == ResolutionScope.BASELINE));
     }
 
     @Test
     void validatesSinkAndRestoreCapabilityRegistries() {
         ScenarioSpecification guarantee = scenario(document ->
                 job(document).withObject("sink").put("delivery_guarantee", "MAYBE"));
-        ScenarioResolutionException guaranteeException = assertThrows(ScenarioResolutionException.class,
+        SpecificationException guaranteeException = assertFailsAt(Stage.RESOLUTION,
                 () -> resolver.resolve(guarantee, ResolutionRequest.none()));
         assertHasIssue(guaranteeException, "capability.delivery-guarantee.unsupported", ResolutionScope.SINGLE,
                 "$/workload/jobs/0/sink/delivery_guarantee");
 
         ScenarioSpecification naming = scenario(document ->
                 job(document).withObject("sink").put("transaction_id_naming_strategy", "RANDOM"));
-        ScenarioResolutionException namingException = assertThrows(ScenarioResolutionException.class,
+        SpecificationException namingException = assertFailsAt(Stage.RESOLUTION,
                 () -> resolver.resolve(naming, ResolutionRequest.none()));
         assertHasIssue(namingException, "capability.transaction-id-naming-strategy.unsupported",
                 ResolutionScope.SINGLE, "$/workload/jobs/0/sink/transaction_id_naming_strategy");
@@ -389,7 +394,7 @@ class ScenarioParameterResolverTest {
             restoreBody.put("from", "latest-checkpoint");
             restoreBody.put("mode", "take-ownership");
         });
-        ScenarioResolutionException restoreException = assertThrows(ScenarioResolutionException.class,
+        SpecificationException restoreException = assertFailsAt(Stage.RESOLUTION,
                 () -> resolver.resolve(restore, ResolutionRequest.none()));
         assertHasIssue(restoreException, "capability.restore-mode.unsupported", ResolutionScope.SINGLE,
                 "$/phases/0/steps/0/restore/mode");
@@ -400,14 +405,14 @@ class ScenarioParameterResolverTest {
         ScenarioSpecification scenario = scenario(document ->
                 parameterWithDefault(document, "known", "string", TextNode.valueOf("value")));
 
-        ScenarioResolutionException submitException = assertThrows(ScenarioResolutionException.class,
+        SpecificationException submitException = assertFailsAt(Stage.RESOLUTION,
                 () -> resolver.resolve(scenario, new ResolutionRequest(
                         Map.of(), Map.of("unknown", TextNode.valueOf("value")))));
         assertHasIssue(submitException, "parameter.unknown-submit-override", ResolutionScope.COMMON,
                 "$/submit-overrides/unknown");
         assertTrue(submitException.getMessage().contains("known"));
 
-        ScenarioResolutionException suiteException = assertThrows(ScenarioResolutionException.class,
+        SpecificationException suiteException = assertFailsAt(Stage.RESOLUTION,
                 () -> resolver.resolve(scenario, new ResolutionRequest(
                         Map.of("unknown", TextNode.valueOf("value")), Map.of())));
         assertHasIssue(suiteException, "parameter.unknown-suite-binding", ResolutionScope.COMMON,
@@ -422,7 +427,7 @@ class ScenarioParameterResolverTest {
             declaration.put("min", 1).put("max", 5);
         });
 
-        ScenarioResolutionException exception = assertThrows(ScenarioResolutionException.class,
+        SpecificationException exception = assertFailsAt(Stage.RESOLUTION,
                 () -> resolver.resolve(scenario, new ResolutionRequest(
                         Map.of("count", TextNode.valueOf("wrong")),
                         Map.of("count", IntNode.valueOf(3)))));
@@ -430,7 +435,7 @@ class ScenarioParameterResolverTest {
         assertHasIssue(exception, "parameter.type-mismatch", ResolutionScope.COMMON,
                 "$/suite-bindings/count");
 
-        ScenarioResolutionException boundsException = assertThrows(ScenarioResolutionException.class,
+        SpecificationException boundsException = assertFailsAt(Stage.RESOLUTION,
                 () -> resolver.resolve(scenario, new ResolutionRequest(
                         Map.of("count", IntNode.valueOf(0)),
                         Map.of("count", IntNode.valueOf(3)))));
@@ -445,13 +450,13 @@ class ScenarioParameterResolverTest {
             parameterWithDefault(document, "label", "string", TextNode.valueOf("plain"));
         });
 
-        ScenarioResolutionException durationException = assertThrows(ScenarioResolutionException.class,
+        SpecificationException durationException = assertFailsAt(Stage.RESOLUTION,
                 () -> resolver.resolve(scenario, new ResolutionRequest(
                         Map.of(), Map.of("timeout", TextNode.valueOf("1m30s")))));
         assertHasIssue(durationException, "parameter.invalid-duration", ResolutionScope.COMMON,
                 "$/submit-overrides/timeout");
 
-        ScenarioResolutionException recursiveException = assertThrows(ScenarioResolutionException.class,
+        SpecificationException recursiveException = assertFailsAt(Stage.RESOLUTION,
                 () -> resolver.resolve(scenario, new ResolutionRequest(
                         Map.of(), Map.of("label", TextNode.valueOf("${label}")))));
         assertHasIssue(recursiveException, "parameter.recursive-expansion", ResolutionScope.COMMON,
@@ -464,7 +469,7 @@ class ScenarioParameterResolverTest {
             parameterWithDefault(document, "first", "string", TextNode.valueOf("${second}"));
             parameterWithDefault(document, "second", "string", TextNode.valueOf("value"));
         });
-        ScenarioResolutionException declarationException = assertThrows(ScenarioResolutionException.class,
+        SpecificationException declarationException = assertFailsAt(Stage.RESOLUTION,
                 () -> resolver.resolve(recursiveDefault, ResolutionRequest.none()));
         assertHasIssue(declarationException, "parameter.recursive-expansion", ResolutionScope.COMMON,
                 "$/parameters/first/default");
@@ -473,7 +478,7 @@ class ScenarioParameterResolverTest {
             parameterWithDefault(document, "config_key", "string", TextNode.valueOf("key"));
             flink(document).putObject("config").put("${config_key}", "value");
         });
-        ScenarioResolutionException keyException = assertThrows(ScenarioResolutionException.class,
+        SpecificationException keyException = assertFailsAt(Stage.RESOLUTION,
                 () -> resolver.resolve(mapKey, ResolutionRequest.none()));
         assertHasIssue(keyException, "parameter.reference-in-map-key", ResolutionScope.SINGLE,
                 "$/setup/flink/config/${config_key}");
@@ -484,7 +489,7 @@ class ScenarioParameterResolverTest {
         ScenarioSpecification scenario = scenario(document ->
                 kafkaCluster(document).put("brokers", "${missing}"));
 
-        ScenarioResolutionException exception = assertThrows(ScenarioResolutionException.class,
+        SpecificationException exception = assertFailsAt(Stage.RESOLUTION,
                 () -> resolver.resolve(scenario, ResolutionRequest.none()));
 
         assertHasIssue(exception, "parameter.unknown-reference", ResolutionScope.SINGLE,
@@ -498,7 +503,7 @@ class ScenarioParameterResolverTest {
             declaration.put("type", "integer").put("required", true).put("min", 1);
         });
 
-        ScenarioResolutionException exception = assertThrows(ScenarioResolutionException.class,
+        SpecificationException exception = assertFailsAt(Stage.RESOLUTION,
                 () -> resolver.resolve(scenario, ResolutionRequest.none()));
 
         assertHasIssue(exception, "parameter.required-value-missing", ResolutionScope.SINGLE,
@@ -513,7 +518,7 @@ class ScenarioParameterResolverTest {
             declaration.put("min", 10).put("max", 3);
         });
 
-        ScenarioResolutionException exception = assertThrows(ScenarioResolutionException.class,
+        SpecificationException exception = assertFailsAt(Stage.RESOLUTION,
                 () -> resolver.resolve(scenario, ResolutionRequest.none()));
 
         assertHasIssue(exception, "parameter.invalid-bounds", ResolutionScope.COMMON,
@@ -565,15 +570,15 @@ class ScenarioParameterResolverTest {
                     TextNode.valueOf(mavenConnector), TextNode.valueOf(localConnector));
         });
 
-        ScenarioResolutionException exception = assertThrows(
-                ScenarioResolutionException.class,
+        SpecificationException exception = assertFailsAt(
+                Stage.RESOLUTION,
                 () -> resolver.resolve(scenario, ResolutionRequest.none()));
 
         assertHasIssue(exception, "schema.required", ResolutionScope.CANDIDATE,
                 "$/subject/connectors/kafka");
-        assertTrue(exception.issues().stream()
+        assertTrue(exception.diagnostics().stream()
                 .allMatch(issue -> issue.scope() == ResolutionScope.CANDIDATE),
-                () -> "Maven auto mode should produce no baseline issue: " + exception.issues());
+                () -> "Maven auto mode should produce no baseline issue: " + exception.diagnostics());
     }
 
     @Test
@@ -632,7 +637,7 @@ class ScenarioParameterResolverTest {
             experiment(document, "backend", TextNode.valueOf("rocksdb"), TextNode.valueOf("hashmap"))
                     .put("claim", "EOS holds for ${backend}.");
         });
-        ScenarioResolutionException exception = assertThrows(ScenarioResolutionException.class,
+        SpecificationException exception = assertFailsAt(Stage.RESOLUTION,
                 () -> resolver.resolve(variedClaim, ResolutionRequest.none()));
         assertHasIssue(exception, "parameter.varied-reference-in-experiment-claim", ResolutionScope.COMMON,
                 "$/experiment/claim");
@@ -648,7 +653,7 @@ class ScenarioParameterResolverTest {
                     .put("claim", "${label}");
         });
 
-        ScenarioResolutionException exception = assertThrows(ScenarioResolutionException.class,
+        SpecificationException exception = assertFailsAt(Stage.RESOLUTION,
                 () -> resolver.resolve(scenario, ResolutionRequest.none()));
 
         assertHasIssue(exception, "experiment.claim-blank", ResolutionScope.COMMON,
@@ -677,7 +682,7 @@ class ScenarioParameterResolverTest {
             experiment.withObject("candidate").remove("backend");
             experiment.withObject("candidate").put("other", "candidate");
         });
-        ScenarioResolutionException exception = assertThrows(ScenarioResolutionException.class,
+        SpecificationException exception = assertFailsAt(Stage.RESOLUTION,
                 () -> resolver.resolve(incomplete, ResolutionRequest.none()));
         assertHasIssue(exception, "parameter.required-value-missing", ResolutionScope.CANDIDATE,
                 "$/parameters/backend");
@@ -692,7 +697,7 @@ class ScenarioParameterResolverTest {
             experiment(document, "count", IntNode.valueOf(2), IntNode.valueOf(6));
         });
 
-        ScenarioResolutionException exception = assertThrows(ScenarioResolutionException.class,
+        SpecificationException exception = assertFailsAt(Stage.RESOLUTION,
                 () -> resolver.resolve(scenario, ResolutionRequest.none()));
 
         assertHasIssue(exception, "parameter.out-of-range", ResolutionScope.CANDIDATE,
@@ -712,7 +717,7 @@ class ScenarioParameterResolverTest {
                 "backend", new EffectiveParameter(TextNode.valueOf("hashmap"),
                         ParameterSource.EXPERIMENT_CANDIDATE),
                 "unreferenced", new EffectiveParameter(IntNode.valueOf(2), ParameterSource.SCENARIO_DEFAULT));
-        List<ResolutionIssue> issues = new ExperimentDriftValidator().validate(
+        List<Diagnostic> issues = new ExperimentDriftValidator().validate(
                 source,
                 Set.of("backend"),
                 baselineParameters,
@@ -752,13 +757,13 @@ class ScenarioParameterResolverTest {
     void rejectsSuiteAndSubmitBindingsForExperimentVaries() {
         ScenarioSpecification scenario = experimentScenario();
 
-        ScenarioResolutionException suiteException = assertThrows(ScenarioResolutionException.class,
+        SpecificationException suiteException = assertFailsAt(Stage.RESOLUTION,
                 () -> resolver.resolve(scenario, new ResolutionRequest(
                         Map.of("backend", TextNode.valueOf("rocksdb")), Map.of())));
         assertHasIssue(suiteException, "parameter.varied-suite-binding", ResolutionScope.COMMON,
                 "$/suite-bindings/backend");
 
-        ScenarioResolutionException submitException = assertThrows(ScenarioResolutionException.class,
+        SpecificationException submitException = assertFailsAt(Stage.RESOLUTION,
                 () -> resolver.resolve(scenario, new ResolutionRequest(
                         Map.of(), Map.of("backend", TextNode.valueOf("rocksdb")))));
         assertHasIssue(submitException, "parameter.varied-submit-override", ResolutionScope.COMMON,
@@ -776,7 +781,7 @@ class ScenarioParameterResolverTest {
             experiment.withObject("baseline").put("other", 2);
         });
 
-        ScenarioResolutionException exception = assertThrows(ScenarioResolutionException.class,
+        SpecificationException exception = assertFailsAt(Stage.RESOLUTION,
                 () -> resolver.resolve(scenario, ResolutionRequest.none()));
 
         assertHasIssue(exception, "parameter.side-key-not-varied", ResolutionScope.BASELINE,
@@ -791,7 +796,7 @@ class ScenarioParameterResolverTest {
             experiment(document, "unknown", TextNode.valueOf("one"), TextNode.valueOf("two"));
         });
 
-        ScenarioResolutionException exception = assertThrows(ScenarioResolutionException.class,
+        SpecificationException exception = assertFailsAt(Stage.RESOLUTION,
                 () -> resolver.resolve(scenario, ResolutionRequest.none()));
 
         assertHasIssue(exception, "parameter.unknown-varies", ResolutionScope.COMMON,
@@ -841,7 +846,7 @@ class ScenarioParameterResolverTest {
             parameterWithDefault(document, "count", "integer", IntNode.valueOf(0));
             useParameter.accept(document);
         });
-        ScenarioResolutionException exception = assertThrows(ScenarioResolutionException.class,
+        SpecificationException exception = assertFailsAt(Stage.RESOLUTION,
                 () -> resolver.resolve(scenario, ResolutionRequest.none()));
         assertHasIssue(exception, "schema.one-of", ResolutionScope.SINGLE, path);
     }
@@ -903,14 +908,14 @@ class ScenarioParameterResolverTest {
     }
 
     private static void assertHasIssue(
-            ScenarioResolutionException exception,
+            SpecificationException exception,
             String code,
             ResolutionScope scope,
             String path) {
-        assertTrue(exception.issues().stream().anyMatch(issue ->
+        assertTrue(exception.diagnostics().stream().anyMatch(issue ->
                         issue.code().equals(code) && issue.scope() == scope && issue.path().equals(path)),
                 () -> "Expected " + code + " [" + scope + "] at " + path
-                        + " but got " + exception.issues());
+                        + " but got " + exception.diagnostics());
     }
 
     private Path resource(String name) {

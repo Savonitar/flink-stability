@@ -1,20 +1,22 @@
 package org.savonitar.flink.stability.core.artifact;
 
+import org.savonitar.flink.stability.core.spec.document.Diagnostic;
 import org.savonitar.flink.stability.core.spec.document.ExpectedResultSpecification;
 import org.savonitar.flink.stability.core.spec.document.ScenarioBundle;
 import org.savonitar.flink.stability.core.spec.document.ScenarioSpecification;
 import org.savonitar.flink.stability.core.spec.document.SpecificationCatalog;
 import org.savonitar.flink.stability.core.spec.document.SpecificationCatalogTestFactory;
+import org.savonitar.flink.stability.core.spec.document.SpecificationException;
+import org.savonitar.flink.stability.core.spec.document.SpecificationException.Stage;
 import org.savonitar.flink.stability.core.spec.document.SpecificationLoader;
 import org.savonitar.flink.stability.core.spec.document.SuiteSpecification;
 import org.savonitar.flink.stability.core.spec.resolution.ResolutionRequest;
-import org.savonitar.flink.stability.core.spec.resolution.ResolutionScope;
+import org.savonitar.flink.stability.core.spec.document.ResolutionScope;
 import org.savonitar.flink.stability.core.spec.resolution.ResolvedScenarioPlan;
 import org.savonitar.flink.stability.core.spec.resolution.ResolvedSuitePlan;
 import org.savonitar.flink.stability.core.spec.resolution.ScenarioPlanResolver;
 import org.savonitar.flink.stability.core.spec.resolution.ScenarioSide;
 import org.savonitar.flink.stability.core.spec.resolution.SuitePlanResolver;
-import org.savonitar.flink.stability.core.spec.resolution.SuitePlanningException;
 import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import org.junit.jupiter.api.Test;
@@ -47,6 +49,7 @@ import static org.junit.jupiter.api.Assertions.assertNotSame;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.savonitar.flink.stability.core.spec.document.SpecificationAssertions.assertFailsAt;
 
 class ArtifactPlanResolverTest {
     private static final String JOB_PATH = "$/workload/jobs/0/jar";
@@ -100,14 +103,14 @@ class ArtifactPlanResolverTest {
     void rejectsAnArtifactRootThatIsNotAnExistingDirectory() {
         Path missingRoot = artifactRoot.resolve("missing");
 
-        ArtifactResolutionException exception = assertThrows(
-                ArtifactResolutionException.class,
+        SpecificationException exception = assertFailsAt(
+                Stage.ARTIFACT,
                 () -> new ArtifactPlanResolver().resolve(
                         plainPlan("bad-root", document -> {}),
                         ArtifactResolutionOptions.online(missingRoot)));
 
-        assertEquals(1, exception.issues().size());
-        ArtifactIssue issue = exception.issues().getFirst();
+        assertEquals(1, exception.diagnostics().size());
+        Diagnostic issue = exception.diagnostics().getFirst();
         assertEquals("artifact.root.not-directory", issue.code());
         assertEquals(ResolutionScope.COMMON, issue.scope());
         assertEquals("$", issue.path());
@@ -122,8 +125,8 @@ class ArtifactPlanResolverTest {
         Path outside = Files.createDirectories(artifactRoot.resolve("outside"));
         Files.createSymbolicLink(trustedRoot.resolve(".flink-stability"), outside);
 
-        ArtifactResolutionException exception = assertThrows(
-                ArtifactResolutionException.class,
+        SpecificationException exception = assertFailsAt(
+                Stage.ARTIFACT,
                 () -> new ArtifactPlanResolver().resolve(
                         plainPlan("staging-symlink", document -> setCoreArtifacts(
                                 document, "connector.jar", "job.jar")),
@@ -146,8 +149,8 @@ class ArtifactPlanResolverTest {
         Path outsideJob = createJar(outside.resolve("outside-job.jar"), true);
         String relativeEscape = trustedRoot.relativize(outsideInput).toString();
 
-        ArtifactResolutionException escapedFile = assertThrows(
-                ArtifactResolutionException.class,
+        SpecificationException escapedFile = assertFailsAt(
+                Stage.ARTIFACT,
                 () -> new ArtifactPlanResolver().resolve(
                         plainPlan("relative-escape", document -> {
                             setCoreArtifacts(document, "connector.jar", "job.jar");
@@ -162,8 +165,8 @@ class ArtifactPlanResolverTest {
         assertSingleIssue(escapedFile, "artifact.local.outside-root",
                 "$/setup/kafka/clusters/main/topics/0/input_source/path");
 
-        ArtifactResolutionException absoluteJar = assertThrows(
-                ArtifactResolutionException.class,
+        SpecificationException absoluteJar = assertFailsAt(
+                Stage.ARTIFACT,
                 () -> new ArtifactPlanResolver().resolve(
                         plainPlan("absolute-escape", document -> setCoreArtifacts(
                                 document, "connector.jar", outsideJob.toString())),
@@ -181,8 +184,8 @@ class ArtifactPlanResolverTest {
         Path directLink = trustedRoot.resolve("linked-job.jar");
         Files.createSymbolicLink(directLink, outsideJob);
 
-        ArtifactResolutionException linkedJar = assertThrows(
-                ArtifactResolutionException.class,
+        SpecificationException linkedJar = assertFailsAt(
+                Stage.ARTIFACT,
                 () -> new ArtifactPlanResolver().resolve(
                         plainPlan("symlink-escape", document -> setCoreArtifacts(
                                 document, "connector.jar", "linked-job.jar")),
@@ -191,8 +194,8 @@ class ArtifactPlanResolverTest {
 
         Path build = Files.createDirectories(trustedRoot.resolve("build"));
         Files.createSymbolicLink(build.resolve("job-linked.jar"), outsideJob);
-        ArtifactResolutionException linkedGlob = assertThrows(
-                ArtifactResolutionException.class,
+        SpecificationException linkedGlob = assertFailsAt(
+                Stage.ARTIFACT,
                 () -> new ArtifactPlanResolver().resolve(
                         plainPlan("glob-symlink-escape", document -> setCoreArtifacts(
                                 document, "connector.jar", "build/job-*.jar")),
@@ -205,8 +208,8 @@ class ArtifactPlanResolverTest {
         createJar(artifactRoot.resolve("connector.jar"), false);
         createJar(artifactRoot.resolve("job.jar"), true);
 
-        ArtifactResolutionException exception = assertThrows(
-                ArtifactResolutionException.class,
+        SpecificationException exception = assertFailsAt(
+                Stage.ARTIFACT,
                 () -> new ArtifactPlanResolver().resolve(
                         plainPlan("normalized-glob", document -> setCoreArtifacts(
                                 document, "connector.jar", "build-*/../job.jar")),
@@ -256,8 +259,8 @@ class ArtifactPlanResolverTest {
         createJar(artifactRoot.resolve("connector.jar"), false);
         ArtifactPlanResolver resolver = new ArtifactPlanResolver();
 
-        ArtifactResolutionException zero = assertThrows(
-                ArtifactResolutionException.class,
+        SpecificationException zero = assertFailsAt(
+                Stage.ARTIFACT,
                 () -> resolver.resolve(
                         plainPlan("zero-glob", document -> setCoreArtifacts(
                                 document, "connector.jar", "build/job-*.jar")),
@@ -266,8 +269,8 @@ class ArtifactPlanResolverTest {
 
         createJar(artifactRoot.resolve("build/job-a.jar"), true);
         createJar(artifactRoot.resolve("build/job-b.jar"), true);
-        ArtifactResolutionException multiple = assertThrows(
-                ArtifactResolutionException.class,
+        SpecificationException multiple = assertFailsAt(
+                Stage.ARTIFACT,
                 () -> resolver.resolve(
                         plainPlan("multi-glob", document -> setCoreArtifacts(
                                 document, "connector.jar", "build/job-*.jar")),
@@ -281,8 +284,8 @@ class ArtifactPlanResolverTest {
         createJar(artifactRoot.resolve("job.jar"), true);
         Files.createDirectories(artifactRoot.resolve("inputs"));
 
-        ArtifactResolutionException filePattern = assertThrows(
-                ArtifactResolutionException.class,
+        SpecificationException filePattern = assertFailsAt(
+                Stage.ARTIFACT,
                 () -> new ArtifactPlanResolver().resolve(
                         plainPlan("file-pattern", document -> {
                             setCoreArtifacts(document, "connector.jar", "job.jar");
@@ -297,8 +300,8 @@ class ArtifactPlanResolverTest {
         assertSingleIssue(filePattern, "artifact.reference.invalid",
                 "$/setup/kafka/clusters/main/topics/0/input_source/path");
 
-        ArtifactResolutionException directoryPattern = assertThrows(
-                ArtifactResolutionException.class,
+        SpecificationException directoryPattern = assertFailsAt(
+                Stage.ARTIFACT,
                 () -> new ArtifactPlanResolver().resolve(
                         plainPlan("directory-pattern", document -> setCoreArtifacts(
                                 document, "connector.jar", "build-*/job.jar")),
@@ -311,8 +314,8 @@ class ArtifactPlanResolverTest {
         createJar(artifactRoot.resolve("connector.jar"), false);
         createJar(artifactRoot.resolve("job.bin"), true);
 
-        ArtifactResolutionException extension = assertThrows(
-                ArtifactResolutionException.class,
+        SpecificationException extension = assertFailsAt(
+                Stage.ARTIFACT,
                 () -> resolvePlain("wrong-extension", "connector.jar", "job.bin"));
 
         assertSingleIssue(extension, "artifact.jar.invalid", JOB_PATH);
@@ -323,14 +326,14 @@ class ArtifactPlanResolverTest {
         createJar(artifactRoot.resolve("connector.jar"), false);
 
         Files.writeString(artifactRoot.resolve("broken.jar"), "not a jar");
-        ArtifactResolutionException archive = assertThrows(
-                ArtifactResolutionException.class,
+        SpecificationException archive = assertFailsAt(
+                Stage.ARTIFACT,
                 () -> resolvePlain("broken-archive", "connector.jar", "broken.jar"));
         assertSingleIssue(archive, "artifact.jar.invalid", JOB_PATH);
 
         createJar(artifactRoot.resolve("no-main.jar"), false);
-        ArtifactResolutionException entrypoint = assertThrows(
-                ArtifactResolutionException.class,
+        SpecificationException entrypoint = assertFailsAt(
+                Stage.ARTIFACT,
                 () -> resolvePlain("no-entrypoint", "connector.jar", "no-main.jar"));
         assertSingleIssue(entrypoint, "artifact.jar.entrypoint-missing", JOB_PATH);
 
@@ -350,12 +353,12 @@ class ArtifactPlanResolverTest {
         createJarWithCorruptStoredEntry(
                 artifactRoot.resolve("corrupt-job.jar"), true);
 
-        ArtifactResolutionException connector = assertThrows(
-                ArtifactResolutionException.class,
+        SpecificationException connector = assertFailsAt(
+                Stage.ARTIFACT,
                 () -> resolvePlain(
                         "corrupt-connector", "corrupt-connector.jar", "job.jar"));
-        ArtifactResolutionException job = assertThrows(
-                ArtifactResolutionException.class,
+        SpecificationException job = assertFailsAt(
+                Stage.ARTIFACT,
                 () -> resolvePlain("corrupt-job", "connector.jar", "corrupt-job.jar"));
 
         assertSingleIssue(connector, "artifact.jar.invalid", CONNECTOR_PATH);
@@ -380,8 +383,8 @@ class ArtifactPlanResolverTest {
             addCustomValidator(terminal.addObject(), "no-main.jar");
         });
 
-        ArtifactResolutionException exception = assertThrows(
-                ArtifactResolutionException.class,
+        SpecificationException exception = assertFailsAt(
+                Stage.ARTIFACT,
                 () -> new ArtifactPlanResolver().resolve(
                         plan, ArtifactResolutionOptions.online(artifactRoot)));
 
@@ -389,7 +392,7 @@ class ArtifactPlanResolverTest {
                         "artifact.jar.entrypoint-missing@"
                                 + "$/setup/kafka/clusters/main/topics/0/input_source/artifact",
                         "artifact.jar.entrypoint-missing@$/terminal_validations/0/artifact"),
-                exception.issues().stream()
+                exception.diagnostics().stream()
                         .map(issue -> issue.code() + "@" + issue.path())
                         .toList());
     }
@@ -467,8 +470,8 @@ class ArtifactPlanResolverTest {
     void validatesMavenCoordinatesAndRestrictsThemToSubjectConnectors() throws IOException {
         createJar(artifactRoot.resolve("job.jar"), true);
 
-        ArtifactResolutionException invalidCoordinate = assertThrows(
-                ArtifactResolutionException.class,
+        SpecificationException invalidCoordinate = assertFailsAt(
+                Stage.ARTIFACT,
                 () -> new ArtifactPlanResolver((coordinate, offline) -> {
                     throw new AssertionError("Invalid coordinates must not reach the lookup");
                 }).resolve(
@@ -480,8 +483,8 @@ class ArtifactPlanResolverTest {
         assertSingleIssue(invalidCoordinate, "artifact.maven.invalid-coordinate", CONNECTOR_PATH);
 
         createJar(artifactRoot.resolve("connector.jar"), false);
-        ArtifactResolutionException forbiddenRole = assertThrows(
-                ArtifactResolutionException.class,
+        SpecificationException forbiddenRole = assertFailsAt(
+                Stage.ARTIFACT,
                 () -> new ArtifactPlanResolver().resolve(
                         plainPlan("maven-job", document -> setCoreArtifacts(
                                 document,
@@ -543,8 +546,8 @@ class ArtifactPlanResolverTest {
                         expectation.getKey(), "lookup failed", new IOException("cause"));
             };
             String suffix = expectation.getKey().name().toLowerCase().replace('_', '-');
-            ArtifactResolutionException exception = assertThrows(
-                    ArtifactResolutionException.class,
+            SpecificationException exception = assertFailsAt(
+                    Stage.ARTIFACT,
                     () -> new ArtifactPlanResolver(lookup).resolve(
                             plainPlan("maven-failure-" + suffix, document -> {
                                 setCoreArtifacts(
@@ -618,19 +621,19 @@ class ArtifactPlanResolverTest {
         ResolvedSuitePlan plan = new SuitePlanResolver().resolve(
                 catalog(suite, valid, firstMissing, secondMissing), suite.name());
 
-        SuitePlanningException exception = assertThrows(
-                SuitePlanningException.class,
+        SpecificationException exception = assertFailsAt(
+                Stage.SUITE_PLANNING,
                 () -> new ArtifactPlanResolver().resolve(
                         plan, ArtifactResolutionOptions.online(artifactRoot)));
 
-        assertEquals(List.of("first-missing", "second-missing"), exception.issues().stream()
-                .map(issue -> issue.entry().entryId())
+        assertEquals(List.of("first-missing", "second-missing"), exception.diagnostics().stream()
+                .map(issue -> issue.entry().orElseThrow().entryId())
                 .toList());
-        assertTrue(exception.issues().stream().allMatch(issue ->
+        assertTrue(exception.diagnostics().stream().allMatch(issue ->
                 issue.code().equals("artifact.local.not-found")
                         && issue.path().equals(JOB_PATH)));
-        assertEquals(firstMissing.scenario().source(), exception.issues().getFirst().source());
-        assertEquals(secondMissing.scenario().source(), exception.issues().get(1).source());
+        assertEquals(firstMissing.scenario().source(), exception.diagnostics().getFirst().source());
+        assertEquals(secondMissing.scenario().source(), exception.diagnostics().get(1).source());
         assertPreparedWorkspacesEmpty(artifactRoot);
         assertTrue(Files.isRegularFile(artifactRoot.resolve("connector.jar")));
         assertTrue(Files.isRegularFile(artifactRoot.resolve("valid.jar")));
@@ -643,12 +646,12 @@ class ArtifactPlanResolverTest {
         ResolvedScenarioPlan plan = plainPlan("failed-scenario-cleanup", document ->
                 setCoreArtifacts(document, "connector.jar", "missing-job.jar"));
 
-        ArtifactResolutionException exception = assertThrows(
-                ArtifactResolutionException.class,
+        SpecificationException exception = assertFailsAt(
+                Stage.ARTIFACT,
                 () -> new ArtifactPlanResolver().resolve(
                         plan, ArtifactResolutionOptions.online(artifactRoot)));
 
-        assertTrue(exception.issues().stream().anyMatch(issue ->
+        assertTrue(exception.diagnostics().stream().anyMatch(issue ->
                 issue.code().equals("artifact.local.not-found")
                         && issue.path().equals(JOB_PATH)));
         assertPreparedWorkspacesEmpty(artifactRoot);
@@ -911,9 +914,9 @@ class ArtifactPlanResolverTest {
     }
 
     private static void assertSingleIssue(
-            ArtifactResolutionException exception, String code, String path) {
-        assertEquals(1, exception.issues().size());
-        ArtifactIssue issue = exception.issues().getFirst();
+            SpecificationException exception, String code, String path) {
+        assertEquals(1, exception.diagnostics().size());
+        Diagnostic issue = exception.diagnostics().getFirst();
         assertEquals(code, issue.code());
         assertEquals(path, issue.path());
         assertFalse(issue.message().isBlank());

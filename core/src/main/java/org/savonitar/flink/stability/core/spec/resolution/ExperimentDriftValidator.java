@@ -10,10 +10,12 @@ import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
+import org.savonitar.flink.stability.core.spec.document.Diagnostic;
+import org.savonitar.flink.stability.core.spec.document.ResolutionScope;
 
 /** Defends the differential invariant independently of the resolver's construction logic. */
 final class ExperimentDriftValidator {
-    List<ResolutionIssue> validate(
+    List<Diagnostic> validate(
             Path source,
             Set<String> varies,
             Map<String, EffectiveParameter> baselineParameters,
@@ -22,7 +24,7 @@ final class ExperimentDriftValidator {
             ObjectNode candidateDocument,
             Map<String, Set<String>> baselineProvenance,
             Map<String, Set<String>> candidateProvenance) {
-        List<ResolutionIssue> issues = new ArrayList<>();
+        List<Diagnostic> issues = new ArrayList<>();
         compareParameters(source, varies, baselineParameters, candidateParameters, issues);
         compareNodes(source, baselineDocument, candidateDocument, "$", varies,
                 baselineProvenance, candidateProvenance, issues);
@@ -34,7 +36,7 @@ final class ExperimentDriftValidator {
             Set<String> varies,
             Map<String, EffectiveParameter> baseline,
             Map<String, EffectiveParameter> candidate,
-            List<ResolutionIssue> issues) {
+            List<Diagnostic> issues) {
         Set<String> names = new LinkedHashSet<>();
         names.addAll(baseline.keySet());
         names.addAll(candidate.keySet());
@@ -54,7 +56,7 @@ final class ExperimentDriftValidator {
             Set<String> varies,
             Map<String, Set<String>> baselineProvenance,
             Map<String, Set<String>> candidateProvenance,
-            List<ResolutionIssue> issues) {
+            List<Diagnostic> issues) {
         if (baseline.equals(candidate)) {
             return;
         }
@@ -83,8 +85,8 @@ final class ExperimentDriftValidator {
         }
     }
 
-    private static ResolutionIssue issue(Path source, String path, String message) {
-        return new ResolutionIssue(source, ResolutionScope.COMMON,
+    private static Diagnostic issue(Path source, String path, String message) {
+        return new Diagnostic(source, ResolutionScope.COMMON,
                 "experiment.configuration-drift", path, message);
     }
 

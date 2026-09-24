@@ -1,8 +1,12 @@
 package org.savonitar.flink.stability.core.spec.resolution;
 
+import org.savonitar.flink.stability.core.spec.document.Diagnostic;
 import org.savonitar.flink.stability.core.spec.document.ExpectedResultSpecification;
+import org.savonitar.flink.stability.core.spec.document.ResolutionScope;
 import org.savonitar.flink.stability.core.spec.document.ScenarioBundle;
 import org.savonitar.flink.stability.core.spec.document.ScenarioSpecification;
+import org.savonitar.flink.stability.core.spec.document.SpecificationException;
+import org.savonitar.flink.stability.core.spec.document.SpecificationException.Stage;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
@@ -42,7 +46,7 @@ final class ExpectedResultSelector {
         ArrayNode cases = document.get("cases") instanceof ArrayNode array
                 ? array
                 : document.arrayNode();
-        List<ExpectationIssue> issues = new ArrayList<>();
+        List<Diagnostic> issues = new ArrayList<>();
         boolean experiment = resolved.isExperiment();
         validateShape(source, "$/default", defaultExpectation, experiment, issues);
 
@@ -84,7 +88,7 @@ final class ExpectedResultSelector {
         }
 
         if (!issues.isEmpty()) {
-            throw new ExpectedResultSelectionException(issues);
+            throw new SpecificationException(Stage.EXPECTATION, issues);
         }
 
         List<Integer> matches = new ArrayList<>();
@@ -94,7 +98,7 @@ final class ExpectedResultSelector {
             }
         }
         if (matches.size() > 1) {
-            throw new ExpectedResultSelectionException(List.of(issue(
+            throw new SpecificationException(Stage.EXPECTATION, List.of(issue(
                     source,
                     "expectation.multiple-matches",
                     "$/cases",
@@ -128,7 +132,7 @@ final class ExpectedResultSelector {
             int index,
             ObjectNode conditions,
             ResolvedScenario resolved,
-            List<ExpectationIssue> issues) {
+            List<Diagnostic> issues) {
         Map<String, JsonNode> probeBindings = new LinkedHashMap<>();
         resolved.commonEffectiveParameters().forEach((name, parameter) ->
                 probeBindings.put(name, parameter.value()));
@@ -137,7 +141,7 @@ final class ExpectedResultSelector {
         try {
             ResolvedScenario probe = parameterResolver.resolveExpectationProbe(
                     resolved.template(), new ResolutionRequest(probeBindings, Map.of()));
-            List<PreflightIssue> preflightIssues = new ArrayList<>();
+            List<Diagnostic> preflightIssues = new ArrayList<>();
             for (ResolvedSide side : probe.sides()) {
                 preflightIssues.addAll(ScenarioPreflightValidator.validateResolvedSide(
                         probe.template().source(), scopeOf(side.side()), side.document()));
@@ -152,8 +156,11 @@ final class ExpectedResultSelector {
                 issues.add(issue(source, "expectation.case-value-invalid", "$/cases/" + index + "/when",
                         "Case values cannot produce a valid scenario: " + details));
             }
-        } catch (ScenarioResolutionException exception) {
-            String details = exception.issues().stream()
+        } catch (SpecificationException exception) {
+            if (exception.stage() != Stage.RESOLUTION) {
+                throw exception;
+            }
+            String details = exception.diagnostics().stream()
                     .map(issue -> issue.scope() + ":" + issue.code() + "@" + issue.path()
                             + " - " + issue.message())
                     .sorted()
@@ -178,7 +185,7 @@ final class ExpectedResultSelector {
             ObjectNode conditions,
             Map<String, ScenarioParameterContract.Definition> definitions,
             Set<String> varies,
-            List<ExpectationIssue> issues) {
+            List<Diagnostic> issues) {
         boolean valid = true;
         var fields = conditions.fields();
         while (fields.hasNext()) {
@@ -216,7 +223,7 @@ final class ExpectedResultSelector {
             String path,
             ObjectNode expectation,
             boolean experiment,
-            List<ExpectationIssue> issues) {
+            List<Diagnostic> issues) {
         boolean experimentShape = expectation.has("baseline") && expectation.has("candidate");
         if (experiment != experimentShape) {
             issues.add(issue(source, "expectation.shape-mismatch", path,
@@ -227,7 +234,7 @@ final class ExpectedResultSelector {
     }
 
     private static void validateOverlaps(
-            Path source, List<ObjectNode> conditions, List<ExpectationIssue> issues) {
+            Path source, List<ObjectNode> conditions, List<Diagnostic> issues) {
         for (int later = 0; later < conditions.size(); later++) {
             List<Integer> overlapping = new ArrayList<>();
             for (int earlier = 0; earlier < later; earlier++) {
@@ -287,8 +294,8 @@ final class ExpectedResultSelector {
                 && left.document().equals(right.document());
     }
 
-    private static ExpectationIssue issue(Path source, String code, String path, String message) {
-        return new ExpectationIssue(source, code, path, message);
+    private static Diagnostic issue(Path source, String code, String path, String message) {
+        return new Diagnostic(source, code, path, message);
     }
 
     private static String escapePointer(String value) {

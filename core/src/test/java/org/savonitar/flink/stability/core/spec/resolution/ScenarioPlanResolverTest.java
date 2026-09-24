@@ -1,8 +1,11 @@
 package org.savonitar.flink.stability.core.spec.resolution;
 
+import org.savonitar.flink.stability.core.spec.document.Diagnostic;
 import org.savonitar.flink.stability.core.spec.document.ExpectedResultSpecification;
 import org.savonitar.flink.stability.core.spec.document.ScenarioBundle;
 import org.savonitar.flink.stability.core.spec.document.ScenarioSpecification;
+import org.savonitar.flink.stability.core.spec.document.SpecificationException;
+import org.savonitar.flink.stability.core.spec.document.SpecificationException.Stage;
 import org.savonitar.flink.stability.core.spec.document.SpecificationLoader;
 import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
@@ -14,8 +17,8 @@ import java.nio.file.Path;
 import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.savonitar.flink.stability.core.spec.document.SpecificationAssertions.assertFailsAt;
 
 class ScenarioPlanResolverTest {
     private final SpecificationLoader loader = new SpecificationLoader();
@@ -63,8 +66,8 @@ class ScenarioPlanResolverTest {
         ScenarioSpecification scenario = loader.validateScenarioDocument(
                 baseScenario.source(), document);
 
-        assertThrows(
-                ScenarioPreflightException.class,
+        assertFailsAt(
+                Stage.PREFLIGHT,
                 () -> new ScenarioPlanResolver().resolve(
                         new ScenarioBundle(
                                 scenario,
@@ -92,13 +95,13 @@ class ScenarioPlanResolverTest {
         ExpectedResultSpecification expected = loader.validateExpectedResultDocument(
                 baseExpected.source(), expectedDocument);
 
-        ScenarioPreflightException exception = assertThrows(
-                ScenarioPreflightException.class,
+        SpecificationException exception = assertFailsAt(
+                Stage.PREFLIGHT,
                 () -> new ScenarioPlanResolver().resolve(
                         new ScenarioBundle(scenario, expected), ResolutionRequest.none()));
 
-        assertEquals(1, exception.issues().size());
-        PreflightIssue issue = exception.issues().getFirst();
+        assertEquals(1, exception.diagnostics().size());
+        Diagnostic issue = exception.diagnostics().getFirst();
         assertEquals("preflight.reference.connector-not-found", issue.code());
         assertEquals("$/workload/jobs/0/connectors/1", issue.path());
         assertEquals(scenario.source(), issue.source());
@@ -117,14 +120,14 @@ class ScenarioPlanResolverTest {
         ExpectedResultSpecification expected = loader.validateExpectedResultDocument(
                 baseExpected.source(), document);
 
-        ScenarioPreflightException exception = assertThrows(
-                ScenarioPreflightException.class,
+        SpecificationException exception = assertFailsAt(
+                Stage.PREFLIGHT,
                 () -> new ScenarioPlanResolver().resolve(
                         new ScenarioBundle(
                                 loader.loadScenario(resource("minimal.yaml")), expected),
                         ResolutionRequest.none()));
 
-        assertTrue(exception.issues().stream().anyMatch(issue ->
+        assertTrue(exception.diagnostics().stream().anyMatch(issue ->
                 issue.code().equals("preflight.expectation.reason-not-declared")
                         && issue.path().equals("$/default/reason")));
     }

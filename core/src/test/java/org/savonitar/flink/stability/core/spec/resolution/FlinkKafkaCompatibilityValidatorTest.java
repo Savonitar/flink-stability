@@ -1,6 +1,9 @@
 package org.savonitar.flink.stability.core.spec.resolution;
 
+import org.savonitar.flink.stability.core.spec.document.ResolutionScope;
 import org.savonitar.flink.stability.core.spec.document.ScenarioSpecification;
+import org.savonitar.flink.stability.core.spec.document.SpecificationException;
+import org.savonitar.flink.stability.core.spec.document.SpecificationException.Stage;
 import org.savonitar.flink.stability.core.spec.document.SpecificationLoader;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.node.ArrayNode;
@@ -15,8 +18,8 @@ import java.util.function.Consumer;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
-import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.savonitar.flink.stability.core.spec.document.SpecificationAssertions.assertFailsAt;
 
 class FlinkKafkaCompatibilityValidatorTest {
     private static final String CONNECTOR_PATH = "$/subject/connectors/kafka/artifact";
@@ -81,8 +84,8 @@ class FlinkKafkaCompatibilityValidatorTest {
                     TextNode.valueOf(incompatible));
         });
 
-        ScenarioResolutionException exception = assertThrows(
-                ScenarioResolutionException.class,
+        SpecificationException exception = assertFailsAt(
+                Stage.RESOLUTION,
                 () -> resolver.resolve(scenario, ResolutionRequest.none()));
 
         assertIssue(
@@ -90,7 +93,7 @@ class FlinkKafkaCompatibilityValidatorTest {
                 FlinkKafkaCompatibilityValidator.KAFKA_CONNECTOR_LINE_UNSUPPORTED,
                 ResolutionScope.CANDIDATE,
                 CONNECTOR_PATH);
-        assertFalse(exception.issues().stream()
+        assertFalse(exception.diagnostics().stream()
                 .anyMatch(issue -> issue.scope() == ResolutionScope.BASELINE));
     }
 
@@ -110,8 +113,8 @@ class FlinkKafkaCompatibilityValidatorTest {
             useLocalConnector(document);
             flink(document).put("image", "flink:1.20.3");
         });
-        ScenarioResolutionException exception = assertThrows(
-                ScenarioResolutionException.class,
+        SpecificationException exception = assertFailsAt(
+                Stage.RESOLUTION,
                 () -> resolver.resolve(incompatible, ResolutionRequest.none()));
 
         assertIssue(
@@ -119,7 +122,7 @@ class FlinkKafkaCompatibilityValidatorTest {
                 FlinkKafkaCompatibilityValidator.FLINK_LINE_UNSUPPORTED,
                 ResolutionScope.SINGLE,
                 "$/setup/flink/image");
-        assertEquals(1, exception.issues().size());
+        assertEquals(1, exception.diagnostics().size());
     }
 
     @Test
@@ -131,8 +134,8 @@ class FlinkKafkaCompatibilityValidatorTest {
             ScenarioSpecification scenario = scenario(document ->
                     flink(document).put("image", image));
 
-            ScenarioResolutionException exception = assertThrows(
-                    ScenarioResolutionException.class,
+            SpecificationException exception = assertFailsAt(
+                    Stage.RESOLUTION,
                     () -> resolver.resolve(scenario, ResolutionRequest.none()),
                     image);
 
@@ -141,8 +144,8 @@ class FlinkKafkaCompatibilityValidatorTest {
                     FlinkKafkaCompatibilityValidator.FLINK_LINE_UNSUPPORTED,
                     ResolutionScope.SINGLE,
                     "$/setup/flink/image");
-            assertEquals(1, exception.issues().size(), image);
-            assertTrue(exception.issues().getFirst().message()
+            assertEquals(1, exception.diagnostics().size(), image);
+            assertTrue(exception.diagnostics().getFirst().message()
                     .contains("Cannot establish a supported Flink line"));
         }
     }
@@ -159,8 +162,8 @@ class FlinkKafkaCompatibilityValidatorTest {
                     "artifact",
                     "maven:org.apache.flink:flink-connector-kafka:" + version));
 
-            ScenarioResolutionException exception = assertThrows(
-                    ScenarioResolutionException.class,
+            SpecificationException exception = assertFailsAt(
+                    Stage.RESOLUTION,
                     () -> resolver.resolve(scenario, ResolutionRequest.none()),
                     version);
 
@@ -169,8 +172,8 @@ class FlinkKafkaCompatibilityValidatorTest {
                     FlinkKafkaCompatibilityValidator.KAFKA_CONNECTOR_LINE_UNSUPPORTED,
                     ResolutionScope.SINGLE,
                     CONNECTOR_PATH);
-            assertEquals(1, exception.issues().size(), version);
-            assertTrue(exception.issues().getFirst().message().contains("5.0.<patch>-2.2"));
+            assertEquals(1, exception.diagnostics().size(), version);
+            assertTrue(exception.diagnostics().getFirst().message().contains("5.0.<patch>-2.2"));
         }
     }
 
@@ -183,8 +186,8 @@ class FlinkKafkaCompatibilityValidatorTest {
             ScenarioSpecification scenario = scenario(document ->
                     connector(document).put("artifact", reference));
 
-            ScenarioResolutionException exception = assertThrows(
-                    ScenarioResolutionException.class,
+            SpecificationException exception = assertFailsAt(
+                    Stage.RESOLUTION,
                     () -> resolver.resolve(scenario, ResolutionRequest.none()),
                     reference);
 
@@ -193,7 +196,7 @@ class FlinkKafkaCompatibilityValidatorTest {
                     FlinkKafkaCompatibilityValidator.CONNECTOR_MAVEN_COORDINATE_UNREGISTERED,
                     ResolutionScope.SINGLE,
                     CONNECTOR_PATH);
-            assertEquals(1, exception.issues().size(), reference);
+            assertEquals(1, exception.diagnostics().size(), reference);
         }
     }
 
@@ -214,8 +217,8 @@ class FlinkKafkaCompatibilityValidatorTest {
             flinkRestart.put("image", "flink:2.1.4");
         });
 
-        ScenarioResolutionException exception = assertThrows(
-                ScenarioResolutionException.class,
+        SpecificationException exception = assertFailsAt(
+                Stage.RESOLUTION,
                 () -> resolver.resolve(scenario, ResolutionRequest.none()));
 
         assertIssue(
@@ -223,7 +226,7 @@ class FlinkKafkaCompatibilityValidatorTest {
                 FlinkKafkaCompatibilityValidator.FLINK_LINE_UNSUPPORTED,
                 ResolutionScope.SINGLE,
                 "$/phases/0/steps/0/loop/steps/1/restart/image");
-        assertEquals(1, exception.issues().size());
+        assertEquals(1, exception.diagnostics().size());
     }
 
     @Test
@@ -263,11 +266,11 @@ class FlinkKafkaCompatibilityValidatorTest {
             restart.put("image", "apache/kafka:4.1.0");
         });
 
-        ScenarioResolutionException exception = assertThrows(
-                ScenarioResolutionException.class,
+        SpecificationException exception = assertFailsAt(
+                Stage.RESOLUTION,
                 () -> resolver.resolve(scenario, ResolutionRequest.none()));
 
-        assertEquals(2, exception.issues().size());
+        assertEquals(2, exception.diagnostics().size());
         assertIssue(
                 exception,
                 FlinkKafkaCompatibilityValidator.KAFKA_IMAGE_VERSION_UNSUPPORTED,
@@ -297,18 +300,18 @@ class FlinkKafkaCompatibilityValidatorTest {
             taskManagerRestart.put("image", "flink:2.1.4");
         });
 
-        ScenarioResolutionException exception = assertThrows(
-                ScenarioResolutionException.class,
+        SpecificationException exception = assertFailsAt(
+                Stage.RESOLUTION,
                 () -> resolver.resolve(scenario, ResolutionRequest.none()));
 
-        assertEquals(2, exception.issues().size());
+        assertEquals(2, exception.diagnostics().size());
         assertEquals(
                 "$/phases/0/steps/0/loop/steps/0/restart/image",
-                exception.issues().get(0).path());
+                exception.diagnostics().get(0).path());
         assertEquals(
                 "$/phases/0/steps/0/loop/steps/1/restart/image",
-                exception.issues().get(1).path());
-        assertTrue(exception.issues().stream().allMatch(issue -> issue.code().equals(
+                exception.diagnostics().get(1).path());
+        assertTrue(exception.diagnostics().stream().allMatch(issue -> issue.code().equals(
                 FlinkKafkaCompatibilityValidator.FLINK_LINE_UNSUPPORTED)));
     }
 
@@ -321,8 +324,8 @@ class FlinkKafkaCompatibilityValidatorTest {
                     "maven:org.apache.flink:flink-connector-kafka:3.4.0-1.20");
         });
 
-        ScenarioResolutionException exception = assertThrows(
-                ScenarioResolutionException.class,
+        SpecificationException exception = assertFailsAt(
+                Stage.RESOLUTION,
                 () -> resolver.resolve(scenario, ResolutionRequest.none()));
 
         assertIssue(
@@ -330,10 +333,10 @@ class FlinkKafkaCompatibilityValidatorTest {
                 FlinkKafkaCompatibilityValidator.FLINK_LINE_UNSUPPORTED,
                 ResolutionScope.SINGLE,
                 "$/setup/flink/image");
-        assertFalse(exception.issues().stream().anyMatch(issue ->
+        assertFalse(exception.diagnostics().stream().anyMatch(issue ->
                 issue.code().equals(
                         FlinkKafkaCompatibilityValidator.KAFKA_CONNECTOR_LINE_UNSUPPORTED)));
-        assertEquals(1, exception.issues().size());
+        assertEquals(1, exception.diagnostics().size());
     }
 
     @Test
@@ -343,13 +346,13 @@ class FlinkKafkaCompatibilityValidatorTest {
             flink(document).put("image", "${image_value}");
         });
 
-        ScenarioResolutionException schemaException = assertThrows(
-                ScenarioResolutionException.class,
+        SpecificationException schemaException = assertFailsAt(
+                Stage.RESOLUTION,
                 () -> resolver.resolve(structurallyInvalid, ResolutionRequest.none()));
-        assertTrue(schemaException.issues().stream().anyMatch(issue ->
+        assertTrue(schemaException.diagnostics().stream().anyMatch(issue ->
                 issue.code().startsWith("schema.")
                         && issue.path().equals("$/setup/flink/image")));
-        assertFalse(schemaException.issues().stream().anyMatch(issue ->
+        assertFalse(schemaException.diagnostics().stream().anyMatch(issue ->
                 issue.code().equals(FlinkKafkaCompatibilityValidator.FLINK_LINE_UNSUPPORTED)));
 
         ScenarioSpecification malformedMaven = scenario(document ->
@@ -407,16 +410,16 @@ class FlinkKafkaCompatibilityValidatorTest {
     }
 
     private static void assertIssue(
-            ScenarioResolutionException exception,
+            SpecificationException exception,
             String code,
             ResolutionScope scope,
             String path) {
-        assertTrue(exception.issues().stream().anyMatch(issue ->
+        assertTrue(exception.diagnostics().stream().anyMatch(issue ->
                         issue.code().equals(code)
                                 && issue.scope() == scope
                                 && issue.path().equals(path)),
                 () -> "Expected " + code + " [" + scope + "] at " + path
-                        + " but got " + exception.issues());
+                        + " but got " + exception.diagnostics());
     }
 
     private Path resource(String name) {

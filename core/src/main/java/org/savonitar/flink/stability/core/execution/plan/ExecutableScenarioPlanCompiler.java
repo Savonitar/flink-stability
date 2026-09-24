@@ -5,11 +5,14 @@ import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import org.savonitar.flink.stability.core.artifact.ArtifactRole;
 import org.savonitar.flink.stability.core.artifact.ConnectorClusterBundleBuilder;
+import org.savonitar.flink.stability.core.spec.document.Diagnostic;
+import org.savonitar.flink.stability.core.spec.document.SpecificationException;
+import org.savonitar.flink.stability.core.spec.document.SpecificationException.Stage;
 import org.savonitar.flink.stability.core.spec.resolution.KafkaBrokerImagePolicy;
 import org.savonitar.flink.stability.core.artifact.PreparedConnectorBundle;
 import org.savonitar.flink.stability.core.artifact.PreparedConnectorRuntimeTargetFactory;
 import org.savonitar.flink.stability.core.artifact.PreparedScenarioPlan;
-import org.savonitar.flink.stability.core.spec.resolution.ResolutionScope;
+import org.savonitar.flink.stability.core.spec.document.ResolutionScope;
 import org.savonitar.flink.stability.core.artifact.ResolvedArtifact;
 import org.savonitar.flink.stability.core.spec.resolution.ResolvedScenarioPlan;
 import org.savonitar.flink.stability.core.spec.resolution.ScenarioSide;
@@ -81,7 +84,7 @@ public final class ExecutableScenarioPlanCompiler {
     public ExecutableScenarioPlan compile(ResolvedScenarioPlan sourcePlan) {
         Objects.requireNonNull(sourcePlan, "sourcePlan");
         if (sourcePlan.scenario().isExperiment()) {
-            throw new RunnerCapabilityException(List.of(issue(
+            throw new SpecificationException(Stage.RUNNER_CAPABILITY, List.of(issue(
                     sourcePlan.scenario().template().source(),
                     ResolutionScope.COMMON,
                     "runner.topology.experiment-unsupported",
@@ -91,7 +94,7 @@ public final class ExecutableScenarioPlanCompiler {
 
         Path source = sourcePlan.scenario().template().source();
         ObjectNode document = sourcePlan.scenario().side(ScenarioSide.SINGLE).document();
-        List<RunnerCapabilityIssue> issues = new ArrayList<>();
+        List<Diagnostic> issues = new ArrayList<>();
         validateInvocation(source, document, issues);
         validateSetup(source, document, issues);
         validateWorkload(source, document, issues);
@@ -99,7 +102,7 @@ public final class ExecutableScenarioPlanCompiler {
         validateTerminalValidation(source, document, issues);
         ExpectationCompiler.validate(sourcePlan, issues);
         if (!issues.isEmpty()) {
-            throw new RunnerCapabilityException(issues);
+            throw new SpecificationException(Stage.RUNNER_CAPABILITY, issues);
         }
         return map(sourcePlan, document);
     }
@@ -147,7 +150,7 @@ public final class ExecutableScenarioPlanCompiler {
     private static void validateInvocation(
             Path source,
             ObjectNode document,
-            List<RunnerCapabilityIssue> issues) {
+            List<Diagnostic> issues) {
         requireEqualInteger(
                 source,
                 document.path("runs"),
@@ -169,7 +172,7 @@ public final class ExecutableScenarioPlanCompiler {
     private static void validateSetup(
             Path source,
             ObjectNode document,
-            List<RunnerCapabilityIssue> issues) {
+            List<Diagnostic> issues) {
         JsonNode proxies = document.at("/setup/proxies");
         if (proxies.isObject() && !proxies.isEmpty()) {
             issues.add(issue(
@@ -297,7 +300,7 @@ public final class ExecutableScenarioPlanCompiler {
     private static void validateWorkload(
             Path source,
             ObjectNode document,
-            List<RunnerCapabilityIssue> issues) {
+            List<Diagnostic> issues) {
         ObjectNode connectors = (ObjectNode) document.at("/subject/connectors");
         if (connectors.size() != 1) {
             issues.add(issue(
@@ -437,7 +440,7 @@ public final class ExecutableScenarioPlanCompiler {
             JsonNode value,
             String path,
             boolean hashmapStateBackend,
-            List<RunnerCapabilityIssue> issues) {
+            List<Diagnostic> issues) {
         if (!(value instanceof ObjectNode stateTtl) || !stateTtl.path("enabled").booleanValue()) {
             return;
         }
@@ -458,7 +461,7 @@ public final class ExecutableScenarioPlanCompiler {
             Path source,
             JsonNode value,
             String path,
-            List<RunnerCapabilityIssue> issues) {
+            List<Diagnostic> issues) {
         if (!(value instanceof ObjectNode watermarks)) {
             return;
         }
@@ -489,7 +492,7 @@ public final class ExecutableScenarioPlanCompiler {
             Path source,
             JsonNode value,
             String path,
-            List<RunnerCapabilityIssue> issues) {
+            List<Diagnostic> issues) {
         if (value == null) {
             return;
         }
@@ -516,7 +519,7 @@ public final class ExecutableScenarioPlanCompiler {
     private static void validatePhases(
             Path source,
             ObjectNode document,
-            List<RunnerCapabilityIssue> issues) {
+            List<Diagnostic> issues) {
         ArrayNode phases = (ArrayNode) document.get("phases");
         for (int phaseIndex = 0; phaseIndex < phases.size(); phaseIndex++) {
             ObjectNode phase = (ObjectNode) phases.get(phaseIndex);
@@ -535,7 +538,7 @@ public final class ExecutableScenarioPlanCompiler {
             ArrayNode steps,
             String stepsPath,
             String jobAlias,
-            List<RunnerCapabilityIssue> issues) {
+            List<Diagnostic> issues) {
         for (int index = 0; index < steps.size(); index++) {
             ObjectNode step = (ObjectNode) steps.get(index);
             String stepPath = stepsPath + "/" + index;
@@ -581,7 +584,7 @@ public final class ExecutableScenarioPlanCompiler {
             ObjectNode await,
             String path,
             String jobAlias,
-            List<RunnerCapabilityIssue> issues) {
+            List<Diagnostic> issues) {
         requireDuration(source, await.path("timeout"), path + "/timeout", issues);
         ObjectNode condition = (ObjectNode) await.get("condition");
         String type = condition.path("type").textValue();
@@ -621,7 +624,7 @@ public final class ExecutableScenarioPlanCompiler {
             Path source,
             ObjectNode kill,
             String path,
-            List<RunnerCapabilityIssue> issues) {
+            List<Diagnostic> issues) {
         ObjectNode target = (ObjectNode) kill.get("target");
         if (!"named".equals(target.path("kind").textValue())
                 || !"taskmanager".equals(target.path("role").textValue())
@@ -638,7 +641,7 @@ public final class ExecutableScenarioPlanCompiler {
             Path source,
             ObjectNode restart,
             String path,
-            List<RunnerCapabilityIssue> issues) {
+            List<Diagnostic> issues) {
         if (!"taskmanager".equals(restart.path("component").textValue())) {
             issues.add(issue(
                     source,
@@ -658,7 +661,7 @@ public final class ExecutableScenarioPlanCompiler {
     private static void validateTaskManagerLifecycle(
             Path source,
             ArrayNode phases,
-            List<RunnerCapabilityIssue> issues) {
+            List<Diagnostic> issues) {
         TaskManagerState state = TaskManagerState.active();
         for (int phaseIndex = 0; phaseIndex < phases.size(); phaseIndex++) {
             ObjectNode phase = (ObjectNode) phases.get(phaseIndex);
@@ -683,7 +686,7 @@ public final class ExecutableScenarioPlanCompiler {
             ArrayNode steps,
             String stepsPath,
             TaskManagerState initial,
-            List<RunnerCapabilityIssue> issues) {
+            List<Diagnostic> issues) {
         TaskManagerState state = initial;
         for (int index = 0; index < steps.size(); index++) {
             ObjectNode step = (ObjectNode) steps.get(index);
@@ -749,7 +752,7 @@ public final class ExecutableScenarioPlanCompiler {
     private static void validateTerminalValidation(
             Path source,
             ObjectNode document,
-            List<RunnerCapabilityIssue> issues) {
+            List<Diagnostic> issues) {
         ArrayNode validators = (ArrayNode) document.get("terminal_validations");
         if (validators.size() != 1) {
             issues.add(issue(
@@ -1036,7 +1039,7 @@ public final class ExecutableScenarioPlanCompiler {
                                 + artifact.sha256() + ", actual " + actualSha256);
             }
             WorkloadProtocolArtifactValidator.validate(jar);
-        } catch (RunnerCapabilityException exception) {
+        } catch (SpecificationException exception) {
             throw exception;
         } catch (WorkloadProtocolArtifactValidator.ValidationException exception) {
             throw capability(
@@ -1071,12 +1074,12 @@ public final class ExecutableScenarioPlanCompiler {
         }
     }
 
-    private static RunnerCapabilityException capability(
+    private static SpecificationException capability(
             PreparedScenarioPlan plan,
             String code,
             String path,
             String message) {
-        return new RunnerCapabilityException(List.of(issue(
+        return new SpecificationException(Stage.RUNNER_CAPABILITY, List.of(issue(
                 plan.scenarioPlan().scenario().template().source(), code, path, message)));
     }
 
@@ -1087,7 +1090,7 @@ public final class ExecutableScenarioPlanCompiler {
             String path,
             String code,
             String message,
-            List<RunnerCapabilityIssue> issues) {
+            List<Diagnostic> issues) {
         if (!BigInteger.valueOf(expected).equals(value.bigIntegerValue())) {
             issues.add(issue(source, code, path, message + ", found " + value));
         }
@@ -1097,7 +1100,7 @@ public final class ExecutableScenarioPlanCompiler {
             Path source,
             JsonNode value,
             String path,
-            List<RunnerCapabilityIssue> issues) {
+            List<Diagnostic> issues) {
         BigInteger integer = value.bigIntegerValue();
         if (integer.signum() < 1 || integer.compareTo(INT_MAX) > 0) {
             issues.add(issue(
@@ -1112,7 +1115,7 @@ public final class ExecutableScenarioPlanCompiler {
             Path source,
             JsonNode value,
             String path,
-            List<RunnerCapabilityIssue> issues) {
+            List<Diagnostic> issues) {
         BigInteger integer = value.bigIntegerValue();
         if (integer.signum() < 1 || integer.compareTo(LONG_MAX) > 0) {
             issues.add(issue(
@@ -1127,7 +1130,7 @@ public final class ExecutableScenarioPlanCompiler {
             Path source,
             JsonNode value,
             String path,
-            List<RunnerCapabilityIssue> issues) {
+            List<Diagnostic> issues) {
         BigInteger total = value.bigIntegerValue();
         if (total.signum() < 1
                 || total.compareTo(BigInteger.valueOf(
@@ -1148,7 +1151,7 @@ public final class ExecutableScenarioPlanCompiler {
             Path source,
             JsonNode value,
             String path,
-            List<RunnerCapabilityIssue> issues) {
+            List<Diagnostic> issues) {
         if (!value.isTextual()) {
             issues.add(issue(
                     source,
@@ -1197,7 +1200,7 @@ public final class ExecutableScenarioPlanCompiler {
         };
     }
 
-    private static RunnerCapabilityIssue issue(
+    private static Diagnostic issue(
             Path source,
             String code,
             String path,
@@ -1205,13 +1208,13 @@ public final class ExecutableScenarioPlanCompiler {
         return issue(source, ResolutionScope.SINGLE, code, path, message);
     }
 
-    private static RunnerCapabilityIssue issue(
+    private static Diagnostic issue(
             Path source,
             ResolutionScope scope,
             String code,
             String path,
             String message) {
-        return new RunnerCapabilityIssue(source, scope, code, path, message);
+        return new Diagnostic(source, scope, code, path, message);
     }
 
     private static String safeMessage(Exception exception) {

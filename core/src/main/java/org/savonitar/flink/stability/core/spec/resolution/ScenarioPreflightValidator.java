@@ -1,6 +1,10 @@
 package org.savonitar.flink.stability.core.spec.resolution;
 
+import org.savonitar.flink.stability.core.spec.document.Diagnostic;
 import org.savonitar.flink.stability.core.spec.document.ExpectedResultSpecification;
+import org.savonitar.flink.stability.core.spec.document.ResolutionScope;
+import org.savonitar.flink.stability.core.spec.document.SpecificationException;
+import org.savonitar.flink.stability.core.spec.document.SpecificationException.Stage;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
@@ -26,27 +30,27 @@ final class ScenarioPreflightValidator {
 
     ResolvedScenario validateScenario(ResolvedScenario scenario) {
         Objects.requireNonNull(scenario, "scenario");
-        List<PreflightIssue> issues = validateResolvedScenario(scenario);
+        List<Diagnostic> issues = validateResolvedScenario(scenario);
         if (!issues.isEmpty()) {
-            throw new ScenarioPreflightException(issues);
+            throw new SpecificationException(Stage.PREFLIGHT, issues);
         }
         return scenario;
     }
 
     ResolvedScenarioPlan validate(ResolvedScenarioPlan plan) {
         Objects.requireNonNull(plan, "plan");
-        List<PreflightIssue> issues = validateResolvedScenario(plan.scenario());
+        List<Diagnostic> issues = validateResolvedScenario(plan.scenario());
         List<SideIndex> sideIndexes = indexResolvedScenario(plan.scenario(), new ArrayList<>());
 
         validateExpectedContract(plan, sideIndexes, issues);
         if (!issues.isEmpty()) {
-            throw new ScenarioPreflightException(issues);
+            throw new SpecificationException(Stage.PREFLIGHT, issues);
         }
         return plan;
     }
 
-    private static List<PreflightIssue> validateResolvedScenario(ResolvedScenario scenario) {
-        List<PreflightIssue> issues = new ArrayList<>();
+    private static List<Diagnostic> validateResolvedScenario(ResolvedScenario scenario) {
+        List<Diagnostic> issues = new ArrayList<>();
         List<SideIndex> indexes = indexResolvedScenario(scenario, issues);
         Path source = scenario.template().source();
         validateInvocationPolicy(source, scenario, issues);
@@ -63,7 +67,7 @@ final class ScenarioPreflightValidator {
     private static void validateInvocationPolicy(
             Path source,
             ResolvedScenario scenario,
-            List<PreflightIssue> issues) {
+            List<Diagnostic> issues) {
         if (!scenario.isExperiment()) {
             return;
         }
@@ -84,7 +88,7 @@ final class ScenarioPreflightValidator {
     }
 
     private static List<SideIndex> indexResolvedScenario(
-            ResolvedScenario scenario, List<PreflightIssue> issues) {
+            ResolvedScenario scenario, List<Diagnostic> issues) {
         Path source = scenario.template().source();
         List<SideIndex> indexes = new ArrayList<>();
         for (ResolvedSide side : scenario.sides()) {
@@ -93,9 +97,9 @@ final class ScenarioPreflightValidator {
         return indexes;
     }
 
-    static List<PreflightIssue> validateResolvedSide(
+    static List<Diagnostic> validateResolvedSide(
             Path source, ResolutionScope scope, ObjectNode document) {
-        List<PreflightIssue> issues = new ArrayList<>();
+        List<Diagnostic> issues = new ArrayList<>();
         SideIndex index = indexSide(source, scope, document, issues);
         validateSide(source, scope, index, issues);
         return List.copyOf(issues);
@@ -105,7 +109,7 @@ final class ScenarioPreflightValidator {
             Path source,
             ResolutionScope scope,
             ObjectNode document,
-            List<PreflightIssue> issues) {
+            List<Diagnostic> issues) {
         Map<String, ClusterIndex> clusters = new LinkedHashMap<>();
         List<InputEndpoint> inputs = new ArrayList<>();
         ObjectNode clusterNodes = objectAt(document, "/setup/kafka/clusters");
@@ -278,7 +282,7 @@ final class ScenarioPreflightValidator {
             Path source,
             ResolutionScope scope,
             SideIndex index,
-            List<PreflightIssue> issues) {
+            List<Diagnostic> issues) {
         validateProxies(source, scope, index, issues);
         validateJobs(source, scope, index, issues);
         validateInputSources(source, scope, index, issues);
@@ -290,7 +294,7 @@ final class ScenarioPreflightValidator {
             Path source,
             ResolutionScope scope,
             SideIndex index,
-            List<PreflightIssue> issues) {
+            List<Diagnostic> issues) {
         index.proxies().forEach((alias, proxy) -> {
             boolean proxyClusterExists = index.clusters().containsKey(proxy.cluster());
             if (!proxyClusterExists) {
@@ -332,7 +336,7 @@ final class ScenarioPreflightValidator {
             Path source,
             ResolutionScope scope,
             SideIndex index,
-            List<PreflightIssue> issues) {
+            List<Diagnostic> issues) {
         index.jobs().values().forEach(job -> {
             validateTopicReference(source, scope, index, job.source().cluster(), job.source().topic(),
                     job.source().path(), "job source", issues);
@@ -352,7 +356,7 @@ final class ScenarioPreflightValidator {
             Path source,
             ResolutionScope scope,
             SideIndex index,
-            List<PreflightIssue> issues) {
+            List<Diagnostic> issues) {
         if (index.inputs().size() > 1) {
             List<String> inputs = index.inputs().stream()
                     .map(input -> input.cluster() + "/" + input.topic())
@@ -391,7 +395,7 @@ final class ScenarioPreflightValidator {
             Path source,
             ResolutionScope scope,
             SideIndex index,
-            List<PreflightIssue> issues) {
+            List<Diagnostic> issues) {
         boolean customInput = index.inputs().size() == 1
                 && index.inputs().getFirst().mode().equals("custom");
         for (TerminalValidatorIndex validator : index.terminalValidators()) {
@@ -406,7 +410,7 @@ final class ScenarioPreflightValidator {
             SideIndex index,
             TerminalValidatorIndex validator,
             boolean validateManifestLink,
-            List<PreflightIssue> issues) {
+            List<Diagnostic> issues) {
         ObjectNode config = validator.config();
         switch (validator.type()) {
             case "kafka.id-set", "kafka.record-count" -> validateTopicReference(
@@ -463,7 +467,7 @@ final class ScenarioPreflightValidator {
             SideIndex index,
             TerminalValidatorIndex validator,
             InputEndpoint input,
-            List<PreflightIssue> issues) {
+            List<Diagnostic> issues) {
         if (input == null || input.mode().equals("custom")) {
             issues.add(issue(source, scope, "preflight.input.manifest-not-available",
                     validator.path() + "/expected",
@@ -505,7 +509,7 @@ final class ScenarioPreflightValidator {
             Path source,
             ResolutionScope scope,
             SideIndex index,
-            List<PreflightIssue> issues) {
+            List<Diagnostic> issues) {
         ArrayNode phases = (ArrayNode) index.document().get("phases");
         Map<String, String> phasePaths = new LinkedHashMap<>();
         for (int phaseIndex = 0; phaseIndex < phases.size(); phaseIndex++) {
@@ -543,7 +547,7 @@ final class ScenarioPreflightValidator {
             ResolutionScope scope,
             SideIndex index,
             ArrayNode phases,
-            List<PreflightIssue> issues) {
+            List<Diagnostic> issues) {
         String setupTarget = index.document().at("/setup/flink/image").textValue();
         FlinkTargetState state = new FlinkTargetState(setupTarget, setupTarget);
         for (int phaseIndex = 0; phaseIndex < phases.size(); phaseIndex++) {
@@ -566,7 +570,7 @@ final class ScenarioPreflightValidator {
             ArrayNode steps,
             String stepsPath,
             FlinkTargetState initial,
-            List<PreflightIssue> issues) {
+            List<Diagnostic> issues) {
         FlinkTargetState state = initial;
         for (int stepIndex = 0; stepIndex < steps.size(); stepIndex++) {
             ObjectNode step = (ObjectNode) steps.get(stepIndex);
@@ -617,7 +621,7 @@ final class ScenarioPreflightValidator {
             ObjectNode restart,
             String path,
             FlinkTargetState state,
-            List<PreflightIssue> issues) {
+            List<Diagnostic> issues) {
         String component = restart.path("component").textValue();
         String image = optionalText(restart, "image");
         if ("jobmanager".equals(component)) {
@@ -661,7 +665,7 @@ final class ScenarioPreflightValidator {
             Path source,
             ResolutionScope scope,
             ArrayNode phases,
-            List<PreflightIssue> issues) {
+            List<Diagnostic> issues) {
         List<StateArtifactDeclaration> declarations = new ArrayList<>();
         Map<StateArtifactKey, StateArtifactDeclaration> firstByKey = new LinkedHashMap<>();
         Set<StateArtifactKey> invalidKeys = new LinkedHashSet<>();
@@ -691,7 +695,7 @@ final class ScenarioPreflightValidator {
             List<StateArtifactDeclaration> declarations,
             Map<StateArtifactKey, StateArtifactDeclaration> firstByKey,
             Set<StateArtifactKey> invalidKeys,
-            List<PreflightIssue> issues) {
+            List<Diagnostic> issues) {
         for (int stepIndex = 0; stepIndex < steps.size(); stepIndex++) {
             ObjectNode step = (ObjectNode) steps.get(stepIndex);
             String stepPath = stepsPath + "/" + stepIndex;
@@ -753,7 +757,7 @@ final class ScenarioPreflightValidator {
             String stepsPath,
             StateArtifactLedger ledger,
             Set<StateArtifactKey> priorArtifacts,
-            List<PreflightIssue> issues) {
+            List<Diagnostic> issues) {
         for (int stepIndex = 0; stepIndex < steps.size(); stepIndex++) {
             ObjectNode step = (ObjectNode) steps.get(stepIndex);
             String stepPath = stepsPath + "/" + stepIndex;
@@ -829,7 +833,7 @@ final class ScenarioPreflightValidator {
             SideIndex index,
             ObjectNode await,
             String path,
-            List<PreflightIssue> issues) {
+            List<Diagnostic> issues) {
         ObjectNode condition = (ObjectNode) await.get("condition");
         String conditionPath = path + "/condition";
         switch (condition.path("type").textValue()) {
@@ -894,7 +898,7 @@ final class ScenarioPreflightValidator {
             SideIndex index,
             ObjectNode target,
             String path,
-            List<PreflightIssue> issues) {
+            List<Diagnostic> issues) {
         if ("selector".equals(target.path("kind").textValue())) {
             issues.add(issue(source, ResolutionScope.COMMON,
                     "capability.runtime-target-selector.unsupported",
@@ -954,7 +958,7 @@ final class ScenarioPreflightValidator {
             SideIndex index,
             ObjectNode networkFault,
             String path,
-            List<PreflightIssue> issues) {
+            List<Diagnostic> issues) {
         String proxyAlias = networkFault.path("proxy").textValue();
         ProxyIndex proxy = index.proxies().get(proxyAlias);
         if (proxy == null) {
@@ -1166,7 +1170,7 @@ final class ScenarioPreflightValidator {
             ObjectNode producer,
             String path,
             Set<StateArtifactKey> priorArtifacts,
-            List<PreflightIssue> issues) {
+            List<Diagnostic> issues) {
         String job = producer.path("job").textValue();
         validateJobReference(source, index, job, path + "/job", "State step", issues);
         if (producer.has("as")) {
@@ -1182,7 +1186,7 @@ final class ScenarioPreflightValidator {
             String path,
             StateArtifactLedger ledger,
             Set<StateArtifactKey> priorArtifacts,
-            List<PreflightIssue> issues) {
+            List<Diagnostic> issues) {
         String job = restore.path("job").textValue();
         if (!validateJobReference(source, index, job, path + "/job", "Restore step", issues)) {
             return;
@@ -1241,7 +1245,7 @@ final class ScenarioPreflightValidator {
             SideIndex index,
             ObjectNode restart,
             String path,
-            List<PreflightIssue> issues) {
+            List<Diagnostic> issues) {
         if ("kafka".equals(restart.path("component").textValue())
                 && index.clusters().size() != 1) {
             issues.add(issue(source, ResolutionScope.COMMON,
@@ -1258,7 +1262,7 @@ final class ScenarioPreflightValidator {
             String job,
             String path,
             String owner,
-            List<PreflightIssue> issues) {
+            List<Diagnostic> issues) {
         if (index.jobs().containsKey(job)) {
             return true;
         }
@@ -1280,7 +1284,7 @@ final class ScenarioPreflightValidator {
     private static void validateExpectedContract(
             ResolvedScenarioPlan plan,
             List<SideIndex> sideIndexes,
-            List<PreflightIssue> issues) {
+            List<Diagnostic> issues) {
         ExpectedResultSpecification specification = plan.selectedExpectation().specification();
         ObjectNode expectedDocument = specification.document();
         Set<String> terminalTypes = new LinkedHashSet<>();
@@ -1319,7 +1323,7 @@ final class ScenarioPreflightValidator {
             Set<String> terminalTypes,
             Map<String, Set<String>> allowedReasons,
             boolean customInput,
-            List<PreflightIssue> issues) {
+            List<Diagnostic> issues) {
         if (expectation.has("outcome")) {
             validateFailExpectation(
                     source, ResolutionScope.COMMON, path, expectation,
@@ -1340,7 +1344,7 @@ final class ScenarioPreflightValidator {
             Set<String> terminalTypes,
             Map<String, Set<String>> allowedReasons,
             boolean customInput,
-            List<PreflightIssue> issues) {
+            List<Diagnostic> issues) {
         if (!"fail".equals(expectation.path("outcome").textValue())) {
             return;
         }
@@ -1373,7 +1377,7 @@ final class ScenarioPreflightValidator {
             String topic,
             String path,
             String owner,
-            List<PreflightIssue> issues) {
+            List<Diagnostic> issues) {
         ClusterIndex clusterIndex = index.clusters().get(cluster);
         if (clusterIndex == null) {
             issues.add(issue(source, scope, "preflight.reference.kafka-cluster-not-found",
@@ -1401,7 +1405,7 @@ final class ScenarioPreflightValidator {
             String proxyAlias,
             String path,
             String owner,
-            List<PreflightIssue> issues) {
+            List<Diagnostic> issues) {
         if (proxyAlias == null) {
             return;
         }
@@ -1447,13 +1451,13 @@ final class ScenarioPreflightValidator {
         return value.replace("~", "~0").replace("/", "~1");
     }
 
-    private static PreflightIssue issue(
+    private static Diagnostic issue(
             Path source,
             ResolutionScope scope,
             String code,
             String path,
             String message) {
-        return new PreflightIssue(source, scope, code, path, message);
+        return new Diagnostic(source, scope, code, path, message);
     }
 
     private record ClusterIndex(BigInteger brokers, Map<String, String> topics) {}

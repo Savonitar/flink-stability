@@ -1,8 +1,12 @@
 package org.savonitar.flink.stability.core.spec.resolution;
 
+import org.savonitar.flink.stability.core.spec.document.Diagnostic;
 import org.savonitar.flink.stability.core.spec.document.ExpectedResultSpecification;
+import org.savonitar.flink.stability.core.spec.document.ResolutionScope;
 import org.savonitar.flink.stability.core.spec.document.ScenarioBundle;
 import org.savonitar.flink.stability.core.spec.document.ScenarioSpecification;
+import org.savonitar.flink.stability.core.spec.document.SpecificationException;
+import org.savonitar.flink.stability.core.spec.document.SpecificationException.Stage;
 import org.savonitar.flink.stability.core.spec.document.SpecificationLoader;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -25,8 +29,8 @@ import java.util.stream.Stream;
 import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
-import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.savonitar.flink.stability.core.spec.document.SpecificationAssertions.assertFailsAt;
 
 class ScenarioNetworkPreflightValidatorTest {
     private static final String NETWORK_PATH = "$/phases/0/steps/0/network_fault";
@@ -46,7 +50,7 @@ class ScenarioNetworkPreflightValidatorTest {
 
     @Test
     void rejectsDuplicateResolvedProxyListenAddresses() {
-        ScenarioPreflightException exception = reject(document -> {
+        SpecificationException exception = reject(document -> {
             addManagedProxy(document, "first-proxy", "main", "127.0.0.1:19092");
             addManagedProxy(document, "second-proxy", "main", "127.0.0.1:19092");
         });
@@ -60,7 +64,7 @@ class ScenarioNetworkPreflightValidatorTest {
 
     @Test
     void comparesProxyListenerHostsUsingDnsIdentity() {
-        ScenarioPreflightException exception = reject(document -> {
+        SpecificationException exception = reject(document -> {
             addManagedProxy(document, "first-proxy", "main", "KAFKA-PROXY.:19092");
             addManagedProxy(document, "second-proxy", "main", "kafka-proxy:19092");
         });
@@ -74,7 +78,7 @@ class ScenarioNetworkPreflightValidatorTest {
 
     @Test
     void rejectsAnExplicitBootstrapThatCyclesToTheProxyListenAddress() {
-        ScenarioPreflightException exception = reject(document ->
+        SpecificationException exception = reject(document ->
                 addAddressProxy(
                         document,
                         "kafka-proxy",
@@ -91,7 +95,7 @@ class ScenarioNetworkPreflightValidatorTest {
 
     @Test
     void comparesBootstrapAndListenerHostsUsingDnsIdentity() {
-        ScenarioPreflightException exception = reject(document ->
+        SpecificationException exception = reject(document ->
                 addAddressProxy(
                         document,
                         "kafka-proxy",
@@ -129,7 +133,7 @@ class ScenarioNetworkPreflightValidatorTest {
 
     @Test
     void rejectsMissingProxyBeforeEndpointMatching() {
-        ScenarioPreflightException exception = reject(document -> addNetworkFault(
+        SpecificationException exception = reject(document -> addNetworkFault(
                 replaceSteps(document),
                 "missing-proxy",
                 "main",
@@ -143,14 +147,14 @@ class ScenarioNetworkPreflightValidatorTest {
                 ResolutionScope.COMMON,
                 "preflight.reference.proxy-not-found",
                 NETWORK_PATH + "/proxy");
-        assertEquals(1, exception.issues().stream()
+        assertEquals(1, exception.diagnostics().stream()
                 .filter(issue -> issue.path().startsWith(NETWORK_PATH))
                 .count());
     }
 
     @Test
     void rejectsMissingOrMismatchedTargetClustersBeforeEndpointMatching() {
-        ScenarioPreflightException missing = reject(document -> {
+        SpecificationException missing = reject(document -> {
             addManagedProxy(document, "kafka-proxy", "main", "127.0.0.1:19092");
             addNetworkFault(
                     replaceSteps(document),
@@ -167,7 +171,7 @@ class ScenarioNetworkPreflightValidatorTest {
                 "preflight.reference.kafka-cluster-not-found",
                 NETWORK_PATH + "/target/cluster");
 
-        ScenarioPreflightException mismatched = reject(document -> {
+        SpecificationException mismatched = reject(document -> {
             addKafkaCluster(document, "other");
             addManagedProxy(document, "kafka-proxy", "main", "127.0.0.1:19092");
             addNetworkFault(
@@ -202,7 +206,7 @@ class ScenarioNetworkPreflightValidatorTest {
                     null);
         });
 
-        ScenarioPreflightException exception = reject(document -> {
+        SpecificationException exception = reject(document -> {
             addManagedProxy(document, "kafka-proxy", "main", "127.0.0.1:19092");
             sink(document).put("connect_via_proxy", "kafka-proxy");
             addNetworkFault(
@@ -275,7 +279,7 @@ class ScenarioNetworkPreflightValidatorTest {
 
     @Test
     void distinguishesDirectWrongProxyMissingSelectorAndUnusedProxyRoutes() {
-        ScenarioPreflightException direct = reject(document -> {
+        SpecificationException direct = reject(document -> {
             addManagedProxy(document, "kafka-proxy", "main", "127.0.0.1:19092");
             addNetworkFault(
                     replaceSteps(document),
@@ -292,7 +296,7 @@ class ScenarioNetworkPreflightValidatorTest {
                 "preflight.network.endpoint-bypasses-proxy",
                 NETWORK_PATH + "/match");
 
-        ScenarioPreflightException wrongProxy = reject(document -> {
+        SpecificationException wrongProxy = reject(document -> {
             addManagedProxy(document, "fault-proxy", "main", "127.0.0.1:19092");
             addManagedProxy(document, "other-proxy", "main", "127.0.0.1:29092");
             sink(document).put("connect_via_proxy", "other-proxy");
@@ -311,7 +315,7 @@ class ScenarioNetworkPreflightValidatorTest {
                 "preflight.network.endpoint-bypasses-proxy",
                 NETWORK_PATH + "/match");
 
-        ScenarioPreflightException missingSelector = reject(document -> {
+        SpecificationException missingSelector = reject(document -> {
             addManagedProxy(document, "kafka-proxy", "main", "127.0.0.1:19092");
             source(document).put("connect_via_proxy", "kafka-proxy");
             addNetworkFault(
@@ -329,7 +333,7 @@ class ScenarioNetworkPreflightValidatorTest {
                 "preflight.network.endpoint-not-found",
                 NETWORK_PATH + "/match");
 
-        ScenarioPreflightException unusedProxy = reject(document -> {
+        SpecificationException unusedProxy = reject(document -> {
             addManagedProxy(document, "kafka-proxy", "main", "127.0.0.1:19092");
             addNetworkFault(
                     replaceSteps(document),
@@ -367,7 +371,7 @@ class ScenarioNetworkPreflightValidatorTest {
     @ParameterizedTest(name = "rejects topic selector for {0}")
     @MethodSource("topiclessTransactionApis")
     void rejectsTopicsForTransactionApisWithoutSafelyMatchableTopicFields(String api) {
-        ScenarioPreflightException exception = reject(document -> {
+        SpecificationException exception = reject(document -> {
             addManagedProxy(document, "kafka-proxy", "main", "127.0.0.1:19092");
             sink(document).put("connect_via_proxy", "kafka-proxy");
             addNetworkFault(
@@ -414,7 +418,7 @@ class ScenarioNetworkPreflightValidatorTest {
                     "minimal");
         });
 
-        ScenarioPreflightException wrongSinkTopic = reject(document -> {
+        SpecificationException wrongSinkTopic = reject(document -> {
             addManagedProxy(document, "kafka-proxy", "main", "127.0.0.1:19092");
             sink(document).put("connect_via_proxy", "kafka-proxy");
             addNetworkFault(
@@ -432,7 +436,7 @@ class ScenarioNetworkPreflightValidatorTest {
                 "preflight.network.endpoint-not-found",
                 NETWORK_PATH + "/match");
 
-        ScenarioPreflightException wrongSourceTopic = reject(document -> {
+        SpecificationException wrongSourceTopic = reject(document -> {
             addManagedProxy(document, "kafka-proxy", "main", "127.0.0.1:19092");
             sink(document).put("connect_via_proxy", "kafka-proxy");
             addNetworkFault(
@@ -453,7 +457,7 @@ class ScenarioNetworkPreflightValidatorTest {
 
     @Test
     void restrictsTransactionPrefixesAndTransactionApisToExactlyOnceSinks() {
-        ScenarioPreflightException prefixOnProduce = reject(document -> {
+        SpecificationException prefixOnProduce = reject(document -> {
             addManagedProxy(document, "kafka-proxy", "main", "127.0.0.1:19092");
             sink(document).put("connect_via_proxy", "kafka-proxy");
             addNetworkFault(
@@ -471,7 +475,7 @@ class ScenarioNetworkPreflightValidatorTest {
                 "preflight.network.transactional-prefix-unsupported",
                 NETWORK_PATH + "/match/transactional_id_prefix");
 
-        ScenarioPreflightException wrongPrefix = reject(document -> {
+        SpecificationException wrongPrefix = reject(document -> {
             addManagedProxy(document, "kafka-proxy", "main", "127.0.0.1:19092");
             sink(document).put("connect_via_proxy", "kafka-proxy");
             addNetworkFault(
@@ -489,7 +493,7 @@ class ScenarioNetworkPreflightValidatorTest {
                 "preflight.network.endpoint-not-found",
                 NETWORK_PATH + "/match");
 
-        ScenarioPreflightException nonTransactionalSink = reject(document -> {
+        SpecificationException nonTransactionalSink = reject(document -> {
             ObjectNode sink = sink(document);
             sink.put("delivery_guarantee", "AT_LEAST_ONCE");
             sink.remove("transactional_id_prefix");
@@ -533,7 +537,7 @@ class ScenarioNetworkPreflightValidatorTest {
     @ParameterizedTest(name = "rejects unsafe error {1} for {0}")
     @MethodSource("unsafeErrorPairs")
     void rejectsUnregisteredErrorResponsePairs(String api, String error) {
-        ScenarioPreflightException exception = reject(document -> {
+        SpecificationException exception = reject(document -> {
             addManagedProxy(document, "kafka-proxy", "main", "127.0.0.1:19092");
             routeForApi(document, api, "kafka-proxy");
             ObjectNode networkFault = addNetworkFault(
@@ -556,7 +560,7 @@ class ScenarioNetworkPreflightValidatorTest {
 
     @Test
     void validatesNetworkFaultsAtTheirExactNestedLoopPath() {
-        ScenarioPreflightException exception = reject(document -> {
+        SpecificationException exception = reject(document -> {
             ObjectNode loop = replaceSteps(document).addObject().putObject("loop");
             loop.put("times", 1);
             addNetworkFault(
@@ -592,7 +596,7 @@ class ScenarioNetworkPreflightValidatorTest {
 
     @Test
     void reportsParameterizedBrokerInventoryFailureOnlyForTheCandidateSide() {
-        ScenarioPreflightException exception = reject(document -> {
+        SpecificationException exception = reject(document -> {
             addBrokerCountParameter(document, 2);
             ObjectNode experiment = document.putObject("experiment");
             experiment.put("claim", "Both broker topologies reach the declared network target.");
@@ -617,7 +621,7 @@ class ScenarioNetworkPreflightValidatorTest {
                 ResolutionScope.CANDIDATE,
                 "preflight.network.broker-not-found",
                 NETWORK_PATH + "/target/broker");
-        assertTrue(exception.issues().stream()
+        assertTrue(exception.diagnostics().stream()
                 .filter(issue -> issue.code().equals("preflight.network.broker-not-found"))
                 .allMatch(issue -> issue.scope() == ResolutionScope.CANDIDATE));
     }
@@ -647,16 +651,16 @@ class ScenarioNetworkPreflightValidatorTest {
         ResolvedScenario resolved = parameterResolver.resolve(
                 scenario, ResolutionRequest.none());
 
-        ExpectedResultSelectionException exception = assertThrows(
-                ExpectedResultSelectionException.class,
+        SpecificationException exception = assertFailsAt(
+                Stage.EXPECTATION,
                 () -> expectationSelector.select(new ScenarioBundle(scenario, expected), resolved));
 
-        ExpectationIssue issue = exception.issues().stream()
+        Diagnostic issue = exception.diagnostics().stream()
                 .filter(candidate -> candidate.code().equals("expectation.case-value-invalid")
                         && candidate.path().equals("$/cases/0/when"))
                 .findFirst()
                 .orElseThrow(() -> new AssertionError(
-                        "Expected dormant network preflight issue but got " + exception.issues()));
+                        "Expected dormant network preflight issue but got " + exception.diagnostics()));
         assertTrue(issue.message().contains("preflight.network.broker-not-found"));
     }
 
@@ -686,10 +690,10 @@ class ScenarioNetworkPreflightValidatorTest {
                 Arguments.of("produce", "unknown-error"));
     }
 
-    private ScenarioPreflightException reject(Consumer<ObjectNode> changes) {
+    private SpecificationException reject(Consumer<ObjectNode> changes) {
         ResolvedScenario scenario = resolve(changes);
-        return assertThrows(
-                ScenarioPreflightException.class,
+        return assertFailsAt(
+                Stage.PREFLIGHT,
                 () -> validator.validateScenario(scenario));
     }
 
@@ -822,19 +826,19 @@ class ScenarioNetworkPreflightValidatorTest {
                 "/setup/kafka/clusters/main/topics/0/input_source");
     }
 
-    private static PreflightIssue assertHasIssue(
-            ScenarioPreflightException exception,
+    private static Diagnostic assertHasIssue(
+            SpecificationException exception,
             ResolutionScope scope,
             String code,
             String path) {
-        return exception.issues().stream()
+        return exception.diagnostics().stream()
                 .filter(issue -> issue.scope() == scope
                         && issue.code().equals(code)
                         && issue.path().equals(path))
                 .findFirst()
                 .orElseThrow(() -> new AssertionError(
                         "Expected " + scope + ":" + code + " at " + path
-                                + " but got " + exception.issues()));
+                                + " but got " + exception.diagnostics()));
     }
 
     private Path resource(String name) {

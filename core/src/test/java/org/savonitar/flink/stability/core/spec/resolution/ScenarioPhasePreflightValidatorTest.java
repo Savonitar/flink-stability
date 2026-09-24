@@ -1,6 +1,10 @@
 package org.savonitar.flink.stability.core.spec.resolution;
 
+import org.savonitar.flink.stability.core.spec.document.Diagnostic;
+import org.savonitar.flink.stability.core.spec.document.ResolutionScope;
 import org.savonitar.flink.stability.core.spec.document.ScenarioSpecification;
+import org.savonitar.flink.stability.core.spec.document.SpecificationException;
+import org.savonitar.flink.stability.core.spec.document.SpecificationException.Stage;
 import org.savonitar.flink.stability.core.spec.document.SpecificationLoader;
 import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
@@ -13,7 +17,7 @@ import java.util.function.Consumer;
 import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
-import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.savonitar.flink.stability.core.spec.document.SpecificationAssertions.assertFailsAt;
 
 class ScenarioPhasePreflightValidatorTest {
     private final SpecificationLoader loader = new SpecificationLoader();
@@ -23,7 +27,7 @@ class ScenarioPhasePreflightValidatorTest {
 
     @Test
     void rejectsDuplicatePhaseNames() {
-        ScenarioPreflightException exception = reject(document ->
+        SpecificationException exception = reject(document ->
                 phases(document).add(phase(document).deepCopy()));
 
         assertHasIssue(
@@ -35,7 +39,7 @@ class ScenarioPhasePreflightValidatorTest {
 
     @Test
     void rejectsAllMissingJobReferencesIncludingOnNestedSteps() {
-        ScenarioPreflightException exception = reject(document -> {
+        SpecificationException exception = reject(document -> {
             ArrayNode outer = replaceSteps(document);
             ObjectNode loop = outer.addObject().putObject("loop");
             loop.put("times", 1);
@@ -74,7 +78,7 @@ class ScenarioPhasePreflightValidatorTest {
                 nested + "6/await/condition/job");
         assertHasIssue(exception, ResolutionScope.COMMON, "preflight.reference.job-not-found",
                 nested + "7/await/condition/job");
-        assertEquals(8, exception.issues().stream()
+        assertEquals(8, exception.diagnostics().stream()
                 .filter(issue -> issue.code().equals("preflight.reference.job-not-found"))
                 .count());
     }
@@ -96,7 +100,7 @@ class ScenarioPhasePreflightValidatorTest {
             condition.put("count", 1);
         });
 
-        ScenarioPreflightException exception = reject(document -> {
+        SpecificationException exception = reject(document -> {
             ObjectNode condition = addAwait(replaceSteps(document), "record-threshold");
             condition.put("cluster", "main");
             condition.put("topic", "missing");
@@ -113,7 +117,7 @@ class ScenarioPhasePreflightValidatorTest {
     void validatesKafkaTransactionAwaitClusterAndPrefix() {
         assertAccepts(document -> addTransactionAwait(replaceSteps(document), "main", "minimal"));
 
-        ScenarioPreflightException missingPrefix = reject(document ->
+        SpecificationException missingPrefix = reject(document ->
                 addTransactionAwait(replaceSteps(document), "main", "other-prefix"));
         assertHasIssue(
                 missingPrefix,
@@ -121,14 +125,14 @@ class ScenarioPhasePreflightValidatorTest {
                 "preflight.await.transactional-sink-not-found",
                 "$/phases/0/steps/0/await/condition/transactional_id_prefix");
 
-        ScenarioPreflightException missingCluster = reject(document ->
+        SpecificationException missingCluster = reject(document ->
                 addTransactionAwait(replaceSteps(document), "missing", "other-prefix"));
         assertHasIssue(
                 missingCluster,
                 ResolutionScope.SINGLE,
                 "preflight.reference.kafka-cluster-not-found",
                 "$/phases/0/steps/0/await/condition/cluster");
-        assertFalse(missingCluster.issues().stream().anyMatch(issue ->
+        assertFalse(missingCluster.diagnostics().stream().anyMatch(issue ->
                 issue.code().equals("preflight.await.transactional-sink-not-found")));
     }
 
@@ -136,7 +140,7 @@ class ScenarioPhasePreflightValidatorTest {
     void rejectsOnlyTaskmanagerCountsAboveTheResolvedTopology() {
         assertAccepts(document -> addTaskmanagerCountAwait(replaceSteps(document), 1));
 
-        ScenarioPreflightException exception = reject(document ->
+        SpecificationException exception = reject(document ->
                 addTaskmanagerCountAwait(replaceSteps(document), 2));
         assertHasIssue(
                 exception,
@@ -147,7 +151,7 @@ class ScenarioPhasePreflightValidatorTest {
 
     @Test
     void rejectsRuntimeSelectorsWithoutCascadingIntoSelectorDetails() {
-        ScenarioPreflightException exception = reject(document -> {
+        SpecificationException exception = reject(document -> {
             ObjectNode target = replaceSteps(document)
                     .addObject().putObject("kill").putObject("target");
             target.put("kind", "selector");
@@ -163,7 +167,7 @@ class ScenarioPhasePreflightValidatorTest {
                 ResolutionScope.COMMON,
                 "capability.runtime-target-selector.unsupported",
                 "$/phases/0/steps/0/kill/target/kind");
-        assertEquals(1, exception.issues().stream()
+        assertEquals(1, exception.diagnostics().stream()
                 .filter(issue -> issue.path().startsWith("$/phases/0/steps/0/kill/target"))
                 .count());
     }
@@ -175,7 +179,7 @@ class ScenarioPhasePreflightValidatorTest {
             addNamedKill(replaceSteps(document), "taskmanager", "taskmanager-2");
         });
 
-        ScenarioPreflightException wrongRole = reject(document ->
+        SpecificationException wrongRole = reject(document ->
                 addNamedKill(replaceSteps(document), "taskmanager", "broker-1"));
         assertHasIssue(
                 wrongRole,
@@ -183,7 +187,7 @@ class ScenarioPhasePreflightValidatorTest {
                 "preflight.target.named-not-found",
                 "$/phases/0/steps/0/kill/target/name");
 
-        ScenarioPreflightException aboveCount = reject(document -> {
+        SpecificationException aboveCount = reject(document -> {
             document.withObject("setup").withObject("flink").put("taskmanagers", 2);
             addNamedKill(replaceSteps(document), "taskmanager", "taskmanager-3");
         });
@@ -204,7 +208,7 @@ class ScenarioPhasePreflightValidatorTest {
             addNamedKill(replaceSteps(document), "broker", "broker-2");
         });
 
-        ScenarioPreflightException exception = reject(document -> {
+        SpecificationException exception = reject(document -> {
             addKafkaCluster(document, "other");
             addNamedKill(replaceSteps(document), "broker", "broker-1");
         });
@@ -219,7 +223,7 @@ class ScenarioPhasePreflightValidatorTest {
     void acceptsSingleClusterKafkaRestartAndRejectsTwoClusterAmbiguity() {
         assertAccepts(document -> addRestart(replaceSteps(document), "kafka"));
 
-        ScenarioPreflightException exception = reject(document -> {
+        SpecificationException exception = reject(document -> {
             addKafkaCluster(document, "other");
             addRestart(replaceSteps(document), "kafka");
         });
@@ -241,7 +245,7 @@ class ScenarioPhasePreflightValidatorTest {
 
     @Test
     void distinguishesForwardUnknownTypeAndJobStateArtifactReferences() {
-        ScenarioPreflightException forward = reject(document -> {
+        SpecificationException forward = reject(document -> {
             ArrayNode steps = replaceSteps(document);
             addNamedRestore(steps, "eos-job", "checkpoint", "later");
             addCheckpoint(steps, "eos-job", "later");
@@ -252,7 +256,7 @@ class ScenarioPhasePreflightValidatorTest {
                 "preflight.state-artifact.not-prior",
                 "$/phases/0/steps/0/restore/from/name");
 
-        ScenarioPreflightException unknown = reject(document ->
+        SpecificationException unknown = reject(document ->
                 addNamedRestore(replaceSteps(document), "eos-job", "checkpoint", "unknown"));
         assertHasIssue(
                 unknown,
@@ -260,7 +264,7 @@ class ScenarioPhasePreflightValidatorTest {
                 "preflight.state-artifact.not-found",
                 "$/phases/0/steps/0/restore/from/name");
 
-        ScenarioPreflightException wrongType = reject(document -> {
+        SpecificationException wrongType = reject(document -> {
             ArrayNode steps = replaceSteps(document);
             addCheckpoint(steps, "eos-job", "before-failure");
             addNamedRestore(steps, "eos-job", "savepoint", "before-failure");
@@ -271,7 +275,7 @@ class ScenarioPhasePreflightValidatorTest {
                 "preflight.state-artifact.type-mismatch",
                 "$/phases/0/steps/1/restore/from/name");
 
-        ScenarioPreflightException wrongJob = reject(document -> {
+        SpecificationException wrongJob = reject(document -> {
             addSecondJob(document, "second-job");
             ArrayNode steps = replaceSteps(document);
             addCheckpoint(steps, "eos-job", "before-failure");
@@ -286,7 +290,7 @@ class ScenarioPhasePreflightValidatorTest {
 
     @Test
     void rejectsDuplicateNamedStateArtifacts() {
-        ScenarioPreflightException exception = reject(document -> {
+        SpecificationException exception = reject(document -> {
             ArrayNode steps = replaceSteps(document);
             addCheckpoint(steps, "eos-job", "same-name");
             addCheckpoint(steps, "eos-job", "same-name");
@@ -301,7 +305,7 @@ class ScenarioPhasePreflightValidatorTest {
 
     @Test
     void rejectsNamedArtifactsInRepeatedLoopsButAcceptsOneIteration() {
-        ScenarioPreflightException repeated = reject(document -> {
+        SpecificationException repeated = reject(document -> {
             ObjectNode loop = replaceSteps(document).addObject().putObject("loop");
             loop.put("times", 2);
             addCheckpoint(loop.putArray("steps"), "eos-job", "inside-loop");
@@ -341,7 +345,7 @@ class ScenarioPhasePreflightValidatorTest {
             addInlineRecordCount(steps, "main", "output");
         });
 
-        ScenarioPreflightException exception = reject(document -> {
+        SpecificationException exception = reject(document -> {
             ArrayNode steps = replaceSteps(document);
             addInlineRecordCount(steps, "main", "missing");
             ObjectNode log = steps.addObject().putObject("validate");
@@ -359,13 +363,13 @@ class ScenarioPhasePreflightValidatorTest {
                 ResolutionScope.COMMON,
                 "preflight.reference.job-not-found",
                 "$/phases/0/steps/1/validate/job");
-        assertFalse(exception.issues().stream()
+        assertFalse(exception.diagnostics().stream()
                 .anyMatch(issue -> issue.code().equals("preflight.terminal.duplicate-type")));
     }
 
     @Test
     void rejectsInlineIdSetWhenCustomInputCannotProvideAManifest() {
-        ScenarioPreflightException exception = reject(document -> {
+        SpecificationException exception = reject(document -> {
             ObjectNode input = (ObjectNode) document.at(
                     "/setup/kafka/clusters/main/topics/0/input_source");
             input.removeAll();
@@ -392,10 +396,10 @@ class ScenarioPhasePreflightValidatorTest {
                 "$/phases/0/steps/0/validate/expected");
     }
 
-    private ScenarioPreflightException reject(Consumer<ObjectNode> changes) {
+    private SpecificationException reject(Consumer<ObjectNode> changes) {
         ResolvedScenario scenario = resolve(changes);
-        return assertThrows(
-                ScenarioPreflightException.class,
+        return assertFailsAt(
+                Stage.PREFLIGHT,
                 () -> validator.validateScenario(scenario));
     }
 
@@ -521,19 +525,19 @@ class ScenarioPhasePreflightValidatorTest {
         return (ObjectNode) document.at("/phases/0");
     }
 
-    private static PreflightIssue assertHasIssue(
-            ScenarioPreflightException exception,
+    private static Diagnostic assertHasIssue(
+            SpecificationException exception,
             ResolutionScope scope,
             String code,
             String path) {
-        return exception.issues().stream()
+        return exception.diagnostics().stream()
                 .filter(issue -> issue.scope() == scope
                         && issue.code().equals(code)
                         && issue.path().equals(path))
                 .findFirst()
                 .orElseThrow(() -> new AssertionError(
                         "Expected " + scope + ":" + code + " at " + path
-                                + " but got " + exception.issues()));
+                                + " but got " + exception.diagnostics()));
     }
 
     private Path resource(String name) {

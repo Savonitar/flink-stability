@@ -9,6 +9,8 @@ import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Set;
+import org.savonitar.flink.stability.core.spec.document.Diagnostic;
+import org.savonitar.flink.stability.core.spec.document.ResolutionScope;
 
 /** Validates harness-owned capability values after parameter interpolation. */
 final class ScenarioCapabilityValidator {
@@ -20,8 +22,8 @@ final class ScenarioCapabilityValidator {
             Set.of("INCREMENTING", "POOLING");
     private static final Set<String> RESTORE_MODES = Set.of("claim", "no-claim");
 
-    List<ResolutionIssue> validate(Path source, ResolutionScope scope, ObjectNode document) {
-        List<ResolutionIssue> issues = new ArrayList<>();
+    List<Diagnostic> validate(Path source, ResolutionScope scope, ObjectNode document) {
+        List<Diagnostic> issues = new ArrayList<>();
 
         JsonNode clusters = document.at("/setup/kafka/clusters");
         if (clusters instanceof ObjectNode clusterObject) {
@@ -75,7 +77,7 @@ final class ScenarioCapabilityValidator {
             ResolutionScope scope,
             JsonNode node,
             String path,
-            List<ResolutionIssue> issues) {
+            List<Diagnostic> issues) {
         if (node == null) {
             return;
         }
@@ -102,7 +104,7 @@ final class ScenarioCapabilityValidator {
             String label,
             String code,
             Set<String> supported,
-            List<ResolutionIssue> issues) {
+            List<Diagnostic> issues) {
         if (value != null && value.isTextual() && !supported.contains(value.textValue())) {
             issues.add(issue(source, scope, code, path,
                     "Harness does not support " + label + " '" + value.textValue()
@@ -110,13 +112,13 @@ final class ScenarioCapabilityValidator {
         }
     }
 
-    private static ResolutionIssue issue(
+    private static Diagnostic issue(
             Path source,
             ResolutionScope scope,
             String code,
             String path,
             String message) {
-        return new ResolutionIssue(source, scope, code, path, message);
+        return new Diagnostic(source, scope, code, path, message);
     }
 
     private static String escapePointer(String value) {

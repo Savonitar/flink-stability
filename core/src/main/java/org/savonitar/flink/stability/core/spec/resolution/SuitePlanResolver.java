@@ -1,7 +1,11 @@
 package org.savonitar.flink.stability.core.spec.resolution;
 
+import org.savonitar.flink.stability.core.spec.document.Diagnostic;
 import org.savonitar.flink.stability.core.spec.document.ScenarioBundle;
 import org.savonitar.flink.stability.core.spec.document.SpecificationCatalog;
+import org.savonitar.flink.stability.core.spec.document.SpecificationException;
+import org.savonitar.flink.stability.core.spec.document.SpecificationException.Stage;
+import org.savonitar.flink.stability.core.spec.document.SuiteEntryIdentity;
 import org.savonitar.flink.stability.core.spec.document.SuiteSpecification;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.node.ArrayNode;
@@ -14,6 +18,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Optional;
 
 /** Eagerly resolves every suite entry before any provisioning is permitted. */
 public final class SuitePlanResolver {
@@ -55,20 +60,18 @@ public final class SuitePlanResolver {
 
         ArrayNode nodes = (ArrayNode) suite.document().get("scenarios");
         List<ResolvedSuiteEntry> entries = new ArrayList<>();
-        List<SuitePlanningIssue> issues = new ArrayList<>();
+        List<Diagnostic> issues = new ArrayList<>();
         for (int index = 0; index < nodes.size(); index++) {
             ObjectNode node = (ObjectNode) nodes.get(index);
             SuiteEntryIdentity identity = identity(suite, node, index);
             ScenarioBundle bundle = catalog.scenario(identity.scenarioName()).orElse(null);
             if (bundle == null) {
-                issues.add(new SuitePlanningIssue(
-                        identity,
+                issues.add(new Diagnostic(
                         suite.source(),
-                        ResolutionScope.COMMON,
                         "suite.scenario-not-found",
                         identity.entryPointer() + "/scenario",
                         "Suite references undiscovered scenario '"
-                                + identity.scenarioName() + "'"));
+                                + identity.scenarioName() + "'").inSuiteEntry(identity));
                 continue;
             }
 
@@ -81,30 +84,13 @@ public final class SuitePlanResolver {
                         : null;
                 entries.add(new ResolvedSuiteEntry(
                         identity, scenarioPlan, suiteRuns));
-            } catch (ScenarioResolutionException exception) {
-                exception.issues().forEach(issue -> issues.add(
-                        mapResolutionIssue(identity, issue)));
-            } catch (ExpectedResultSelectionException exception) {
-                exception.issues().forEach(issue -> issues.add(new SuitePlanningIssue(
-                        identity,
-                        issue.source(),
-                        ResolutionScope.COMMON,
-                        issue.code(),
-                        issue.path(),
-                        issue.message())));
-            } catch (ScenarioPreflightException exception) {
-                exception.issues().forEach(issue -> issues.add(new SuitePlanningIssue(
-                        identity,
-                        issue.source(),
-                        issue.scope(),
-                        issue.code(),
-                        issue.path(),
-                        issue.message())));
+            } catch (SpecificationException exception) {
+                issues.addAll(attributeToEntry(identity, exception));
             }
         }
 
         if (!issues.isEmpty()) {
-            throw new SuitePlanningException(issues);
+            throw new SpecificationException(Stage.SUITE_PLANNING, issues);
         }
         return new ResolvedSuitePlan(suite, entries);
     }
@@ -142,32 +128,36 @@ public final class SuitePlanResolver {
         return Collections.unmodifiableMap(copy);
     }
 
-    private static SuitePlanningIssue mapResolutionIssue(
+    /** Attributes one entry's resolution, expectation, or preflight failure to that entry. */
+    private static List<Diagnostic> attributeToEntry(
             SuiteEntryIdentity identity,
-            ResolutionIssue issue) {
-        PathAndPointer location = rebaseSuiteBinding(identity, issue.source(), issue.path());
-        return new SuitePlanningIssue(
-                identity,
-                location.source(),
-                issue.scope(),
-                issue.code(),
-                location.path(),
-                issue.message());
+            SpecificationException failure) {
+        return switch (failure.stage()) {
+            case RESOLUTION -> failure.diagnostics().stream()
+                    .map(diagnostic -> rebaseSuiteBinding(identity, diagnostic))
+                    .toList();
+            case EXPECTATION, PREFLIGHT -> failure.diagnostics().stream()
+                    .map(diagnostic -> diagnostic.inSuiteEntry(identity))
+                    .toList();
+            default -> throw failure;
+        };
     }
 
-    private static PathAndPointer rebaseSuiteBinding(
+    private static Diagnostic rebaseSuiteBinding(
             SuiteEntryIdentity identity,
-            java.nio.file.Path source,
-            String path) {
+            Diagnostic diagnostic) {
+        String path = diagnostic.path();
         if (!path.equals(SUITE_BINDING_PREFIX)
                 && !path.startsWith(SUITE_BINDING_PREFIX + "/")) {
-            return new PathAndPointer(source, path);
+            return diagnostic.inSuiteEntry(identity);
         }
-        return new PathAndPointer(
+        return new Diagnostic(
                 identity.suiteSource(),
+                diagnostic.scope(),
+                Optional.of(identity),
+                diagnostic.code(),
                 identity.entryPointer() + "/parameters"
-                        + path.substring(SUITE_BINDING_PREFIX.length()));
+                        + path.substring(SUITE_BINDING_PREFIX.length()),
+                diagnostic.message());
     }
-
-    private record PathAndPointer(java.nio.file.Path source, String path) {}
 }

@@ -10,6 +10,8 @@ import java.util.List;
 import java.util.Locale;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
+import org.savonitar.flink.stability.core.spec.document.Diagnostic;
+import org.savonitar.flink.stability.core.spec.document.ResolutionScope;
 
 /** Validates the Docker-free Flink/Kafka-connector compatibility registry. */
 final class FlinkKafkaCompatibilityValidator {
@@ -36,8 +38,8 @@ final class FlinkKafkaCompatibilityValidator {
                     + "-(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)$");
     private static final Pattern TIMESTAMPED_SNAPSHOT = Pattern.compile(
             ".*-\\d{8}\\.\\d{6}-\\d+$");
-    List<ResolutionIssue> validate(Path source, ResolutionScope scope, ObjectNode document) {
-        List<ResolutionIssue> issues = new ArrayList<>();
+    List<Diagnostic> validate(Path source, ResolutionScope scope, ObjectNode document) {
+        List<Diagnostic> issues = new ArrayList<>();
         List<ImageReference> images = flinkImages(document);
         boolean flinkLineSupported = true;
         for (ImageReference image : images) {
@@ -198,7 +200,7 @@ final class FlinkKafkaCompatibilityValidator {
             ResolutionScope scope,
             String alias,
             JsonNode artifact,
-            List<ResolutionIssue> issues) {
+            List<Diagnostic> issues) {
         if (artifact == null || !artifact.isTextual()) {
             return;
         }
@@ -257,13 +259,13 @@ final class FlinkKafkaCompatibilityValidator {
                 || TIMESTAMPED_SNAPSHOT.matcher(version).matches();
     }
 
-    private static ResolutionIssue issue(
+    private static Diagnostic issue(
             Path source,
             ResolutionScope scope,
             String code,
             String path,
             String message) {
-        return new ResolutionIssue(source, scope, code, path, message);
+        return new Diagnostic(source, scope, code, path, message);
     }
 
     private static String escapePointer(String value) {

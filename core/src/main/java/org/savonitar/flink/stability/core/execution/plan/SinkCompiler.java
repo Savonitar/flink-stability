@@ -1,7 +1,8 @@
 package org.savonitar.flink.stability.core.execution.plan;
 
 import com.fasterxml.jackson.databind.node.ObjectNode;
-import org.savonitar.flink.stability.core.spec.resolution.ResolutionScope;
+import org.savonitar.flink.stability.core.spec.document.Diagnostic;
+import org.savonitar.flink.stability.core.spec.document.ResolutionScope;
 import org.savonitar.flink.stability.runtime.api.KafkaBrokerPolicy;
 
 import java.nio.file.Path;
@@ -20,7 +21,7 @@ final class SinkCompiler {
             Path source,
             String sinkPath,
             ObjectNode sink,
-            List<RunnerCapabilityIssue> issues) {
+            List<Diagnostic> issues) {
         String guarantee = sink.path("delivery_guarantee").textValue();
         if (!GUARANTEES.contains(guarantee)) {
             issues.add(issue(source, "runner.workload.delivery-guarantee-unsupported",
@@ -72,8 +73,8 @@ final class SinkCompiler {
                 : ExecutableScenarioPlan.KAFKA_TRANSACTION_TIMEOUT;
     }
 
-    private static RunnerCapabilityIssue issue(
+    private static Diagnostic issue(
             Path source, String code, String path, String message) {
-        return new RunnerCapabilityIssue(source, ResolutionScope.SINGLE, code, path, message);
+        return new Diagnostic(source, ResolutionScope.SINGLE, code, path, message);
     }
 }

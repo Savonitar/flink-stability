@@ -5,6 +5,7 @@ import java.util.Iterator;
 import java.util.NoSuchElementException;
 import java.util.Objects;
 import java.util.Optional;
+import org.savonitar.flink.stability.core.spec.document.SuiteEntryIdentity;
 
 /** Fully preflighted scenario invocation plus its suite-owned repetition policy. */
 public final class ResolvedSuiteEntry {

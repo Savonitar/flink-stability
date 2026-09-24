@@ -1,8 +1,11 @@
 package org.savonitar.flink.stability.core.spec.resolution;
 
+import org.savonitar.flink.stability.core.spec.document.Diagnostic;
 import org.savonitar.flink.stability.core.spec.document.ExpectedResultSpecification;
 import org.savonitar.flink.stability.core.spec.document.ScenarioBundle;
 import org.savonitar.flink.stability.core.spec.document.ScenarioSpecification;
+import org.savonitar.flink.stability.core.spec.document.SpecificationException;
+import org.savonitar.flink.stability.core.spec.document.SpecificationException.Stage;
 import org.savonitar.flink.stability.core.spec.document.SpecificationLoader;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.node.ArrayNode;
@@ -22,6 +25,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.savonitar.flink.stability.core.spec.document.SpecificationAssertions.assertFailsAt;
 
 class ExpectedResultSelectorTest {
     private final SpecificationLoader loader = new SpecificationLoader();
@@ -144,16 +148,16 @@ class ExpectedResultSelectorTest {
     void rejectsDefaultShapeThatDoesNotMatchScenarioKind() {
         ScenarioSpecification plain = plainScenario(document -> {});
         ExpectedResultSpecification experimentShape = experimentExpected(document -> {});
-        ExpectedResultSelectionException plainException = assertThrows(
-                ExpectedResultSelectionException.class,
+        SpecificationException plainException = assertFailsAt(
+                Stage.EXPECTATION,
                 () -> selector.select(bundle(plain, experimentShape),
                         parameterResolver.resolve(plain, ResolutionRequest.none())));
         assertHasIssue(plainException, "expectation.shape-mismatch", "$/default");
 
         ScenarioSpecification experiment = experimentScenario();
         ExpectedResultSpecification plainShape = expected(document -> {});
-        ExpectedResultSelectionException experimentException = assertThrows(
-                ExpectedResultSelectionException.class,
+        SpecificationException experimentException = assertFailsAt(
+                Stage.EXPECTATION,
                 () -> selector.select(bundle(experiment, plainShape),
                         parameterResolver.resolve(experiment, ResolutionRequest.none())));
         assertHasIssue(experimentException, "expectation.shape-mismatch", "$/default");
@@ -169,8 +173,8 @@ class ExpectedResultSelectorTest {
             caseNode.putObject("candidate").put("outcome", "pass");
         });
 
-        ExpectedResultSelectionException exception = assertThrows(
-                ExpectedResultSelectionException.class,
+        SpecificationException exception = assertFailsAt(
+                Stage.EXPECTATION,
                 () -> selector.select(bundle(scenario, expected),
                         parameterResolver.resolve(scenario, ResolutionRequest.none())));
 
@@ -182,8 +186,8 @@ class ExpectedResultSelectorTest {
         ScenarioSpecification plain = parameterizedPlainScenario("known", "string", TextNode.valueOf("value"));
         ExpectedResultSpecification unknown = expected(document -> addPlainFailCase(
                 document, Map.of("unknown", TextNode.valueOf("value"))));
-        ExpectedResultSelectionException unknownException = assertThrows(
-                ExpectedResultSelectionException.class,
+        SpecificationException unknownException = assertFailsAt(
+                Stage.EXPECTATION,
                 () -> selector.select(bundle(plain, unknown),
                         parameterResolver.resolve(plain, ResolutionRequest.none())));
         assertHasIssue(unknownException, "expectation.case-unknown-parameter", "$/cases/0/when/unknown");
@@ -195,8 +199,8 @@ class ExpectedResultSelectorTest {
             caseNode.putObject("baseline").put("outcome", "pass");
             caseNode.putObject("candidate").put("outcome", "pass");
         });
-        ExpectedResultSelectionException variedException = assertThrows(
-                ExpectedResultSelectionException.class,
+        SpecificationException variedException = assertFailsAt(
+                Stage.EXPECTATION,
                 () -> selector.select(bundle(experiment, varied),
                         parameterResolver.resolve(experiment, ResolutionRequest.none())));
         assertHasIssue(variedException, "expectation.case-varied-parameter", "$/cases/0/when/backend");
@@ -213,8 +217,8 @@ class ExpectedResultSelectorTest {
         });
         ExpectedResultSpecification expected = expected(document -> addPlainFailCase(
                 document, Map.of("count", IntNode.valueOf(4))));
-        ExpectedResultSelectionException exception = assertThrows(
-                ExpectedResultSelectionException.class,
+        SpecificationException exception = assertFailsAt(
+                Stage.EXPECTATION,
                 () -> selector.select(bundle(bounded, expected),
                         parameterResolver.resolve(bounded, ResolutionRequest.none())));
         assertHasIssue(exception, "expectation.case-value-invalid", "$/cases/0/when/count");
@@ -229,8 +233,8 @@ class ExpectedResultSelectorTest {
         ExpectedResultSpecification expected = expected(document -> addPlainFailCase(
                 document, Map.of("backend", TextNode.valueOf("forst"))));
 
-        ExpectedResultSelectionException exception = assertThrows(
-                ExpectedResultSelectionException.class,
+        SpecificationException exception = assertFailsAt(
+                Stage.EXPECTATION,
                 () -> selector.select(bundle(scenario, expected),
                         parameterResolver.resolve(scenario, ResolutionRequest.none())));
 
@@ -247,8 +251,8 @@ class ExpectedResultSelectorTest {
         ExpectedResultSpecification expected = expected(document -> addPlainFailCase(
                 document, Map.of("guarantee", TextNode.valueOf("AT_LEAST_ONCE"))));
 
-        ExpectedResultSelectionException exception = assertThrows(
-                ExpectedResultSelectionException.class,
+        SpecificationException exception = assertFailsAt(
+                Stage.EXPECTATION,
                 () -> selector.select(bundle(scenario, expected),
                         parameterResolver.resolve(scenario, ResolutionRequest.none())));
 
@@ -266,8 +270,8 @@ class ExpectedResultSelectorTest {
         ExpectedResultSpecification expected = expected(document -> addPlainFailCase(
                 document, Map.of("source_topic", TextNode.valueOf("missing"))));
 
-        ExpectedResultSelectionException exception = assertThrows(
-                ExpectedResultSelectionException.class,
+        SpecificationException exception = assertFailsAt(
+                Stage.EXPECTATION,
                 () -> selector.select(bundle(scenario, expected),
                         parameterResolver.resolve(scenario, ResolutionRequest.none())));
 
@@ -306,8 +310,8 @@ class ExpectedResultSelectorTest {
             addPlainFailCase(document, Map.of("b", IntNode.valueOf(1)));
         });
 
-        ExpectedResultSelectionException exception = assertThrows(
-                ExpectedResultSelectionException.class,
+        SpecificationException exception = assertFailsAt(
+                Stage.EXPECTATION,
                 () -> selector.select(bundle(scenario, expected),
                         parameterResolver.resolve(scenario, ResolutionRequest.none())));
 
@@ -327,12 +331,12 @@ class ExpectedResultSelectorTest {
             addPlainFailCase(document, Map.of("b", IntNode.valueOf(1)));
         });
 
-        ExpectedResultSelectionException exception = assertThrows(
-                ExpectedResultSelectionException.class,
+        SpecificationException exception = assertFailsAt(
+                Stage.EXPECTATION,
                 () -> selector.select(bundle(scenario, expected),
                         parameterResolver.resolve(scenario, ResolutionRequest.none())));
 
-        ExpectationIssue issue = exception.issues().stream()
+        Diagnostic issue = exception.diagnostics().stream()
                 .filter(candidate -> candidate.path().equals("$/cases/2/when"))
                 .findFirst().orElseThrow();
         assertTrue(issue.message().contains("[0, 1]"));
@@ -368,8 +372,8 @@ class ExpectedResultSelectorTest {
             caseNode.put("oracle", "kafka.id-set");
         });
 
-        ExpectedResultSelectionException exception = assertThrows(
-                ExpectedResultSelectionException.class,
+        SpecificationException exception = assertFailsAt(
+                Stage.EXPECTATION,
                 () -> selector.select(bundle(scenario, expected),
                         parameterResolver.resolve(scenario, ResolutionRequest.none())));
 
@@ -410,8 +414,8 @@ class ExpectedResultSelectorTest {
         ScenarioSpecification scenario = parameterizedPlainScenario(name, type, defaultValue);
         ExpectedResultSpecification expected = expected(document -> addPlainFailCase(
                 document, Map.of(name, invalidValue)));
-        ExpectedResultSelectionException exception = assertThrows(
-                ExpectedResultSelectionException.class,
+        SpecificationException exception = assertFailsAt(
+                Stage.EXPECTATION,
                 () -> selector.select(bundle(scenario, expected),
                         parameterResolver.resolve(scenario, ResolutionRequest.none())));
         assertHasIssue(exception, "expectation.case-value-invalid", "$/cases/0/when/" + name);
@@ -496,10 +500,10 @@ class ExpectedResultSelectorTest {
     }
 
     private static void assertHasIssue(
-            ExpectedResultSelectionException exception, String code, String path) {
-        assertTrue(exception.issues().stream()
+            SpecificationException exception, String code, String path) {
+        assertTrue(exception.diagnostics().stream()
                         .anyMatch(issue -> issue.code().equals(code) && issue.path().equals(path)),
-                () -> "Expected " + code + " at " + path + " but got " + exception.issues());
+                () -> "Expected " + code + " at " + path + " but got " + exception.diagnostics());
     }
 
     private Path resource(String name) {
