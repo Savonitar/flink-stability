@@ -1017,6 +1017,19 @@ Connector pull-request gating is the same mechanism with one axis:
   or watermark setting. Such a JAR needs protocol-conformance integration tests
   before it is trusted as a CI oracle. A declaration without conforming behavior
   remains a protocol defect, never permission to fall back to legacy arguments.
+- **R5.6d** Installed and verified connector bytes do not prove that the subject
+  connector is the code the job runs. Workload protocol v1 builds its job from the
+  Kafka connector's entry classes `org.apache.flink.connector.kafka.source.KafkaSource`
+  and `org.apache.flink.connector.kafka.sink.KafkaSink`. Before provisioning, the
+  first runner requires that the subject connector's primary artifact contains
+  every entry class (`runner.subject.entry-class-missing`), and that neither another
+  connector-bundle entry nor the workload JAR contains any of them
+  (`runner.subject.entry-class-conflict`). Flink loads the workload JAR child-first,
+  and the bundle order decides which of two `lib` copies loads, so a second copy
+  would make the tested code depend on class-loading order. An unrelated local
+  primary with the released connector as a runtime dependency therefore rejects
+  instead of silently testing the release. Recording which JAR each Flink process
+  actually loaded these classes from is later work.
 - **R5.7** Each workload job has optional `start: auto | manual`, defaulting to
   `auto`. Auto-start jobs are submitted after infrastructure is ready and any
   preload input source has completed per R4.5a, before the first phase begins.
@@ -2693,7 +2706,7 @@ The execution decisions formerly recorded as review proposals are now normative:
 | Fault lifecycle, instantaneous vs held faults, and TaskManager-kill effect | R6.9, R6.12–R6.12a, and §12.6 |
 | Suite-specific repetition | R6.13 |
 | Artifact-under-test declaration, dependency closure, and deployment | R4.13–R4.13d and R5.6–R5.6b |
-| Workload defaults, runner capability/storage boundary, and protocol | R5.1a, R5.4a–R5.4b, and R5.6c |
+| Workload defaults, runner capability/storage boundary, protocol, and subject use | R5.1a, R5.4a–R5.4b, and R5.6c–R5.6d |
 | Terminal completion, write fence, validator deadlines, and bounded observation | R7.1c–R7.1d, R7.3–R7.3d, and R8.4–R8.8 |
 
 The JSON Schema encodes structural constraints; semantic-validation tests encode

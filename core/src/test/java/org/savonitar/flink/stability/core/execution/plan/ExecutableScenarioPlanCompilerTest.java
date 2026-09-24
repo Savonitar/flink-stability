@@ -658,6 +658,68 @@ class ExecutableScenarioPlanCompilerTest {
     }
 
     @Test
+    void rejectsAWrongSubjectWhoseDependencySuppliesTheConnectorClasses() throws IOException {
+        // Review finding F3: an unrelated local primary plus the released connector as a
+        // runtime dependency. Every installed byte verifies, yet the release would be tested.
+        createJar(artifactRoot.resolve("connector.jar"), List.of("example.Unrelated"));
+        createJar(artifactRoot.resolve("released-connector.jar"),
+                SubjectEntryClassCheck.PROTOCOL_V1_ENTRY_CLASSES);
+        createJar(artifactRoot.resolve("job.jar"), true, "v1");
+        ResolvedScenarioPlan resolved = resolved(document -> {
+            useLocalArtifacts(document);
+            ((ObjectNode) document.at("/subject/connectors/kafka"))
+                    .putArray("runtime_dependencies").add("released-connector.jar");
+        });
+        ExecutableScenarioPlan executable = compiler.compile(resolved);
+        PreparedScenarioPlan prepared = new ArtifactPlanResolver().resolve(
+                resolved, ArtifactResolutionOptions.online(artifactRoot));
+        try {
+            RunnerCapabilityException exception = assertThrows(
+                    RunnerCapabilityException.class,
+                    () -> compiler.bind(prepared, executable));
+
+            assertEquals(
+                    List.of("runner.subject.entry-class-conflict",
+                            "runner.subject.entry-class-missing"),
+                    exception.issues().stream().map(RunnerCapabilityIssue::code).toList());
+            assertTrue(exception.issues().stream().allMatch(issue ->
+                    issue.path().equals("$/subject/connectors/kafka/artifact")));
+            assertTrue(exception.issues().getFirst().message()
+                    .contains("$/subject/connectors/kafka/runtime_dependencies/0"));
+        } finally {
+            prepared.close();
+        }
+    }
+
+    @Test
+    void rejectsAWorkloadJarThatShadowsTheSubjectConnectorClasses() throws IOException {
+        createJar(artifactRoot.resolve("connector.jar"), false, null);
+        Manifest manifest = new Manifest();
+        manifest.getMainAttributes().put(Attributes.Name.MANIFEST_VERSION, "1.0");
+        manifest.getMainAttributes().put(Attributes.Name.MAIN_CLASS, "example.Main");
+        manifest.getMainAttributes().putValue(
+                ExecutableScenarioPlanCompiler.WORKLOAD_PROTOCOL_ATTRIBUTE, "v1");
+        createJar(artifactRoot.resolve("job.jar"), manifest, List.of(
+                "example.Main", "org.apache.flink.connector.kafka.sink.KafkaSink"));
+        ResolvedScenarioPlan resolved = resolved(this::useLocalArtifacts);
+        ExecutableScenarioPlan executable = compiler.compile(resolved);
+        PreparedScenarioPlan prepared = new ArtifactPlanResolver().resolve(
+                resolved, ArtifactResolutionOptions.online(artifactRoot));
+        try {
+            RunnerCapabilityException exception = assertThrows(
+                    RunnerCapabilityException.class,
+                    () -> compiler.bind(prepared, executable));
+
+            RunnerCapabilityIssue issue = exception.issues().getFirst();
+            assertEquals("runner.subject.entry-class-conflict", issue.code());
+            assertEquals("$/workload/jobs/0/jar", issue.path());
+            assertTrue(issue.message().contains("child-first"), issue.message());
+        } finally {
+            prepared.close();
+        }
+    }
+
+    @Test
     void artifactPreparationRejectsAWorkloadWithoutTheProtocolMarker() throws IOException {
         createJar(artifactRoot.resolve("connector.jar"), false, null);
         createJar(artifactRoot.resolve("job.jar"), true, null);
@@ -762,11 +824,29 @@ class ExecutableScenarioPlanCompilerTest {
             attributes.putValue(
                     ExecutableScenarioPlanCompiler.WORKLOAD_PROTOCOL_ATTRIBUTE, protocol);
         }
+        List<String> classes = new ArrayList<>(List.of("example.Main"));
+        if (!executable) {
+            // A connector fixture supplies what the subject entry-class check requires.
+            classes.addAll(SubjectEntryClassCheck.PROTOCOL_V1_ENTRY_CLASSES);
+        }
+        return createJar(path, manifest, classes);
+    }
+
+    private static Path createJar(Path path, List<String> classes) throws IOException {
+        Manifest manifest = new Manifest();
+        manifest.getMainAttributes().put(Attributes.Name.MANIFEST_VERSION, "1.0");
+        return createJar(path, manifest, classes);
+    }
+
+    private static Path createJar(Path path, Manifest manifest, List<String> classes)
+            throws IOException {
         try (JarOutputStream output = new JarOutputStream(
                 Files.newOutputStream(path), manifest)) {
-            output.putNextEntry(new JarEntry("example/Main.class"));
-            output.write(new byte[] {0, 1, 2, 3});
-            output.closeEntry();
+            for (String className : classes) {
+                output.putNextEntry(new JarEntry(className.replace('.', '/') + ".class"));
+                output.write(new byte[] {0, 1, 2, 3});
+                output.closeEntry();
+            }
         }
         return path;
     }

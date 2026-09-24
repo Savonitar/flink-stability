@@ -1114,9 +1114,17 @@ class V1ScenarioExecutorTest {
         }
         try (JarOutputStream output = new JarOutputStream(
                 Files.newOutputStream(path), manifest)) {
-            output.putNextEntry(new JarEntry("example/Main.class"));
-            output.write(new byte[] {0, 1, 2, 3});
-            output.closeEntry();
+            List<String> classes = new ArrayList<>(List.of("example/Main.class"));
+            if (!executable) {
+                // The protocol-v1 subject entry classes (SPEC-001 R5.6d).
+                classes.add("org/apache/flink/connector/kafka/source/KafkaSource.class");
+                classes.add("org/apache/flink/connector/kafka/sink/KafkaSink.class");
+            }
+            for (String entry : classes) {
+                output.putNextEntry(new JarEntry(entry));
+                output.write(new byte[] {0, 1, 2, 3});
+                output.closeEntry();
+            }
         }
         return path;
     }

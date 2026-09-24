@@ -31,6 +31,9 @@ Important properties of this boundary:
 - scenario and expected-result documents are selected by `meta.name` from a complete catalog;
 - connector Maven closures and local artifacts are resolved, hashed, and privately staged;
 - the connector classpath is copied and verified before each Flink process starts;
+- the subject connector's primary artifact must be the only source of the Kafka
+  connector classes the workload runs; a second copy in a dependency or the workload
+  JAR is rejected before Docker starts;
 - the bundled workload JAR is thin and declares `Flink-Stability-Workload-Protocol: v1`;
 - generated input is acknowledged and reconciled before its exclusive stopping offsets are used;
 - terminal Kafka validation never runs unless the Flink process fence succeeds;

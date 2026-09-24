@@ -1,0 +1,109 @@
+package org.savonitar.flink.stability.core.execution.plan;
+
+import org.savonitar.flink.stability.core.artifact.ConnectorBundleContribution;
+import org.savonitar.flink.stability.core.artifact.PreparedConnectorBundle;
+import org.savonitar.flink.stability.core.artifact.PreparedConnectorBundleEntry;
+import org.savonitar.flink.stability.core.spec.resolution.ResolutionScope;
+
+import java.io.IOException;
+import java.nio.file.Path;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.jar.JarFile;
+import java.util.stream.Collectors;
+
+/**
+ * Checks before provisioning that the subject connector supplies the classes the protocol-v1
+ * workload runs (SPEC-001 R5.6d, review finding F3). Installed bytes alone prove nothing: an
+ * unrelated primary plus the released connector as a runtime dependency would test the release.
+ */
+final class SubjectEntryClassCheck {
+    /** The Kafka connector classes that every protocol-v1 workload builds its job from. */
+    static final List<String> PROTOCOL_V1_ENTRY_CLASSES = List.of(
+            "org.apache.flink.connector.kafka.source.KafkaSource",
+            "org.apache.flink.connector.kafka.sink.KafkaSink");
+
+    private SubjectEntryClassCheck() {}
+
+    /**
+     * The subject's primary artifact must contain every entry class, and nothing else that Flink
+     * could load first may: neither another connector-bundle entry nor the workload JAR, which
+     * Flink loads child-first.
+     */
+    static void verify(
+            Path source,
+            PreparedConnectorBundle bundle,
+            Path workloadJar,
+            String workloadPath) {
+        List<RunnerCapabilityIssue> issues = new ArrayList<>();
+        for (String alias : bundle.aliases()) {
+            String artifactPath = "$/subject/connectors/" + alias + "/artifact";
+            for (PreparedConnectorBundleEntry entry : bundle.entries()) {
+                List<String> found = entryClassesIn(
+                        entry.stagedPath(), source, artifactPath, issues);
+                if (isPrimaryOf(entry, alias)) {
+                    List<String> missing = PROTOCOL_V1_ENTRY_CLASSES.stream()
+                            .filter(entryClass -> !found.contains(entryClass))
+                            .toList();
+                    if (!missing.isEmpty()) {
+                        issues.add(issue(source, "runner.subject.entry-class-missing",
+                                artifactPath,
+                                "The subject connector '" + alias + "' primary artifact lacks "
+                                        + missing + ", so the job cannot run its code"));
+                    }
+                } else if (!found.isEmpty()) {
+                    issues.add(issue(source, "runner.subject.entry-class-conflict",
+                            artifactPath,
+                            "Connector bundle entry " + entry.fileName() + " from "
+                                    + origins(entry) + " also defines " + found
+                                    + "; the executed copy would depend on classpath order"));
+                }
+            }
+        }
+        List<String> inWorkload = entryClassesIn(workloadJar, source, workloadPath, issues);
+        if (!inWorkload.isEmpty()) {
+            issues.add(issue(source, "runner.subject.entry-class-conflict", workloadPath,
+                    "The workload JAR defines " + inWorkload + "; Flink loads it child-first,"
+                            + " so its copies would run instead of the subject connector"));
+        }
+        if (!issues.isEmpty()) {
+            throw new RunnerCapabilityException(issues);
+        }
+    }
+
+    private static boolean isPrimaryOf(PreparedConnectorBundleEntry entry, String alias) {
+        return entry.contributions().stream().anyMatch(contribution ->
+                contribution.alias().equals(alias) && contribution.closureEntry().primary());
+    }
+
+    private static String origins(PreparedConnectorBundleEntry entry) {
+        return entry.contributions().stream()
+                .map(ConnectorBundleContribution::closureEntry)
+                .map(closureEntry -> closureEntry.effectiveOrigin().declarationPath())
+                .distinct()
+                .collect(Collectors.joining(", "));
+    }
+
+    private static List<String> entryClassesIn(
+            Path jar,
+            Path source,
+            String path,
+            List<RunnerCapabilityIssue> issues) {
+        try (JarFile jarFile = new JarFile(jar.toFile(), false)) {
+            return PROTOCOL_V1_ENTRY_CLASSES.stream()
+                    .filter(entryClass -> jarFile.getJarEntry(
+                            entryClass.replace('.', '/') + ".class") != null)
+                    .toList();
+        } catch (IOException unreadable) {
+            issues.add(issue(source, "runner.subject.entry-class-unreadable", path,
+                    "Cannot inspect " + jar.getFileName() + " for subject entry classes: "
+                            + unreadable.getMessage()));
+            return List.of();
+        }
+    }
+
+    private static RunnerCapabilityIssue issue(
+            Path source, String code, String path, String message) {
+        return new RunnerCapabilityIssue(source, ResolutionScope.SINGLE, code, path, message);
+    }
+}
