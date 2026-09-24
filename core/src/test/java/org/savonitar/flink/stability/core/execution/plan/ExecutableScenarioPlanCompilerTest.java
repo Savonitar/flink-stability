@@ -101,7 +101,12 @@ class ExecutableScenarioPlanCompilerTest {
                 plan.job().watermarks().strategy());
         assertEquals(Duration.ofMinutes(2), plan.jobCompletionTimeout());
         assertEquals(Duration.ofMinutes(2), plan.terminalValidation().timeout());
-        assertEquals(ExecutableScenarioPlan.ExpectedOutcome.PASS, plan.expectedOutcome());
+        assertEquals(ExecutableScenarioPlan.ExpectedOutcome.pass(), plan.expectedOutcome());
+        assertEquals(ExecutableScenarioPlan.Sink.exactlyOnce(
+                        new ExecutableScenarioPlan.TopicReference("main", "output"),
+                        "minimal",
+                        ExecutableScenarioPlan.TransactionIdNamingStrategy.INCREMENTING),
+                plan.job().sink());
         assertTrue(plan.phases().getFirst().steps().getFirst()
                 instanceof ExecutableScenarioPlan.AwaitJobState);
     }
@@ -470,23 +475,86 @@ class ExecutableScenarioPlanCompilerTest {
     }
 
     @Test
-    void rejectsExpectedFailuresUntilOracleMatchingIsImplemented() {
+    void compilesAPinnedKafkaIdSetFailureAsTheExpectation() {
         ExpectedResultSpecification expected = expected(document -> {
             ObjectNode outcome = document.withObject("default");
             outcome.removeAll();
             outcome.put("outcome", "fail");
             outcome.put("oracle", "kafka.id-set");
-            outcome.put("reason", "validator.kafka.id-set.missing-ids");
+            outcome.put("reason", "validator.kafka.id-set.duplicate-ids");
         });
-        ResolvedScenarioPlan resolved = resolved(document -> {}, expected);
+
+        ExecutableScenarioPlan plan = compiler.compile(resolved(document -> {}, expected));
+
+        assertEquals(ExecutableScenarioPlan.ExpectedOutcome.failure(
+                        "kafka.id-set", "validator.kafka.id-set.duplicate-ids"),
+                plan.expectedOutcome());
+    }
+
+    @Test
+    void rejectsAnExpectedFailureOfAnOracleTheRunnerCannotEvaluate() {
+        ExpectedResultSpecification expected = expected(document -> {
+            ObjectNode outcome = document.withObject("default");
+            outcome.removeAll();
+            outcome.put("outcome", "fail");
+            outcome.put("oracle", "kafka.no-hanging-transactions");
+            outcome.put("reason", "validator.kafka.transaction.ongoing-after-timeout");
+        });
+        ResolvedScenarioPlan resolved = resolved(document -> {
+            ObjectNode transactions = ((ArrayNode) document.get("terminal_validations"))
+                    .addObject();
+            transactions.put("type", "kafka.no-hanging-transactions");
+            transactions.put("cluster", "main");
+            transactions.put("transactional_id_prefix", "minimal");
+            transactions.put("stabilization_timeout", "30s");
+        }, expected);
 
         RunnerCapabilityException exception = assertThrows(
                 RunnerCapabilityException.class, () -> compiler.compile(resolved));
 
-        RunnerCapabilityIssue issue = exception.issues().getFirst();
-        assertEquals("runner.expectation.outcome-unsupported", issue.code());
-        assertEquals("$/default/outcome", issue.path());
+        RunnerCapabilityIssue issue = exception.issues().stream()
+                .filter(candidate -> candidate.code()
+                        .equals("runner.expectation.outcome-unsupported"))
+                .findFirst()
+                .orElseThrow();
+        assertEquals("$/default/oracle", issue.path());
         assertEquals(expected.source().toAbsolutePath().normalize(), issue.source());
+    }
+
+    @Test
+    void compilesAnAtLeastOnceSinkWithoutTransactionSettings() {
+        ExecutableScenarioPlan plan = compiler.compile(resolved(document -> {
+            ObjectNode sink = (ObjectNode) document.at("/workload/jobs/0/sink");
+            sink.put("delivery_guarantee", "AT_LEAST_ONCE");
+            sink.remove("transactional_id_prefix");
+            sink.remove("transaction_id_naming_strategy");
+        }));
+
+        assertEquals(ExecutableScenarioPlan.Sink.atLeastOnce(
+                        new ExecutableScenarioPlan.TopicReference("main", "output")),
+                plan.job().sink());
+        Map<String, String> values = plan.job().materializeFlinkConfiguration(
+                "kafka:9092", Map.of(0, 10L), 1, "a1b2c3d4");
+        assertEquals("AT_LEAST_ONCE",
+                values.get("flink-stability.workload.v1.sink.delivery-guarantee"));
+        assertTrue(values.keySet().stream().noneMatch(key -> key.startsWith(
+                "flink-stability.workload.v1.sink.transaction")));
+    }
+
+    @Test
+    void rejectsASinkWithoutADeliveryGuarantee() {
+        ResolvedScenarioPlan resolved = resolved(document -> {
+            ObjectNode sink = (ObjectNode) document.at("/workload/jobs/0/sink");
+            sink.put("delivery_guarantee", "NONE");
+            sink.remove("transactional_id_prefix");
+            sink.remove("transaction_id_naming_strategy");
+        });
+
+        RunnerCapabilityException exception = assertThrows(
+                RunnerCapabilityException.class, () -> compiler.compile(resolved));
+
+        assertEquals(List.of("runner.workload.delivery-guarantee-unsupported"),
+                exception.issues().stream().map(RunnerCapabilityIssue::code).toList());
     }
 
     @Test

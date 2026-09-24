@@ -1513,9 +1513,13 @@ Connector pull-request gating is the same mechanism with one axis:
   | *scenario verdict* | The final `pass`, `fail`, or `inconclusive` result after the repetition and experiment rules in R8.5–R8.8. |
 
 - **R8.2b** The implemented first-vertical `run` command emits one stable JSON
-  result/evidence summary after execution and prepared-artifact cleanup. It
-  includes scenario and attempt identity, retained checkpoint root,
-  attempt status, reason and message, summarized input and phase evidence,
+  result/evidence summary after execution and prepared-artifact cleanup. Its
+  top-level `status`, `reason`, and `message` are the scenario verdict of R8.7a,
+  and only a `pass` verdict exits `0`. `expectation` names the selected outcome,
+  the oracle and reason of an expected failure, and whether the attempt matched.
+  It also includes scenario and attempt identity, retained checkpoint root, the
+  attempt's own status, reason and message under `attempt`, summarized input and
+  phase evidence,
   write/process-fence completion evidence, terminal-validation status/counts/
   completeness, Flink provisioning count, and diagnostics. It also includes the
   last job observation of R6.12a as `evidence.flinkJob` (`observed`,
@@ -1619,12 +1623,18 @@ Connector pull-request gating is the same mechanism with one axis:
 - **R8.6c** The first narrow executable runner's remaining topology boundary is
   exact and fail-closed: one plain scenario with `runs: 1`; one Kafka cluster
   containing exactly the distinct input and sink topics; one subject connector;
-  one auto-started job at parallelism `1`; one JobManager and one TaskManager;
-  no free-form `setup.flink.config`; the bounded input, phase, and validator
-  subset registered in R4.5, R6, and R7.3c; and a selected expected outcome of
-  `pass`. Valid broad-v1 scenarios outside that boundary reject before artifact
-  preparation or Docker with their source-aware `runner.*-unsupported` or
-  `runner.*-required` capability issue. The runner never ignores extra topics,
+  one auto-started job at parallelism `1` whose Kafka sink is `EXACTLY_ONCE` or
+  `AT_LEAST_ONCE`; one JobManager and one TaskManager; no free-form
+  `setup.flink.config`; the bounded input, phase, and validator subset registered
+  in R4.5, R6, and R7.3c; and a selected expected outcome of `pass`, or `fail`
+  pinned to the `kafka.id-set` oracle and one of its registered reasons (a
+  negative control, R8.7a). `AT_LEAST_ONCE` exists for negative controls: a
+  recovery is expected to duplicate its output. Valid broad-v1 scenarios outside
+  that boundary reject before artifact preparation or Docker with their
+  source-aware `runner.*-unsupported` or `runner.*-required` capability issue;
+  a `NONE` sink rejects with `runner.workload.delivery-guarantee-unsupported`,
+  and an expected failure of another oracle with
+  `runner.expectation.outcome-unsupported`. The runner never ignores extra topics,
   connectors, Flink configuration, or a selected expected failure.
 - **R8.7** An experiment aggregates attempts as follows:
 
@@ -1644,6 +1654,16 @@ Connector pull-request gating is the same mechanism with one axis:
   unevaluable terminal validators, except that R7.1c, R7.3b, or R7.3d verification failures
   take precedence over both.
 
+- **R8.7a** Without an experiment, the first runner turns its single attempt into
+  the scenario verdict as follows. An `inconclusive` attempt is an `inconclusive`
+  verdict and a `verification.*` failure is a `fail` verdict; neither matches any
+  expectation (SPEC-002 E4.2, R7.1a). Otherwise the verdict is `pass` exactly when
+  the attempt matches the selected expectation (SPEC-002 E4.3–E4.4): an expected
+  `pass` needs a passing attempt, and an expected failure needs a failing attempt
+  with the pinned reason. A mismatch is a `fail` verdict. A failing attempt that
+  was expected to pass keeps its own reason; an expected failure that did not
+  occur, or occurred with another reason, reports `expectation.mismatch`. A
+  negative control is therefore green only when it fails exactly as pinned.
 - **R8.8** N-of-K is reported as evidence strength, never used as a threshold to
   dismiss a clean expectation mismatch. `inconclusive` is reserved for invalid
   evidence, including dirty health, retry exhaustion, an invalid baseline, or an

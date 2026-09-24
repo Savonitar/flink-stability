@@ -433,11 +433,34 @@ class V1ScenarioExecutorTest {
             KafkaTransactionListing listing = result.sinkTransactions().orElseThrow();
             assertEquals(V1ScenarioExecutionResult.Status.PASS, result.status());
             assertEquals(fixture.bound().executablePlan().job().sink().transactionalIdPrefix(),
-                    listing.transactionalIdPrefix());
+                    Optional.of(listing.transactionalIdPrefix()));
             assertEquals(List.of("Ongoing"), listing.unresolved().stream()
                     .map(KafkaTransactionListing.Transaction::state)
                     .toList());
             assertTrue(events.indexOf("process-fence") < events.indexOf("list-transactions"));
+        }
+    }
+
+    @Test
+    void anAtLeastOnceSinkHasNoTransactionsToList() throws Exception {
+        List<String> events = new ArrayList<>();
+        try (Fixture fixture = fixture(document -> {
+            ObjectNode sink = (ObjectNode) document.at("/workload/jobs/0/sink");
+            sink.put("delivery_guarantee", "AT_LEAST_ONCE");
+            sink.remove("transactional_id_prefix");
+            sink.remove("transaction_id_naming_strategy");
+        })) {
+            V1ScenarioExecutor executor = executor(
+                    events, new FakeRuntime(events), new FakeFlink(events),
+                    (bootstrap, topic, count, timeout) -> passResult());
+
+            V1ScenarioExecutionResult result = executor.execute(
+                    fixture.bound(), attemptContext());
+
+            assertEquals(V1ScenarioExecutionResult.Status.PASS, result.status());
+            assertFalse(events.contains("list-transactions"));
+            assertTrue(result.sinkTransactions().isEmpty());
+            assertTrue(result.diagnostics().isEmpty());
         }
     }
 

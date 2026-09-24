@@ -1,6 +1,7 @@
 package org.savonitar.flink.stability.cli;
 
 import com.fasterxml.jackson.databind.JsonNode;
+import org.savonitar.flink.stability.core.execution.ScenarioVerdict;
 import org.savonitar.flink.stability.core.execution.V1AttemptContext;
 import org.savonitar.flink.stability.core.execution.V1ScenarioExecutionResult;
 import org.savonitar.flink.stability.core.execution.V1ScenarioExecutor;
@@ -11,6 +12,7 @@ import org.savonitar.flink.stability.core.spec.document.DocumentValidationExcept
 import org.savonitar.flink.stability.core.spec.resolution.ExpectedResultSelectionException;
 import org.savonitar.flink.stability.core.spec.resolution.ScenarioPreflightException;
 import org.savonitar.flink.stability.core.spec.resolution.ScenarioResolutionException;
+import org.savonitar.flink.stability.core.execution.plan.ExecutableScenarioPlan;
 import org.savonitar.flink.stability.core.execution.plan.RunnerCapabilityException;
 import org.savonitar.flink.stability.testcontainers.DockerV1AttemptRuntime;
 import picocli.CommandLine;
@@ -122,9 +124,12 @@ public final class RunScenarioCommand implements Callable<Integer> {
             } catch (RuntimeException cleanupFailure) {
                 result = result.withPreparedArtifactCleanupFailure(cleanupFailure);
             }
-            specification.commandLine().getOut().println(
-                    resultRenderer.render(scenario, context, result));
-            return result.status() == V1ScenarioExecutionResult.Status.PASS
+            // The verdict compares the final attempt result, including cleanup outcomes, with
+            // the selected expectation; a negative control passes by failing as pinned.
+            ScenarioVerdict verdict = ScenarioVerdict.of(prepared.expectedOutcome(), result);
+            specification.commandLine().getOut().println(resultRenderer.render(
+                    scenario, context, prepared.expectedOutcome(), result));
+            return verdict.status() == ScenarioVerdict.Status.PASS
                     ? CommandLine.ExitCode.OK
                     : CommandLine.ExitCode.SOFTWARE;
         } catch (UnknownSpecificationTargetException failure) {
@@ -171,6 +176,11 @@ public final class RunScenarioCommand implements Callable<Integer> {
                 }
 
                 @Override
+                public ExecutableScenarioPlan.ExpectedOutcome expectedOutcome() {
+                    return target.executionPlan().executablePlan().expectedOutcome();
+                }
+
+                @Override
                 public void close() {
                     target.close();
                 }
@@ -189,6 +199,8 @@ public final class RunScenarioCommand implements Callable<Integer> {
 
     interface PreparedExecution extends AutoCloseable {
         V1ScenarioExecutionResult execute(V1AttemptContext context);
+
+        ExecutableScenarioPlan.ExpectedOutcome expectedOutcome();
 
         @Override
         void close();

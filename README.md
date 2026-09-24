@@ -115,13 +115,21 @@ mvn -q exec:java -pl cli \
   --artifact-root ."
 ```
 
-The result status is `pass`, `fail`, or `inconclusive`. Only `pass` exits `0`;
-execution, validation, or infrastructure failures exit `1`, and usage errors exit `2`.
+The top-level result status is the scenario verdict: `pass`, `fail`, or
+`inconclusive`. Only `pass` exits `0`; execution, validation, or infrastructure
+failures exit `1`, and usage errors exit `2`. The attempt's own result appears under
+`attempt`. A negative control pins an expected failure, so it passes only when its
+attempt fails exactly as pinned; any other outcome is `expectation.mismatch`.
 
-The executable reference pair is:
+The executable reference pairs are:
 
-- [`scenarios/bounded-eos.yaml`](scenarios/bounded-eos.yaml)
-- [`scenarios/bounded-eos.expected.yaml`](scenarios/bounded-eos.expected.yaml)
+- [`scenarios/bounded-eos.yaml`](scenarios/bounded-eos.yaml) with
+  [`bounded-eos.expected.yaml`](scenarios/bounded-eos.expected.yaml): an
+  exactly-once job survives a mid-stream TaskManager kill with exact output;
+- [`scenarios/selftest-duplicates.yaml`](scenarios/selftest-duplicates.yaml) with
+  [`selftest-duplicates.expected.yaml`](scenarios/selftest-duplicates.expected.yaml):
+  a negative control. An at-least-once sink must duplicate output after the same kind
+  of recovery, so the oracle must report `validator.kafka.id-set.duplicate-ids`.
 
 ## Current executable subset
 
@@ -130,11 +138,13 @@ The first runner accepts exactly:
 - one plain scenario, one run, and no health retry;
 - one Apache Kafka 4.0 broker with the input and sink topics;
 - one Flink 2.2 JobManager and one TaskManager;
-- one auto-started protocol-v1 job with parallelism `1`;
+- one auto-started protocol-v1 job with parallelism `1` and an `EXACTLY_ONCE` or
+  `AT_LEAST_ONCE` Kafka sink;
 - one verified connector closure;
 - bounded generated integer input, capped at 1,000,000 records for the in-memory runner;
 - the currently registered wait/await, loop, and named TaskManager kill/restart phase operations;
-- one terminal `kafka.id-set` validator and an expected outcome of `pass`.
+- one terminal `kafka.id-set` validator, with an expected outcome of `pass` or an
+  expected `kafka.id-set` failure.
 
 A TaskManager kill counts only if Flink shows that it affected the job: a failure on
 a TaskManager that hosted active subtasks, followed by a checkpoint restore, or by a
