@@ -17,6 +17,7 @@ import com.fasterxml.jackson.databind.node.ObjectNode;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import org.savonitar.flink.stability.runtime.api.ConnectorClasspathManifest;
+import org.savonitar.flink.stability.runtime.api.Digests;
 import org.savonitar.flink.stability.runtime.api.FlinkConnectorBundleInstallation;
 import org.savonitar.flink.stability.runtime.api.FlinkRuntimeTarget;
 
@@ -25,8 +26,6 @@ import java.net.URISyntaxException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.security.MessageDigest;
-import java.security.NoSuchAlgorithmException;
 import java.util.ArrayList;
 import java.util.List;
 
@@ -50,7 +49,7 @@ class ConnectorClusterBundleBuilderTest {
             throws IOException {
         Path alpha = write("alpha.jar", "identical connector bytes");
         Path beta = write("beta.jar", "identical connector bytes");
-        String hash = sha256(alpha);
+        String hash = Digests.sha256(alpha);
         ObjectNode document = scenarioDocument(
                 "coalesced-bundle", List.of("beta", "alpha"), false, true);
         PreparedScenarioPlan plan = directPlan(
@@ -96,7 +95,7 @@ class ConnectorClusterBundleBuilderTest {
                 + "\"}],\"format\":\"" + PreparedConnectorBundle.TARGET_BINDING_FORMAT
                 + "\",\"target_flink_image_reference\":\"flink:2.2.0\"}";
         assertEquals(expectedBinding, initial.canonicalTargetBindingJson());
-        assertEquals(CanonicalJson.sha256(expectedBinding), initial.targetBindingSha256());
+        assertEquals(Digests.sha256(expectedBinding), initial.targetBindingSha256());
         assertFalse(initial.canonicalTargetBindingJson().contains("\"aliases\""));
         assertFalse(initial.canonicalTargetBindingJson().contains("\"entries\""));
         assertThrows(UnsupportedOperationException.class, () -> initial.aliases().clear());
@@ -120,20 +119,20 @@ class ConnectorClusterBundleBuilderTest {
                         localClosure(
                                 "alpha",
                                 alpha,
-                                sha256(alpha),
+                                Digests.sha256(alpha),
                                 List.of(localDependency(
-                                        "alpha", 0, sharedAlpha, sha256(sharedAlpha)))),
+                                        "alpha", 0, sharedAlpha, Digests.sha256(sharedAlpha)))),
                         localClosure(
                                 "beta",
                                 beta,
-                                sha256(beta),
+                                Digests.sha256(beta),
                                 List.of(localDependency(
-                                        "beta", 0, sharedBeta, sha256(sharedBeta))))));
+                                        "beta", 0, sharedBeta, Digests.sha256(sharedBeta))))));
 
         PreparedConnectorBundle bundle = builder.build(
                 plan, ScenarioSide.SINGLE, "flink:2.2.0");
 
-        assertEquals(List.of(sha256(alpha), sha256(sharedAlpha), sha256(beta)),
+        assertEquals(List.of(Digests.sha256(alpha), Digests.sha256(sharedAlpha), Digests.sha256(beta)),
                 bundle.entries().stream().map(PreparedConnectorBundleEntry::sha256).toList());
         assertEquals(List.of(0, 1, 2), bundle.entries().stream()
                 .map(PreparedConnectorBundleEntry::globalClasspathIndex).toList());
@@ -173,15 +172,15 @@ class ConnectorClusterBundleBuilderTest {
                         localClosure(
                                 "alpha",
                                 alpha,
-                                sha256(alpha),
+                                Digests.sha256(alpha),
                                 List.of(mavenDependency(
-                                        "alpha", "1.0", sharedOne, sha256(sharedOne)))),
+                                        "alpha", "1.0", sharedOne, Digests.sha256(sharedOne)))),
                         localClosure(
                                 "beta",
                                 beta,
-                                sha256(beta),
+                                Digests.sha256(beta),
                                 List.of(mavenDependency(
-                                        "beta", "2.0", sharedTwo, sha256(sharedTwo))))));
+                                        "beta", "2.0", sharedTwo, Digests.sha256(sharedTwo))))));
 
         PreparedConnectorBundle coalesced = builder.build(
                 coalescingPlan, ScenarioSide.SINGLE, "flink:2.2.0");
@@ -204,15 +203,15 @@ class ConnectorClusterBundleBuilderTest {
                         localClosure(
                                 "alpha",
                                 alpha,
-                                sha256(alpha),
+                                Digests.sha256(alpha),
                                 List.of(mavenDependency(
-                                        "alpha", "1.0", sharedOne, sha256(sharedOne)))),
+                                        "alpha", "1.0", sharedOne, Digests.sha256(sharedOne)))),
                         localClosure(
                                 "beta",
                                 beta,
-                                sha256(beta),
+                                Digests.sha256(beta),
                                 List.of(mavenDependency(
-                                        "beta", "2.0", conflicting, sha256(conflicting))))));
+                                        "beta", "2.0", conflicting, Digests.sha256(conflicting))))));
 
         SpecificationException failure = assertFailsAt(
                 Stage.ARTIFACT,
@@ -225,15 +224,15 @@ class ConnectorClusterBundleBuilderTest {
         assertTrue(message.contains("org.example:shared:jar:2.0"));
         assertTrue(message.contains("alias='alpha'"));
         assertTrue(message.contains("alias='beta'"));
-        assertTrue(message.contains(sha256(sharedOne)));
-        assertTrue(message.contains(sha256(conflicting)));
+        assertTrue(message.contains(Digests.sha256(sharedOne)));
+        assertTrue(message.contains(Digests.sha256(conflicting)));
     }
 
     @Test
     void staleBytesAndTargetDisagreementAreTyped()
             throws IOException {
         Path alpha = write("alpha.jar", "prepared-alpha");
-        String recorded = sha256(alpha);
+        String recorded = Digests.sha256(alpha);
         PreparedConnectorClosure closure = localClosure("alpha", alpha, recorded, List.of());
         PreparedScenarioPlan plan = directPlan(
                 resolve(scenarioDocument(
@@ -264,7 +263,7 @@ class ConnectorClusterBundleBuilderTest {
             throws IOException {
         Path alpha = write("runtime-alpha.jar", "runtime-alpha");
         PreparedConnectorClosure closure = localClosure(
-                "alpha", alpha, sha256(alpha), List.of());
+                "alpha", alpha, Digests.sha256(alpha), List.of());
         PreparedScenarioPlan plan = directPlan(
                 resolve(scenarioDocument(
                         "runtime-adapter", List.of("alpha"), false, false)),
@@ -499,18 +498,9 @@ class ConnectorClusterBundleBuilderTest {
         return Files.writeString(temporary.resolve(name), value, StandardCharsets.UTF_8);
     }
 
-    private static String sha256(Path path) throws IOException {
-        try {
-            MessageDigest digest = MessageDigest.getInstance("SHA-256");
-            return java.util.HexFormat.of().formatHex(digest.digest(Files.readAllBytes(path)));
-        } catch (NoSuchAlgorithmException impossible) {
-            throw new AssertionError("Java must provide SHA-256", impossible);
-        }
-    }
-
     private static String uncheckedSha256(Path path) {
         try {
-            return sha256(path);
+            return Digests.sha256(path);
         } catch (IOException exception) {
             throw new AssertionError(exception);
         }

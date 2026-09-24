@@ -1,6 +1,8 @@
 package org.savonitar.flink.stability.runtime.api;
 
 import java.util.Objects;
+
+import static org.savonitar.flink.stability.runtime.api.Checks.requireNonBlank;
 /** One effective Flink image and its mandatory verified connector-bundle installation. */
 public final class FlinkRuntimeTarget {
     private final String imageReference;
@@ -54,13 +56,5 @@ public final class FlinkRuntimeTarget {
     @Override
     public String toString() {
         return imageReference + " (binding " + connectorBundle.targetBindingSha256() + ")";
-    }
-
-    private static String requireNonBlank(String value, String name) {
-        value = Objects.requireNonNull(value, name);
-        if (value.isBlank()) {
-            throw new IllegalArgumentException(name + " must not be blank");
-        }
-        return value;
     }
 }

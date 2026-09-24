@@ -12,6 +12,8 @@ import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
 
+import static org.savonitar.flink.stability.runtime.api.Checks.requireNonBlank;
+
 /** Structured first-vertical outcome; PASS is possible only after a successful write fence. */
 public record V1ScenarioExecutionResult(
         Status status,
@@ -166,13 +168,5 @@ public record V1ScenarioExecutionResult(
                 subjectClassOrigins,
                 flinkProvisioningEvidence,
                 updated);
-    }
-
-    private static String requireNonBlank(String value, String name) {
-        Objects.requireNonNull(value, name);
-        if (value.isBlank()) {
-            throw new IllegalArgumentException(name + " must not be blank");
-        }
-        return value;
     }
 }

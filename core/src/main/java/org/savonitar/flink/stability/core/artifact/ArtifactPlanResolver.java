@@ -10,6 +10,7 @@ import org.savonitar.flink.stability.core.spec.resolution.ResolvedSide;
 import org.savonitar.flink.stability.core.spec.resolution.ResolvedSuiteEntry;
 import org.savonitar.flink.stability.core.spec.resolution.ResolvedSuitePlan;
 import org.savonitar.flink.stability.core.spec.resolution.ScenarioSide;
+import org.savonitar.flink.stability.runtime.api.Digests;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
@@ -23,8 +24,6 @@ import java.nio.file.Files;
 import java.nio.file.InvalidPathException;
 import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
-import java.security.MessageDigest;
-import java.security.NoSuchAlgorithmException;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.HashMap;
@@ -1810,17 +1809,8 @@ public final class ArtifactPlanResolver {
 
     private static String uncheckedSha256(Path path) {
         try {
-            MessageDigest digest = MessageDigest.getInstance("SHA-256");
-            try (InputStream input = Files.newInputStream(path)) {
-                byte[] buffer = new byte[8192];
-                for (int read; (read = input.read(buffer)) >= 0;) {
-                    if (read > 0) {
-                        digest.update(buffer, 0, read);
-                    }
-                }
-            }
-            return java.util.HexFormat.of().formatHex(digest.digest());
-        } catch (IOException | NoSuchAlgorithmException exception) {
+            return Digests.sha256(path);
+        } catch (IOException exception) {
             throw new ChecksumFailure(exception);
         }
     }

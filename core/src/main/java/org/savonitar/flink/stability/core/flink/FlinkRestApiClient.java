@@ -10,6 +10,7 @@ import okhttp3.Request;
 import okhttp3.RequestBody;
 import okhttp3.Response;
 import okhttp3.MultipartBody;
+import org.savonitar.flink.stability.runtime.api.Digests;
 import org.savonitar.flink.stability.runtime.api.MonotonicDeadline;
 
 import java.io.IOException;
@@ -17,8 +18,6 @@ import java.io.InterruptedIOException;
 import java.nio.file.Files;
 import java.nio.file.LinkOption;
 import java.nio.file.Path;
-import java.security.MessageDigest;
-import java.security.NoSuchAlgorithmException;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
@@ -81,7 +80,7 @@ public final class FlinkRestApiClient implements FlinkScenarioControl {
         }
         JsonNode response;
         try (UploadSnapshot snapshot = snapshotForUpload(normalized)) {
-            String actualSha256 = sha256(snapshot.path());
+            String actualSha256 = Digests.sha256(snapshot.path(), LinkOption.NOFOLLOW_LINKS);
             if (!expectedSha256.equals(actualSha256)) {
                 throw new IOException(
                         "Prepared workload JAR changed before upload; expected SHA-256 "
@@ -122,23 +121,6 @@ public final class FlinkRestApiClient implements FlinkScenarioControl {
                 failure.addSuppressed(cleanupFailure);
             }
             throw failure;
-        }
-    }
-
-    private static String sha256(Path path) throws IOException {
-        try {
-            MessageDigest digest = MessageDigest.getInstance("SHA-256");
-            try (var input = Files.newInputStream(path, LinkOption.NOFOLLOW_LINKS)) {
-                byte[] buffer = new byte[8192];
-                for (int read; (read = input.read(buffer)) >= 0;) {
-                    if (read > 0) {
-                        digest.update(buffer, 0, read);
-                    }
-                }
-            }
-            return java.util.HexFormat.of().formatHex(digest.digest());
-        } catch (NoSuchAlgorithmException impossible) {
-            throw new IllegalStateException("Java must provide SHA-256", impossible);
         }
     }
 

@@ -39,7 +39,7 @@ class ConnectorClasspathManifestTest {
                 + "],\"format\":\"flink-stability-connector-classpath-v1\"}";
 
         assertEquals(expected, new String(manifest.canonicalBytes(), StandardCharsets.UTF_8));
-        assertEquals(ConnectorClasspathManifest.sha256(
+        assertEquals(Digests.sha256(
                 expected.getBytes(StandardCharsets.UTF_8)), manifest.manifestSha256());
         assertEquals(
                 "/opt/flink/lib/flink-stability-connector-00000001-"
@@ -149,7 +149,7 @@ class ConnectorClasspathManifestTest {
                         installation.canonicalTargetBindingBytes(),
                         StandardCharsets.UTF_8));
         assertEquals(
-                ConnectorClasspathManifest.sha256(
+                Digests.sha256(
                         expected.getBytes(StandardCharsets.UTF_8)),
                 installation.targetBindingSha256());
         assertEquals(List.of("alpha", "zeta"), installation.closureLocks().stream()
@@ -214,6 +214,6 @@ class ConnectorClasspathManifestTest {
     }
 
     private static String hash(Path path) throws Exception {
-        return ConnectorClasspathManifest.sha256(Files.readAllBytes(path));
+        return Digests.sha256(Files.readAllBytes(path));
     }
 }

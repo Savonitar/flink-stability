@@ -36,14 +36,12 @@ import org.eclipse.aether.util.graph.transformer.JavaScopeDeriver;
 import org.eclipse.aether.util.graph.transformer.JavaScopeSelector;
 import org.eclipse.aether.util.graph.transformer.SimpleOptionalitySelector;
 import org.eclipse.aether.util.repository.SimpleArtifactDescriptorPolicy;
+import org.savonitar.flink.stability.runtime.api.Digests;
 
 import java.io.IOException;
-import java.io.InputStream;
 import java.net.URI;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.security.MessageDigest;
-import java.security.NoSuchAlgorithmException;
 import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.Collections;
@@ -96,7 +94,7 @@ final class CentralMavenArtifactLookup implements MavenArtifactLookup {
             URI uri = Objects.requireNonNull(uris.get(index), "repository URI");
             String repositoryId = MAVEN_CENTRAL.equals(uri)
                     ? "central"
-                    : "v1-repository-" + index + "-" + sha256(uri.toASCIIString());
+                    : "v1-repository-" + index + "-" + Digests.sha256(uri.toASCIIString());
             fixedRepositories.add(new RemoteRepository.Builder(
                     repositoryId, "default", uri.toString()).build());
         }
@@ -508,7 +506,7 @@ final class CentralMavenArtifactLookup implements MavenArtifactLookup {
                     visit.node().getDependency().getScope(),
                     visit.dependencyPath(),
                     canonicalSource,
-                    sha256(canonicalSource)));
+                    Digests.sha256(canonicalSource)));
         }
         return List.copyOf(classpath);
     }
@@ -555,33 +553,6 @@ final class CentralMavenArtifactLookup implements MavenArtifactLookup {
                     "Neither maven.repo.local nor user.home identifies a Maven local repository");
         }
         return Path.of(userHome, ".m2", "repository");
-    }
-
-    private static String sha256(Path path) throws IOException {
-        MessageDigest digest = newSha256Digest();
-        try (InputStream input = Files.newInputStream(path)) {
-            byte[] buffer = new byte[8192];
-            for (int read = input.read(buffer); read >= 0; read = input.read(buffer)) {
-                if (read > 0) {
-                    digest.update(buffer, 0, read);
-                }
-            }
-        }
-        return java.util.HexFormat.of().formatHex(digest.digest());
-    }
-
-    private static String sha256(String value) {
-        MessageDigest digest = newSha256Digest();
-        return java.util.HexFormat.of().formatHex(
-                digest.digest(value.getBytes(java.nio.charset.StandardCharsets.UTF_8)));
-    }
-
-    private static MessageDigest newSha256Digest() {
-        try {
-            return MessageDigest.getInstance("SHA-256");
-        } catch (NoSuchAlgorithmException impossible) {
-            throw new IllegalStateException("SHA-256 is unavailable", impossible);
-        }
     }
 
     private enum RuntimeDependencySelector implements DependencySelector {
@@ -686,7 +657,7 @@ final class CentralMavenArtifactLookup implements MavenArtifactLookup {
             for (Map.Entry<MavenArtifactIdentity, Path> entry : entries) {
                 Path source = entry.getValue().toRealPath();
                 evidence.add(new MavenPomEvidence(
-                        entry.getKey(), source, sha256(source)));
+                        entry.getKey(), source, Digests.sha256(source)));
             }
             return List.copyOf(evidence);
         }

@@ -10,6 +10,8 @@ import java.util.Objects;
 import java.util.Set;
 import java.util.regex.Pattern;
 
+import static org.savonitar.flink.stability.runtime.api.Checks.requireNonBlank;
+
 /**
  * Immutable target-specific connector binding paired with target-independent classpath bytes.
  * The binding identity is derived here from its complete structured input; callers cannot pair
@@ -35,7 +37,7 @@ public record FlinkConnectorBundleInstallation(
 
     /** SHA-256 derived exclusively from {@link #canonicalTargetBindingBytes()}. */
     public String targetBindingSha256() {
-        return ConnectorClasspathManifest.sha256(canonicalTargetBindingBytes());
+        return Digests.sha256(canonicalTargetBindingBytes());
     }
 
     private String canonicalTargetBindingJson() {
@@ -101,14 +103,6 @@ public record FlinkConnectorBundleInstallation(
             }
         }
         return escaped.toString();
-    }
-
-    private static String requireNonBlank(String value, String name) {
-        value = Objects.requireNonNull(value, name);
-        if (value.isBlank()) {
-            throw new IllegalArgumentException(name + " must not be blank");
-        }
-        return value;
     }
 
     /** One alias and the SHA-256 of its exact target-specific dependency closure lock. */

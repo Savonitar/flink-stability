@@ -6,6 +6,7 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import org.savonitar.flink.stability.runtime.api.ConnectorBundleProvisioningException;
 import org.savonitar.flink.stability.runtime.api.ConnectorClasspathManifest;
+import org.savonitar.flink.stability.runtime.api.Digests;
 import org.savonitar.flink.stability.runtime.api.FlinkClassLoadLog;
 import org.savonitar.flink.stability.runtime.api.FlinkConnectorBundleInstallation;
 import org.savonitar.flink.stability.runtime.api.FlinkRuntimeTarget;
@@ -154,7 +155,7 @@ class FlinkContainerTest {
     @Test
     void configuresTheIdenticalByteOnlyBundleForEveryFlinkProcess() throws Exception {
         Path jar = Files.writeString(temporaryDirectory.resolve("connector.jar"), "connector");
-        String sha256 = ConnectorClasspathManifest.sha256(Files.readAllBytes(jar));
+        String sha256 = Digests.sha256(Files.readAllBytes(jar));
         ConnectorClasspathManifest manifest = new ConnectorClasspathManifest(List.of(
                 new ConnectorClasspathManifest.Entry(0, jar, sha256)));
         FlinkRuntimeTarget target = FlinkRuntimeTarget.withConnectorBundle(
@@ -203,7 +204,7 @@ class FlinkContainerTest {
         Path jar = Files.writeString(temporaryDirectory.resolve("mutable.jar"), "before");
         ConnectorClasspathManifest manifest = new ConnectorClasspathManifest(List.of(
                 new ConnectorClasspathManifest.Entry(
-                        0, jar, ConnectorClasspathManifest.sha256(Files.readAllBytes(jar)))));
+                        0, jar, Digests.sha256(Files.readAllBytes(jar)))));
         FlinkContainer factory = new FlinkContainer(
                 FlinkRuntimeTarget.withConnectorBundle(
                         "flink:2.2.0",

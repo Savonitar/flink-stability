@@ -21,13 +21,12 @@ import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
+import org.savonitar.flink.stability.runtime.api.Digests;
 
 import java.io.IOException;
 import java.net.URISyntaxException;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.security.MessageDigest;
-import java.security.NoSuchAlgorithmException;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.LinkedHashMap;
@@ -95,8 +94,8 @@ class ArtifactPlanResolverTest {
 
         Files.writeString(input, "mutated source");
         assertEquals("hello", Files.readString(resolved.preparedPath()));
-        assertEquals(resolved.sha256(), sha256(resolved.preparedPath()));
-        assertNotEquals(sha256(input), resolved.sha256());
+        assertEquals(resolved.sha256(), Digests.sha256(resolved.preparedPath()));
+        assertNotEquals(Digests.sha256(input), resolved.sha256());
     }
 
     @Test
@@ -945,16 +944,7 @@ class ArtifactPlanResolverTest {
         assertTrue(Files.isRegularFile(staged));
         assertTrue(staged.getFileName().toString().startsWith(artifact.sha256()));
         assertArrayEquals(Files.readAllBytes(original), Files.readAllBytes(staged));
-        assertEquals(artifact.sha256(), sha256(staged));
-    }
-
-    private static String sha256(Path path) throws IOException {
-        try {
-            MessageDigest digest = MessageDigest.getInstance("SHA-256");
-            return java.util.HexFormat.of().formatHex(digest.digest(Files.readAllBytes(path)));
-        } catch (NoSuchAlgorithmException exception) {
-            throw new AssertionError("Java must provide SHA-256", exception);
-        }
+        assertEquals(artifact.sha256(), Digests.sha256(staged));
     }
 
     private static List<String> artifactSignature(PreparedScenarioPlan plan) {

@@ -8,6 +8,8 @@ import java.util.Optional;
 import java.util.OptionalInt;
 import java.util.regex.Pattern;
 
+import static org.savonitar.flink.stability.runtime.api.Checks.requireNonBlank;
+
 /** One immutable connector classpath entry prepared for execution. */
 public final class PreparedConnectorArtifact {
     private static final Pattern SHA_256 = Pattern.compile("[0-9a-f]{64}");
@@ -232,14 +234,6 @@ public final class PreparedConnectorArtifact {
         value = requireNonBlank(value, name);
         if (!value.startsWith("$/")) {
             throw new IllegalArgumentException(name + " must be a root-relative JSON pointer");
-        }
-        return value;
-    }
-
-    private static String requireNonBlank(String value, String name) {
-        Objects.requireNonNull(value, name);
-        if (value.isBlank()) {
-            throw new IllegalArgumentException(name + " must not be blank");
         }
         return value;
     }

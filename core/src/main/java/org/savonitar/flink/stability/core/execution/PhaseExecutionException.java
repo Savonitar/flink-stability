@@ -3,6 +3,8 @@ package org.savonitar.flink.stability.core.execution;
 import java.util.List;
 import java.util.Objects;
 
+import static org.savonitar.flink.stability.runtime.api.Checks.requireNonBlank;
+
 /** Typed FAIL or INCONCLUSIVE result from one attempted phase step. */
 public final class PhaseExecutionException extends Exception {
     private final Outcome outcome;
@@ -69,13 +71,5 @@ public final class PhaseExecutionException extends Exception {
     public enum Outcome {
         FAIL,
         INCONCLUSIVE
-    }
-
-    private static String requireNonBlank(String value, String name) {
-        Objects.requireNonNull(value, name);
-        if (value.isBlank()) {
-            throw new IllegalArgumentException(name + " must not be blank");
-        }
-        return value;
     }
 }

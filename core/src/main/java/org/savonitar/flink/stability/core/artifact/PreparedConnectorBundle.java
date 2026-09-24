@@ -8,6 +8,8 @@ import java.util.Objects;
 import java.util.Optional;
 import java.util.regex.Pattern;
 
+import static org.savonitar.flink.stability.runtime.api.Checks.requireNonBlank;
+
 /** Immutable, target-specific connector bundle ready for cluster provisioning. */
 public final class PreparedConnectorBundle {
     public static final String TARGET_BINDING_FORMAT =
@@ -144,13 +146,5 @@ public final class PreparedConnectorBundle {
 
     public String classpathManifestSha256() {
         return classpathManifestSha256;
-    }
-
-    private static String requireNonBlank(String value, String name) {
-        Objects.requireNonNull(value, name);
-        if (value.isBlank()) {
-            throw new IllegalArgumentException(name + " must not be blank");
-        }
-        return value;
     }
 }

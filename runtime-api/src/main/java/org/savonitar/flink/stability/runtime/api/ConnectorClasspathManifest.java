@@ -6,11 +6,8 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.LinkOption;
 import java.nio.file.Path;
-import java.security.MessageDigest;
-import java.security.NoSuchAlgorithmException;
 import java.util.Arrays;
 import java.util.HashSet;
-import java.util.HexFormat;
 import java.util.List;
 import java.util.Locale;
 import java.util.Objects;
@@ -44,7 +41,7 @@ public final class ConnectorClasspathManifest {
             }
         }
         this.canonicalBytes = canonicalJson(this.entries).getBytes(StandardCharsets.UTF_8);
-        this.manifestSha256 = sha256(canonicalBytes);
+        this.manifestSha256 = Digests.sha256(canonicalBytes);
     }
 
     public List<Entry> entries() {
@@ -71,7 +68,7 @@ public final class ConnectorClasspathManifest {
                 }
                 String observed;
                 try (InputStream input = Files.newInputStream(path)) {
-                    observed = sha256(input);
+                    observed = Digests.sha256(input);
                 }
                 if (!entry.sha256().equals(observed)) {
                     throw new ConnectorBundleProvisioningException(
@@ -84,30 +81,6 @@ public final class ConnectorClasspathManifest {
                         "Could not verify prepared connector classpath entry " + path,
                         exception);
             }
-        }
-    }
-
-    public static String sha256(InputStream input) throws IOException {
-        MessageDigest digest = newDigest();
-        byte[] buffer = new byte[8192];
-        int read;
-        while ((read = input.read(buffer)) >= 0) {
-            if (read > 0) {
-                digest.update(buffer, 0, read);
-            }
-        }
-        return HexFormat.of().formatHex(digest.digest());
-    }
-
-    public static String sha256(byte[] bytes) {
-        return HexFormat.of().formatHex(newDigest().digest(bytes));
-    }
-
-    private static MessageDigest newDigest() {
-        try {
-            return MessageDigest.getInstance("SHA-256");
-        } catch (NoSuchAlgorithmException exception) {
-            throw new IllegalStateException("SHA-256 is unavailable", exception);
         }
     }
 

@@ -3,6 +3,8 @@ package org.savonitar.flink.stability.core.spec.document;
 import java.nio.file.Path;
 import java.util.Objects;
 
+import static org.savonitar.flink.stability.runtime.api.Checks.requireNonBlank;
+
 /** Stable report and artifact identity for one source-ordered suite membership. */
 public record SuiteEntryIdentity(
         Path suiteSource,
@@ -14,7 +16,7 @@ public record SuiteEntryIdentity(
     public SuiteEntryIdentity {
         suiteSource = Objects.requireNonNull(suiteSource, "suiteSource")
                 .toAbsolutePath().normalize();
-        requireText(suiteName, "suiteName");
+        requireNonBlank(suiteName, "suiteName");
         if (entryIndex < 0) {
             throw new IllegalArgumentException("entryIndex must be non-negative");
         }
@@ -23,13 +25,7 @@ public record SuiteEntryIdentity(
             throw new IllegalArgumentException(
                     "entryPointer must be '" + requiredPointer + "'");
         }
-        requireText(entryId, "entryId");
-        requireText(scenarioName, "scenarioName");
-    }
-
-    private static void requireText(String value, String name) {
-        if (Objects.requireNonNull(value, name).isBlank()) {
-            throw new IllegalArgumentException(name + " must not be blank");
-        }
+        requireNonBlank(entryId, "entryId");
+        requireNonBlank(scenarioName, "scenarioName");
     }
 }

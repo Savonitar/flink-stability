@@ -20,14 +20,13 @@ import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
+import org.savonitar.flink.stability.runtime.api.Digests;
 
 import java.io.IOException;
 import java.net.URISyntaxException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.security.MessageDigest;
-import java.security.NoSuchAlgorithmException;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.LinkedHashMap;
@@ -78,7 +77,7 @@ class ArtifactPlanResolverConnectorClosureTest {
                 new MavenArtifactIdentity(
                         primary.groupId(), primary.artifactId(), "pom", "", primary.version()),
                 pom,
-                sha256(pom));
+                Digests.sha256(pom));
         MavenConflictDecision conflict = new MavenConflictDecision(
                 omittedChild,
                 child,
@@ -273,7 +272,7 @@ class ArtifactPlanResolverConnectorClosureTest {
                         ScenarioSide.SINGLE, "kafka").orElseThrow()
                 .dependencies().getFirst();
         assertEquals(leaf.toRealPath(), emitted.sourcePath());
-        assertEquals(sha256(sameBytes), emitted.sha256());
+        assertEquals(Digests.sha256(sameBytes), emitted.sha256());
         assertEquals(List.of(0, 1), emitted.origins().stream()
                 .map(origin -> origin.runtimeDependencyIndex().orElseThrow())
                 .toList());
@@ -486,7 +485,7 @@ class ArtifactPlanResolverConnectorClosureTest {
                 new MavenArtifactIdentity(
                         primary.groupId(), primary.artifactId(), "pom", "", primary.version()),
                 pom,
-                sha256(pom));
+                Digests.sha256(pom));
         MavenRuntimeClosure graph = new MavenRuntimeClosure(
                 List.of(jar(primary, 0, 0, List.of(primary), primaryA)),
                 List.of(),
@@ -702,7 +701,7 @@ class ArtifactPlanResolverConnectorClosureTest {
                 List.of(other),
                 jar,
                 jar,
-                sha256(jar)));
+                Digests.sha256(jar)));
         assertThrows(IllegalArgumentException.class, () -> new PreparedConnectorOrigin(
                 ResolutionScope.SINGLE,
                 PreparedConnectorOrigin.RootKind.PRIMARY,
@@ -827,7 +826,7 @@ class ArtifactPlanResolverConnectorClosureTest {
                 depth == 0 ? "compile" : "runtime",
                 path,
                 source,
-                sha256(source));
+                Digests.sha256(source));
     }
 
     private static Path createJar(
@@ -857,18 +856,9 @@ class ArtifactPlanResolverConnectorClosureTest {
         return Files.copy(source, target);
     }
 
-    private static String sha256(Path path) throws IOException {
-        try {
-            MessageDigest digest = MessageDigest.getInstance("SHA-256");
-            return java.util.HexFormat.of().formatHex(digest.digest(Files.readAllBytes(path)));
-        } catch (NoSuchAlgorithmException exception) {
-            throw new AssertionError("Java must provide SHA-256", exception);
-        }
-    }
-
     private static String uncheckedSha256(Path path) {
         try {
-            return sha256(path);
+            return Digests.sha256(path);
         } catch (IOException exception) {
             throw new AssertionError(exception);
         }

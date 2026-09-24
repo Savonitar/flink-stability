@@ -7,6 +7,8 @@ import java.util.List;
 import java.util.Objects;
 import java.util.Set;
 
+import static org.savonitar.flink.stability.runtime.api.Checks.requireNonBlank;
+
 /** One connector's immutable primary and ordered runtime classpath evidence. */
 public final class PreparedConnectorClosure {
     private final ResolutionScope scope;
@@ -117,14 +119,6 @@ public final class PreparedConnectorClosure {
         value = requireNonBlank(value, name);
         if (!value.startsWith("$/")) {
             throw new IllegalArgumentException(name + " must be a root-relative JSON pointer");
-        }
-        return value;
-    }
-
-    private static String requireNonBlank(String value, String name) {
-        Objects.requireNonNull(value, name);
-        if (value.isBlank()) {
-            throw new IllegalArgumentException(name + " must not be blank");
         }
         return value;
     }

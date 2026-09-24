@@ -2,6 +2,7 @@ package org.savonitar.flink.stability.testcontainers;
 
 import org.savonitar.flink.stability.runtime.api.ConnectorBundleProvisioningException;
 import org.savonitar.flink.stability.runtime.api.ConnectorClasspathManifest;
+import org.savonitar.flink.stability.runtime.api.Digests;
 import org.savonitar.flink.stability.runtime.api.FlinkConnectorBundleInstallation;
 import org.savonitar.flink.stability.runtime.api.FlinkRuntimeTarget;
 import org.savonitar.flink.stability.runtime.api.ProvisionedConnectorArtifact;
@@ -84,7 +85,7 @@ final class VerifiedFlinkContainer extends GenericContainer<VerifiedFlinkContain
             String observed;
             try {
                 observed = copyFileFromContainer(
-                        entry.containerPath(), ConnectorClasspathManifest::sha256);
+                        entry.containerPath(), Digests::sha256);
             } catch (RuntimeException exception) {
                 throw new ConnectorBundleProvisioningException(
                         "Could not read copied connector JAR " + entry.containerPath(),

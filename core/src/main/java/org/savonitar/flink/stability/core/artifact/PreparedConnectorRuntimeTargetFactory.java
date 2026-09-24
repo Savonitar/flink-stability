@@ -1,16 +1,14 @@
 package org.savonitar.flink.stability.core.artifact;
 
 import org.savonitar.flink.stability.runtime.api.ConnectorClasspathManifest;
+import org.savonitar.flink.stability.runtime.api.Digests;
 import org.savonitar.flink.stability.runtime.api.FlinkConnectorBundleInstallation;
 import org.savonitar.flink.stability.runtime.api.FlinkRuntimeTarget;
 
 import java.io.IOException;
-import java.io.InputStream;
 import java.nio.file.Files;
 import java.nio.file.LinkOption;
 import java.nio.file.Path;
-import java.security.MessageDigest;
-import java.security.NoSuchAlgorithmException;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.HashMap;
@@ -33,7 +31,7 @@ public final class PreparedConnectorRuntimeTargetFactory {
 
         String manifestJson = ConnectorClusterBundleBuilder.canonicalClasspathManifest(
                 bundle.entries());
-        String manifestSha256 = CanonicalJson.sha256(manifestJson);
+        String manifestSha256 = Digests.sha256(manifestJson);
         if (!manifestJson.equals(bundle.classpathManifestJson())
                 || !manifestSha256.equals(bundle.classpathManifestSha256())) {
             throw new IllegalStateException(
@@ -46,7 +44,7 @@ public final class PreparedConnectorRuntimeTargetFactory {
                 bundle.targetFlinkImageReference(),
                 bundle.closureLocks(),
                 manifestSha256);
-        String targetBindingSha256 = CanonicalJson.sha256(targetBindingJson);
+        String targetBindingSha256 = Digests.sha256(targetBindingJson);
         if (!targetBindingJson.equals(bundle.canonicalTargetBindingJson())
                 || !targetBindingSha256.equals(bundle.targetBindingSha256())) {
             throw new IllegalStateException(
@@ -110,7 +108,7 @@ public final class PreparedConnectorRuntimeTargetFactory {
     private static void verifyClosureLocks(List<ConnectorClosureLock> locks) {
         for (ConnectorClosureLock lock : locks) {
             String projection = ConnectorClosureLockFactory.canonicalProjection(lock);
-            String sha256 = CanonicalJson.sha256(projection);
+            String sha256 = Digests.sha256(projection);
             if (!projection.equals(lock.canonicalProjectionJson())
                     || !sha256.equals(lock.closureSha256())) {
                 throw new IllegalStateException(
@@ -189,7 +187,7 @@ public final class PreparedConnectorRuntimeTargetFactory {
         }
         String actual;
         try {
-            actual = sha256(path);
+            actual = Digests.sha256(path);
         } catch (IOException exception) {
             throw new IllegalStateException(
                     "Could not revalidate prepared connector JAR at classpath index "
@@ -203,23 +201,6 @@ public final class PreparedConnectorRuntimeTargetFactory {
                             + entry.globalClasspathIndex() + ": " + path
                             + "; expected SHA-256 " + entry.sha256()
                             + ", actual " + actual);
-        }
-    }
-
-    private static String sha256(Path path) throws IOException {
-        try {
-            MessageDigest digest = MessageDigest.getInstance("SHA-256");
-            try (InputStream input = Files.newInputStream(path)) {
-                byte[] buffer = new byte[8192];
-                for (int read; (read = input.read(buffer)) >= 0;) {
-                    if (read > 0) {
-                        digest.update(buffer, 0, read);
-                    }
-                }
-            }
-            return java.util.HexFormat.of().formatHex(digest.digest());
-        } catch (NoSuchAlgorithmException impossible) {
-            throw new IllegalStateException("Java must provide SHA-256", impossible);
         }
     }
 }
