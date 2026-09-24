@@ -10,6 +10,7 @@ import okhttp3.Request;
 import okhttp3.RequestBody;
 import okhttp3.Response;
 import okhttp3.MultipartBody;
+import org.savonitar.flink.stability.runtime.api.MonotonicDeadline;
 
 import java.io.IOException;
 import java.io.InterruptedIOException;
@@ -180,7 +181,7 @@ public final class FlinkRestApiClient implements FlinkScenarioControl {
             FlinkJobState expected,
             Duration timeout) throws IOException {
         Objects.requireNonNull(expected, "expected");
-        Deadline deadline = Deadline.after(timeout, nanoTime);
+        MonotonicDeadline deadline = MonotonicDeadline.start(timeout, nanoTime);
         while (true) {
             FlinkJobState state = jobState(job, deadline);
             if (state == expected) {
@@ -190,7 +191,7 @@ public final class FlinkRestApiClient implements FlinkScenarioControl {
                 throw new IOException("Flink job reached " + state
                         + " before expected state " + expected);
             }
-            deadline.pauseBeforeNextPoll();
+            pauseBeforeNextPoll(deadline);
         }
     }
 
@@ -203,7 +204,7 @@ public final class FlinkRestApiClient implements FlinkScenarioControl {
         if (minimumCompleted < 1) {
             throw new IllegalArgumentException("minimumCompleted must be positive");
         }
-        Deadline deadline = Deadline.after(timeout, nanoTime);
+        MonotonicDeadline deadline = MonotonicDeadline.start(timeout, nanoTime);
         while (true) {
             long completed = completedCheckpointCount(job, deadline);
             if (completed >= minimumCompleted) {
@@ -222,13 +223,13 @@ public final class FlinkRestApiClient implements FlinkScenarioControl {
                         + completed + " completed checkpoints; expected at least "
                         + minimumCompleted);
             }
-            deadline.pauseBeforeNextPoll();
+            pauseBeforeNextPoll(deadline);
         }
     }
 
     private long completedCheckpointCount(
             FlinkJobHandle job,
-            Deadline deadline) throws IOException {
+            MonotonicDeadline deadline) throws IOException {
         JsonNode response = get(
                 "/jobs/" + pathSegment(job.jobId()) + "/checkpoints", deadline);
         return count(response, "completed");
@@ -237,14 +238,14 @@ public final class FlinkRestApiClient implements FlinkScenarioControl {
     @Override
     public long jobManagerTimeMillis(FlinkJobHandle job) throws IOException {
         Objects.requireNonNull(job, "job");
-        Deadline deadline = Deadline.after(OBSERVATION_TIMEOUT, nanoTime);
+        MonotonicDeadline deadline = MonotonicDeadline.start(OBSERVATION_TIMEOUT, nanoTime);
         return requiredLong(get("/jobs/" + pathSegment(job.jobId()), deadline), "now");
     }
 
     @Override
     public FlinkJobObservation observe(FlinkJobHandle job) throws IOException {
         Objects.requireNonNull(job, "job");
-        Deadline deadline = Deadline.after(OBSERVATION_TIMEOUT, nanoTime);
+        MonotonicDeadline deadline = MonotonicDeadline.start(OBSERVATION_TIMEOUT, nanoTime);
         String jobPath = "/jobs/" + pathSegment(job.jobId());
         JsonNode details = get(jobPath, deadline);
         JsonNode checkpoints = get(jobPath + "/checkpoints", deadline);
@@ -348,7 +349,7 @@ public final class FlinkRestApiClient implements FlinkScenarioControl {
     @Override
     public FlinkJobState awaitFinished(FlinkJobHandle job, Duration timeout) throws IOException {
         FlinkJobState finalState = awaitTerminalState(
-                job, Deadline.after(timeout, nanoTime));
+                job, MonotonicDeadline.start(timeout, nanoTime));
         if (finalState != FlinkJobState.FINISHED) {
             throw new IOException(
                     "Flink job ended in " + finalState + " instead of FINISHED");
@@ -358,17 +359,17 @@ public final class FlinkRestApiClient implements FlinkScenarioControl {
 
     private FlinkJobState awaitTerminalState(
             FlinkJobHandle job,
-            Deadline deadline) throws IOException {
+            MonotonicDeadline deadline) throws IOException {
         while (true) {
             FlinkJobState state = jobState(job, deadline);
             if (state.terminal()) {
                 return state;
             }
-            deadline.pauseBeforeNextPoll();
+            pauseBeforeNextPoll(deadline);
         }
     }
 
-    private FlinkJobState jobState(FlinkJobHandle job, Deadline deadline) throws IOException {
+    private FlinkJobState jobState(FlinkJobHandle job, MonotonicDeadline deadline) throws IOException {
         Objects.requireNonNull(job, "job");
         JsonNode response = get("/jobs/" + pathSegment(job.jobId()), deadline);
         return parseState(response.path("state").asText());
@@ -382,11 +383,11 @@ public final class FlinkRestApiClient implements FlinkScenarioControl {
         }
     }
 
-    private JsonNode get(String endpoint, Deadline deadline) throws IOException {
+    private JsonNode get(String endpoint, MonotonicDeadline deadline) throws IOException {
         return execute("GET", endpoint, null, deadline);
     }
 
-    private JsonNode post(String endpoint, JsonNode body, Deadline deadline) throws IOException {
+    private JsonNode post(String endpoint, JsonNode body, MonotonicDeadline deadline) throws IOException {
         return execute("POST", endpoint, mapper.writeValueAsBytes(body), deadline);
     }
 
@@ -394,8 +395,8 @@ public final class FlinkRestApiClient implements FlinkScenarioControl {
             String method,
             String endpoint,
             byte[] requestBody,
-            Deadline deadline) throws IOException {
-        Duration remaining = deadline == null ? DEFAULT_CALL_TIMEOUT : deadline.remaining();
+            MonotonicDeadline deadline) throws IOException {
+        Duration remaining = deadline == null ? DEFAULT_CALL_TIMEOUT : remaining(deadline);
         byte[] response;
         try {
             response = transport.execute(method, endpoint, requestBody, remaining);
@@ -538,60 +539,20 @@ public final class FlinkRestApiClient implements FlinkScenarioControl {
         }
     }
 
-    private static final class Deadline {
-        private final long startedAtNanos;
-        private final long timeoutNanos;
-        private final LongSupplier nanoTime;
+    private static Duration remaining(MonotonicDeadline deadline) throws IOException {
+        return deadline.remainingOrThrow(() -> new FlinkRestTimeoutException(
+                "Timed out waiting for Flink operation completion"));
+    }
 
-        private Deadline(
-                long startedAtNanos,
-                long timeoutNanos,
-                LongSupplier nanoTime) {
-            this.startedAtNanos = startedAtNanos;
-            this.timeoutNanos = timeoutNanos;
-            this.nanoTime = nanoTime;
-        }
-
-        static Deadline after(Duration timeout, LongSupplier nanoTime) {
-            if (timeout == null || timeout.isZero() || timeout.isNegative()) {
-                throw new IllegalArgumentException("timeout must be positive");
-            }
-            long nanos;
-            try {
-                nanos = timeout.toNanos();
-            } catch (ArithmeticException overflow) {
-                nanos = Long.MAX_VALUE;
-            }
-            return new Deadline(
-                    nanoTime.getAsLong(),
-                    nanos,
-                    Objects.requireNonNull(nanoTime, "nanoTime"));
-        }
-
-        Duration remaining() throws IOException {
-            long elapsed = nanoTime.getAsLong() - startedAtNanos;
-            if (elapsed < 0) {
-                elapsed = 0;
-            }
-            long remaining = timeoutNanos - elapsed;
-            if (remaining <= 0) {
-                throw new FlinkRestTimeoutException(
-                        "Timed out waiting for Flink operation completion");
-            }
-            return Duration.ofNanos(remaining);
-        }
-
-        void pauseBeforeNextPoll() throws IOException {
-            long remainingNanos = remaining().toNanos();
-            long sleepNanos = Math.min(
-                    TimeUnit.MILLISECONDS.toNanos(POLL_INTERVAL_MILLIS),
-                    remainingNanos);
-            try {
-                TimeUnit.NANOSECONDS.sleep(sleepNanos);
-            } catch (InterruptedException interrupted) {
-                Thread.currentThread().interrupt();
-                throw new IOException("Interrupted while waiting for Flink", interrupted);
-            }
+    private static void pauseBeforeNextPoll(MonotonicDeadline deadline) throws IOException {
+        long sleepNanos = Math.min(
+                TimeUnit.MILLISECONDS.toNanos(POLL_INTERVAL_MILLIS),
+                remaining(deadline).toNanos());
+        try {
+            TimeUnit.NANOSECONDS.sleep(sleepNanos);
+        } catch (InterruptedException interrupted) {
+            Thread.currentThread().interrupt();
+            throw new IOException("Interrupted while waiting for Flink", interrupted);
         }
     }
 }

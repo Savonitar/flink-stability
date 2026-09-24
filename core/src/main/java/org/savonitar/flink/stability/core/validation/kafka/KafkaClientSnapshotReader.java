@@ -9,6 +9,7 @@ import org.apache.kafka.common.PartitionInfo;
 import org.apache.kafka.common.TopicPartition;
 import org.apache.kafka.common.errors.TimeoutException;
 import org.apache.kafka.common.serialization.StringDeserializer;
+import org.savonitar.flink.stability.runtime.api.MonotonicDeadline;
 
 import java.time.Duration;
 import java.util.ArrayList;
@@ -69,7 +70,7 @@ public final class KafkaClientSnapshotReader implements KafkaSnapshotReader {
         if (maximumRecords < 1) {
             throw new IllegalArgumentException("maximumRecords must be positive");
         }
-        Deadline deadline = Deadline.after(timeout, nanoTime);
+        MonotonicDeadline deadline = MonotonicDeadline.start(timeout, nanoTime);
         Consumer<String, String> boundaryConsumer = null;
         Consumer<String, String> consumer = null;
         boolean brokerReached = false;
@@ -82,7 +83,7 @@ public final class KafkaClientSnapshotReader implements KafkaSnapshotReader {
             boundaryConsumer = consumerFactory.create(
                     properties(bootstrapServers, timeout, "read_uncommitted"));
             Map<String, List<PartitionInfo>> topics =
-                    boundaryConsumer.listTopics(deadline.remaining());
+                    boundaryConsumer.listTopics(remaining(deadline));
             brokerReached = true;
             List<PartitionInfo> partitionInfo = topics.get(topic);
             if (partitionInfo == null || partitionInfo.isEmpty()) {
@@ -98,13 +99,13 @@ public final class KafkaClientSnapshotReader implements KafkaSnapshotReader {
             // advance after an already-accepted EndTxn finishes writing its commit markers. Raw
             // high watermarks already include every acknowledged transactional record, so they
             // form the fixed boundary that the committed reader must traverse before succeeding.
-            end = boundaryConsumer.endOffsets(partitions, deadline.remaining());
+            end = boundaryConsumer.endOffsets(partitions, remaining(deadline));
             offsetsCaptured = true;
 
             consumer = consumerFactory.create(
                     properties(bootstrapServers, timeout, "read_committed"));
             consumer.assign(partitions);
-            beginning = consumer.beginningOffsets(partitions, deadline.remaining());
+            beginning = consumer.beginningOffsets(partitions, remaining(deadline));
             List<TopicPartition> truncated = beginning.entrySet().stream()
                     .filter(entry -> entry.getValue() != 0L)
                     .map(Map.Entry::getKey)
@@ -121,11 +122,11 @@ public final class KafkaClientSnapshotReader implements KafkaSnapshotReader {
 
             while (!complete(consumer, end, deadline)) {
                 ConsumerRecords<String, String> polled =
-                        consumer.poll(min(MAX_POLL, deadline.remaining()));
+                        consumer.poll(min(MAX_POLL, remaining(deadline)));
                 int examined = 0;
                 for (ConsumerRecord<String, String> record : polled) {
                     if ((examined++ % DEADLINE_CHECK_INTERVAL) == 0) {
-                        deadline.remaining();
+                        remaining(deadline);
                     }
                     TopicPartition partition =
                             new TopicPartition(record.topic(), record.partition());
@@ -209,9 +210,9 @@ public final class KafkaClientSnapshotReader implements KafkaSnapshotReader {
     private static boolean complete(
             Consumer<String, String> consumer,
             Map<TopicPartition, Long> end,
-            Deadline deadline) {
+            MonotonicDeadline deadline) {
         for (Map.Entry<TopicPartition, Long> entry : end.entrySet()) {
-            if (consumer.position(entry.getKey(), deadline.remaining()) < entry.getValue()) {
+            if (consumer.position(entry.getKey(), remaining(deadline)) < entry.getValue()) {
                 return false;
             }
         }
@@ -270,49 +271,6 @@ public final class KafkaClientSnapshotReader implements KafkaSnapshotReader {
         return left.compareTo(right) <= 0 ? left : right;
     }
 
-    private static final class Deadline {
-        private final long startedAtNanos;
-        private final long timeoutNanos;
-        private final LongSupplier nanoTime;
-
-        private Deadline(
-                long startedAtNanos,
-                long timeoutNanos,
-                LongSupplier nanoTime) {
-            this.startedAtNanos = startedAtNanos;
-            this.timeoutNanos = timeoutNanos;
-            this.nanoTime = nanoTime;
-        }
-
-        static Deadline after(Duration timeout, LongSupplier nanoTime) {
-            if (timeout == null || timeout.isZero() || timeout.isNegative()) {
-                throw new IllegalArgumentException("timeout must be positive");
-            }
-            long nanos;
-            try {
-                nanos = timeout.toNanos();
-            } catch (ArithmeticException overflow) {
-                nanos = Long.MAX_VALUE;
-            }
-            return new Deadline(nanoTime.getAsLong(), nanos, nanoTime);
-        }
-
-        Duration remaining() {
-            long elapsed = nanoTime.getAsLong() - startedAtNanos;
-            // nanoTime has an arbitrary (and commonly negative) origin. Subtraction is
-            // wrap-safe for every supported interval; a genuinely backward test clock must not
-            // manufacture an immediate expiry.
-            if (elapsed < 0) {
-                elapsed = 0;
-            }
-            long remaining = timeoutNanos - elapsed;
-            if (remaining <= 0) {
-                throw new TimeoutException("Kafka snapshot deadline expired");
-            }
-            return Duration.ofNanos(remaining);
-        }
-    }
-
     private static final class FailureProgress {
         private final TreeSet<KafkaTopicSnapshot.ObservedRecord> observedSamples =
                 new TreeSet<>(COORDINATE_ORDER);
@@ -338,5 +296,10 @@ public final class KafkaClientSnapshotReader implements KafkaSnapshotReader {
     @FunctionalInterface
     interface ConsumerFactory {
         Consumer<String, String> create(Properties properties);
+    }
+
+    private static Duration remaining(MonotonicDeadline deadline) {
+        return deadline.remainingOrThrow(
+                () -> new TimeoutException("Kafka snapshot deadline expired"));
     }
 }
