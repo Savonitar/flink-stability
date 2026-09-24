@@ -1,0 +1,38 @@
+name: bounded-eos (Docker)
+
+# Manual only: starts real Kafka and Flink containers and takes several minutes.
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  bounded-eos:
+    name: run bounded-eos
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: corretto
+          java-version: '21'
+          cache: maven
+      - name: Build
+        run: mvn -B -ntp install -DskipTests
+      # The command result is one JSON document on stdout; only `pass` exits 0.
+      - name: Run scenario
+        run: >
+          mvn -B -ntp -q exec:java -pl cli
+          -Dexec.args="run --catalog-root scenarios --scenario bounded-eos --artifact-root ."
+          > bounded-eos-result.json
+      - name: Upload result and logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: bounded-eos
+          path: |
+            bounded-eos-result.json
+            logs/
+          if-no-files-found: warn
