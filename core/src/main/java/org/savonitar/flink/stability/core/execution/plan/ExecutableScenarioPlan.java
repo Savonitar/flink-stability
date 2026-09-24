@@ -2,6 +2,7 @@ package org.savonitar.flink.stability.core.execution.plan;
 
 import org.savonitar.flink.stability.core.spec.resolution.ResolvedScenarioPlan;
 import org.savonitar.flink.stability.runtime.api.KafkaBrokerPolicy;
+import org.savonitar.flink.stability.runtime.api.KafkaRuntimeTarget;
 
 import java.time.Duration;
 import java.util.ArrayList;
@@ -176,6 +177,11 @@ public final class ExecutableScenarioPlan {
             if (topics.stream().map(KafkaTopic::name).distinct().count() != topics.size()) {
                 throw new IllegalArgumentException("Kafka topic names must be distinct");
             }
+        }
+
+        /** What the runtime needs to start this cluster; the broker policy is passed as is. */
+        public KafkaRuntimeTarget runtimeTarget() {
+            return new KafkaRuntimeTarget(alias, imageReference, brokerPolicy);
         }
     }
 
