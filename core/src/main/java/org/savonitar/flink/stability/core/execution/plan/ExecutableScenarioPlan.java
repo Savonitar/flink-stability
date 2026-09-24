@@ -23,6 +23,10 @@ import java.util.regex.Pattern;
 public final class ExecutableScenarioPlan {
     public static final Duration DEFAULT_JOB_COMPLETION_TIMEOUT = Duration.ofMinutes(2);
     public static final Duration DEFAULT_TERMINAL_VALIDATION_TIMEOUT = Duration.ofMinutes(2);
+    /** The Kafka connector classes every protocol-v1 workload builds its job from (R5.6d). */
+    public static final List<String> PROTOCOL_V1_SUBJECT_ENTRY_CLASSES = List.of(
+            "org.apache.flink.connector.kafka.source.KafkaSource",
+            "org.apache.flink.connector.kafka.sink.KafkaSink");
     /** The exactly-once transaction timeout when a scenario declares none. */
     public static final Duration KAFKA_TRANSACTION_TIMEOUT = Duration.ofHours(2);
     public static final long FIRST_RUNNER_IN_MEMORY_MAX_GENERATED_INPUT_RECORDS = 1_000_000L;

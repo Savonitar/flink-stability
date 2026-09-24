@@ -1,6 +1,7 @@
 package org.savonitar.flink.stability.core.execution;
 
 import org.savonitar.flink.stability.core.execution.kafka.KafkaInputManifest;
+import org.savonitar.flink.stability.core.execution.plan.ExecutableScenarioPlan;
 import org.savonitar.flink.stability.core.flink.FlinkJobObservation;
 import org.savonitar.flink.stability.core.validation.kafka.KafkaIdSetValidationResult;
 import org.savonitar.flink.stability.core.validation.kafka.KafkaTransactionListing;
@@ -23,6 +24,7 @@ public record V1ScenarioExecutionResult(
         Optional<FlinkJobObservation.Attempt> finalJobObservation,
         Optional<KafkaIdSetValidationResult> terminalValidation,
         Optional<KafkaTransactionListing> sinkTransactions,
+        Optional<SubjectClassOrigins> subjectClassOrigins,
         List<FlinkComponentProvisioningEvidence> flinkProvisioningEvidence,
         List<String> diagnostics) {
 
@@ -41,6 +43,8 @@ public record V1ScenarioExecutionResult(
         terminalValidation = Objects.requireNonNull(
                 terminalValidation, "terminalValidation");
         sinkTransactions = Objects.requireNonNull(sinkTransactions, "sinkTransactions");
+        subjectClassOrigins = Objects.requireNonNull(
+                subjectClassOrigins, "subjectClassOrigins");
         flinkProvisioningEvidence = List.copyOf(Objects.requireNonNull(
                 flinkProvisioningEvidence, "flinkProvisioningEvidence"));
         diagnostics = List.copyOf(Objects.requireNonNull(diagnostics, "diagnostics"));
@@ -60,6 +64,14 @@ public record V1ScenarioExecutionResult(
                 .anyMatch(effect -> !effect.outcome().confirmed())) {
             throw new IllegalArgumentException(
                     "PASS requires every TaskManager kill to have a confirmed effect");
+        }
+        if (status == Status.PASS && subjectClassOrigins
+                .map(origins -> origins.outcome(
+                        ExecutableScenarioPlan.PROTOCOL_V1_SUBJECT_ENTRY_CLASSES))
+                .orElse(SubjectClassOrigins.Outcome.UNCONFIRMED)
+                        != SubjectClassOrigins.Outcome.CONFIRMED) {
+            throw new IllegalArgumentException(
+                    "PASS requires runtime evidence that the subject connector's code ran");
         }
         if (reason.startsWith("verification.") && status != Status.FAIL) {
             throw new IllegalArgumentException(
@@ -136,6 +148,7 @@ public record V1ScenarioExecutionResult(
                     finalJobObservation,
                     terminalValidation,
                     sinkTransactions,
+                    subjectClassOrigins,
                     flinkProvisioningEvidence,
                     updated);
         }
@@ -150,6 +163,7 @@ public record V1ScenarioExecutionResult(
                 finalJobObservation,
                 terminalValidation,
                 sinkTransactions,
+                subjectClassOrigins,
                 flinkProvisioningEvidence,
                 updated);
     }

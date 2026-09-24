@@ -5,6 +5,7 @@ import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
+import java.util.Optional;
 import java.util.regex.Pattern;
 
 /** Immutable, target-specific connector bundle ready for cluster provisioning. */
@@ -104,6 +105,16 @@ public final class PreparedConnectorBundle {
 
     public List<ConnectorClosureLock> closureLocks() {
         return closureLocks;
+    }
+
+    /** The bundle entry holding this connector alias's declared primary artifact. */
+    public Optional<PreparedConnectorBundleEntry> primaryEntry(String alias) {
+        Objects.requireNonNull(alias, "alias");
+        return entries.stream()
+                .filter(entry -> entry.contributions().stream().anyMatch(contribution ->
+                        contribution.alias().equals(alias)
+                                && contribution.closureEntry().primary()))
+                .findFirst();
     }
 
     public List<PreparedConnectorBundleEntry> entries() {

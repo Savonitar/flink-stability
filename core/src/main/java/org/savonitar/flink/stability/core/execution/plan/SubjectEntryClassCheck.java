@@ -19,10 +19,8 @@ import java.util.stream.Collectors;
  * unrelated primary plus the released connector as a runtime dependency would test the release.
  */
 final class SubjectEntryClassCheck {
-    /** The Kafka connector classes that every protocol-v1 workload builds its job from. */
-    static final List<String> PROTOCOL_V1_ENTRY_CLASSES = List.of(
-            "org.apache.flink.connector.kafka.source.KafkaSource",
-            "org.apache.flink.connector.kafka.sink.KafkaSink");
+    private static final List<String> PROTOCOL_V1_ENTRY_CLASSES =
+            ExecutableScenarioPlan.PROTOCOL_V1_SUBJECT_ENTRY_CLASSES;
 
     private static final Pattern VERSIONED_CLASS = Pattern.compile(
             "META-INF/versions/(?:9|[1-9][0-9]+)/(.+\\.class)");
@@ -45,7 +43,7 @@ final class SubjectEntryClassCheck {
             for (PreparedConnectorBundleEntry entry : bundle.entries()) {
                 List<String> found = entryClassesIn(
                         entry.stagedPath(), source, artifactPath, issues);
-                if (isPrimaryOf(entry, alias)) {
+                if (bundle.primaryEntry(alias).filter(entry::equals).isPresent()) {
                     List<String> missing = PROTOCOL_V1_ENTRY_CLASSES.stream()
                             .filter(entryClass -> !found.contains(entryClass))
                             .toList();
@@ -73,11 +71,6 @@ final class SubjectEntryClassCheck {
         if (!issues.isEmpty()) {
             throw new RunnerCapabilityException(issues);
         }
-    }
-
-    private static boolean isPrimaryOf(PreparedConnectorBundleEntry entry, String alias) {
-        return entry.contributions().stream().anyMatch(contribution ->
-                contribution.alias().equals(alias) && contribution.closureEntry().primary());
     }
 
     private static String origins(PreparedConnectorBundleEntry entry) {

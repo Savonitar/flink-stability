@@ -1,5 +1,6 @@
 package org.savonitar.flink.stability.testcontainers;
 
+import org.savonitar.flink.stability.runtime.api.FlinkClassLoadLog;
 import org.savonitar.flink.stability.runtime.api.FlinkComponentProvisioningEvidence;
 import org.savonitar.flink.stability.runtime.api.FlinkProcessWriteFenceEvidence;
 import org.savonitar.flink.stability.runtime.api.FlinkRuntimeTarget;
@@ -68,6 +69,11 @@ public final class DockerV1AttemptRuntime implements V1AttemptRuntime {
     @Override
     public List<FlinkComponentProvisioningEvidence> flinkProvisioningEvidence() {
         return clusters.provisioningHistory();
+    }
+
+    @Override
+    public List<FlinkClassLoadLog> flinkClassLoadLogs() {
+        return ClassLoadLogs.list(clusters.checkpointStorageRoot());
     }
 
     @Override

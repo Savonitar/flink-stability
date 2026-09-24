@@ -30,6 +30,7 @@ import org.savonitar.flink.stability.core.execution.plan.ExecutableScenarioPlanC
 import org.savonitar.flink.stability.core.execution.plan.PreparedExecutableScenarioPlan;
 import org.savonitar.flink.stability.core.validation.kafka.KafkaIdSetValidationResult;
 import org.savonitar.flink.stability.core.validation.kafka.KafkaTransactionListing;
+import org.savonitar.flink.stability.runtime.api.FlinkClassLoadLog;
 import org.savonitar.flink.stability.runtime.api.FlinkComponentProvisioningEvidence;
 import org.savonitar.flink.stability.runtime.api.FlinkProcessWriteFenceEvidence;
 import org.savonitar.flink.stability.runtime.api.FlinkRuntimeTarget;
@@ -392,10 +393,21 @@ class V1ScenarioExecutorTest {
                         Optional.of(atFence),
                         Optional.of(passResult()),
                         Optional.empty(),
+                        Optional.of(confirmedOrigins()),
                         List.of(),
                         List.of()));
 
         assertTrue(failure.getMessage().contains("confirmed effect"));
+    }
+
+    static SubjectClassOrigins confirmedOrigins() {
+        String primary = "/opt/flink/lib/flink-stability-connector-00000000-subject.jar";
+        return new SubjectClassOrigins(
+                primary,
+                List.of(new SubjectClassOrigins.ProcessOrigin("taskmanager-1#1", Map.of(
+                        "org.apache.flink.connector.kafka.source.KafkaSource", List.of(primary),
+                        "org.apache.flink.connector.kafka.sink.KafkaSink", List.of(primary)))),
+                Optional.empty());
     }
 
     private static void killAndRestart(ObjectNode document) {
@@ -451,6 +463,46 @@ class V1ScenarioExecutorTest {
                     .map(KafkaTransactionListing.Transaction::state)
                     .toList());
             assertTrue(events.indexOf("process-fence") < events.indexOf("list-transactions"));
+        }
+    }
+
+    @Test
+    void passingOracleIsInconclusiveWhenAnotherJarSuppliedTheConnectorClasses()
+            throws Exception {
+        List<String> events = new ArrayList<>();
+        try (Fixture fixture = fixture()) {
+            FakeRuntime runtime = new FakeRuntime(events);
+            runtime.loadedFrom = "/opt/flink/lib/flink-connector-kafka-released.jar";
+            V1ScenarioExecutor executor = executor(
+                    events, runtime, new FakeFlink(events),
+                    (bootstrap, topic, count, timeout) -> passResult());
+
+            V1ScenarioExecutionResult result = executor.execute(
+                    fixture.bound(), attemptContext());
+
+            assertEquals(V1ScenarioExecutionResult.Status.INCONCLUSIVE, result.status());
+            assertEquals(V1ScenarioExecutor.SUBJECT_ORIGIN_MISMATCH, result.reason());
+            assertTrue(result.message().contains("flink-connector-kafka-released.jar"),
+                    result.message());
+        }
+    }
+
+    @Test
+    void passingOracleIsInconclusiveWhenTheClassLoadLogsAreUnavailable() throws Exception {
+        List<String> events = new ArrayList<>();
+        try (Fixture fixture = fixture()) {
+            FakeRuntime runtime = new FakeRuntime(events);
+            runtime.classLoadLogsFailure = new IllegalStateException("attempt directory gone");
+            V1ScenarioExecutor executor = executor(
+                    events, runtime, new FakeFlink(events),
+                    (bootstrap, topic, count, timeout) -> passResult());
+
+            V1ScenarioExecutionResult result = executor.execute(
+                    fixture.bound(), attemptContext());
+
+            assertEquals(V1ScenarioExecutionResult.Status.INCONCLUSIVE, result.status());
+            assertEquals(V1ScenarioExecutor.SUBJECT_ORIGIN_UNCONFIRMED, result.reason());
+            assertTrue(result.message().contains("attempt directory gone"), result.message());
         }
     }
 
@@ -1148,6 +1200,11 @@ class V1ScenarioExecutorTest {
 
     private static final class FakeRuntime implements V1AttemptRuntime {
         private final List<String> events;
+        /** The subject primary's container path, captured when Flink starts. */
+        private String primarySource;
+        /** Replaces the source that the fake class-load log reports, to model a mismatch. */
+        private String loadedFrom;
+        private RuntimeException classLoadLogsFailure;
         private boolean fenced;
         private Exception startFlinkFailure;
         private RuntimeException processFenceFailure;
@@ -1178,6 +1235,8 @@ class V1ScenarioExecutorTest {
             assertEquals(
                     target.imageReference(),
                     target.connectorBundle().targetFlinkImageReference());
+            primarySource = target.connectorBundle().classpathManifest().entries()
+                    .getFirst().containerPath();
             return "http://localhost:8081";
         }
 
@@ -1211,6 +1270,30 @@ class V1ScenarioExecutorTest {
         @Override
         public List<FlinkComponentProvisioningEvidence> flinkProvisioningEvidence() {
             return List.of();
+        }
+
+        /** One TaskManager log that loads both protocol-v1 entry classes. */
+        @Override
+        public List<FlinkClassLoadLog> flinkClassLoadLogs() {
+            if (classLoadLogsFailure != null) {
+                throw classLoadLogsFailure;
+            }
+            String source = loadedFrom != null ? loadedFrom : primarySource;
+            try {
+                Path log = Files.createTempFile("flink-stability-class-load-", ".log");
+                log.toFile().deleteOnExit();
+                Files.writeString(log, String.join("\n",
+                        "[0.1s][info][class,load] java.lang.Object source: jrt:/java.base",
+                        "[1.0s][info][class,load] "
+                                + "org.apache.flink.connector.kafka.source.KafkaSource source: file:"
+                                + source,
+                        "[1.1s][info][class,load] "
+                                + "org.apache.flink.connector.kafka.sink.KafkaSink source: file:"
+                                + source));
+                return List.of(new FlinkClassLoadLog("taskmanager-1#1", log));
+            } catch (IOException failure) {
+                throw new java.io.UncheckedIOException(failure);
+            }
         }
 
         @Override

@@ -85,7 +85,8 @@ class ScenarioVerdictTest {
         V1ScenarioExecutionResult unsupported = new V1ScenarioExecutionResult(
                 V1ScenarioExecutionResult.Status.FAIL, DUPLICATES, "unverified failure",
                 Optional.empty(), Optional.empty(), Optional.empty(), Optional.empty(),
-                Optional.empty(), Optional.empty(), Optional.empty(), List.of(), List.of());
+                Optional.empty(), Optional.empty(), Optional.empty(), Optional.empty(),
+                List.of(), List.of());
 
         ScenarioVerdict verdict = ScenarioVerdict.of(EXPECT_DUPLICATES, unsupported);
 
@@ -129,7 +130,8 @@ class ScenarioVerdictTest {
                             ? Optional.empty() : complete.writeFenceEvidence(),
                     missing.equals("both-fences") ? Optional.empty() : complete.processFenceEvidence(),
                     complete.finalJobObservation(), oracle, complete.sinkTransactions(),
-                    complete.flinkProvisioningEvidence(), complete.diagnostics());
+                    complete.subjectClassOrigins(), complete.flinkProvisioningEvidence(),
+                    complete.diagnostics());
 
             ScenarioVerdict verdict = ScenarioVerdict.of(EXPECT_DUPLICATES, invalid);
 
@@ -177,6 +179,7 @@ class ScenarioVerdictTest {
                 Optional.empty(),
                 Optional.empty(),
                 Optional.empty(),
+                Optional.empty(),
                 List.of(),
                 List.of());
     }
@@ -217,6 +220,7 @@ class ScenarioVerdictTest {
                 Optional.of(finished),
                 Optional.of(oracle),
                 Optional.empty(),
+                Optional.of(V1ScenarioExecutorTest.confirmedOrigins()),
                 List.of(),
                 List.of());
     }
