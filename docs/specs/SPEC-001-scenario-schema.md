@@ -1028,7 +1028,11 @@ Connector pull-request gating is the same mechanism with one axis:
   and the bundle order decides which of two `lib` copies loads, so a second copy
   would make the tested code depend on class-loading order. An unrelated local
   primary with the released connector as a runtime dependency therefore rejects
-  instead of silently testing the release. Recording which JAR each Flink process
+  instead of silently testing the release. A multi-release JAR with either entry
+  class under `META-INF/versions/` rejects with
+  `runner.subject.entry-class-versioned-unsupported`: the runner does not infer
+  the container JVM version from the harness JVM. Unrelated versioned classes
+  do not trigger this rejection. Recording which JAR each Flink process
   actually loaded these classes from is later work.
 - **R5.7** Each workload job has optional `start: auto | manual`, defaulting to
   `auto`. Auto-start jobs are submitted after infrastructure is ready and any
