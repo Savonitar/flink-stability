@@ -10,7 +10,9 @@ import java.util.Set;
  * One read-only REST view of the job state that fault-effect evidence needs.
  *
  * <p>Every timestamp is JobManager-clock epoch milliseconds. Compare timestamps only with each
- * other, never with harness time: containers need not share the harness clock.</p>
+ * other, never with harness time: containers need not share the harness clock. This observation
+ * spans several REST calls; {@code jobManagerTimeMillis} belongs to its initial job-details
+ * response and is not a timestamp for a subsequent kill.</p>
  */
 public record FlinkJobObservation(
         long jobManagerTimeMillis,

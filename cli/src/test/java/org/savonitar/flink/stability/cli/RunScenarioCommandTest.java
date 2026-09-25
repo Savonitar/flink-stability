@@ -275,7 +275,8 @@ class RunScenarioCommandTest {
                                         List.of(new FlinkJobObservation.Subtask(
                                                 "Kafka Source", 0, 0, "RUNNING",
                                                 Optional.of("tm-1"))))),
-                                Optional.empty()))));
+                                Optional.empty()),
+                        java.util.OptionalLong.of(2_000))));
         FlinkJobObservation.Attempt atFence = new FlinkJobObservation.Attempt(
                 Optional.of(new FlinkJobObservation(
                         20_000, FlinkJobState.FINISHED, 20, 1,
@@ -318,7 +319,9 @@ class RunScenarioCommandTest {
                 () -> assertEquals(4, kill.path("completedCheckpointsBeforeKill").longValue()),
                 () -> assertEquals(1, kill.path("activeSubtasksBeforeKill").longValue()),
                 () -> assertEquals(4, kill.path("restoredCheckpoint").longValue()),
-                () -> assertEquals(12_000, kill.path("restoredAfterKillMs").longValue()),
+                () -> assertEquals(2_000, kill.path("jobManagerTimeAfterKill").longValue()),
+                () -> assertEquals(11_000,
+                        kill.path("restoredAfterKillObservationMs").longValue()),
                 () -> assertEquals(1, kill.path("failuresAfterKill").intValue()),
                 () -> assertEquals("TaskManager with id tm-1 is no longer reachable.",
                         kill.path("firstFailureAfterKill").textValue()));

@@ -116,10 +116,13 @@ final class V1ExecutionResultRenderer {
                 kill.put("activeSubtasksBeforeKill", before.activeSubtasks().size());
                 effect.restore().ifPresent(restore -> {
                     kill.put("restoredCheckpoint", restore.checkpointId());
-                    kill.put("restoredAfterKillMs",
-                            restore.restoredAtMillis() - before.jobManagerTimeMillis());
+                    effect.kill().jobManagerTimeAfterKill().ifPresent(sample ->
+                            kill.put("restoredAfterKillObservationMs",
+                                    restore.restoredAtMillis() - sample));
                 });
             });
+            effect.kill().jobManagerTimeAfterKill().ifPresent(sample ->
+                    kill.put("jobManagerTimeAfterKill", sample));
             kill.put("failuresAfterKill", effect.failuresAfterKill().size());
             if (!effect.failuresAfterKill().isEmpty()) {
                 kill.put("firstFailureAfterKill",

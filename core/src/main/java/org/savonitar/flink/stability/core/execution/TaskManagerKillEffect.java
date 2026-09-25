@@ -1,6 +1,7 @@
 package org.savonitar.flink.stability.core.execution;
 
 import org.savonitar.flink.stability.core.flink.FlinkJobObservation;
+import org.savonitar.flink.stability.core.flink.FlinkJobState;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -16,8 +17,12 @@ import java.util.stream.Collectors;
  * <p>The kill counts only if a TaskManager that hosted active subtasks just before it later
  * shows a failure, and, when a checkpoint had completed, Flink restored one afterwards. Each kill
  * is judged against the next observation of the same job: the one taken before the next kill,
- * or the one taken before the process fence. Counters and JobManager-clock timestamps are
- * compared only with each other.</p>
+ * or the one taken before the process fence. Failure and restore timestamps must follow a
+ * JobManager clock sample requested after the process exit was confirmed, and a restore must
+ * not precede the matching host failure. Events in the ambiguous interval before that sample
+ * cannot confirm the kill. Without a checkpoint, a later active execution attempt or a finished
+ * job must show that execution resumed. Counters and JobManager-clock timestamps are compared
+ * only with each other.</p>
  */
 public record TaskManagerKillEffect(
         PhaseExecutionEvidence.TaskManagerKill kill,
@@ -112,31 +117,59 @@ public record TaskManagerKillEffect(
                                     .orElse(""));
         }
         FlinkJobObservation after = observedAfter.orElseThrow();
-        long killedAt = before.jobManagerTimeMillis();
-        List<FlinkJobObservation.Failure> failures = after.failuresAfter(killedAt);
-        boolean hostFailed = failures.stream().anyMatch(failure ->
-                failure.taskManagerId().filter(hosts::contains).isPresent());
+        if (kill.jobManagerTimeAfterKill().isEmpty()) {
+            return unconfirmed(kill, Outcome.EVIDENCE_UNAVAILABLE,
+                    "the JobManager clock could not be sampled after the confirmed process exit");
+        }
+        long afterKill = kill.jobManagerTimeAfterKill().orElseThrow();
+        if (afterKill < before.jobManagerTimeMillis()
+                || after.jobManagerTimeMillis() < afterKill) {
+            return unconfirmed(kill, Outcome.EVIDENCE_UNAVAILABLE,
+                    "JobManager clock samples do not establish the order of the kill and recovery");
+        }
+        List<FlinkJobObservation.Failure> failures = after.failuresAfter(afterKill).stream()
+                .filter(failure -> !before.failures().contains(failure))
+                .toList();
+        List<FlinkJobObservation.Failure> hostFailures = failures.stream()
+                .filter(failure -> failure.taskManagerId().filter(hosts::contains).isPresent())
+                .toList();
         Optional<FlinkJobObservation.Restore> restore = after.restoredCheckpoints()
                 > before.restoredCheckpoints()
-                ? after.latestRestore().filter(latest -> latest.restoredAtMillis() > killedAt)
+                ? after.latestRestore().filter(latest -> latest.restoredAtMillis() > afterKill)
+                        // Flink timestamps have millisecond precision: equal times are ordered
+                        // only to that precision, but an earlier restore cannot prove recovery.
+                        .filter(latest -> hostFailures.stream().anyMatch(failure ->
+                                latest.restoredAtMillis() >= failure.timestampMillis()))
                 : Optional.empty();
 
-        if (!hostFailed) {
+        if (hostFailures.isEmpty()) {
             return new TaskManagerKillEffect(kill, Outcome.NO_RECOVERY_OBSERVED, restore, failures,
-                    "Flink recorded " + failures.size() + " failure(s) after the kill, none on a"
+                    "Flink recorded " + failures.size() + " new failure(s) after the post-exit"
+                            + " clock sample, none on a"
                             + " TaskManager that hosted active subtasks before it");
         }
         if (restore.isPresent()) {
             FlinkJobObservation.Restore restored = restore.orElseThrow();
             return new TaskManagerKillEffect(kill, Outcome.CHECKPOINT_RESTORED, restore, failures,
                     "Flink restored checkpoint " + restored.checkpointId() + " "
-                            + (restored.restoredAtMillis() - killedAt)
-                            + " ms after the pre-kill observation");
+                            + (restored.restoredAtMillis() - afterKill)
+                            + " ms after the post-exit clock sample");
         }
         if (before.completedCheckpoints() > 0) {
             return new TaskManagerKillEffect(kill, Outcome.NO_RECOVERY_OBSERVED, restore, failures,
                     before.completedCheckpoints() + " checkpoint(s) had completed before the kill,"
-                            + " but Flink restored none afterwards");
+                            + " but no restore followed a matching post-kill host failure");
+        }
+        boolean restarted = after.state() == FlinkJobState.FINISHED
+                || after.activeSubtasks().stream().anyMatch(current ->
+                        before.subtasks().stream().anyMatch(previous ->
+                                current.vertexName().equals(previous.vertexName())
+                                        && current.index() == previous.index()
+                                        && current.attempt() > previous.attempt()));
+        if (!restarted) {
+            return new TaskManagerKillEffect(kill, Outcome.NO_RECOVERY_OBSERVED, restore, failures,
+                    "no checkpoint had completed before the kill and a host failure followed it,"
+                            + " but no later active execution attempt or finished job was observed");
         }
         return new TaskManagerKillEffect(
                 kill, Outcome.RESTARTED_WITHOUT_CHECKPOINT, restore, failures,

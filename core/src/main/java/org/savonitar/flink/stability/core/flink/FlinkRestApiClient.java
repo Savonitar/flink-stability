@@ -235,6 +235,13 @@ public final class FlinkRestApiClient implements FlinkScenarioControl {
     }
 
     @Override
+    public long jobManagerTimeMillis(FlinkJobHandle job) throws IOException {
+        Objects.requireNonNull(job, "job");
+        Deadline deadline = Deadline.after(OBSERVATION_TIMEOUT, nanoTime);
+        return requiredLong(get("/jobs/" + pathSegment(job.jobId()), deadline), "now");
+    }
+
+    @Override
     public FlinkJobObservation observe(FlinkJobHandle job) throws IOException {
         Objects.requireNonNull(job, "job");
         Deadline deadline = Deadline.after(OBSERVATION_TIMEOUT, nanoTime);

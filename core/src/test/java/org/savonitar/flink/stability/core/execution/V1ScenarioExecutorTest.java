@@ -48,6 +48,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.OptionalLong;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
@@ -357,7 +358,8 @@ class V1ScenarioExecutorTest {
                         "taskmanager-1",
                         new FlinkJobObservation.Attempt(
                                 Optional.of(job(1_000, FlinkJobState.FINISHED, 1, 0)),
-                                Optional.empty()))));
+                                Optional.empty()),
+                        OptionalLong.of(1_500))));
         FlinkJobObservation.Attempt atFence = new FlinkJobObservation.Attempt(
                 Optional.of(job(2_000, FlinkJobState.FINISHED, 1, 0)), Optional.empty());
         FlinkProcessWriteFenceEvidence processFence = new FlinkProcessWriteFenceEvidence(
@@ -1262,6 +1264,12 @@ class V1ScenarioExecutorTest {
             events.add("observe-job");
             FlinkJobObservation next = observations.poll();
             return next != null ? next : job(10_000, FlinkJobState.FINISHED, 1, 0);
+        }
+
+        @Override
+        public long jobManagerTimeMillis(FlinkJobHandle job) {
+            events.add("post-kill-clock");
+            return 1_500;
         }
 
         @Override

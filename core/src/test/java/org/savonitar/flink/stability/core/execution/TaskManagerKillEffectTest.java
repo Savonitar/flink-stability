@@ -6,6 +6,7 @@ import org.savonitar.flink.stability.core.flink.FlinkJobState;
 
 import java.util.List;
 import java.util.Optional;
+import java.util.OptionalLong;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -31,7 +32,7 @@ class TaskManagerKillEffectTest {
         assertTrue(effect.outcome().confirmed());
         assertEquals(Optional.of(new FlinkJobObservation.Restore(2, 5_000)), effect.restore());
         assertEquals(List.of(LOST_TASK_MANAGER), effect.failuresAfterKill());
-        assertTrue(effect.detail().contains("checkpoint 2 4000 ms after"), effect.detail());
+        assertTrue(effect.detail().contains("checkpoint 2 3500 ms after"), effect.detail());
     }
 
     @Test
@@ -118,6 +119,142 @@ class TaskManagerKillEffectTest {
     }
 
     @Test
+    void aNaturalFailoverDuringThePreKillObservationCannotConfirmTheKill() {
+        // The details and checkpoint endpoints were read at 1000. A natural failure then
+        // restored the job before the remaining REST calls and the actual kill completed.
+        FlinkJobObservation before = new FlinkJobObservation(
+                1_000, FlinkJobState.RUNNING, 2, 0, Optional.empty(),
+                List.of(LOST_TASK_MANAGER), activeOn("tm-1"));
+        TaskManagerKillEffect effect = only(
+                kill(observed(before), OptionalLong.of(6_000)),
+                observed(finished(9_000, 1,
+                        Optional.of(new FlinkJobObservation.Restore(2, 5_000)),
+                        List.of(LOST_TASK_MANAGER))));
+
+        assertEquals(TaskManagerKillEffect.Outcome.NO_RECOVERY_OBSERVED, effect.outcome());
+        assertTrue(effect.failuresAfterKill().isEmpty());
+        assertTrue(effect.restore().isEmpty());
+    }
+
+    @Test
+    void aPreKillFailureStillDoesNotCountWhenTheRestoreFollowsTheKill() {
+        TaskManagerKillEffect effect = only(
+                kill(observed(runningOn("tm-1", 1_000, 2, 0)), OptionalLong.of(4_500)),
+                observed(finished(9_000, 1,
+                        Optional.of(new FlinkJobObservation.Restore(2, 5_000)),
+                        List.of(LOST_TASK_MANAGER))));
+
+        assertEquals(TaskManagerKillEffect.Outcome.NO_RECOVERY_OBSERVED, effect.outcome());
+        assertTrue(effect.restore().isEmpty());
+        assertTrue(effect.failuresAfterKill().isEmpty());
+    }
+
+    @Test
+    void aPostKillRestoreBeforeTheMatchingHostFailureDoesNotProveRecovery() {
+        TaskManagerKillEffect effect = only(
+                kill(observed(runningOn("tm-1", 1_000, 2, 0)), OptionalLong.of(1_500)),
+                observed(finished(9_000, 1,
+                        Optional.of(new FlinkJobObservation.Restore(2, 2_000)),
+                        List.of(LOST_TASK_MANAGER))));
+
+        assertEquals(TaskManagerKillEffect.Outcome.NO_RECOVERY_OBSERVED, effect.outcome());
+        assertTrue(effect.restore().isEmpty());
+        assertEquals(List.of(LOST_TASK_MANAGER), effect.failuresAfterKill());
+    }
+
+    @Test
+    void failureAndRestoreMayShareTheSameMillisecond() {
+        TaskManagerKillEffect effect = only(
+                kill(observed(runningOn("tm-1", 1_000, 2, 0)), OptionalLong.of(1_500)),
+                observed(finished(9_000, 1,
+                        Optional.of(new FlinkJobObservation.Restore(2, 4_000)),
+                        List.of(LOST_TASK_MANAGER))));
+
+        assertEquals(TaskManagerKillEffect.Outcome.CHECKPOINT_RESTORED, effect.outcome());
+        assertTrue(effect.outcome().confirmed());
+    }
+
+    @Test
+    void aFailureWithoutACheckpointNeedsEvidenceThatExecutionRestarted() {
+        for (FlinkJobState state : List.of(FlinkJobState.FAILED, FlinkJobState.RUNNING)) {
+            FlinkJobObservation after = new FlinkJobObservation(
+                    9_000, state, 0, 0, Optional.empty(), List.of(LOST_TASK_MANAGER),
+                    state == FlinkJobState.RUNNING ? activeOn("tm-1") : List.of());
+            TaskManagerKillEffect effect = only(
+                    kill(observed(runningOn("tm-1", 1_000, 0, 0))), observed(after));
+
+            assertEquals(TaskManagerKillEffect.Outcome.NO_RECOVERY_OBSERVED, effect.outcome());
+            assertFalse(effect.outcome().confirmed());
+        }
+    }
+
+    @Test
+    void aLaterActiveAttemptProvesRestartWithoutACheckpoint() {
+        FlinkJobObservation after = new FlinkJobObservation(
+                9_000, FlinkJobState.RUNNING, 0, 0, Optional.empty(),
+                List.of(LOST_TASK_MANAGER), List.of(new FlinkJobObservation.Subtask(
+                        "Kafka Source", 0, 1, "RUNNING", Optional.of("tm-2"))));
+        TaskManagerKillEffect effect = only(
+                kill(observed(runningOn("tm-1", 1_000, 0, 0))), observed(after));
+
+        assertEquals(TaskManagerKillEffect.Outcome.RESTARTED_WITHOUT_CHECKPOINT, effect.outcome());
+        assertTrue(effect.outcome().confirmed());
+    }
+
+    @Test
+    void aPreKillRestoreCannotCombineWithALaterFailureToConfirmTheKill() {
+        TaskManagerKillEffect effect = only(
+                kill(observed(runningOn("tm-1", 1_000, 2, 0)), OptionalLong.of(3_000)),
+                observed(finished(9_000, 1,
+                        Optional.of(new FlinkJobObservation.Restore(2, 2_000)),
+                        List.of(LOST_TASK_MANAGER))));
+
+        assertEquals(TaskManagerKillEffect.Outcome.NO_RECOVERY_OBSERVED, effect.outcome());
+        assertTrue(effect.restore().isEmpty());
+        assertEquals(List.of(LOST_TASK_MANAGER), effect.failuresAfterKill());
+    }
+
+    @Test
+    void anEventAtThePostExitClockSampleIsTemporallyAmbiguous() {
+        TaskManagerKillEffect effect = only(
+                kill(observed(runningOn("tm-1", 1_000, 0, 0)), OptionalLong.of(4_000)),
+                observed(finished(9_000, 0, Optional.empty(), List.of(LOST_TASK_MANAGER))));
+
+        assertEquals(TaskManagerKillEffect.Outcome.NO_RECOVERY_OBSERVED, effect.outcome());
+        assertTrue(effect.failuresAfterKill().isEmpty());
+    }
+
+    @Test
+    void absentOrOutOfOrderPostExitClockEvidenceFailsClosed() {
+        for (OptionalLong sample : List.of(
+                OptionalLong.empty(), OptionalLong.of(500), OptionalLong.of(10_000))) {
+            TaskManagerKillEffect effect = only(
+                    kill(observed(runningOn("tm-1", 1_000, 2, 0)), sample),
+                    observed(finished(9_000, 1,
+                            Optional.of(new FlinkJobObservation.Restore(2, 5_000)),
+                            List.of(LOST_TASK_MANAGER))));
+
+            assertEquals(TaskManagerKillEffect.Outcome.EVIDENCE_UNAVAILABLE, effect.outcome());
+            assertFalse(effect.outcome().confirmed());
+        }
+    }
+
+    @Test
+    void anAlreadyObservedFailureNeverCountsEvenIfItsTimestampIsInconsistent() {
+        FlinkJobObservation before = new FlinkJobObservation(
+                1_000, FlinkJobState.RUNNING, 2, 0, Optional.empty(),
+                List.of(LOST_TASK_MANAGER), activeOn("tm-1"));
+        TaskManagerKillEffect effect = only(
+                kill(observed(before), OptionalLong.of(2_000)),
+                observed(finished(9_000, 1,
+                        Optional.of(new FlinkJobObservation.Restore(2, 5_000)),
+                        List.of(LOST_TASK_MANAGER))));
+
+        assertEquals(TaskManagerKillEffect.Outcome.NO_RECOVERY_OBSERVED, effect.outcome());
+        assertTrue(effect.failuresAfterKill().isEmpty());
+    }
+
+    @Test
     void missingObservationsLeaveTheEffectUnconfirmed() {
         TaskManagerKillEffect unobservedBefore = only(
                 kill(new FlinkJobObservation.Attempt(
@@ -168,8 +305,14 @@ class TaskManagerKillEffectTest {
 
     private static PhaseExecutionEvidence.TaskManagerKill kill(
             FlinkJobObservation.Attempt before) {
+        return kill(before, OptionalLong.of(before.observation()
+                .map(FlinkJobObservation::jobManagerTimeMillis).orElse(1_000L) + 500));
+    }
+
+    private static PhaseExecutionEvidence.TaskManagerKill kill(
+            FlinkJobObservation.Attempt before, OptionalLong afterKill) {
         return new PhaseExecutionEvidence.TaskManagerKill(
-                "$/phases/1/steps/0", List.of(), "taskmanager-1", before);
+                "$/phases/1/steps/0", List.of(), "taskmanager-1", before, afterKill);
     }
 
     private static FlinkJobObservation.Attempt observed(FlinkJobObservation observation) {
