@@ -73,7 +73,7 @@ public final class DockerV1AttemptRuntime implements V1AttemptRuntime {
 
     @Override
     public List<FlinkClassLoadLog> flinkClassLoadLogs() {
-        return ClassLoadLogs.list(clusters.checkpointStorageRoot());
+        return clusters.classLoadLogs();
     }
 
     @Override

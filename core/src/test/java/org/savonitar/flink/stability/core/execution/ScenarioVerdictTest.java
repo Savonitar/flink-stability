@@ -47,6 +47,33 @@ class ScenarioVerdictTest {
     }
 
     @Test
+    void aPinnedFailureCannotMatchWithoutConfirmedRuntimeSubjectOrigins() {
+        SubjectClassOrigins foreign = new SubjectClassOrigins("/subject.jar", List.of(
+                new SubjectClassOrigins.ProcessOrigin("taskmanager-1#1", Map.of(
+                        "org.apache.flink.connector.kafka.sink.KafkaSink",
+                        List.of("/released.jar")))), Optional.empty());
+        List<Optional<SubjectClassOrigins>> observations = List.of(
+                Optional.empty(),
+                Optional.of(new SubjectClassOrigins("/subject.jar", List.of(), Optional.empty())),
+                Optional.of(foreign));
+        for (Optional<SubjectClassOrigins> origins : observations) {
+            V1ScenarioExecutionResult attempt = terminalAttempt(
+                    V1ScenarioExecutionResult.Status.FAIL, DUPLICATES,
+                    new PhaseExecutionEvidence(List.of()), origins);
+            ScenarioVerdict verdict = ScenarioVerdict.of(EXPECT_DUPLICATES, attempt);
+
+            assertEquals(ScenarioVerdict.Status.INCONCLUSIVE, verdict.status());
+            assertFalse(verdict.matched());
+            assertEquals(origins.filter(value -> value == foreign).isPresent()
+                            ? V1ScenarioExecutor.SUBJECT_ORIGIN_MISMATCH
+                            : V1ScenarioExecutor.SUBJECT_ORIGIN_UNCONFIRMED,
+                    verdict.reason());
+            assertEquals(V1ScenarioExecutionResult.Status.FAIL, attempt.status());
+            assertEquals(DUPLICATES, attempt.reason());
+        }
+    }
+
+    @Test
     void aNegativeControlFailsWhenTheOracleMissesTheDefectOrReportsAnotherOne() {
         ScenarioVerdict missed = ScenarioVerdict.of(EXPECT_DUPLICATES,
                 attempt(V1ScenarioExecutionResult.Status.PASS, "validator.kafka.id-set.match"));
@@ -151,7 +178,8 @@ class ScenarioVerdictTest {
                 new PhaseExecutionEvidence.TaskManagerKill("$/phases/0/steps/0", List.of(),
                         "taskmanager-1", finished, OptionalLong.of(600))));
         V1ScenarioExecutionResult attempt = terminalAttempt(
-                V1ScenarioExecutionResult.Status.FAIL, DUPLICATES, phases);
+                V1ScenarioExecutionResult.Status.FAIL, DUPLICATES, phases,
+                Optional.of(V1ScenarioExecutorTest.confirmedOrigins()));
 
         ScenarioVerdict verdict = ScenarioVerdict.of(EXPECT_DUPLICATES, attempt);
 
@@ -166,8 +194,16 @@ class ScenarioVerdictTest {
             String reason) {
         if (status == V1ScenarioExecutionResult.Status.PASS
                 || reason.startsWith("validator.kafka.id-set.")) {
-            return terminalAttempt(status, reason, new PhaseExecutionEvidence(List.of()));
+            return terminalAttempt(status, reason, new PhaseExecutionEvidence(List.of()),
+                    Optional.of(V1ScenarioExecutorTest.confirmedOrigins()));
         }
+        return attempt(status, reason, Optional.of(V1ScenarioExecutorTest.confirmedOrigins()));
+    }
+
+    private static V1ScenarioExecutionResult attempt(
+            V1ScenarioExecutionResult.Status status,
+            String reason,
+            Optional<SubjectClassOrigins> origins) {
         return new V1ScenarioExecutionResult(
                 status,
                 reason,
@@ -179,7 +215,7 @@ class ScenarioVerdictTest {
                 Optional.empty(),
                 Optional.empty(),
                 Optional.empty(),
-                Optional.empty(),
+                origins,
                 List.of(),
                 List.of());
     }
@@ -188,7 +224,8 @@ class ScenarioVerdictTest {
     private static V1ScenarioExecutionResult terminalAttempt(
             V1ScenarioExecutionResult.Status status,
             String reason,
-            PhaseExecutionEvidence phases) {
+            PhaseExecutionEvidence phases,
+            Optional<SubjectClassOrigins> origins) {
         FlinkProcessWriteFenceEvidence processes =
                 new FlinkProcessWriteFenceEvidence(List.of(), Instant.EPOCH);
         FlinkJobObservation.Attempt finished = new FlinkJobObservation.Attempt(
@@ -220,7 +257,7 @@ class ScenarioVerdictTest {
                 Optional.of(finished),
                 Optional.of(oracle),
                 Optional.empty(),
-                Optional.of(V1ScenarioExecutorTest.confirmedOrigins()),
+                origins,
                 List.of(),
                 List.of());
     }

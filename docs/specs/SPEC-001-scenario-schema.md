@@ -1038,14 +1038,18 @@ Connector pull-request gating is the same mechanism with one axis:
   loads (`-Xlog:class+load`, set through the per-process `env.java.opts.jobmanager`
   or `env.java.opts.taskmanager` key so the image's `env.java.opts.all` flags stay)
   to one file per container incarnation in the attempt directory, which survives
-  killed and replaced TaskManagers. After the process fence, the runner reads which
+  killed and replaced TaskManagers. Expected log paths are registered when each
+  container incarnation is configured; an absent file remains missing evidence
+  rather than disappearing from a directory listing. Failed startup retries use
+  distinct incarnation paths. After the process fence, the runner reads which
   source each process loaded each entry class from. The evidence is `confirmed`
   only if every load came from the subject primary's `lib` path and at least one
   TaskManager loaded every entry class. Otherwise a passing oracle becomes
   `inconclusive`: `subject.connector.origin-mismatch` when some process loaded a
   copy from elsewhere, and `subject.connector.origin-unconfirmed` when the logs are
-  unreadable or no TaskManager loaded the classes. A failing oracle keeps its
-  `fail`. The JSON summary reports this as `evidence.subjectClasses`.
+  missing, unreadable, or no single TaskManager loaded all the classes. A failing
+  oracle keeps its attempt `fail`, but cannot match an expected failure without
+  confirmed origins (R8.7a). The JSON summary reports this as `evidence.subjectClasses`.
 - **R5.7** Each workload job has optional `start: auto | manual`, defaulting to
   `auto`. Auto-start jobs are submitted after infrastructure is ready and any
   preload input source has completed per R4.5a, before the first phase begins.
@@ -1713,7 +1717,10 @@ Connector pull-request gating is the same mechanism with one axis:
   was expected to pass keeps its own reason; an expected failure that did not
   occur, or occurred with another reason, reports `expectation.mismatch`. A
   negative control is therefore green only when it fails exactly as pinned with valid
-  experiment evidence.
+  experiment evidence. An expected failure also requires confirmed runtime subject
+  origins (R5.6d). Missing or foreign origins retain the data failure but make the
+  scenario verdict `inconclusive` with `subject.connector.origin-unconfirmed` or
+  `subject.connector.origin-mismatch`; the expectation remains unmatched.
 - **R8.8** N-of-K is reported as evidence strength, never used as a threshold to
   dismiss a clean expectation mismatch. `inconclusive` is reserved for invalid
   evidence, including dirty health, retry exhaustion, an invalid baseline, or an

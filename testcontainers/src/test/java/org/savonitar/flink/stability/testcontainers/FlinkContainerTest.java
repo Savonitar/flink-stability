@@ -6,6 +6,7 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import org.savonitar.flink.stability.runtime.api.ConnectorBundleProvisioningException;
 import org.savonitar.flink.stability.runtime.api.ConnectorClasspathManifest;
+import org.savonitar.flink.stability.runtime.api.FlinkClassLoadLog;
 import org.savonitar.flink.stability.runtime.api.FlinkConnectorBundleInstallation;
 import org.savonitar.flink.stability.runtime.api.FlinkRuntimeTarget;
 import org.testcontainers.containers.GenericContainer;
@@ -51,18 +52,47 @@ class FlinkContainerTest {
     }
 
     @Test
-    void listsClassLoadLogsWithTheirProcessIncarnation() throws Exception {
+    void retainsExpectedLogsForMissingIncarnationsAndIgnoresUnregisteredFiles() throws Exception {
+        FlinkContainer factory = new FlinkContainer(
+                emptyTarget(), Network.SHARED, temporaryDirectory);
+        factory.createJobManager("jobmanager-1");
+        factory.createTaskManager("taskmanager-1");
+        factory.createTaskManager("taskmanager-1");
+        FlinkClassLoadLog replacement = factory.classLoadLogs().getLast();
+        Files.writeString(replacement.hostPath(), "replacement log");
         Files.writeString(temporaryDirectory.resolve(
-                ClassLoadLogs.fileName("taskmanager-1", 2)), "");
-        Files.writeString(temporaryDirectory.resolve(
-                ClassLoadLogs.fileName("jobmanager-1", 1)), "");
-        Files.writeString(temporaryDirectory.resolve("unrelated.log"), "");
+                ClassLoadLogs.fileName("taskmanager-9", 1)), "stale unrelated log");
 
         assertEquals(
-                List.of("jobmanager-1#1", "taskmanager-1#2"),
-                ClassLoadLogs.list(temporaryDirectory).stream()
-                        .map(org.savonitar.flink.stability.runtime.api.FlinkClassLoadLog::process)
+                List.of("jobmanager-1#1", "taskmanager-1#1", "taskmanager-1#2"),
+                factory.classLoadLogs().stream().map(FlinkClassLoadLog::process)
                         .toList());
+        assertTrue(Files.notExists(factory.classLoadLogs().get(1).hostPath()),
+                "the missing predecessor stays in the inventory for fail-closed reading");
+        assertTrue(Files.exists(replacement.hostPath()));
+    }
+
+    @Test
+    void retriedStartupFactoriesCannotOverwriteEarlierIncarnationLogs() {
+        ClassLoadLogs logs = new ClassLoadLogs(temporaryDirectory);
+        FlinkContainer first = new FlinkContainer(
+                emptyTarget(), Network.SHARED, temporaryDirectory, logs);
+        first.createJobManager("jobmanager-1");
+        first.createTaskManager("taskmanager-1");
+        FlinkContainer retry = new FlinkContainer(
+                emptyTarget(), Network.SHARED, temporaryDirectory, logs);
+        String retriedJobManager = retry.createJobManager("jobmanager-1")
+                .getEnvMap().get("FLINK_PROPERTIES");
+        String retriedTaskManager = retry.createTaskManager("taskmanager-1")
+                .getEnvMap().get("FLINK_PROPERTIES");
+
+        assertTrue(retriedJobManager.contains(ClassLoadLogs.fileName("jobmanager-1", 2)));
+        assertTrue(retriedTaskManager.contains(ClassLoadLogs.fileName("taskmanager-1", 2)));
+        assertEquals(List.of("jobmanager-1#1", "taskmanager-1#1",
+                        "jobmanager-1#2", "taskmanager-1#2"),
+                retry.classLoadLogs().stream().map(FlinkClassLoadLog::process).toList());
+        assertEquals(4, retry.classLoadLogs().stream().map(FlinkClassLoadLog::hostPath)
+                .distinct().count());
     }
 
     @Test
