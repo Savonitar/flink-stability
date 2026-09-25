@@ -280,6 +280,54 @@ class ValidateSpecificationsCommandTest {
     }
 
     @Test
+    void expectationFailureRendersRelativeSourceScopeCodeAndPointer() throws IOException {
+        Path catalogRoot = Files.createDirectories(temporaryDirectory.resolve("catalog"));
+        writePair(catalogRoot, "expectation-bad", "unused.jar", "unused.jar", "");
+        updateDocument(catalogRoot.resolve("expectation-bad.expected.yaml"), document -> {
+            ObjectNode fallback = document.putObject("default");
+            fallback.putObject("baseline").put("outcome", "pass");
+            fallback.putObject("candidate").put("outcome", "pass");
+        });
+
+        Invocation result = execute("validate", "--catalog-root", catalogRoot.toString(),
+                "--scenario", "expectation-bad");
+
+        assertValidationFailure(result,
+                "expectation-bad.expected.yaml [common] expectation.shape-mismatch at $/default");
+    }
+
+    @Test
+    void suitePlanningFailureRendersEntryIdentity() throws IOException {
+        Path catalogRoot = Files.createDirectories(temporaryDirectory.resolve("catalog"));
+        writePair(catalogRoot, "preflight-bad", "unused.jar", "unused.jar", "");
+        updateDocument(catalogRoot.resolve("preflight-bad.yaml"), document ->
+                ((ObjectNode) document.requiredAt("/setup/kafka/clusters/main/topics/0"))
+                        .put("replication_factor", 2));
+        writeSuite(catalogRoot, "suite-bad", List.of("preflight-bad"));
+
+        Invocation result = execute("validate", "--catalog-root", catalogRoot.toString(),
+                "--suite", "suite-bad");
+
+        assertValidationFailure(result,
+                "preflight-bad.yaml [entry 0 'preflight-bad', single] "
+                        + "preflight.kafka.replication-exceeds-brokers "
+                        + "at $/setup/kafka/clusters/main/topics/0/replication_factor");
+    }
+
+    @Test
+    void runnerCapabilityFailureRejectsBeforeArtifactsOrDocker() throws IOException {
+        Path catalogRoot = Files.createDirectories(temporaryDirectory.resolve("catalog"));
+        writePair(catalogRoot, "runner-bad", "unused.jar", "unused.jar", "");
+        updateDocument(catalogRoot.resolve("runner-bad.yaml"), document -> document.put("runs", 2));
+
+        Invocation result = execute("run", "--catalog-root", catalogRoot.toString(),
+                "--scenario", "runner-bad", "--offline");
+
+        assertValidationFailure(result,
+                "runner-bad.yaml [single] runner.invocation.runs-unsupported at $/runs");
+    }
+
+    @Test
     void rejectsAnUnsupportedKafkaLineBeforeArtifactPreparation() throws IOException {
         Path catalogRoot = Files.createDirectories(temporaryDirectory.resolve("catalog"));
         writePair(catalogRoot, "kafka-line", "unused.jar", "unused.jar", "");
