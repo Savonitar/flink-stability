@@ -1,6 +1,7 @@
 package org.savonitar.flink.stability.testcontainers;
 
 import org.savonitar.flink.stability.runtime.api.ConnectorBundleProvisioningException;
+import org.savonitar.flink.stability.runtime.api.FlinkClassLoadLog;
 import org.savonitar.flink.stability.runtime.api.FlinkComponentProvisioningEvidence;
 import org.savonitar.flink.stability.runtime.api.FlinkComponentRole;
 import org.savonitar.flink.stability.runtime.api.FlinkConnectorBundleInstallation;
@@ -47,6 +48,7 @@ public final class ClusterManager implements AutoCloseable {
     private final List<ComponentSlot> pendingCleanup = new ArrayList<>();
     private final List<FlinkComponentProvisioningEvidence> provisioningHistory =
             new ArrayList<>();
+    private final List<FlinkComponentFactory> flinkFactories = new ArrayList<>();
 
     private KafkaRuntimeCluster kafkaRuntime;
     private boolean flinkProcessWriteFenceStarted;
@@ -61,10 +63,15 @@ public final class ClusterManager implements AutoCloseable {
      * directories are prepared for container writes by {@link FlinkContainer}.
      */
     public ClusterManager(Path checkpointStorageRoot) {
+        this(checkpointStorageRoot, new ClassLoadLogs(checkpointStorageRoot));
+    }
+
+    private ClusterManager(Path checkpointStorageRoot, ClassLoadLogs classLoadLogs) {
         this(
                 Network.newNetwork(),
                 true,
-                FlinkContainer::new,
+                (target, network, storage) -> new FlinkContainer(
+                        target, network, storage, classLoadLogs),
                 ApacheKafkaRuntime::new,
                 checkpointStorageRoot);
     }
@@ -224,6 +231,12 @@ public final class ClusterManager implements AutoCloseable {
         return List.copyOf(provisioningHistory);
     }
 
+    synchronized List<FlinkClassLoadLog> classLoadLogs() {
+        return flinkFactories.stream().flatMap(factory -> factory.classLoadLogs().stream())
+                .distinct()
+                .toList();
+    }
+
     Path checkpointStorageRoot() {
         return checkpointStorageRoot;
     }
@@ -332,9 +345,11 @@ public final class ClusterManager implements AutoCloseable {
     private FlinkComponentFactory createFlinkFactory(FlinkRuntimeTarget runtimeTarget) {
         Objects.requireNonNull(runtimeTarget, "runtimeTarget");
         runtimeTarget.connectorBundle().classpathManifest().verifyHostFiles();
-        return Objects.requireNonNull(
+        FlinkComponentFactory factory = Objects.requireNonNull(
                 flinkFactoryProvider.create(runtimeTarget, network, checkpointStorageRoot),
                 "Flink component factory returned null");
+        flinkFactories.add(factory);
+        return factory;
     }
 
     private void validateFlinkStart(FlinkRuntimeTarget runtimeTarget) {

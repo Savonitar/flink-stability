@@ -69,15 +69,17 @@ public record SubjectClassOrigins(
         Objects.requireNonNull(logs, "logs");
         Set<String> wanted = Set.copyOf(entryClasses);
         List<ProcessOrigin> processes = new ArrayList<>();
-        try {
-            for (FlinkClassLoadLog log : logs) {
+        List<String> failures = new ArrayList<>();
+        for (FlinkClassLoadLog log : logs) {
+            try {
                 processes.add(new ProcessOrigin(log.process(), sources(log, wanted)));
+            } catch (IOException | UncheckedIOException unreadable) {
+                failures.add(log.process() + ": " + unreadable.getMessage());
             }
-        } catch (IOException | UncheckedIOException unreadable) {
-            return new SubjectClassOrigins(expectedSource, processes, Optional.of(
-                    "Cannot read Flink class-load logs: " + unreadable.getMessage()));
         }
-        return new SubjectClassOrigins(expectedSource, processes, Optional.empty());
+        return new SubjectClassOrigins(expectedSource, processes, failures.isEmpty()
+                ? Optional.empty()
+                : Optional.of("Cannot read Flink class-load logs: " + String.join("; ", failures)));
     }
 
     public Outcome outcome(List<String> entryClasses) {
@@ -91,17 +93,17 @@ public record SubjectClassOrigins(
         if (foreignSource) {
             return Outcome.MISMATCH;
         }
-        boolean ranOnTaskManager = entryClasses.stream().allMatch(entryClass ->
-                processes.stream().anyMatch(process -> process.taskManager()
-                        && process.sources().containsKey(entryClass)));
+        boolean ranOnTaskManager = processes.stream().anyMatch(process -> process.taskManager()
+                && entryClasses.stream().allMatch(entryClass ->
+                        !process.sources().getOrDefault(entryClass, List.of()).isEmpty()));
         return ranOnTaskManager ? Outcome.CONFIRMED : Outcome.UNCONFIRMED;
     }
 
     /** One sentence explaining the outcome, for the attempt message. */
     public String detail(List<String> entryClasses) {
         return switch (outcome(entryClasses)) {
-            case CONFIRMED -> "every Flink process loaded the subject entry classes from "
-                    + expectedSource;
+            case CONFIRMED -> "every observed entry-class load came from " + expectedSource
+                    + " and one TaskManager loaded every entry class";
             case MISMATCH -> "a Flink process loaded a subject entry class from "
                     + processes.stream()
                             .flatMap(process -> process.sources().entrySet().stream()
@@ -113,7 +115,7 @@ public record SubjectClassOrigins(
                             .orElseThrow()
                     + " instead of " + expectedSource;
             case UNCONFIRMED -> failure.orElse(
-                    "no TaskManager log shows the subject entry classes being loaded ("
+                    "no single TaskManager log shows every subject entry class being loaded ("
                             + processes.size() + " class-load logs)");
         };
     }

@@ -4,6 +4,7 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import org.savonitar.flink.stability.runtime.api.ConnectorBundleProvisioningException;
 import org.savonitar.flink.stability.runtime.api.ConnectorClasspathManifest;
+import org.savonitar.flink.stability.runtime.api.FlinkClassLoadLog;
 import org.savonitar.flink.stability.runtime.api.FlinkComponentProvisioningEvidence;
 import org.savonitar.flink.stability.runtime.api.FlinkComponentRole;
 import org.savonitar.flink.stability.runtime.api.FlinkConnectorBundleInstallation;
@@ -12,6 +13,7 @@ import org.savonitar.flink.stability.runtime.api.FlinkRuntimeTarget;
 import org.savonitar.flink.stability.runtime.api.ProvisionedConnectorArtifact;
 import org.testcontainers.containers.Network;
 
+import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Duration;
 import java.util.ArrayList;
@@ -66,6 +68,43 @@ class ClusterManagerTest {
             assertEquals(
                     target().connectorBundle().targetBindingSha256(),
                     manager.provisioningHistory().getLast().targetBindingSha256());
+        }
+    }
+
+    @Test
+    void runtimeKeepsExpectedLogsAcrossReplacementAndFenceEvenWhenFilesAreMissing()
+            throws Exception {
+        RecordingFactory factory = new RecordingFactory();
+        try (ClusterManager manager = manager(factory)) {
+            DockerV1AttemptRuntime runtime = new DockerV1AttemptRuntime(manager);
+            runtime.startFlink(target());
+            runtime.killTaskManager("taskmanager-1", ACTION_TIMEOUT);
+            runtime.restartTaskManager(ACTION_TIMEOUT);
+            FlinkClassLoadLog replacement = runtime.flinkClassLoadLogs().getLast();
+            Files.createDirectories(replacement.hostPath().getParent());
+            Files.writeString(replacement.hostPath(), "replacement evidence");
+            runtime.stopAllFlinkProcesses(ACTION_TIMEOUT);
+
+            assertEquals(List.of("jobmanager-1#1", "taskmanager-1#1", "taskmanager-1#2"),
+                    runtime.flinkClassLoadLogs().stream().map(FlinkClassLoadLog::process).toList());
+            assertTrue(Files.notExists(runtime.flinkClassLoadLogs().get(1).hostPath()));
+            assertTrue(Files.exists(replacement.hostPath()));
+        }
+    }
+
+    @Test
+    void aRetriedInitialStartKeepsTheEarlierLogInventoryWithoutDuplicates() {
+        RecordingFactory factory = new RecordingFactory();
+        factory.failTaskManagerStart = true;
+        try (ClusterManager manager = manager(factory)) {
+            assertThrows(IllegalStateException.class, () -> manager.startFlink(target()));
+            factory.failTaskManagerStart = false;
+            manager.startFlink(target());
+
+            assertEquals(List.of("jobmanager-1#1", "taskmanager-1#1",
+                            "jobmanager-1#2", "taskmanager-1#2"),
+                    new DockerV1AttemptRuntime(manager).flinkClassLoadLogs().stream()
+                            .map(FlinkClassLoadLog::process).toList());
         }
     }
 
@@ -169,7 +208,7 @@ class ClusterManagerTest {
         return new ClusterManager(
                 Network.SHARED,
                 false,
-                (runtimeTarget, network, checkpointRoot) -> factory.bind(runtimeTarget),
+                (runtimeTarget, network, checkpointRoot) -> factory.bind(runtimeTarget, checkpointRoot),
                 (network, runtimeTarget) -> {
                     throw new AssertionError("Kafka must not be started");
                 },
@@ -189,12 +228,21 @@ class ClusterManagerTest {
         private final List<String> events = new ArrayList<>();
         private final Map<String, Integer> generations = new LinkedHashMap<>();
         private FlinkRuntimeTarget target;
+        private ClassLoadLogs logs;
         private boolean failTaskManagerStart;
         private boolean badEvidence;
 
-        private RecordingFactory bind(FlinkRuntimeTarget target) {
+        private RecordingFactory bind(FlinkRuntimeTarget target, Path checkpointRoot) {
             this.target = target;
+            if (logs == null) {
+                this.logs = new ClassLoadLogs(checkpointRoot);
+            }
             return this;
+        }
+
+        @Override
+        public List<FlinkClassLoadLog> classLoadLogs() {
+            return logs.expected();
         }
 
         @Override
@@ -209,6 +257,7 @@ class ClusterManagerTest {
 
         private ContainerHandle newHandle(String name, FlinkComponentRole role) {
             int generation = generations.merge(name, 1, Integer::sum);
+            logs.register(name);
             return new RecordingHandle(
                     name,
                     role,

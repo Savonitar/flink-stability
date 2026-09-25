@@ -74,6 +74,31 @@ class SubjectClassOriginsTest {
         assertTrue(origins.failure().orElseThrow().contains("missing.log"));
     }
 
+    @Test
+    void aConfirmedReplacementCannotHideItsMissingPredecessorLog() throws IOException {
+        SubjectClassOrigins origins = SubjectClassOrigins.read(List.of(
+                        new FlinkClassLoadLog("taskmanager-1#1", directory.resolve("missing.log")),
+                        log("taskmanager-1#2", line(SOURCE, "file:" + PRIMARY),
+                                line(SINK, "file:" + PRIMARY))),
+                ENTRY_CLASSES, PRIMARY);
+
+        assertEquals(SubjectClassOrigins.Outcome.UNCONFIRMED, origins.outcome(ENTRY_CLASSES));
+        assertTrue(origins.failure().orElseThrow().contains("taskmanager-1#1"));
+        assertEquals(List.of("taskmanager-1#2"), origins.processes().stream()
+                .map(SubjectClassOrigins.ProcessOrigin::process).toList(),
+                "retain the readable replacement evidence despite the missing predecessor");
+    }
+
+    @Test
+    void requiresOneTaskManagerToHaveLoadedEveryEntryClass() throws IOException {
+        SubjectClassOrigins origins = SubjectClassOrigins.read(List.of(
+                        log("taskmanager-1#1", line(SOURCE, "file:" + PRIMARY)),
+                        log("taskmanager-1#2", line(SINK, "file:" + PRIMARY))),
+                ENTRY_CLASSES, PRIMARY);
+
+        assertEquals(SubjectClassOrigins.Outcome.UNCONFIRMED, origins.outcome(ENTRY_CLASSES));
+    }
+
     private FlinkClassLoadLog log(String process, String... lines) throws IOException {
         Path file = directory.resolve(process.replace('#', '-') + ".log");
         Files.writeString(file, String.join("\n", lines));

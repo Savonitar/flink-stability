@@ -79,6 +79,16 @@ public record ScenarioVerdict(Status status, String reason, String message, bool
             return unconfirmed(EVIDENCE_UNCONFIRMED,
                     "The expected failure lacks complete phase, fence, or oracle evidence");
         }
+        SubjectClassOrigins.Outcome origins = attempt.subjectClassOrigins()
+                .map(evidence -> evidence.outcome(
+                        ExecutableScenarioPlan.PROTOCOL_V1_SUBJECT_ENTRY_CLASSES))
+                .orElse(SubjectClassOrigins.Outcome.UNCONFIRMED);
+        if (origins != SubjectClassOrigins.Outcome.CONFIRMED) {
+            return unconfirmed(origins == SubjectClassOrigins.Outcome.MISMATCH
+                            ? V1ScenarioExecutor.SUBJECT_ORIGIN_MISMATCH
+                            : V1ScenarioExecutor.SUBJECT_ORIGIN_UNCONFIRMED,
+                    "The expected failure does not prove that the subject connector ran");
+        }
         for (TaskManagerKillEffect effect : attempt.taskManagerKillEffects()) {
             if (!effect.outcome().confirmed()) {
                 return unconfirmed(ExecutablePhaseExecutor.TASKMANAGER_KILL_EFFECT_UNCONFIRMED,

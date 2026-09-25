@@ -1,5 +1,6 @@
 package org.savonitar.flink.stability.testcontainers;
 
+import org.savonitar.flink.stability.runtime.api.FlinkClassLoadLog;
 import org.savonitar.flink.stability.runtime.api.FlinkComponentRole;
 import org.savonitar.flink.stability.runtime.api.FlinkRuntimeTarget;
 import org.slf4j.LoggerFactory;
@@ -16,8 +17,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.attribute.PosixFilePermissions;
 import java.time.Duration;
-import java.util.HashMap;
-import java.util.Map;
+import java.util.List;
 import java.util.Objects;
 
 final class FlinkContainer implements FlinkComponentFactory {
@@ -31,18 +31,28 @@ final class FlinkContainer implements FlinkComponentFactory {
     private final FlinkRuntimeTarget runtimeTarget;
     private final Network network;
     private final Path checkpointStorageRoot;
-    private final Map<String, Integer> incarnations = new HashMap<>();
+    private final ClassLoadLogs classLoadLogs;
 
     /** Creates a factory for one exact image/bundle binding. */
     FlinkContainer(
             FlinkRuntimeTarget runtimeTarget,
             Network network,
             Path checkpointStorageRoot) {
+        this(runtimeTarget, network, checkpointStorageRoot, new ClassLoadLogs(checkpointStorageRoot));
+    }
+
+    /** Keeps incarnation names unique even when startup is retried with another factory. */
+    FlinkContainer(
+            FlinkRuntimeTarget runtimeTarget,
+            Network network,
+            Path checkpointStorageRoot,
+            ClassLoadLogs classLoadLogs) {
         this.runtimeTarget = Objects.requireNonNull(runtimeTarget, "runtimeTarget");
         this.flinkImage = DockerImageName.parse(runtimeTarget.imageReference())
                 .asCompatibleSubstituteFor("flink");
         this.network = Objects.requireNonNull(network, "network");
         this.checkpointStorageRoot = prepareCheckpointStorage(checkpointStorageRoot);
+        this.classLoadLogs = Objects.requireNonNull(classLoadLogs, "classLoadLogs");
     }
 
     GenericContainer<?> createJobManager(String logicalName) {
@@ -95,13 +105,18 @@ final class FlinkContainer implements FlinkComponentFactory {
      * directory. One file per container incarnation, so a replaced TaskManager keeps its log.
      */
     private String flinkProperties(String process, String logicalName) {
-        int incarnation = incarnations.merge(logicalName, 1, Integer::sum);
+        FlinkClassLoadLog log = classLoadLogs.register(logicalName);
         // The per-process key is appended to env.java.opts.all, which the image uses for its
         // required --add-opens flags. The value stays unquoted: quotes would reach the JVM.
         return TASK_SLOTS_PROPERTY + "\n"
                 + "env.java.opts." + process + ": -Xlog:class+load=info:file="
-                + CHECKPOINT_PATH + "/" + ClassLoadLogs.fileName(logicalName, incarnation)
+                + CHECKPOINT_PATH + "/" + log.hostPath().getFileName()
                 + "::filecount=0";
+    }
+
+    @Override
+    public List<FlinkClassLoadLog> classLoadLogs() {
+        return classLoadLogs.expected();
     }
 
     private Slf4jLogConsumer createLogConsumer(String loggerName) {
