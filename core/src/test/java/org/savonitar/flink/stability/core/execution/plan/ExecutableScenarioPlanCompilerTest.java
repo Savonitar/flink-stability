@@ -720,6 +720,60 @@ class ExecutableScenarioPlanCompilerTest {
     }
 
     @Test
+    void rejectsVersionedSubjectClassesInPrimaryDependencyAndWorkloadJars() throws IOException {
+        for (String artifact : List.of("connector.jar", "dependency.jar", "job.jar")) {
+            createJar(artifactRoot.resolve("connector.jar"), false, null);
+            createJar(artifactRoot.resolve("dependency.jar"), List.of("example.Unrelated"));
+            createJar(artifactRoot.resolve("job.jar"), true, "v1");
+            Manifest manifest = new Manifest();
+            manifest.getMainAttributes().put(Attributes.Name.MANIFEST_VERSION, "1.0");
+            manifest.getMainAttributes().put(Attributes.Name.MAIN_CLASS, "example.Main");
+            manifest.getMainAttributes().putValue("Multi-Release", "true");
+            manifest.getMainAttributes().putValue(
+                    ExecutableScenarioPlanCompiler.WORKLOAD_PROTOCOL_ATTRIBUTE, "v1");
+            createJar(artifactRoot.resolve(artifact), manifest, List.of("example.Main",
+                    "META-INF/versions/21/org.apache.flink.connector.kafka.source.KafkaSource",
+                    "META-INF/versions/21/org.apache.flink.connector.kafka.sink.KafkaSink"));
+            ResolvedScenarioPlan resolved = resolved(document -> {
+                useLocalArtifacts(document);
+                ((ObjectNode) document.at("/subject/connectors/kafka"))
+                        .putArray("runtime_dependencies").add("dependency.jar");
+            });
+            ExecutableScenarioPlan executable = compiler.compile(resolved);
+            try (PreparedScenarioPlan prepared = new ArtifactPlanResolver().resolve(
+                    resolved, ArtifactResolutionOptions.online(artifactRoot))) {
+                RunnerCapabilityException exception = assertThrows(
+                        RunnerCapabilityException.class, () -> compiler.bind(prepared, executable));
+
+                assertTrue(exception.issues().stream().anyMatch(issue -> issue.code()
+                                .equals("runner.subject.entry-class-versioned-unsupported")),
+                        artifact + ": " + exception.issues());
+            }
+        }
+    }
+
+    @Test
+    void permitsMultiReleaseDependenciesWithoutVersionedSubjectClasses() throws IOException {
+        createJar(artifactRoot.resolve("connector.jar"), false, null);
+        createJar(artifactRoot.resolve("job.jar"), true, "v1");
+        Manifest manifest = new Manifest();
+        manifest.getMainAttributes().put(Attributes.Name.MANIFEST_VERSION, "1.0");
+        manifest.getMainAttributes().putValue("Multi-Release", "true");
+        createJar(artifactRoot.resolve("dependency.jar"), manifest,
+                List.of("example.Unrelated", "META-INF/versions/21/example.Unrelated"));
+        ResolvedScenarioPlan resolved = resolved(document -> {
+            useLocalArtifacts(document);
+            ((ObjectNode) document.at("/subject/connectors/kafka"))
+                    .putArray("runtime_dependencies").add("dependency.jar");
+        });
+        ExecutableScenarioPlan executable = compiler.compile(resolved);
+        try (PreparedScenarioPlan prepared = new ArtifactPlanResolver().resolve(
+                resolved, ArtifactResolutionOptions.online(artifactRoot))) {
+            assertEquals(executable, compiler.bind(prepared, executable).executablePlan());
+        }
+    }
+
+    @Test
     void artifactPreparationRejectsAWorkloadWithoutTheProtocolMarker() throws IOException {
         createJar(artifactRoot.resolve("connector.jar"), false, null);
         createJar(artifactRoot.resolve("job.jar"), true, null);

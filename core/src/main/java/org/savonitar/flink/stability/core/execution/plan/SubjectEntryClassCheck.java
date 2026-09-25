@@ -10,6 +10,7 @@ import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.jar.JarFile;
+import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 
 /**
@@ -22,6 +23,9 @@ final class SubjectEntryClassCheck {
     static final List<String> PROTOCOL_V1_ENTRY_CLASSES = List.of(
             "org.apache.flink.connector.kafka.source.KafkaSource",
             "org.apache.flink.connector.kafka.sink.KafkaSink");
+
+    private static final Pattern VERSIONED_CLASS = Pattern.compile(
+            "META-INF/versions/(?:9|[1-9][0-9]+)/(.+\\.class)");
 
     private SubjectEntryClassCheck() {}
 
@@ -90,6 +94,26 @@ final class SubjectEntryClassCheck {
             String path,
             List<RunnerCapabilityIssue> issues) {
         try (JarFile jarFile = new JarFile(jar.toFile(), false)) {
+            // The image reference does not establish its Java feature version. Do not use
+            // the harness JVM's version to guess which versioned connector copy will load.
+            if (jarFile.isMultiRelease()) {
+                List<String> versioned = jarFile.stream()
+                        .map(entry -> VERSIONED_CLASS.matcher(entry.getName()))
+                        .filter(matcher -> matcher.matches())
+                        .map(matcher -> matcher.group(1))
+                        .filter(entry -> PROTOCOL_V1_ENTRY_CLASSES.stream().anyMatch(
+                                entryClass -> entry.equals(
+                                        entryClass.replace('.', '/') + ".class")))
+                        .distinct()
+                        .sorted()
+                        .toList();
+                if (!versioned.isEmpty()) {
+                    issues.add(issue(source, "runner.subject.entry-class-versioned-unsupported",
+                            path, "Cannot determine the target JVM's effective subject classes in "
+                                    + jar.getFileName() + ": multi-release entries " + versioned
+                                    + "; use a JAR without versioned subject entry classes"));
+                }
+            }
             return PROTOCOL_V1_ENTRY_CLASSES.stream()
                     .filter(entryClass -> jarFile.getJarEntry(
                             entryClass.replace('.', '/') + ".class") != null)
