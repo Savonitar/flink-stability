@@ -14,6 +14,7 @@ import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
+import java.util.OptionalLong;
 
 /** Executes the compiler-approved v1 phase subset in exact document order. */
 public final class ExecutablePhaseExecutor {
@@ -272,7 +273,8 @@ public final class ExecutablePhaseExecutor {
         try {
             taskManagers.killTaskManager(kill.targetName(), TASKMANAGER_ACTION_TIMEOUT);
             evidence.kills.add(new PhaseExecutionEvidence.TaskManagerKill(
-                    path, loopIterations, kill.targetName(), jobBeforeKill));
+                    path, loopIterations, kill.targetName(), jobBeforeKill,
+                    jobManagerTimeAfterKill(job)));
             succeeded(
                     evidence,
                     phaseIndex,
@@ -303,6 +305,16 @@ public final class ExecutablePhaseExecutor {
                     PhaseExecutionException.Outcome.INCONCLUSIVE,
                     TASKMANAGER_KILL_INFRASTRUCTURE,
                     failure);
+        }
+    }
+
+    private OptionalLong jobManagerTimeAfterKill(FlinkJobHandle job) {
+        try {
+            return OptionalLong.of(flink.jobManagerTimeMillis(job));
+        } catch (IOException | RuntimeException unavailable) {
+            // The injection succeeded. Missing timing evidence must not skip a later restart,
+            // but it cannot confirm that a failure or restore followed the injection.
+            return OptionalLong.empty();
         }
     }
 

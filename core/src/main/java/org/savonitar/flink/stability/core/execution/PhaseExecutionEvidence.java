@@ -4,6 +4,7 @@ import org.savonitar.flink.stability.core.flink.FlinkJobObservation;
 
 import java.util.List;
 import java.util.Objects;
+import java.util.OptionalLong;
 
 /**
  * Immutable ordered evidence for every atomic typed phase step that was attempted, plus the job
@@ -22,18 +23,23 @@ public record PhaseExecutionEvidence(
         this(steps, List.of());
     }
 
-    /** A kill whose process exit was confirmed, and the job observed right before it. */
+    /**
+     * A confirmed process exit, its pre-kill job observation, and a JobManager clock sample
+     * requested after exit. Recovery events must follow that sample to prove post-kill timing.
+     */
     public record TaskManagerKill(
             String path,
             List<LoopIteration> loopIterations,
             String target,
-            FlinkJobObservation.Attempt jobBeforeKill) {
+            FlinkJobObservation.Attempt jobBeforeKill,
+            OptionalLong jobManagerTimeAfterKill) {
         public TaskManagerKill {
             path = requireNonBlank(path, "path");
             loopIterations = List.copyOf(Objects.requireNonNull(
                     loopIterations, "loopIterations"));
             target = requireNonBlank(target, "target");
             Objects.requireNonNull(jobBeforeKill, "jobBeforeKill");
+            Objects.requireNonNull(jobManagerTimeAfterKill, "jobManagerTimeAfterKill");
         }
     }
 

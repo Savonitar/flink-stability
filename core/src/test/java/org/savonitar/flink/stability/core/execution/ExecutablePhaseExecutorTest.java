@@ -32,6 +32,7 @@ import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
+import java.util.OptionalLong;
 import java.util.function.Consumer;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -227,12 +228,14 @@ class ExecutablePhaseExecutorTest {
         PhaseExecutionEvidence evidence = executor.execute(plan, JOB);
 
         assertEquals(
-                List.of("observe-job", "kill:taskmanager-1", "restart:taskmanager"), events);
+                List.of("observe-job", "kill:taskmanager-1", "sample-jobmanager-time",
+                        "restart:taskmanager"), events);
         assertEquals(1, evidence.taskManagerKills().size());
         PhaseExecutionEvidence.TaskManagerKill kill = evidence.taskManagerKills().getFirst();
         assertEquals("$/phases/0/steps/0", kill.path());
         assertEquals("taskmanager-1", kill.target());
         assertEquals(Optional.of(RUNNING_JOB), kill.jobBeforeKill().observation());
+        assertEquals(OptionalLong.of(1_500), kill.jobManagerTimeAfterKill());
         assertEquals(
                 ExecutablePhaseExecutor.TASKMANAGER_ACTION_TIMEOUT,
                 taskManagers.killTimeout);
@@ -253,7 +256,8 @@ class ExecutablePhaseExecutorTest {
                 () -> executor.execute(plan, JOB));
 
         assertEquals(
-                List.of("observe-job", "kill:taskmanager-1", "restart:taskmanager"), events);
+                List.of("observe-job", "kill:taskmanager-1", "sample-jobmanager-time",
+                        "restart:taskmanager"), events);
         assertEquals(
                 PhaseExecutionException.Outcome.INCONCLUSIVE,
                 failure.outcome());
@@ -324,11 +328,35 @@ class ExecutablePhaseExecutorTest {
         PhaseExecutionEvidence evidence = executor.execute(plan, JOB);
 
         assertEquals(
-                List.of("observe-job", "kill:taskmanager-1", "restart:taskmanager"), events);
+                List.of("observe-job", "kill:taskmanager-1", "sample-jobmanager-time",
+                        "restart:taskmanager"), events);
         FlinkJobObservation.Attempt observed =
                 evidence.taskManagerKills().getFirst().jobBeforeKill();
         assertTrue(observed.observation().isEmpty());
         assertEquals(Optional.of("IOException: REST unavailable"), observed.failure());
+    }
+
+    @Test
+    void anUnavailablePostExitClockSampleDoesNotPreventRestart() throws Exception {
+        ExecutableScenarioPlan plan = plan(document -> {
+            ArrayNode steps = replaceSteps(document);
+            ObjectNode target = steps.addObject().putObject("kill").putObject("target");
+            target.put("kind", "named");
+            target.put("role", "taskmanager");
+            target.put("name", "taskmanager-1");
+            steps.addObject().putObject("restart").put("component", "taskmanager");
+        });
+        List<String> events = new ArrayList<>();
+        FakeFlink flink = new FakeFlink(events);
+        flink.clockFailure = new IOException("REST unavailable after exit");
+        ExecutablePhaseExecutor executor = new ExecutablePhaseExecutor(
+                flink, new FakeTaskManagers(events), duration -> {});
+
+        PhaseExecutionEvidence evidence = executor.execute(plan, JOB);
+
+        assertEquals(List.of("observe-job", "kill:taskmanager-1", "sample-jobmanager-time",
+                "restart:taskmanager"), events);
+        assertTrue(evidence.taskManagerKills().getFirst().jobManagerTimeAfterKill().isEmpty());
     }
 
     private ExecutablePhaseExecutor executor(FakeFlink flink) {
@@ -442,6 +470,7 @@ class ExecutablePhaseExecutorTest {
         private IOException awaitStateFailure;
         private IOException checkpointFailure;
         private IOException observeFailure;
+        private IOException clockFailure;
 
         private FakeFlink(List<String> events) {
             this.events = events;
@@ -498,6 +527,15 @@ class ExecutablePhaseExecutorTest {
                 throw observeFailure;
             }
             return RUNNING_JOB;
+        }
+
+        @Override
+        public long jobManagerTimeMillis(FlinkJobHandle job) throws IOException {
+            events.add("sample-jobmanager-time");
+            if (clockFailure != null) {
+                throw clockFailure;
+            }
+            return 1_500;
         }
 
         @Override

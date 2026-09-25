@@ -1187,17 +1187,32 @@ Connector pull-request gating is the same mechanism with one axis:
      kill, or the final observation of item 2 for the last kill. Only values
      from the JobManager clock are compared with each other.
 
-  The effect is confirmed only when Flink recorded a failure after the kill on a
+  Immediately after confirmed process exit, the runner requests a fresh JobManager
+  time using a separate job-details call. This post-exit sample is a conservative
+  lower bound for accepted recovery evidence, not the timestamp of the kill.
+  Failures and restores must occur strictly after that sample; failures already
+  present in the pre-kill observation are excluded. Missing or reversed timing
+  evidence is unconfirmed. A failure detected between exit and sampling can
+  therefore be unconfirmed rather than attributed using an ambiguous time window.
+  A restore must also follow a matching host failure (equal millisecond timestamps
+  are accepted). Without a completed checkpoint, recovery requires a later
+  `FINISHED` observation or an active execution attempt with a greater attempt
+  number for a previously observed vertex/subtask; a failure alone proves no restart.
+
+  The effect is confirmed only when Flink recorded a qualifying new failure on a
   TaskManager that hosted a deployed, initializing, or running subtask just before
-  it, and either Flink restored a checkpoint after the kill (`checkpoint-restored`)
-  or no checkpoint had completed before it (`restarted-without-checkpoint`). It is
+  the kill, and either Flink restored a checkpoint after that failure
+  (`checkpoint-restored`) or no checkpoint had completed before the kill and the
+  later observation proves a restart (`restarted-without-checkpoint`). It is
   unconfirmed when the job was already terminal (`job-terminal-before-kill`), when
   no subtask was active (`no-active-subtask-before-kill`), when no such failure or
   no required restore follows (`no-recovery-observed`), or when an observation
-  failed (`evidence-unavailable`). A job that is already failing over for another
-  reason therefore does not confirm a kill that found no active subtask. Each
-  observation has one fixed internal `30s` deadline; its failure is recorded as
-  evidence and never blocks the kill or the process fence.
+  or timing sample failed (`evidence-unavailable`). A job that is already failing
+  over for another reason therefore does not confirm a kill that found no active
+  subtask. Each observation has one fixed internal `30s` deadline; its failure is recorded as
+  evidence and never blocks the kill or the process fence. The post-exit clock
+  request has its own fixed internal `30s` deadline; its failure leaves timing
+  evidence unavailable and does not skip the subsequent restart.
 
   An unconfirmed effect never hides a failure: a failing terminal oracle keeps its
   `fail` result. A passing oracle with any unconfirmed kill makes the attempt
@@ -1507,7 +1522,8 @@ Connector pull-request gating is the same mechanism with one axis:
   `unavailable` with its failure, or `not-run`) and one `evidence.taskManagerKills`
   entry per confirmed kill: step path and loop iterations, target, effect outcome,
   whether it is confirmed, job state, checkpoint and active-subtask counts before
-  the kill, the restored checkpoint and its delay after the pre-kill observation,
+  the kill, `jobManagerTimeAfterKill` when available, the restored checkpoint and
+  `restoredAfterKillObservationMs` measured from that post-exit time sample,
   the failures recorded after the kill, and a one-sentence detail. The R7.1c sink
   transaction listing appears as `evidence.sinkTransactions`: `listed` with the
   prefix, the total, and each unresolved transaction, or `not-listed`. Input

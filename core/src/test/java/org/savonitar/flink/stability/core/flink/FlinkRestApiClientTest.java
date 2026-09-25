@@ -331,6 +331,32 @@ class FlinkRestApiClientTest {
         assertTrue(failure.getMessage().contains("now"), failure.getMessage());
     }
 
+    @Test
+    void samplesTheJobManagerClockWithOneBoundedJobDetailsRead() throws Exception {
+        List<String> endpoints = new ArrayList<>();
+        FlinkRestApiClient sampling = new FlinkRestApiClient((method, path, body, timeout) -> {
+            endpoints.add(method + " " + path);
+            assertTrue(timeout.compareTo(Duration.ZERO) > 0);
+            assertTrue(timeout.compareTo(Duration.ofSeconds(30)) <= 0);
+            // Clock sampling must not depend on checkpoint, exception, or vertex responses.
+            return "{\"now\":6000}".getBytes(StandardCharsets.UTF_8);
+        }, mapper);
+
+        assertEquals(6_000, sampling.jobManagerTimeMillis(new FlinkJobHandle(JOB_ID)));
+        assertEquals(List.of("GET /jobs/" + JOB_ID), endpoints);
+    }
+
+    @Test
+    void aClockSampleWithoutJobManagerTimeIsRejected() {
+        FlinkRestApiClient sampling = new FlinkRestApiClient(cannedTransport(
+                Map.of("/jobs/" + JOB_ID, "{\"state\":\"RUNNING\"}")), mapper);
+
+        IOException failure = assertThrows(IOException.class,
+                () -> sampling.jobManagerTimeMillis(new FlinkJobHandle(JOB_ID)));
+
+        assertTrue(failure.getMessage().contains("now"), failure.getMessage());
+    }
+
     private static FlinkRestApiClient.Transport cannedTransport(Map<String, String> responses) {
         return (method, path, body, timeout) -> {
             String response = responses.get(path);
