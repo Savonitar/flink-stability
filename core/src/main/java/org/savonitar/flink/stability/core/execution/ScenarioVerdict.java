@@ -1,6 +1,7 @@
 package org.savonitar.flink.stability.core.execution;
 
 import org.savonitar.flink.stability.core.execution.plan.ExecutableScenarioPlan;
+import org.savonitar.flink.stability.core.validation.kafka.KafkaIdSetValidationResult;
 
 import java.util.Objects;
 
@@ -8,11 +9,13 @@ import java.util.Objects;
  * The scenario verdict of the first runner: its single attempt result compared with the selected
  * expectation (SPEC-001 R8.7 without an experiment, SPEC-002 E4). An expected failure that
  * occurs with its pinned reason is a {@code pass}; a negative control is green when it fails
- * exactly as pinned.
+ * exactly as pinned with complete, confirmed experiment evidence.
  */
 public record ScenarioVerdict(Status status, String reason, String message, boolean matched) {
     /** The attempt contradicted the selected expectation (SPEC-002 E4.5). */
     public static final String EXPECTATION_MISMATCH = "expectation.mismatch";
+    /** A matching failure without the evidence needed to validate the experiment. */
+    public static final String EVIDENCE_UNCONFIRMED = "expectation.evidence-unconfirmed";
 
     public enum Status {
         PASS,
@@ -52,8 +55,7 @@ public record ScenarioVerdict(Status status, String reason, String message, bool
         }
         String expectedReason = expected.reason().orElseThrow();
         if (!attemptPassed && attempt.reason().equals(expectedReason)) {
-            return new ScenarioVerdict(Status.PASS, attempt.reason(),
-                    "The expected failure occurred: " + attempt.message(), true);
+            return matchingFailure(attempt);
         }
         return new ScenarioVerdict(Status.FAIL, EXPECTATION_MISMATCH,
                 "Expected " + expected.oracle().orElseThrow() + " to fail with "
@@ -61,5 +63,34 @@ public record ScenarioVerdict(Status status, String reason, String message, bool
                         + (attemptPassed ? "passed" : "failed with " + attempt.reason())
                         + ": " + attempt.message(),
                 false);
+    }
+
+    /** Keep the observed data failure, but do not bless an invalid negative control. */
+    private static ScenarioVerdict matchingFailure(V1ScenarioExecutionResult attempt) {
+        if (attempt.phaseEvidence().isEmpty()
+                || attempt.phaseEvidence().orElseThrow().steps().stream().anyMatch(step ->
+                        step.status() == PhaseExecutionEvidence.StepStatus.FAILED)
+                || attempt.writeFenceEvidence().isEmpty()
+                || attempt.processFenceEvidence().isEmpty()
+                || attempt.terminalValidation().filter(validation ->
+                        validation.status() == KafkaIdSetValidationResult.Status.FAIL
+                                && validation.reason().equals(attempt.reason())
+                                && validation.evidence().snapshotComplete()).isEmpty()) {
+            return unconfirmed(EVIDENCE_UNCONFIRMED,
+                    "The expected failure lacks complete phase, fence, or oracle evidence");
+        }
+        for (TaskManagerKillEffect effect : attempt.taskManagerKillEffects()) {
+            if (!effect.outcome().confirmed()) {
+                return unconfirmed(ExecutablePhaseExecutor.TASKMANAGER_KILL_EFFECT_UNCONFIRMED,
+                        "The expected failure occurred, but the kill at " + effect.kill().path()
+                                + " has unconfirmed effect: " + effect.outcome());
+            }
+        }
+        return new ScenarioVerdict(Status.PASS, attempt.reason(),
+                "The expected failure occurred: " + attempt.message(), true);
+    }
+
+    private static ScenarioVerdict unconfirmed(String reason, String message) {
+        return new ScenarioVerdict(Status.INCONCLUSIVE, reason, message, false);
     }
 }

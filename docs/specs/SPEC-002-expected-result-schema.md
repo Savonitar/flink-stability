@@ -130,7 +130,10 @@ cases:
   attempt result.
 - **E4.3** Expected `pass` matches only an attempt result of `pass`.
 - **E4.4** Expected `fail` matches only an attempt result of `fail` from the
-  expected `oracle` with the expected `reason`.
+  expected `oracle` with the expected `reason` and confirmed experiment evidence
+  (SPEC-001 R8.7a). A matching data failure with unconfirmed fault evidence or
+  incomplete phase/fence/oracle evidence remains an attempt failure but gives an
+  `inconclusive` scenario verdict.
 - **E4.5** A clean candidate result that does not match its expectation is a
   scenario `fail`, subject to experiment aggregation in SPEC-001 R8.7.
 - **E4.6** Baseline mismatch in an experiment is `inconclusive`, not a candidate

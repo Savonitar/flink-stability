@@ -1660,10 +1660,17 @@ Connector pull-request gating is the same mechanism with one axis:
   expectation (SPEC-002 E4.2, R7.1a). Otherwise the verdict is `pass` exactly when
   the attempt matches the selected expectation (SPEC-002 E4.3–E4.4): an expected
   `pass` needs a passing attempt, and an expected failure needs a failing attempt
-  with the pinned reason. A mismatch is a `fail` verdict. A failing attempt that
+  with the pinned reason and complete experiment evidence: successful phase execution,
+  both write fences, a complete terminal snapshot whose failing oracle reason matches
+  the attempt, and confirmed effect for every TaskManager kill (R6.12a). Missing phase,
+  fence, or oracle evidence makes a matching failure's verdict `inconclusive` with
+  `expectation.evidence-unconfirmed`; an ineffective kill uses
+  `taskmanager.kill.effect-unconfirmed`. The raw failing attempt and its reason remain
+  unchanged. A mismatch is a `fail` verdict. A failing attempt that
   was expected to pass keeps its own reason; an expected failure that did not
   occur, or occurred with another reason, reports `expectation.mismatch`. A
-  negative control is therefore green only when it fails exactly as pinned.
+  negative control is therefore green only when it fails exactly as pinned with valid
+  experiment evidence.
 - **R8.8** N-of-K is reported as evidence strength, never used as a threshold to
   dismiss a clean expectation mismatch. `inconclusive` is reserved for invalid
   evidence, including dirty health, retry exhaustion, an invalid baseline, or an

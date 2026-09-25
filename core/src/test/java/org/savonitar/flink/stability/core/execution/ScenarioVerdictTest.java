@@ -11,6 +11,7 @@ import java.time.Instant;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.OptionalLong;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -79,11 +80,91 @@ class ScenarioVerdictTest {
         }
     }
 
+    @Test
+    void aFailureReasonAloneDoesNotProveAnExpectedFailure() {
+        V1ScenarioExecutionResult unsupported = new V1ScenarioExecutionResult(
+                V1ScenarioExecutionResult.Status.FAIL, DUPLICATES, "unverified failure",
+                Optional.empty(), Optional.empty(), Optional.empty(), Optional.empty(),
+                Optional.empty(), Optional.empty(), Optional.empty(), List.of(), List.of());
+
+        ScenarioVerdict verdict = ScenarioVerdict.of(EXPECT_DUPLICATES, unsupported);
+
+        assertEquals(ScenarioVerdict.Status.INCONCLUSIVE, verdict.status());
+        assertEquals(ScenarioVerdict.EVIDENCE_UNCONFIRMED, verdict.reason());
+        assertFalse(verdict.matched());
+        assertEquals(V1ScenarioExecutionResult.Status.FAIL, unsupported.status());
+        assertEquals(DUPLICATES, unsupported.reason());
+    }
+
+    @Test
+    void matchingFailuresNeedSuccessfulPhasesBothFencesAndACompletePinnedOracle() {
+        V1ScenarioExecutionResult complete = attempt(V1ScenarioExecutionResult.Status.FAIL, DUPLICATES);
+        PhaseExecutionEvidence failedPhase = new PhaseExecutionEvidence(List.of(
+                new PhaseExecutionEvidence.StepEvidence(0, "fault", "$/phases/0/steps/0",
+                        List.of(), PhaseExecutionEvidence.StepKind.KILL_TASKMANAGER,
+                        PhaseExecutionEvidence.StepStatus.FAILED, "kill unavailable")));
+        for (String missing : List.of("phases", "successful-phases", "write-fence",
+                "both-fences", "oracle", "complete-snapshot", "pinned-reason", "failing-oracle")) {
+            Optional<PhaseExecutionEvidence> phases = switch (missing) {
+                case "phases" -> Optional.empty();
+                case "successful-phases" -> Optional.of(failedPhase);
+                default -> complete.phaseEvidence();
+            };
+            Optional<KafkaIdSetValidationResult> oracle = switch (missing) {
+                case "oracle", "both-fences" -> Optional.empty();
+                case "complete-snapshot" -> Optional.of(new KafkaIdSetValidationResult(
+                        KafkaIdSetValidationResult.Status.FAIL, DUPLICATES, "partial",
+                        KafkaIdSetValidationResult.Evidence.unavailable(10)));
+                case "pinned-reason" -> Optional.of(new KafkaIdSetValidationResult(
+                        KafkaIdSetValidationResult.Status.FAIL, "validator.kafka.id-set.missing-ids",
+                        "different anomaly", complete.terminalValidation().orElseThrow().evidence()));
+                case "failing-oracle" -> Optional.of(new KafkaIdSetValidationResult(
+                        KafkaIdSetValidationResult.Status.PASS, DUPLICATES, "not a failure",
+                        complete.terminalValidation().orElseThrow().evidence()));
+                default -> complete.terminalValidation();
+            };
+            V1ScenarioExecutionResult invalid = new V1ScenarioExecutionResult(
+                    complete.status(), complete.reason(), complete.message(), complete.inputManifest(),
+                    phases, missing.endsWith("fence") || missing.equals("both-fences")
+                            ? Optional.empty() : complete.writeFenceEvidence(),
+                    missing.equals("both-fences") ? Optional.empty() : complete.processFenceEvidence(),
+                    complete.finalJobObservation(), oracle, complete.sinkTransactions(),
+                    complete.flinkProvisioningEvidence(), complete.diagnostics());
+
+            ScenarioVerdict verdict = ScenarioVerdict.of(EXPECT_DUPLICATES, invalid);
+
+            assertEquals(ScenarioVerdict.Status.INCONCLUSIVE, verdict.status(), missing);
+            assertEquals(ScenarioVerdict.EVIDENCE_UNCONFIRMED, verdict.reason(), missing);
+            assertFalse(verdict.matched(), missing);
+            assertEquals(V1ScenarioExecutionResult.Status.FAIL, invalid.status(), missing);
+        }
+    }
+
+    @Test
+    void aMatchingFailureCannotPassWhenItsKillHitsAFinishedJob() {
+        FlinkJobObservation.Attempt finished = new FlinkJobObservation.Attempt(
+                Optional.of(new FlinkJobObservation(500, FlinkJobState.FINISHED,
+                        1, 0, Optional.empty(), List.of(), List.of())), Optional.empty());
+        PhaseExecutionEvidence phases = new PhaseExecutionEvidence(List.of(), List.of(
+                new PhaseExecutionEvidence.TaskManagerKill("$/phases/0/steps/0", List.of(),
+                        "taskmanager-1", finished, OptionalLong.of(600))));
+        V1ScenarioExecutionResult attempt = terminalAttempt(
+                V1ScenarioExecutionResult.Status.FAIL, DUPLICATES, phases);
+
+        ScenarioVerdict verdict = ScenarioVerdict.of(EXPECT_DUPLICATES, attempt);
+
+        assertEquals(ScenarioVerdict.Status.INCONCLUSIVE, verdict.status());
+        assertEquals(ExecutablePhaseExecutor.TASKMANAGER_KILL_EFFECT_UNCONFIRMED, verdict.reason());
+        assertFalse(verdict.matched());
+        assertEquals(V1ScenarioExecutionResult.Status.FAIL, attempt.status());
+    }
+
     private static V1ScenarioExecutionResult attempt(
             V1ScenarioExecutionResult.Status status,
             String reason) {
-        if (status == V1ScenarioExecutionResult.Status.PASS) {
-            return passingAttempt();
+        if (status == V1ScenarioExecutionResult.Status.PASS
+                || reason.startsWith("validator.kafka.id-set.")) {
+            return terminalAttempt(status, reason, new PhaseExecutionEvidence(List.of()));
         }
         return new V1ScenarioExecutionResult(
                 status,
@@ -100,8 +181,11 @@ class ScenarioVerdictTest {
                 List.of());
     }
 
-    /** A pass needs fence and oracle evidence (see the result's invariants). */
-    private static V1ScenarioExecutionResult passingAttempt() {
+    /** Both positive and negative controls need a completed experiment. */
+    private static V1ScenarioExecutionResult terminalAttempt(
+            V1ScenarioExecutionResult.Status status,
+            String reason,
+            PhaseExecutionEvidence phases) {
         FlinkProcessWriteFenceEvidence processes =
                 new FlinkProcessWriteFenceEvidence(List.of(), Instant.EPOCH);
         FlinkJobObservation.Attempt finished = new FlinkJobObservation.Attempt(
@@ -110,9 +194,11 @@ class ScenarioVerdictTest {
                         List.of(), List.of())),
                 Optional.empty());
         KafkaIdSetValidationResult oracle = new KafkaIdSetValidationResult(
-                KafkaIdSetValidationResult.Status.PASS,
-                "validator.kafka.id-set.match",
-                "Exact terminal ID set matched",
+                status == V1ScenarioExecutionResult.Status.PASS
+                        ? KafkaIdSetValidationResult.Status.PASS
+                        : KafkaIdSetValidationResult.Status.FAIL,
+                reason,
+                "Terminal ID set checked",
                 new KafkaIdSetValidationResult.Evidence(
                         10, 10,
                         Optional.of(new KafkaIdSetValidationResult.DefectTotals(
@@ -120,11 +206,11 @@ class ScenarioVerdictTest {
                         List.of(), List.of(), List.of(), List.of(), List.of(),
                         Map.of(0, 0L), Map.of(0, 10L), true));
         return new V1ScenarioExecutionResult(
-                V1ScenarioExecutionResult.Status.PASS,
+                status,
                 oracle.reason(),
                 "attempt message",
                 Optional.empty(),
-                Optional.empty(),
+                Optional.of(phases),
                 Optional.of(new FlinkTerminalWriteFence.Evidence(
                         FlinkJobState.FINISHED, processes, finished)),
                 Optional.of(processes),
