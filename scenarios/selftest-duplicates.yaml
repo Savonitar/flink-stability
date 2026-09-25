@@ -6,7 +6,8 @@ meta:
   description: >-
     Negative control for the kafka.id-set oracle. An at-least-once sink writes again the
     records that followed its last completed checkpoint when Flink recovers from a
-    TaskManager kill, so the oracle must report duplicate IDs.
+    TaskManager kill. The control expects duplicate IDs when the kill lands in that replay
+    window; checkpoint and REST timing can make it miss.
 
 runs: 1
 health_retry_limit: 0
@@ -24,7 +25,7 @@ setup:
             input_source:
               mode: generated
               format: integer-sequence
-              # About 30 s at 5 ms per record: the kill below lands mid-stream.
+              # About 30 s at 5 ms per record, intended to leave a mid-stream kill window.
               total: 6000
           - name: output
             partitions: 1
@@ -51,7 +52,7 @@ workload:
         topic: output
         delivery_guarantee: AT_LEAST_ONCE
       checkpointing:
-        interval: 5s
+        interval: 10s
         mode: EXACTLY_ONCE
       program_args: [--processingDelayMs, "5"]
 
@@ -68,8 +69,9 @@ phases:
           on_timeout: fail
   - name: replay-window
     steps:
-      # About 400 records reach Kafka after checkpoint 1; the next checkpoint is at least
-      # three seconds away. Recovery restores checkpoint 1 and writes them again.
+      # Leave time for writes after checkpoint 1. The 10 s interval gives more margin for
+      # delayed REST checkpoint statistics, but this is a timing-based replay window:
+      # another completed checkpoint before the kill can remove the expected duplicates.
       - wait: { duration: 2s }
   - name: taskmanager-recovery
     steps:

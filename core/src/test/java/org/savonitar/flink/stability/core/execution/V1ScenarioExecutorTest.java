@@ -294,36 +294,43 @@ class V1ScenarioExecutorTest {
     }
 
     @Test
-    void passingOracleIsPassWhenFlinkRestoredACheckpointAfterTheKill() throws Exception {
-        List<String> events = new ArrayList<>();
-        try (Fixture fixture = fixture(V1ScenarioExecutorTest::killAndRestart)) {
-            FakeFlink flink = new FakeFlink(events);
-            flink.observations.add(new FlinkJobObservation(
-                    1_000, FlinkJobState.RUNNING, 2, 0, Optional.empty(), List.of(),
-                    List.of(new FlinkJobObservation.Subtask(
-                            "Kafka Source", 0, 0, "RUNNING", Optional.of("tm-1")))));
-            flink.observations.add(new FlinkJobObservation(
-                    9_000, FlinkJobState.FINISHED, 6, 1,
-                    Optional.of(new FlinkJobObservation.Restore(2, 5_000)),
-                    List.of(new FlinkJobObservation.Failure(
-                            4_000, "ResourceManagerException",
-                            "TaskManager with id tm-1 is no longer reachable.",
-                            Optional.of("tm-1"))),
-                    List.of()));
-            V1ScenarioExecutor executor = executor(
-                    events, new FakeRuntime(events), flink,
-                    (bootstrap, topic, count, timeout) -> passResult());
+    void confirmedRecoverySupportsPositiveAndNegativeControls() throws Exception {
+        for (boolean oraclePasses : List.of(false, true)) {
+            List<String> events = new ArrayList<>();
+            try (Fixture fixture = fixture(V1ScenarioExecutorTest::killAndRestart)) {
+                FakeFlink flink = new FakeFlink(events);
+                flink.observations.add(new FlinkJobObservation(
+                        1_000, FlinkJobState.RUNNING, 2, 0, Optional.empty(), List.of(),
+                        List.of(new FlinkJobObservation.Subtask(
+                                "Kafka Source", 0, 0, "RUNNING", Optional.of("tm-1")))));
+                flink.observations.add(new FlinkJobObservation(
+                        9_000, FlinkJobState.FINISHED, 6, 1,
+                        Optional.of(new FlinkJobObservation.Restore(2, 5_000)),
+                        List.of(new FlinkJobObservation.Failure(
+                                4_000, "ResourceManagerException",
+                                "TaskManager with id tm-1 is no longer reachable.",
+                                Optional.of("tm-1"))),
+                        List.of()));
+                V1ScenarioExecutor executor = executor(
+                        events, new FakeRuntime(events), flink,
+                        (bootstrap, topic, count, timeout) -> oraclePasses ? passResult() : missingResult());
 
-            V1ScenarioExecutionResult result = executor.execute(
-                    fixture.bound(), attemptContext());
+                V1ScenarioExecutionResult result = executor.execute(
+                        fixture.bound(), attemptContext());
 
-            assertEquals(V1ScenarioExecutionResult.Status.PASS, result.status());
-            TaskManagerKillEffect effect = result.taskManagerKillEffects().getFirst();
-            assertEquals(TaskManagerKillEffect.Outcome.CHECKPOINT_RESTORED, effect.outcome());
-            assertEquals(Optional.of(new FlinkJobObservation.Restore(2, 5_000)),
-                    effect.restore());
-            assertEquals(1, effect.failuresAfterKill().size());
-            assertTrue(events.indexOf("observe-job") < events.indexOf("taskmanager-kill"));
+                assertEquals(oraclePasses ? V1ScenarioExecutionResult.Status.PASS
+                        : V1ScenarioExecutionResult.Status.FAIL, result.status());
+                ScenarioVerdict verdict = ScenarioVerdict.of(oraclePasses
+                        ? ExecutableScenarioPlan.ExpectedOutcome.pass()
+                        : ExecutableScenarioPlan.ExpectedOutcome.failure("kafka.id-set", result.reason()), result);
+                assertEquals(ScenarioVerdict.Status.PASS, verdict.status());
+                TaskManagerKillEffect effect = result.taskManagerKillEffects().getFirst();
+                assertEquals(TaskManagerKillEffect.Outcome.CHECKPOINT_RESTORED, effect.outcome());
+                assertEquals(Optional.of(new FlinkJobObservation.Restore(2, 5_000)),
+                        effect.restore());
+                assertEquals(1, effect.failuresAfterKill().size());
+                assertTrue(events.indexOf("observe-job") < events.indexOf("taskmanager-kill"));
+            }
         }
     }
 
@@ -345,6 +352,10 @@ class V1ScenarioExecutorTest {
             assertEquals(
                     List.of(TaskManagerKillEffect.Outcome.JOB_TERMINAL_BEFORE_KILL),
                     outcomes(result));
+            ScenarioVerdict verdict = ScenarioVerdict.of(
+                    ExecutableScenarioPlan.ExpectedOutcome.failure("kafka.id-set", result.reason()), result);
+            assertEquals(ScenarioVerdict.Status.INCONCLUSIVE, verdict.status());
+            assertEquals(ExecutablePhaseExecutor.TASKMANAGER_KILL_EFFECT_UNCONFIRMED, verdict.reason());
         }
     }
 

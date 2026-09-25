@@ -119,7 +119,10 @@ The top-level result status is the scenario verdict: `pass`, `fail`, or
 `inconclusive`. Only `pass` exits `0`; execution, validation, or infrastructure
 failures exit `1`, and usage errors exit `2`. The attempt's own result appears under
 `attempt`. A negative control pins an expected failure, so it passes only when its
-attempt fails exactly as pinned; any other outcome is `expectation.mismatch`.
+attempt fails exactly as pinned with complete phase, fence, and oracle evidence and
+confirmed kill effects. A matching failure without that evidence is `inconclusive`;
+a different evaluable outcome is `expectation.mismatch`. The raw attempt remains a
+failure when its matching scenario verdict is inconclusive.
 
 The executable reference pairs are:
 
@@ -128,8 +131,11 @@ The executable reference pairs are:
   exactly-once job survives a mid-stream TaskManager kill with exact output;
 - [`scenarios/selftest-duplicates.yaml`](scenarios/selftest-duplicates.yaml) with
   [`selftest-duplicates.expected.yaml`](scenarios/selftest-duplicates.expected.yaml):
-  a negative control. An at-least-once sink must duplicate output after the same kind
-  of recovery, so the oracle must report `validator.kafka.id-set.duplicate-ids`.
+  a negative control. An at-least-once sink is expected to duplicate output when
+  recovery replays records written after the last checkpoint, so the oracle must
+  report `validator.kafka.id-set.duplicate-ids`. The 10 s checkpoint interval and
+  2 s wait create a timing-based window; they do not guarantee duplication on every
+  machine or run.
 
 ## Current executable subset
 

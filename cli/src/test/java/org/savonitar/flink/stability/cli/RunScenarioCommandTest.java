@@ -738,7 +738,7 @@ class RunScenarioCommandTest {
                 terminal.reason(),
                 terminal.message(),
                 Optional.empty(),
-                Optional.empty(),
+                Optional.of(new PhaseExecutionEvidence(List.of())),
                 Optional.of(fence),
                 Optional.of(processes),
                 Optional.of(FINISHED_JOB),
