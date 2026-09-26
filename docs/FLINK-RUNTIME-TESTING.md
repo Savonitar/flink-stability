@@ -120,4 +120,10 @@ and the JobManager plus both TaskManager incarnations had matching image IDs. A 
 run with a deliberately wrong image ID stopped before Flink process start, returned
 `inconclusive / infrastructure.flink-start-failed`, and retained both IDs in diagnostics.
 These checks validate the engine's image verification, not a Flink PR or token behavior.
-Runtime JAR Docker validation has not yet been run.
+Runtime JAR checks were verified separately on `8ac0c69`, also with released Flink 2.2.0.
+The explicitly pinned JAR passed `bounded-eos` with 3,000 exact records, confirmed
+checkpoint recovery, matching hashes in all three containers, and the required runtime
+class sources in all three retained JVM logs. The wrong-hash control stopped before
+Flink startup with `inconclusive / infrastructure.flink-start-failed`, no accepted Flink
+components, and both expected and actual hashes retained. The canonical scenario's faults,
+timing, load, and expected outcome were unchanged. This still does not exercise a Flink PR.
