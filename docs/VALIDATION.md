@@ -70,6 +70,9 @@ the verdict. An unreadable event file adds the diagnostic
 `network-fault.retry-evidence-unavailable` without changing the verdict
 ([SPEC-004 K6.12](specs/SPEC-004-kroxylicious-fault-model.md)).
 
-The connector-mutant matrix remains unfinished. Historical run counts and CLI
-byte-comparison claims without their commands and retained outputs are not
-substitutes for rerunning these checks on the current changes.
+The connector-mutant matrix is in
+[`calibration/connector-mutants/`](../calibration/connector-mutants/README.md). It runs a
+healthy control and two wrong-decision variants of the released connector against both
+EndTxn scenarios, and its README records the last results. Historical run counts and CLI
+byte-comparison claims without their commands and retained outputs are not substitutes
+for rerunning these checks on the current changes.

@@ -1,0 +1,27 @@
+--- a/org/apache/flink/connector/kafka/sink/internal/FlinkKafkaInternalProducer.java
++++ b/org/apache/flink/connector/kafka/sink/internal/FlinkKafkaInternalProducer.java
+@@ -72,6 +72,9 @@
+     private static Properties withTransactionalId(Properties properties, String transactionalId) {
+         Properties props = new Properties();
+         props.putAll(properties);
++        // EXPERIMENTAL CONTROL: identical in healthy, assume, and rewrite artifacts.
++        props.setProperty(ProducerConfig.MAX_BLOCK_MS_CONFIG, "5000");
++        props.setProperty(ProducerConfig.REQUEST_TIMEOUT_MS_CONFIG, "30000");
+         props.setProperty(ProducerConfig.TRANSACTIONAL_ID_CONFIG, transactionalId);
+         return props;
+     }
+@@ -112,7 +115,13 @@
+         LOG.debug("commitTransaction {}", transactionalId);
+         checkState(isInTransaction(), "Transaction was not started");
+         transactionState = TransactionState.NOT_IN_TRANSACTION;
+-        super.commitTransaction();
++        try {
++            super.commitTransaction();
++        } catch (org.apache.kafka.common.errors.TimeoutException timeout) {
++            System.err.println("CALIBRATION_COMMIT_TIMEOUT tx=" + transactionalId
++                    + " maxBlockMs=5000 requestTimeoutMs=30000");
++            throw timeout;
++        }
+     }
+ 
+     public boolean isInTransaction() {

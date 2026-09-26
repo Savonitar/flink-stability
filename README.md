@@ -62,8 +62,11 @@ mvn clean install
 ```
 
 See [validation and evidence](docs/VALIDATION.md) for regression coverage,
-optional container runs, and the no-match control. Unit tests do not prove that
-the unfinished connector-mutant calibration detects the intended defects.
+optional container runs, and the no-match control. Unit tests alone do not show that
+the scenarios catch real connector defects. The
+[connector-mutant calibration](calibration/connector-mutants/README.md) checks this in
+real containers: two deliberately wrong commit decisions must fail the EndTxn scenarios,
+and a healthy control must pass them.
 
 The workload artifact is written directly to:
 
