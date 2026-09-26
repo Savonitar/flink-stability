@@ -59,6 +59,7 @@ class ExecutableScenarioPlanCompilerTest {
         ExecutableScenarioPlan plan = compiler.compile(resolved);
 
         assertSame(resolved, plan.sourcePlan());
+        assertTrue(plan.flink().expectedImageId().isEmpty());
         assertEquals("minimal", plan.scenarioName());
         assertEquals(new ExecutableScenarioPlan.InvocationPolicy(1, 0), plan.invocation());
         assertEquals("main", plan.kafka().alias());
@@ -653,6 +654,24 @@ class ExecutableScenarioPlanCompilerTest {
             prepared.close();
         }
         assertFalse(Files.exists(preparedJob));
+    }
+
+    @Test
+    void carriesTheExpectedImageIdFromScenarioThroughArtifactBinding() throws IOException {
+        createJar(artifactRoot.resolve("connector.jar"), false, null);
+        createJar(artifactRoot.resolve("job.jar"), true, "v1");
+        String imageId = "sha256:" + "b".repeat(64);
+        ResolvedScenarioPlan resolved = resolved(document -> {
+            useLocalArtifacts(document);
+            ((ObjectNode) document.at("/setup/flink")).put("image_id", imageId);
+        });
+        ExecutableScenarioPlan executable = compiler.compile(resolved);
+        assertEquals(imageId, executable.flink().expectedImageId().orElseThrow());
+        try (PreparedScenarioPlan prepared = new ArtifactPlanResolver().resolve(
+                resolved, ArtifactResolutionOptions.online(artifactRoot))) {
+            assertEquals(imageId, compiler.bind(prepared, executable)
+                    .flinkRuntimeTarget().expectedImageId().orElseThrow());
+        }
     }
 
     @Test

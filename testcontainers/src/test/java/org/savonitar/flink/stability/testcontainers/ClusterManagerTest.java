@@ -29,6 +29,8 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class ClusterManagerTest {
     private static final Duration ACTION_TIMEOUT = Duration.ofSeconds(5);
+    private static final String IMAGE_ID = "sha256:" + "a".repeat(64);
+    private static final String OTHER_IMAGE_ID = "sha256:" + "b".repeat(64);
 
     @TempDir
     Path temporaryDirectory;
@@ -49,6 +51,63 @@ class ClusterManagerTest {
                     manager.provisioningHistory().stream()
                             .map(FlinkComponentProvisioningEvidence::logicalName)
                             .toList());
+        }
+    }
+
+    @Test
+    void validatesDeclaredImageIdentityAndRetainsItForEachPhysicalProcess() {
+        RecordingFactory factory = new RecordingFactory();
+        try (ClusterManager manager = manager(factory)) {
+            manager.startFlink(target().withExpectedImageId(IMAGE_ID));
+            assertEquals(List.of(IMAGE_ID, IMAGE_ID), manager.provisioningHistory().stream()
+                    .map(FlinkComponentProvisioningEvidence::imageId).toList());
+        }
+        try (ClusterManager manager = manager(new RecordingFactory())) {
+            IllegalStateException failure = assertThrows(IllegalStateException.class,
+                    () -> manager.startFlink(target().withExpectedImageId(OTHER_IMAGE_ID)));
+            assertTrue(failure.getMessage().contains("expected " + OTHER_IMAGE_ID));
+            assertTrue(failure.getMessage().contains("actual " + IMAGE_ID));
+            assertTrue(manager.provisioningHistory().isEmpty());
+        }
+    }
+
+    @Test
+    void rejectsDifferentImagesUnderTheSameTagForInitialComponents() {
+        RecordingFactory factory = new RecordingFactory();
+        factory.taskManagerImageId = OTHER_IMAGE_ID;
+        try (ClusterManager manager = manager(factory)) {
+            IllegalStateException failure = assertThrows(IllegalStateException.class,
+                    () -> manager.startFlink(target()));
+
+            assertTrue(failure.getMessage().contains("expected " + IMAGE_ID));
+            assertTrue(failure.getMessage().contains("actual " + OTHER_IMAGE_ID));
+            assertEquals(1, manager.provisioningHistory().size());
+            assertEquals(IMAGE_ID, manager.provisioningHistory().getFirst().imageId());
+            assertTrue(factory.events.contains("stop:taskmanager-1"));
+            assertTrue(factory.events.contains("stop:jobmanager-1"));
+        }
+    }
+
+    @Test
+    void failedReplacementCannotChangeTheImageOrEraseEarlierEvidence() {
+        RecordingFactory factory = new RecordingFactory();
+        try (ClusterManager manager = manager(factory)) {
+            manager.startFlink(target());
+            manager.killTaskManager("taskmanager-1", ACTION_TIMEOUT);
+            factory.imageId = OTHER_IMAGE_ID;
+
+            IllegalStateException failure = assertThrows(IllegalStateException.class,
+                    () -> manager.restartTaskManager("taskmanager-1", ACTION_TIMEOUT));
+            assertTrue(failure.getMessage().contains("expected " + IMAGE_ID));
+            assertTrue(failure.getMessage().contains("actual " + OTHER_IMAGE_ID));
+            assertFalse(manager.isTaskManagerRunning("taskmanager-1"));
+            assertEquals(List.of(IMAGE_ID, IMAGE_ID), manager.provisioningHistory().stream()
+                    .map(FlinkComponentProvisioningEvidence::imageId).toList());
+
+            factory.imageId = IMAGE_ID;
+            manager.restartTaskManager("taskmanager-1", ACTION_TIMEOUT);
+            assertEquals(List.of(IMAGE_ID, IMAGE_ID, IMAGE_ID), manager.provisioningHistory().stream()
+                    .map(FlinkComponentProvisioningEvidence::imageId).toList());
         }
     }
 
@@ -101,6 +160,7 @@ class ClusterManagerTest {
             factory.failTaskManagerStart = false;
             manager.startFlink(target());
 
+            assertEquals(IMAGE_ID, factory.target.expectedImageId().orElseThrow());
             assertEquals(List.of("jobmanager-1#1", "taskmanager-1#1",
                             "jobmanager-1#2", "taskmanager-1#2"),
                     new DockerV1AttemptRuntime(manager).flinkClassLoadLogs().stream()
@@ -231,6 +291,8 @@ class ClusterManagerTest {
         private ClassLoadLogs logs;
         private boolean failTaskManagerStart;
         private boolean badEvidence;
+        private String imageId = IMAGE_ID;
+        private String taskManagerImageId;
 
         private RecordingFactory bind(FlinkRuntimeTarget target, Path checkpointRoot) {
             this.target = target;
@@ -263,6 +325,8 @@ class ClusterManagerTest {
                     role,
                     name + "-runtime-" + generation,
                     target,
+                    role == FlinkComponentRole.TASK_MANAGER && taskManagerImageId != null
+                            ? taskManagerImageId : imageId,
                     events,
                     failTaskManagerStart && role == FlinkComponentRole.TASK_MANAGER,
                     badEvidence);
@@ -274,6 +338,7 @@ class ClusterManagerTest {
         private final FlinkComponentRole role;
         private final String runtimeId;
         private final FlinkRuntimeTarget target;
+        private final String imageId;
         private final List<String> events;
         private final boolean failStart;
         private final boolean badEvidence;
@@ -285,6 +350,7 @@ class ClusterManagerTest {
                 FlinkComponentRole role,
                 String runtimeId,
                 FlinkRuntimeTarget target,
+                String imageId,
                 List<String> events,
                 boolean failStart,
                 boolean badEvidence) {
@@ -292,6 +358,7 @@ class ClusterManagerTest {
             this.role = role;
             this.runtimeId = runtimeId;
             this.target = target;
+            this.imageId = imageId;
             this.events = events;
             this.failStart = failStart;
             this.badEvidence = badEvidence;
@@ -371,6 +438,7 @@ class ClusterManagerTest {
                     role,
                     runtimeId,
                     badEvidence ? "flink:2.2.1" : target.imageReference(),
+                    imageId,
                     installation.targetBindingSha256(),
                     installation.classpathManifest().manifestSha256(),
                     List.of());

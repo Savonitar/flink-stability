@@ -661,6 +661,26 @@ Connector pull-request gating is the same mechanism with one axis:
   digests. The Kroxylicious image is a harness-pinned capability in v1 because
   `setup.proxies` has no public image field; its configured reference and resolved
   digest are still recorded by the runner.
+- **R4.13e** The first runner accepts optional `setup.flink.image_id`: a full local
+  Docker image configuration ID, `sha256:` followed by 64 lowercase hexadecimal
+  characters, after string parameter resolution. It is distinct from a registry
+  manifest digest and does not establish the source revision. Before each Flink
+  process starts, inspect its created container and require its actual image ID
+  to match this expected ID when supplied. Without an explicit ID, pin the first
+  observed Flink image for the attempt. JobManager, initial TaskManager, and all
+  replacement TaskManagers must use that same ID. Missing identity, an expected-ID
+  mismatch, or a changed tag resolving to another ID prevents process start.
+  Retain the declared reference and the independently observed ID for every
+  successfully provisioned incarnation. An image pin does not relax the version
+  compatibility registry or introduce support for image-changing restart steps.
+  Before a successful attempt or an expected-failure scenario can pass, its
+  provisioning and process-fence evidence must cover every logical component and
+  role expected by the executable plan. Observed evidence must not define the
+  expected inventory. Provisioning evidence must also cover successful
+  TaskManager replacements with one matching image ID. Missing or inconsistent
+  evidence is inconclusive; preserve any separately observed terminal data
+  failure. Image identity does not replace the connector class-load check and
+  does not prove that a particular Flink runtime class or PR code path executed.
 - **R4.14** A generated-input topic uses `cleanup.policy: delete`, never
   compaction, and retains data for longer than the maximum attempt duration.
   This makes the manifest's reconciliation snapshot observable.
@@ -1576,7 +1596,15 @@ Connector pull-request gating is the same mechanism with one axis:
   attempt's own status, reason and message under `attempt`, summarized input and
   phase evidence,
   write/process-fence completion evidence, terminal-validation status/counts/
-  completeness, Flink provisioning count, and diagnostics. It also includes the
+  completeness, Flink provisioning count, and diagnostics. Runtime-image evidence
+  includes the expected image ID when declared, identity-check outcome and detail,
+  and every provisioned incarnation's logical component, role, container ID,
+  declared image reference, observed Docker image ID, and connector bundle hashes
+  (R4.13e). Each component's `connectorArtifactsRef` is a zero-based index into
+  `evidence.flinkRuntime.connectorArtifactSets`, which stores each distinct ordered
+  list of observed JAR entries once. Lists are shared only when all entries match,
+  not merely when their reported manifest hashes match; per-component hashes remain
+  recorded separately. It also includes the
   last job observation of R6.12a as `evidence.flinkJob` (`observed`,
   `unavailable` with its failure, or `not-run`) and one `evidence.taskManagerKills`
   entry per confirmed kill: step path and loop iterations, target, effect outcome,

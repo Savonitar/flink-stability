@@ -4,6 +4,7 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
+import org.savonitar.flink.stability.core.execution.FlinkRuntimeIdentity;
 import org.savonitar.flink.stability.core.execution.FlinkTerminalWriteFence;
 import org.savonitar.flink.stability.core.execution.PhaseExecutionEvidence;
 import org.savonitar.flink.stability.core.execution.SubjectClassOrigins;
@@ -15,6 +16,9 @@ import org.savonitar.flink.stability.core.flink.FlinkJobObservation;
 import org.savonitar.flink.stability.core.flink.FlinkJobState;
 import org.savonitar.flink.stability.core.validation.kafka.KafkaIdSetValidationResult;
 import org.savonitar.flink.stability.runtime.api.FlinkProcessWriteFenceEvidence;
+import org.savonitar.flink.stability.runtime.api.FlinkComponentProvisioningEvidence;
+import org.savonitar.flink.stability.runtime.api.FlinkComponentRole;
+import org.savonitar.flink.stability.runtime.api.ProvisionedConnectorArtifact;
 import picocli.CommandLine;
 
 import java.io.IOException;
@@ -148,7 +152,7 @@ class RunScenarioCommandTest {
                 () -> assertEquals("pass",
                         output.path("evidence").path("terminalValidation")
                                 .path("status").textValue()),
-                () -> assertEquals(0,
+                () -> assertEquals(2,
                         output.path("evidence").path("processFence")
                                 .path("processes").intValue()),
                 () -> assertEquals(0, output.path("diagnostics").size()));
@@ -207,10 +211,78 @@ class RunScenarioCommandTest {
     }
 
     @Test
+    void rendersObservedLocalImageIdsAndTheDeclaredExpectationSeparately() throws Exception {
+        JsonNode evidence = JSON.readTree(new V1ExecutionResultRenderer().render(
+                "bounded-eos", context("1234abcd"), expectation, passResult())).path("evidence");
+        JsonNode runtime = evidence.path("flinkRuntime");
+
+        assertAll(
+                () -> assertEquals(2, evidence.path("flinkComponents").intValue()),
+                () -> assertEquals("confirmed", runtime.path("status").textValue()),
+                () -> assertEquals("docker-image-id", runtime.path("identityKind").textValue()),
+                () -> assertEquals(IMAGE_ID, runtime.path("expectedImageId").textValue()),
+                () -> assertEquals(2, runtime.path("components").size()),
+                () -> assertEquals("jm", runtime.at("/components/0/runtimeId").textValue()),
+                () -> assertEquals("job_manager", runtime.at("/components/0/role").textValue()),
+                () -> assertEquals("flink:2.2.0",
+                        runtime.at("/components/0/imageReference").textValue()),
+                () -> assertEquals(IMAGE_ID, runtime.at("/components/0/imageId").textValue()),
+                () -> assertEquals("taskmanager-1",
+                        runtime.at("/components/1/logicalName").textValue()),
+                () -> assertEquals("tm", runtime.at("/components/1/runtimeId").textValue()),
+                () -> assertEquals(IMAGE_ID, runtime.at("/components/1/imageId").textValue()),
+                () -> assertEquals("0".repeat(64),
+                        runtime.at("/components/1/targetBindingSha256").textValue()),
+                () -> assertEquals(1, runtime.path("connectorArtifactSets").size()),
+                () -> assertTrue(runtime.at("/connectorArtifactSets/0").isEmpty()),
+                () -> assertEquals(0, runtime.at("/components/0/connectorArtifactsRef").intValue()),
+                () -> assertEquals(0, runtime.at("/components/1/connectorArtifactsRef").intValue()),
+                () -> assertFalse(runtime.has("registryDigest")));
+    }
+
+    @Test
+    void sharesIdenticalArtifactListsWithoutHidingDifferentObservedEntries() throws Exception {
+        List<ProvisionedConnectorArtifact> artifacts = List.of(new ProvisionedConnectorArtifact(
+                0, "/opt/flink/lib/flink-stability-connector-00000000-" + "a".repeat(64) + ".jar", "a".repeat(64)));
+        List<ProvisionedConnectorArtifact> changed = List.of(new ProvisionedConnectorArtifact(
+                0, "/opt/flink/lib/flink-stability-connector-00000000-" + "b".repeat(64) + ".jar", "b".repeat(64)));
+        List<FlinkComponentProvisioningEvidence> components = new ArrayList<>();
+        for (int incarnation = 0; incarnation < 4; incarnation++) {
+            components.add(FlinkComponentProvisioningEvidence.verified(
+                    incarnation == 0 ? "jobmanager-1" : "taskmanager-1",
+                    incarnation == 0 ? FlinkComponentRole.JOB_MANAGER : FlinkComponentRole.TASK_MANAGER,
+                    "container-" + incarnation, "flink:2.2.0", IMAGE_ID,
+                    String.valueOf(incarnation).repeat(64), "1".repeat(64),
+                    incarnation == 3 ? changed : artifacts));
+        }
+        JsonNode runtime = JSON.readTree(new V1ExecutionResultRenderer().render(
+                "bounded-eos", context("1234abcd"), expectation,
+                result(V1ScenarioExecutionResult.Status.INCONCLUSIVE, "test.partial", components)))
+                .at("/evidence/flinkRuntime");
+
+        assertEquals(2, runtime.path("connectorArtifactSets").size());
+        for (int incarnation = 0; incarnation < 4; incarnation++) {
+            JsonNode rendered = runtime.path("components").get(incarnation);
+            assertEquals("container-" + incarnation, rendered.path("runtimeId").textValue());
+            assertEquals(String.valueOf(incarnation).repeat(64),
+                    rendered.path("targetBindingSha256").textValue());
+            assertEquals("1".repeat(64), rendered.path("classpathManifestSha256").textValue());
+            assertEquals(incarnation == 3 ? 1 : 0, rendered.path("connectorArtifactsRef").intValue());
+            assertFalse(rendered.has("connectorArtifacts"));
+            JsonNode entries = runtime.path("connectorArtifactSets")
+                    .get(rendered.path("connectorArtifactsRef").intValue());
+            assertEquals(1, entries.size());
+            assertEquals(0, entries.get(0).path("index").intValue());
+            ProvisionedConnectorArtifact observed = components.get(incarnation).connectorArtifacts().getFirst();
+            assertEquals(observed.containerPath(), entries.get(0).path("containerPath").textValue());
+            assertEquals(observed.sha256(), entries.get(0).path("sha256").textValue());
+        }
+    }
+
+    @Test
     void partialEvidenceIsExplicitAndDoesNotPublishProvisionalDefectTotals()
             throws Exception {
-        FlinkProcessWriteFenceEvidence processFence = new FlinkProcessWriteFenceEvidence(
-                List.of(), Instant.EPOCH);
+        FlinkProcessWriteFenceEvidence processFence = runtimeFence();
         KafkaIdSetValidationResult terminal = new KafkaIdSetValidationResult(
                 KafkaIdSetValidationResult.Status.FAIL,
                 "verification.kafka.incomplete-after-timeout",
@@ -239,7 +311,8 @@ class RunScenarioCommandTest {
                 Optional.of(terminal),
                 Optional.empty(),
                 SUBJECT_ORIGINS,
-                List.of(),
+                runtimeComponents(),
+                EXPECTED_RUNTIME,
                 List.of());
 
         JsonNode output = JSON.readTree(new V1ExecutionResultRenderer().render(
@@ -305,8 +378,7 @@ class RunScenarioCommandTest {
                         Optional.of(new FlinkJobObservation.Restore(4, 13_000)),
                         List.of(lostTaskManager), List.of())),
                 Optional.empty());
-        FlinkProcessWriteFenceEvidence processes = new FlinkProcessWriteFenceEvidence(
-                List.of(), Instant.EPOCH);
+        FlinkProcessWriteFenceEvidence processes = runtimeFence();
         KafkaIdSetValidationResult terminal = passResult().terminalValidation().orElseThrow();
         V1ScenarioExecutionResult result = new V1ScenarioExecutionResult(
                 V1ScenarioExecutionResult.Status.PASS,
@@ -321,7 +393,8 @@ class RunScenarioCommandTest {
                 Optional.of(terminal),
                 Optional.empty(),
                 SUBJECT_ORIGINS,
-                List.of(),
+                runtimeComponents(),
+                EXPECTED_RUNTIME,
                 List.of());
 
         JsonNode evidence = JSON.readTree(new V1ExecutionResultRenderer().render(
@@ -694,9 +767,31 @@ class RunScenarioCommandTest {
                             List.of(), List.of())),
                     Optional.empty());
 
+    private static final String IMAGE_ID = "sha256:" + "a".repeat(64);
+    private static final FlinkRuntimeIdentity.ExpectedTarget EXPECTED_RUNTIME =
+            new FlinkRuntimeIdentity.ExpectedTarget(Optional.of(IMAGE_ID), Map.of(
+                    "jobmanager-1", FlinkComponentRole.JOB_MANAGER,
+                    "taskmanager-1", FlinkComponentRole.TASK_MANAGER));
+
+    private static List<FlinkComponentProvisioningEvidence> runtimeComponents() {
+        return List.of(
+                FlinkComponentProvisioningEvidence.verified("jobmanager-1",
+                        FlinkComponentRole.JOB_MANAGER, "jm", "flink:2.2.0", IMAGE_ID,
+                        "0".repeat(64), "1".repeat(64), List.of()),
+                FlinkComponentProvisioningEvidence.verified("taskmanager-1",
+                        FlinkComponentRole.TASK_MANAGER, "tm", "flink:2.2.0", IMAGE_ID,
+                        "0".repeat(64), "1".repeat(64), List.of()));
+    }
+
+    private static FlinkProcessWriteFenceEvidence runtimeFence() {
+        return new FlinkProcessWriteFenceEvidence(runtimeComponents().stream()
+                .map(component -> new FlinkProcessWriteFenceEvidence.Component(
+                        component.logicalName(), component.role(), Optional.of(component.runtimeId()),
+                        FlinkProcessWriteFenceEvidence.Outcome.SIGKILLED)).toList(), Instant.EPOCH);
+    }
+
     private static V1ScenarioExecutionResult passResult() {
-        FlinkProcessWriteFenceEvidence processes = new FlinkProcessWriteFenceEvidence(
-                List.of(), Instant.EPOCH);
+        FlinkProcessWriteFenceEvidence processes = runtimeFence();
         FlinkTerminalWriteFence.Evidence fence = new FlinkTerminalWriteFence.Evidence(
                 FlinkJobState.FINISHED,
                 processes,
@@ -717,20 +812,20 @@ class RunScenarioCommandTest {
                 terminal.reason(),
                 terminal.message(),
                 Optional.empty(),
-                Optional.empty(),
+                Optional.of(new PhaseExecutionEvidence(List.of())),
                 Optional.of(fence),
                 Optional.of(processes),
                 Optional.of(FINISHED_JOB),
                 Optional.of(terminal),
                 Optional.empty(),
                 SUBJECT_ORIGINS,
-                List.of(),
+                runtimeComponents(),
+                EXPECTED_RUNTIME,
                 List.of());
     }
 
     private static V1ScenarioExecutionResult authoritativeFailureResult() {
-        FlinkProcessWriteFenceEvidence processes = new FlinkProcessWriteFenceEvidence(
-                List.of(), Instant.EPOCH);
+        FlinkProcessWriteFenceEvidence processes = runtimeFence();
         FlinkTerminalWriteFence.Evidence fence = new FlinkTerminalWriteFence.Evidence(
                 FlinkJobState.FINISHED,
                 processes,
@@ -758,13 +853,13 @@ class RunScenarioCommandTest {
                 Optional.of(terminal),
                 Optional.empty(),
                 SUBJECT_ORIGINS,
-                List.of(),
+                runtimeComponents(),
+                EXPECTED_RUNTIME,
                 List.of());
     }
 
     private static V1ScenarioExecutionResult duplicateResult() {
-        FlinkProcessWriteFenceEvidence processes = new FlinkProcessWriteFenceEvidence(
-                List.of(), Instant.EPOCH);
+        FlinkProcessWriteFenceEvidence processes = runtimeFence();
         FlinkTerminalWriteFence.Evidence fence = new FlinkTerminalWriteFence.Evidence(
                 FlinkJobState.FINISHED,
                 processes,
@@ -792,7 +887,8 @@ class RunScenarioCommandTest {
                 Optional.of(terminal),
                 Optional.empty(),
                 SUBJECT_ORIGINS,
-                List.of(),
+                runtimeComponents(),
+                EXPECTED_RUNTIME,
                 List.of());
     }
 
@@ -844,6 +940,13 @@ class RunScenarioCommandTest {
     private static V1ScenarioExecutionResult result(
             V1ScenarioExecutionResult.Status status,
             String reason) {
+        return result(status, reason, List.of());
+    }
+
+    private static V1ScenarioExecutionResult result(
+            V1ScenarioExecutionResult.Status status,
+            String reason,
+            List<FlinkComponentProvisioningEvidence> components) {
         return new V1ScenarioExecutionResult(
                 status,
                 reason,
@@ -856,7 +959,8 @@ class RunScenarioCommandTest {
                 Optional.empty(),
                 Optional.empty(),
                 Optional.empty(),
-                List.of(),
+                components,
+                new FlinkRuntimeIdentity.ExpectedTarget(Optional.empty(), EXPECTED_RUNTIME.components()),
                 List.of("diagnostic"));
     }
 

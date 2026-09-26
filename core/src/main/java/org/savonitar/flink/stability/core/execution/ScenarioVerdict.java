@@ -89,6 +89,11 @@ public record ScenarioVerdict(Status status, String reason, String message, bool
                             : V1ScenarioExecutor.SUBJECT_ORIGIN_UNCONFIRMED,
                     "The expected failure does not prove that the subject connector ran");
         }
+        FlinkRuntimeIdentity runtime = attempt.flinkRuntimeIdentity();
+        if (runtime.outcome() != FlinkRuntimeIdentity.Outcome.CONFIRMED) {
+            return unconfirmed(runtime.reason(),
+                    "The expected failure lacks confirmed Flink runtime identity: " + runtime.detail());
+        }
         for (TaskManagerKillEffect effect : attempt.taskManagerKillEffects()) {
             if (!effect.outcome().confirmed()) {
                 return unconfirmed(ExecutablePhaseExecutor.TASKMANAGER_KILL_EFFECT_UNCONFIRMED,

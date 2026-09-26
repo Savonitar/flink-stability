@@ -13,6 +13,8 @@ import java.util.regex.Pattern;
 import org.savonitar.flink.stability.core.spec.document.Diagnostic;
 import org.savonitar.flink.stability.core.spec.document.ResolutionScope;
 
+import static org.savonitar.flink.stability.runtime.api.Checks.requireDockerImageId;
+
 /** Validates the Docker-free Flink/Kafka-connector compatibility registry. */
 final class FlinkKafkaCompatibilityValidator {
     static final String FLINK_LINE_UNSUPPORTED = "capability.flink-line.unsupported";
@@ -40,6 +42,15 @@ final class FlinkKafkaCompatibilityValidator {
             ".*-\\d{8}\\.\\d{6}-\\d+$");
     List<Diagnostic> validate(Path source, ResolutionScope scope, ObjectNode document) {
         List<Diagnostic> issues = new ArrayList<>();
+        JsonNode imageId = document.at("/setup/flink/image_id");
+        if (imageId.isTextual()) {
+            try {
+                requireDockerImageId(imageId.textValue(), "Flink image_id");
+            } catch (IllegalArgumentException invalid) {
+                issues.add(issue(source, scope, "capability.flink-image-id.invalid",
+                        "$/setup/flink/image_id", invalid.getMessage()));
+            }
+        }
         List<ImageReference> images = flinkImages(document);
         boolean flinkLineSupported = true;
         for (ImageReference image : images) {

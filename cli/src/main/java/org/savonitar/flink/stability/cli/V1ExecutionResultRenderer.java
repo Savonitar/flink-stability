@@ -10,9 +10,12 @@ import org.savonitar.flink.stability.core.execution.TaskManagerKillEffect;
 import org.savonitar.flink.stability.core.execution.V1AttemptContext;
 import org.savonitar.flink.stability.core.execution.V1ScenarioExecutionResult;
 import org.savonitar.flink.stability.core.execution.plan.ExecutableScenarioPlan;
+import org.savonitar.flink.stability.runtime.api.ProvisionedConnectorArtifact;
 
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
 import java.util.Objects;
 
 /** Renders one stable, machine-readable summary without dumping record-level evidence. */
@@ -253,6 +256,37 @@ final class V1ExecutionResultRenderer {
             });
         });
         evidence.put("flinkComponents", result.flinkProvisioningEvidence().size());
+        ObjectNode runtime = evidence.putObject("flinkRuntime");
+        runtime.put("identityKind", "docker-image-id");
+        runtime.put("status", result.flinkRuntimeIdentity().outcome().name().toLowerCase(Locale.ROOT));
+        runtime.put("detail", result.flinkRuntimeIdentity().detail());
+        result.expectedFlinkRuntime().imageId().ifPresent(id -> runtime.put("expectedImageId", id));
+        ArrayNode artifactSets = runtime.putArray("connectorArtifactSets");
+        Map<List<ProvisionedConnectorArtifact>, Integer> artifactRefs = new LinkedHashMap<>();
+        ArrayNode components = runtime.putArray("components");
+        result.flinkProvisioningEvidence().forEach(component -> {
+            ObjectNode rendered = components.addObject();
+            rendered.put("logicalName", component.logicalName());
+            rendered.put("role", component.role().name().toLowerCase(Locale.ROOT));
+            rendered.put("runtimeId", component.runtimeId());
+            rendered.put("imageReference", component.imageReference());
+            rendered.put("imageId", component.imageId());
+            rendered.put("targetBindingSha256", component.targetBindingSha256());
+            rendered.put("classpathManifestSha256", component.classpathManifestSha256());
+            // Share only identical observed entries, never merely equal declared hashes.
+            int artifactRef = artifactRefs.computeIfAbsent(component.connectorArtifacts(), entries -> {
+                int index = artifactSets.size();
+                ArrayNode artifacts = artifactSets.addArray();
+                entries.forEach(artifact -> {
+                    ObjectNode copied = artifacts.addObject();
+                    copied.put("index", artifact.index());
+                    copied.put("containerPath", artifact.containerPath());
+                    copied.put("sha256", artifact.sha256());
+                });
+                return index;
+            });
+            rendered.put("connectorArtifactsRef", artifactRef);
+        });
 
         ArrayNode diagnostics = root.putArray("diagnostics");
         result.diagnostics().forEach(diagnostics::add);

@@ -33,6 +33,9 @@ Important properties of this boundary:
 - scenario and expected-result documents are selected by `meta.name` from a complete catalog;
 - connector Maven closures and local artifacts are resolved, hashed, and privately staged;
 - the connector classpath is copied and verified before each Flink process starts;
+- each created Flink container's actual Docker image ID is checked before process start;
+  an optional `setup.flink.image_id` pins the intended local build, and every initial or
+  replacement process must use the same image throughout the attempt;
 - the subject connector's primary artifact must be the only source of the Kafka
   connector classes the workload runs; a second copy in a dependency or the workload
   JAR is rejected before Docker starts;
@@ -156,6 +159,9 @@ The executable reference pairs are:
 
 To run these scenarios against a locally built Kafka connector, such as a pull
 request under review, see [testing a connector pull request](docs/PR-TESTING.md).
+For a compatible custom Flink image, see
+[testing a Flink runtime build](docs/FLINK-RUNTIME-TESTING.md). The runtime image pin
+does not expand the supported Flink 2.2 line or establish coverage of other PR features.
 
 ## Current executable subset
 

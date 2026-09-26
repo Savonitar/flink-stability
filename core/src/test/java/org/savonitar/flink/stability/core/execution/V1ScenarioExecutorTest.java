@@ -86,6 +86,106 @@ class V1ScenarioExecutorTest {
                             prefix + "-0-1", "CompleteCommit", 7, 0, List.of())));
 
     @Test
+    void aPassingOracleRequiresCompleteAndConsistentRuntimeImageEvidence() throws Exception {
+        for (String gap : List.of("missing", "mixed", "missing-fenced-process", "unavailable")) {
+            List<String> events = new ArrayList<>();
+            try (Fixture fixture = fixture()) {
+                FakeRuntime runtime = new FakeRuntime(events);
+                if (gap.equals("unavailable")) {
+                    runtime.provisioningFailure = new IllegalStateException("inspection unavailable");
+                } else {
+                    runtime.provisioningOverride = switch (gap) {
+                        case "missing" -> List.of();
+                        case "mixed" -> List.of(
+                                FlinkRuntimeIdentityTest.component("jobmanager-1", "jm",
+                                        FlinkRuntimeIdentityTest.IMAGE_ID),
+                                FlinkRuntimeIdentityTest.component("taskmanager-1", "tm-1",
+                                        FlinkRuntimeIdentityTest.OTHER_IMAGE_ID));
+                        default -> List.of(
+                                FlinkRuntimeIdentityTest.component("jobmanager-1", "jm",
+                                        FlinkRuntimeIdentityTest.IMAGE_ID),
+                                FlinkRuntimeIdentityTest.component("taskmanager-1", "another-tm",
+                                        FlinkRuntimeIdentityTest.IMAGE_ID));
+                    };
+                }
+                V1ScenarioExecutionResult result = executor(events, runtime, new FakeFlink(events),
+                        (bootstrap, topic, ids, timeout) -> passResult())
+                        .execute(fixture.bound(), attemptContext());
+
+                assertEquals(V1ScenarioExecutionResult.Status.INCONCLUSIVE, result.status(), gap);
+                assertEquals(gap.equals("mixed") ? FlinkRuntimeIdentity.MISMATCH
+                        : FlinkRuntimeIdentity.UNCONFIRMED, result.reason(), gap);
+                assertTrue(result.terminalValidation().isPresent(), gap);
+                assertEquals(KafkaIdSetValidationResult.Status.PASS,
+                        result.terminalValidation().orElseThrow().status(), gap);
+            }
+        }
+    }
+
+    @Test
+    void aDeclaredPinIsCheckedAndRetainedByCleanupFailures() throws Exception {
+        for (String expected : List.of(FlinkRuntimeIdentityTest.IMAGE_ID,
+                FlinkRuntimeIdentityTest.OTHER_IMAGE_ID)) {
+            List<String> events = new ArrayList<>();
+            try (Fixture fixture = fixture(document -> ((ObjectNode) document.at("/setup/flink"))
+                    .put("image_id", expected))) {
+                V1ScenarioExecutionResult result = executor(events, new FakeRuntime(events),
+                        new FakeFlink(events), (bootstrap, topic, ids, timeout) -> passResult())
+                        .execute(fixture.bound(), attemptContext());
+                assertEquals(expected.equals(FlinkRuntimeIdentityTest.IMAGE_ID)
+                        ? V1ScenarioExecutionResult.Status.PASS
+                        : V1ScenarioExecutionResult.Status.INCONCLUSIVE, result.status());
+                assertEquals(Optional.of(expected), result.withCleanupFailure(
+                        new IllegalStateException("cleanup failed")).expectedFlinkRuntime().imageId());
+                assertEquals(fixture.bound().executablePlan().flink().expectedComponents(),
+                        result.expectedFlinkRuntime().components());
+                assertEquals(result.expectedFlinkRuntime(), result.withCleanupFailure(
+                        new IllegalStateException("cleanup failed")).expectedFlinkRuntime());
+            }
+        }
+    }
+
+    @Test
+    void wrappedPrestartImageMismatchKeepsExpectedAndObservedIds() throws Exception {
+        List<String> events = new ArrayList<>();
+        try (Fixture fixture = fixture()) {
+            FakeRuntime runtime = new FakeRuntime(events);
+            runtime.startFlinkFailure = new IllegalStateException("Container failed to start",
+                    new IllegalStateException("Expected " + FlinkRuntimeIdentityTest.IMAGE_ID
+                            + ", actual " + FlinkRuntimeIdentityTest.OTHER_IMAGE_ID));
+            V1ScenarioExecutionResult result = executor(events, runtime, new FakeFlink(events),
+                    (bootstrap, topic, ids, timeout) -> passResult())
+                    .execute(fixture.bound(), attemptContext());
+
+            assertEquals(V1ScenarioExecutionResult.Status.INCONCLUSIVE, result.status());
+            assertTrue(result.diagnostics().stream().anyMatch(detail ->
+                    detail.contains(FlinkRuntimeIdentityTest.IMAGE_ID)
+                            && detail.contains(FlinkRuntimeIdentityTest.OTHER_IMAGE_ID)));
+        }
+    }
+
+    @Test
+    void declaredImageMismatchRetainsDataFailureButCannotValidateANegativeControl() throws Exception {
+        List<String> events = new ArrayList<>();
+        try (Fixture fixture = fixture(document -> ((ObjectNode) document.at("/setup/flink"))
+                .put("image_id", FlinkRuntimeIdentityTest.OTHER_IMAGE_ID))) {
+            V1ScenarioExecutionResult result = executor(events, new FakeRuntime(events),
+                    new FakeFlink(events), (bootstrap, topic, ids, timeout) -> missingResult())
+                    .execute(fixture.bound(), attemptContext());
+
+            assertEquals(V1ScenarioExecutionResult.Status.FAIL, result.status());
+            assertEquals(missingResult().reason(), result.reason());
+            assertEquals(Optional.of(FlinkRuntimeIdentityTest.OTHER_IMAGE_ID),
+                    result.expectedFlinkRuntime().imageId());
+            ScenarioVerdict verdict = ScenarioVerdict.of(
+                    ExecutableScenarioPlan.ExpectedOutcome.failure("kafka.id-set", result.reason()),
+                    result);
+            assertEquals(ScenarioVerdict.Status.INCONCLUSIVE, verdict.status());
+            assertEquals(FlinkRuntimeIdentity.MISMATCH, verdict.reason());
+        }
+    }
+
+    @Test
     void validatesOnlyAfterNaturalCompletionAndThePhysicalProcessFence() throws Exception {
         List<String> events = new ArrayList<>();
         try (Fixture fixture = fixture()) {
@@ -279,7 +379,8 @@ class V1ScenarioExecutorTest {
             FakeFlink flink = new FakeFlink(events);
             // The TaskManager hosted no deployed subtask, so killing it disturbed nothing.
             flink.observations.add(new FlinkJobObservation(
-                    1_000, FlinkJobState.RUNNING, 0, 0, Optional.empty(), List.of(),
+                    1_000, FlinkJobState.RUNNING, 0, 0,
+                    Optional.empty(), List.of(),
                     List.of(new FlinkJobObservation.Subtask(
                             "Kafka Source", 0, 0, "SCHEDULED", Optional.empty()))));
             flink.observations.add(job(9_000, FlinkJobState.FINISHED, 3, 0));
@@ -305,7 +406,8 @@ class V1ScenarioExecutorTest {
             try (Fixture fixture = fixture(V1ScenarioExecutorTest::killAndRestart)) {
                 FakeFlink flink = new FakeFlink(events);
                 flink.observations.add(new FlinkJobObservation(
-                        1_000, FlinkJobState.RUNNING, 2, 0, Optional.empty(), List.of(),
+                        1_000, FlinkJobState.RUNNING, 2, 0,
+                        Optional.empty(), List.of(),
                         List.of(new FlinkJobObservation.Subtask(
                                 "Kafka Source", 0, 0, "RUNNING", Optional.of("tm-1")))));
                 flink.observations.add(new FlinkJobObservation(
@@ -426,6 +528,7 @@ class V1ScenarioExecutorTest {
                         Optional.empty(),
                         Optional.of(confirmedOrigins()),
                         List.of(),
+                        FlinkRuntimeIdentityTest.expected(Optional.empty()),
                         List.of()));
 
         assertTrue(failure.getMessage().contains("confirmed effect"));
@@ -469,6 +572,7 @@ class V1ScenarioExecutorTest {
                         Optional.empty(),
                         Optional.of(confirmedOrigins()),
                         List.of(),
+                        FlinkRuntimeIdentityTest.expected(Optional.empty()),
                         List.of()));
 
         assertTrue(failure.getMessage().contains("network fault"), failure.getMessage());
@@ -1437,6 +1541,9 @@ class V1ScenarioExecutorTest {
         private String loadedFrom;
         private RuntimeException classLoadLogsFailure;
         private boolean fenced;
+        private int taskManagerIncarnations;
+        private List<FlinkComponentProvisioningEvidence> provisioningOverride;
+        private RuntimeException provisioningFailure;
         private Exception startFlinkFailure;
         private RuntimeException processFenceFailure;
         private RuntimeException closeFailure;
@@ -1473,6 +1580,7 @@ class V1ScenarioExecutorTest {
             assertEquals(
                     target.imageReference(),
                     target.connectorBundle().targetFlinkImageReference());
+            taskManagerIncarnations = 1;
             primarySource = target.connectorBundle().classpathManifest().entries()
                     .getFirst().containerPath();
             return "http://localhost:8081";
@@ -1491,6 +1599,7 @@ class V1ScenarioExecutorTest {
         public void restartTaskManager(Duration timeout) {
             assertEquals(ExecutablePhaseExecutor.TASKMANAGER_ACTION_TIMEOUT, timeout);
             events.add("taskmanager-restart");
+            taskManagerIncarnations++;
         }
 
         @Override
@@ -1501,13 +1610,17 @@ class V1ScenarioExecutorTest {
                 throw processFenceFailure;
             }
             fenced = true;
-            return new FlinkProcessWriteFenceEvidence(
-                    List.of(), Instant.parse("2026-08-26T12:00:00Z"));
+            return FlinkRuntimeIdentityTest.fence(taskManagerIncarnations);
         }
 
         @Override
         public List<FlinkComponentProvisioningEvidence> flinkProvisioningEvidence() {
-            return List.of();
+            if (provisioningFailure != null) {
+                throw provisioningFailure;
+            }
+            return provisioningOverride != null ? provisioningOverride
+                    : taskManagerIncarnations == 0 ? List.of()
+                    : FlinkRuntimeIdentityTest.provisioning(taskManagerIncarnations);
         }
 
         /** One TaskManager log that loads both protocol-v1 entry classes. */

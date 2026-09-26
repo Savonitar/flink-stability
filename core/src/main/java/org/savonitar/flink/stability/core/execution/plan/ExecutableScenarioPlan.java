@@ -1,6 +1,7 @@
 package org.savonitar.flink.stability.core.execution.plan;
 
 import org.savonitar.flink.stability.core.spec.resolution.ResolvedScenarioPlan;
+import org.savonitar.flink.stability.runtime.api.FlinkComponentRole;
 import org.savonitar.flink.stability.runtime.api.KafkaBrokerPolicy;
 import org.savonitar.flink.stability.runtime.api.KafkaProxyTarget;
 import org.savonitar.flink.stability.runtime.api.KafkaRuntimeTarget;
@@ -252,14 +253,31 @@ public final class ExecutableScenarioPlan {
 
     public record FlinkCluster(
             String imageReference,
+            Optional<String> expectedImageId,
             int jobmanagers,
             int taskmanagers) {
         public FlinkCluster {
             imageReference = requireNonBlank(imageReference, "imageReference");
+            expectedImageId = Objects.requireNonNull(expectedImageId, "expectedImageId");
+            expectedImageId.ifPresent(id ->
+                    org.savonitar.flink.stability.runtime.api.Checks.requireDockerImageId(
+                            id, "expectedImageId"));
             if (jobmanagers != 1 || taskmanagers != 1) {
                 throw new IllegalArgumentException(
                         "The first executable boundary requires one JobManager and one TaskManager");
             }
+        }
+
+        /** Logical slots the runtime must provision and the result must independently account for. */
+        public Map<String, FlinkComponentRole> expectedComponents() {
+            Map<String, FlinkComponentRole> components = new LinkedHashMap<>();
+            for (int index = 1; index <= jobmanagers; index++) {
+                components.put("jobmanager-" + index, FlinkComponentRole.JOB_MANAGER);
+            }
+            for (int index = 1; index <= taskmanagers; index++) {
+                components.put("taskmanager-" + index, FlinkComponentRole.TASK_MANAGER);
+            }
+            return Collections.unmodifiableMap(components);
         }
     }
 

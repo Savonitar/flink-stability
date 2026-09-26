@@ -137,6 +137,8 @@ public final class ExecutableScenarioPlanCompiler {
                 workloadArtifact.preparedPath(),
                 jobPath);
         FlinkRuntimeTarget runtimeTarget = runtimeTargetFactory.create(connectorBundle);
+        runtimeTarget = executablePlan.flink().expectedImageId()
+                .map(runtimeTarget::withExpectedImageId).orElse(runtimeTarget);
         return new PreparedExecutableScenarioPlan(
                 preparedPlan,
                 executablePlan,
@@ -818,7 +820,8 @@ public final class ExecutableScenarioPlanCompiler {
                 NetworkFaultCompiler.proxy(document));
         ObjectNode flinkNode = (ObjectNode) document.at("/setup/flink");
         ExecutableScenarioPlan.FlinkCluster flink = new ExecutableScenarioPlan.FlinkCluster(
-                flinkNode.path("image").textValue(), 1, 1);
+                flinkNode.path("image").textValue(),
+                java.util.Optional.ofNullable(flinkNode.path("image_id").textValue()), 1, 1);
         ExecutableScenarioPlan.GeneratedIntegerSequenceInput input =
                 new ExecutableScenarioPlan.GeneratedIntegerSequenceInput(
                         clusterAlias,

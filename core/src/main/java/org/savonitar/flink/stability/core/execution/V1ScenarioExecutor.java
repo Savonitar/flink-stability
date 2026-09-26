@@ -133,6 +133,8 @@ public final class V1ScenarioExecutor {
             V1AttemptContext context,
             AttemptResources resources) {
         ExecutableScenarioPlan plan = prepared.executablePlan();
+        FlinkRuntimeIdentity.ExpectedTarget expectedRuntime = new FlinkRuntimeIdentity.ExpectedTarget(
+                plan.flink().expectedImageId(), plan.flink().expectedComponents());
 
         V1AttemptRuntime runtime = null;
         FlinkScenarioControl flink = null;
@@ -270,6 +272,7 @@ public final class V1ScenarioExecutor {
                     sinkTransactions,
                     subjectOrigins,
                     runtime,
+                    expectedRuntime,
                     evidenceDiagnostics);
         } catch (KafkaInputPreparationException failure) {
             inputEvidence = failure.evidence().orElse(inputEvidence);
@@ -286,6 +289,7 @@ public final class V1ScenarioExecutor {
                     sinkTransactions,
                     subjectOrigins,
                     runtime,
+                    expectedRuntime,
                     diagnostics(failure));
         } catch (PhaseExecutionException failure) {
             phases = failure.evidence();
@@ -306,6 +310,7 @@ public final class V1ScenarioExecutor {
                     sinkTransactions,
                     subjectOrigins,
                     runtime,
+                    expectedRuntime,
                     diagnostics(failure));
         } catch (TerminalWriteFenceException failure) {
             processFence = failure.processFenceEvidence().orElse(null);
@@ -323,6 +328,7 @@ public final class V1ScenarioExecutor {
                     sinkTransactions,
                     subjectOrigins,
                     runtime,
+                    expectedRuntime,
                     diagnostics(failure));
         } catch (InterruptedException failure) {
             Thread.currentThread().interrupt();
@@ -339,6 +345,7 @@ public final class V1ScenarioExecutor {
                     sinkTransactions,
                     subjectOrigins,
                     runtime,
+                    expectedRuntime,
                     diagnostics(failure));
         } catch (Exception failure) {
             result = result(
@@ -354,6 +361,7 @@ public final class V1ScenarioExecutor {
                     sinkTransactions,
                     subjectOrigins,
                     runtime,
+                    expectedRuntime,
                     diagnostics(failure));
         }
 
@@ -411,10 +419,26 @@ public final class V1ScenarioExecutor {
             KafkaTransactionListing sinkTransactions,
             SubjectClassOrigins subjectOrigins,
             V1AttemptRuntime runtime,
+            FlinkRuntimeIdentity.ExpectedTarget expectedRuntime,
             List<String> diagnostics) {
-        List<FlinkComponentProvisioningEvidence> provisioning = runtime == null
-                ? List.of()
-                : runtime.flinkProvisioningEvidence();
+        List<String> retainedDiagnostics = new ArrayList<>(diagnostics);
+        List<FlinkComponentProvisioningEvidence> provisioning = List.of();
+        try {
+            if (runtime != null) {
+                provisioning = List.copyOf(runtime.flinkProvisioningEvidence());
+            }
+        } catch (RuntimeException unavailable) {
+            retainedDiagnostics.add("flink.provisioning-evidence-unavailable: " + unavailable);
+        }
+        FlinkRuntimeIdentity identity = FlinkRuntimeIdentity.evaluate(expectedRuntime,
+                provisioning, Optional.ofNullable(processFence), Optional.ofNullable(phases));
+        if (status == V1ScenarioExecutionResult.Status.PASS
+                && identity.outcome() != FlinkRuntimeIdentity.Outcome.CONFIRMED) {
+            status = V1ScenarioExecutionResult.Status.INCONCLUSIVE;
+            reason = identity.reason();
+            message = "The terminal oracle passed, but Flink runtime identity is unconfirmed: "
+                    + identity.detail();
+        }
         return new V1ScenarioExecutionResult(
                 status,
                 reason,
@@ -428,7 +452,8 @@ public final class V1ScenarioExecutor {
                 Optional.ofNullable(sinkTransactions),
                 Optional.ofNullable(subjectOrigins),
                 provisioning,
-                diagnostics);
+                expectedRuntime,
+                retainedDiagnostics);
     }
 
     private static List<String> diagnostics(Throwable failure) {

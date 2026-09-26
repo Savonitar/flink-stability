@@ -18,6 +18,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.attribute.PosixFilePermission;
 import java.util.List;
+import java.util.concurrent.atomic.AtomicReference;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
@@ -25,9 +26,120 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class FlinkContainerTest {
+    private static final String IMAGE_ID = "sha256:" + "a".repeat(64);
+    private static final String OTHER_IMAGE_ID = "sha256:" + "b".repeat(64);
 
     @TempDir
     Path temporaryDirectory;
+
+    @Test
+    void verifiesCreatedContainerImageIdentityForEveryInitialAndReplacementProcess() {
+        FlinkContainer factory = new FlinkContainer(
+                emptyTarget(), Network.SHARED, temporaryDirectory);
+        List<VerifiedFlinkContainer> containers = List.of(
+                (VerifiedFlinkContainer) factory.createJobManager("jobmanager-1"),
+                (VerifiedFlinkContainer) factory.createTaskManager("taskmanager-1"),
+                (VerifiedFlinkContainer) factory.createTaskManager("taskmanager-1"));
+
+        for (int index = 0; index < containers.size(); index++) {
+            String runtimeId = "created-container-" + index;
+            VerifiedFlinkContainer container = containers.get(index);
+            assertThrows(IllegalStateException.class, container::verifiedImageId);
+            container.verifyImageIdentity(runtimeId, inspectedId -> {
+                assertEquals(runtimeId, inspectedId);
+                return IMAGE_ID;
+            });
+            assertEquals(IMAGE_ID, container.verifiedImageId());
+        }
+    }
+
+    @Test
+    void mutableTagCannotChangeTheImageBetweenJobManagerTaskManagerAndReplacement() {
+        FlinkContainer factory = new FlinkContainer(
+                emptyTarget(), Network.SHARED, temporaryDirectory);
+        VerifiedFlinkContainer jobManager = (VerifiedFlinkContainer)
+                factory.createJobManager("jobmanager-1");
+        jobManager.verifyImageIdentity("jobmanager-container", ignored -> IMAGE_ID);
+        VerifiedFlinkContainer wrongTaskManager = (VerifiedFlinkContainer)
+                factory.createTaskManager("taskmanager-1");
+        assertImageMismatch(wrongTaskManager, "wrong-taskmanager", OTHER_IMAGE_ID);
+
+        VerifiedFlinkContainer taskManager = (VerifiedFlinkContainer)
+                factory.createTaskManager("taskmanager-1");
+        taskManager.verifyImageIdentity("taskmanager-container", ignored -> IMAGE_ID);
+        VerifiedFlinkContainer replacement = (VerifiedFlinkContainer)
+                factory.createTaskManager("taskmanager-1");
+        assertImageMismatch(replacement, "replacement-container", OTHER_IMAGE_ID);
+        assertEquals(IMAGE_ID, jobManager.verifiedImageId());
+        assertEquals(IMAGE_ID, taskManager.verifiedImageId());
+    }
+
+    @Test
+    void declaredExpectedImageIsCheckedBeforeTheFirstProcessCanStart() {
+        FlinkContainer factory = new FlinkContainer(
+                emptyTarget().withExpectedImageId(IMAGE_ID), Network.SHARED, temporaryDirectory);
+        VerifiedFlinkContainer wrong = (VerifiedFlinkContainer)
+                factory.createJobManager("jobmanager-1");
+        assertImageMismatch(wrong, "wrong-jobmanager", OTHER_IMAGE_ID);
+
+        VerifiedFlinkContainer matching = (VerifiedFlinkContainer)
+                factory.createJobManager("jobmanager-1");
+        matching.verifyImageIdentity("matching-jobmanager", ignored -> IMAGE_ID);
+        assertEquals(IMAGE_ID, matching.verifiedImageId());
+        // A later failed create/inspect attempt must not reuse the prior incarnation's evidence.
+        assertImageMismatch(matching, "retried-jobmanager", OTHER_IMAGE_ID);
+    }
+
+    @Test
+    void retryKeepsTheFirstCreatedImageEvenWithoutAnySuccessfulProvisioning() {
+        AtomicReference<String> pin = new AtomicReference<>();
+        ClassLoadLogs logs = new ClassLoadLogs(temporaryDirectory);
+        FlinkContainer first = new FlinkContainer(
+                emptyTarget(), Network.SHARED, temporaryDirectory, logs, pin);
+        VerifiedFlinkContainer created = (VerifiedFlinkContainer)
+                first.createJobManager("jobmanager-1");
+        created.verifyImageIdentity("first-created-container", ignored -> IMAGE_ID);
+        // No bundle verification or process start completed before the factory was replaced.
+        FlinkContainer retry = new FlinkContainer(
+                emptyTarget(), Network.SHARED, temporaryDirectory, logs, pin);
+        VerifiedFlinkContainer different = (VerifiedFlinkContainer)
+                retry.createJobManager("jobmanager-1");
+        assertImageMismatch(different, "retried-created-container", OTHER_IMAGE_ID);
+        assertEquals(IMAGE_ID, pin.get());
+
+        VerifiedFlinkContainer matching = (VerifiedFlinkContainer)
+                retry.createJobManager("jobmanager-1");
+        matching.verifyImageIdentity("matching-retry-container", ignored -> IMAGE_ID);
+        assertEquals(IMAGE_ID, matching.verifiedImageId());
+    }
+
+    @Test
+    void missingMalformedOrFailedInspectionCannotPinAnImageOrCreateIdentityEvidence() {
+        FlinkContainer factory = new FlinkContainer(
+                emptyTarget(), Network.SHARED, temporaryDirectory);
+        for (String invalid : new String[] {null, "", "a".repeat(64), "sha256:short"}) {
+            VerifiedFlinkContainer container = (VerifiedFlinkContainer)
+                    factory.createJobManager("jobmanager-1");
+            IllegalStateException failure = assertThrows(IllegalStateException.class,
+                    () -> container.verifyImageIdentity("invalid-container", ignored -> invalid));
+            assertTrue(failure.getMessage().contains("actual " + invalid), failure.getMessage());
+            assertThrows(IllegalStateException.class, container::verifiedImageId);
+        }
+        VerifiedFlinkContainer failed = (VerifiedFlinkContainer)
+                factory.createJobManager("jobmanager-1");
+        IllegalStateException failure = assertThrows(IllegalStateException.class,
+                () -> failed.verifyImageIdentity("unavailable-container", ignored -> {
+                    throw new IllegalStateException("synthetic inspect failure");
+                }));
+        assertTrue(failure.getMessage().contains("actual unavailable"), failure.getMessage());
+        assertEquals("synthetic inspect failure", failure.getCause().getMessage());
+        assertThrows(IllegalStateException.class, failed::verifiedImageId);
+
+        VerifiedFlinkContainer valid = (VerifiedFlinkContainer)
+                factory.createJobManager("jobmanager-1");
+        valid.verifyImageIdentity("valid-container", ignored -> IMAGE_ID);
+        assertEquals(IMAGE_ID, valid.verifiedImageId());
+    }
 
     @Test
     void everyFlinkJvmLogsItsClassLoadsToAPerIncarnationFileInTheAttemptDirectory() {
@@ -225,6 +337,15 @@ class FlinkContainerTest {
 
     private static Bind onlyBind(GenericContainer<?> container) {
         return container.getBinds().getFirst();
+    }
+
+    private static void assertImageMismatch(
+            VerifiedFlinkContainer container, String runtimeId, String observed) {
+        IllegalStateException failure = assertThrows(IllegalStateException.class,
+                () -> container.verifyImageIdentity(runtimeId, ignored -> observed));
+        assertTrue(failure.getMessage().contains("expected " + IMAGE_ID), failure.getMessage());
+        assertTrue(failure.getMessage().contains("actual " + observed), failure.getMessage());
+        assertThrows(IllegalStateException.class, container::verifiedImageId);
     }
 
     private static FlinkRuntimeTarget emptyTarget() {

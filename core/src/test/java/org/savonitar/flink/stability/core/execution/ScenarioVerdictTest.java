@@ -25,6 +25,23 @@ class ScenarioVerdictTest {
             ExpectedOutcome.failure("kafka.id-set", DUPLICATES);
 
     @Test
+    void aPinnedDataFailureCannotMatchWithoutRuntimeImageEvidence() {
+        V1ScenarioExecutionResult complete = attempt(V1ScenarioExecutionResult.Status.FAIL, DUPLICATES);
+        V1ScenarioExecutionResult incomplete = new V1ScenarioExecutionResult(
+                complete.status(), complete.reason(), complete.message(), complete.inputManifest(),
+                complete.phaseEvidence(), complete.writeFenceEvidence(), complete.processFenceEvidence(),
+                complete.finalJobObservation(), complete.terminalValidation(), complete.sinkTransactions(),
+                complete.subjectClassOrigins(), List.of(), FlinkRuntimeIdentityTest.expected(Optional.empty()), complete.diagnostics());
+
+        ScenarioVerdict verdict = ScenarioVerdict.of(EXPECT_DUPLICATES, incomplete);
+
+        assertEquals(V1ScenarioExecutionResult.Status.FAIL, incomplete.status());
+        assertEquals(DUPLICATES, incomplete.reason());
+        assertEquals(ScenarioVerdict.Status.INCONCLUSIVE, verdict.status());
+        assertEquals(FlinkRuntimeIdentity.UNCONFIRMED, verdict.reason());
+    }
+
+    @Test
     void anExpectedPassMatchesOnlyAPassingAttempt() {
         ScenarioVerdict passed = ScenarioVerdict.of(ExpectedOutcome.pass(),
                 attempt(V1ScenarioExecutionResult.Status.PASS, "validator.kafka.id-set.match"));
@@ -113,7 +130,8 @@ class ScenarioVerdictTest {
     void aMatchingFailureCannotPassWhenItsKillHitsAFinishedJob() {
         FlinkJobObservation.Attempt finished = new FlinkJobObservation.Attempt(
                 Optional.of(new FlinkJobObservation(500, FlinkJobState.FINISHED,
-                        1, 0, Optional.empty(), List.of(), List.of())), Optional.empty());
+                        1, 0,
+                        Optional.empty(), List.of(), List.of())), Optional.empty());
         PhaseExecutionEvidence phases = new PhaseExecutionEvidence(List.of(), List.of(
                 new PhaseExecutionEvidence.TaskManagerKill("$/phases/0/steps/0", List.of(),
                         "taskmanager-1", finished, OptionalLong.of(600))), List.of());
@@ -154,7 +172,8 @@ class ScenarioVerdictTest {
                 V1ScenarioExecutionResult.Status.FAIL, DUPLICATES, "unverified failure",
                 Optional.empty(), Optional.empty(), Optional.empty(), Optional.empty(),
                 Optional.empty(), Optional.empty(), Optional.empty(), Optional.empty(),
-                List.of(), List.of());
+                List.of(),
+                FlinkRuntimeIdentityTest.expected(Optional.empty()), List.of());
 
         ScenarioVerdict verdict = ScenarioVerdict.of(EXPECT_DUPLICATES, unsupported);
 
@@ -199,6 +218,7 @@ class ScenarioVerdictTest {
                     missing.equals("both-fences") ? Optional.empty() : complete.processFenceEvidence(),
                     complete.finalJobObservation(), oracle, complete.sinkTransactions(),
                     complete.subjectClassOrigins(), complete.flinkProvisioningEvidence(),
+                    FlinkRuntimeIdentityTest.expected(Optional.empty()),
                     complete.diagnostics());
 
             ScenarioVerdict verdict = ScenarioVerdict.of(EXPECT_DUPLICATES, invalid);
@@ -238,6 +258,7 @@ class ScenarioVerdictTest {
                 Optional.empty(),
                 origins,
                 List.of(),
+                FlinkRuntimeIdentityTest.expected(Optional.empty()),
                 List.of());
     }
 
@@ -248,7 +269,7 @@ class ScenarioVerdictTest {
             PhaseExecutionEvidence phases,
             Optional<SubjectClassOrigins> origins) {
         FlinkProcessWriteFenceEvidence processes =
-                new FlinkProcessWriteFenceEvidence(List.of(), Instant.EPOCH);
+                FlinkRuntimeIdentityTest.fence(1);
         FlinkJobObservation.Attempt finished = new FlinkJobObservation.Attempt(
                 Optional.of(new FlinkJobObservation(
                         1_000, FlinkJobState.FINISHED, 1, 0, Optional.empty(),
@@ -279,7 +300,8 @@ class ScenarioVerdictTest {
                 Optional.of(oracle),
                 Optional.empty(),
                 origins,
-                List.of(),
+                FlinkRuntimeIdentityTest.provisioning(1),
+                FlinkRuntimeIdentityTest.expected(Optional.empty()),
                 List.of());
     }
 }
