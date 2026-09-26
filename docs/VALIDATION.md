@@ -77,3 +77,40 @@ healthy control and two wrong-decision variants of the released connector agains
 EndTxn scenarios, and its README records the last results. Historical run counts and CLI
 byte-comparison claims without their commands and retained outputs are not substitutes
 for rerunning these checks on the current changes.
+
+## Findings and sensitivity
+
+The harness exists to find defects in Flink, Kafka, and connectors. A failing or odd run
+is therefore a finding until someone explains it.
+
+- The following stay open findings:
+  - a violated data guarantee;
+  - an error from a component under test, such as an HTTP 500 from Flink's REST API;
+  - an `inconclusive` result whose cause is not understood.
+
+  An `infrastructure` or `inconclusive` reason says where a check stopped, not who is at
+  fault.
+- Before changing anything, keep the original scenario, versions, parameters, and run
+  outputs. A later passing run does not cancel an earlier observation.
+- Do not change an expectation, fault placement, timing, checkpointing, or load only to
+  make a run pass. Such scenario changes are regression-contract changes
+  ([SPEC-002 E5.6](specs/SPEC-002-expected-result-schema.md)). After one, re-run the
+  applicable calibration matrix and preserve its expected outcomes. Designated mutant
+  cells must retain their pinned data failures with complete phase, fence, and oracle
+  evidence, confirmed subject origins, and confirmed fault effects. Healthy controls
+  and harmless mutant cells must still pass. In the connector-mutant calibration,
+  `assume committed` fails on request loss and `rewrite` fails on response loss; each
+  passes the other fault side. Keep the new run evidence with the scenario change.
+- A harness fix must explain the original failure. A run that turned green after the
+  change does not explain it.
+- Record an evidence-backed disposition for each finding:
+  - **Fixed:** a harness or component defect is demonstrated, and its fix is verified
+    against the original reproducer.
+  - **Upstream-tracked:** a component defect is reported with a linked ticket, retained
+    run evidence, and a preserved reproducer. Reporting is not a fix; keep it tracked
+    until a fix is verified or a documented contract decision explains the behavior.
+  - **Explained infrastructure failure:** retained evidence identifies the concrete
+    infrastructure cause. Record whether it is resolved or needs follow-up; an
+    `infrastructure` label alone does not establish the cause.
+  - **Outside the documented guarantee:** a cited precondition is shown to be violated
+    by the original scenario. Keep the scenario and evidence with that explanation.
