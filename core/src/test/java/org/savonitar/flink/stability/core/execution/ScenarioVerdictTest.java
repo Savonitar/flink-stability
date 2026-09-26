@@ -31,7 +31,7 @@ class ScenarioVerdictTest {
                 complete.status(), complete.reason(), complete.message(), complete.inputManifest(),
                 complete.phaseEvidence(), complete.writeFenceEvidence(), complete.processFenceEvidence(),
                 complete.finalJobObservation(), complete.terminalValidation(), complete.sinkTransactions(),
-                complete.subjectClassOrigins(), List.of(), Optional.empty(), complete.diagnostics());
+                complete.subjectClassOrigins(), List.of(), FlinkRuntimeIdentityTest.expected(Optional.empty()), complete.diagnostics());
 
         ScenarioVerdict verdict = ScenarioVerdict.of(EXPECT_DUPLICATES, incomplete);
 
@@ -173,7 +173,7 @@ class ScenarioVerdictTest {
                 Optional.empty(), Optional.empty(), Optional.empty(), Optional.empty(),
                 Optional.empty(), Optional.empty(), Optional.empty(), Optional.empty(),
                 List.of(),
-                Optional.empty(), List.of());
+                FlinkRuntimeIdentityTest.expected(Optional.empty()), List.of());
 
         ScenarioVerdict verdict = ScenarioVerdict.of(EXPECT_DUPLICATES, unsupported);
 
@@ -218,7 +218,7 @@ class ScenarioVerdictTest {
                     missing.equals("both-fences") ? Optional.empty() : complete.processFenceEvidence(),
                     complete.finalJobObservation(), oracle, complete.sinkTransactions(),
                     complete.subjectClassOrigins(), complete.flinkProvisioningEvidence(),
-                    Optional.empty(),
+                    FlinkRuntimeIdentityTest.expected(Optional.empty()),
                     complete.diagnostics());
 
             ScenarioVerdict verdict = ScenarioVerdict.of(EXPECT_DUPLICATES, invalid);
@@ -258,7 +258,7 @@ class ScenarioVerdictTest {
                 Optional.empty(),
                 origins,
                 List.of(),
-                Optional.empty(),
+                FlinkRuntimeIdentityTest.expected(Optional.empty()),
                 List.of());
     }
 
@@ -301,7 +301,7 @@ class ScenarioVerdictTest {
                 Optional.empty(),
                 origins,
                 FlinkRuntimeIdentityTest.provisioning(1),
-                Optional.empty(),
+                FlinkRuntimeIdentityTest.expected(Optional.empty()),
                 List.of());
     }
 }

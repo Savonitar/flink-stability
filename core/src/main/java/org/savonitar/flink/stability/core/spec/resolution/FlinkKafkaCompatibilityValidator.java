@@ -13,6 +13,8 @@ import java.util.regex.Pattern;
 import org.savonitar.flink.stability.core.spec.document.Diagnostic;
 import org.savonitar.flink.stability.core.spec.document.ResolutionScope;
 
+import static org.savonitar.flink.stability.runtime.api.Checks.requireDockerImageId;
+
 /** Validates the Docker-free Flink/Kafka-connector compatibility registry. */
 final class FlinkKafkaCompatibilityValidator {
     static final String FLINK_LINE_UNSUPPORTED = "capability.flink-line.unsupported";
@@ -41,11 +43,13 @@ final class FlinkKafkaCompatibilityValidator {
     List<Diagnostic> validate(Path source, ResolutionScope scope, ObjectNode document) {
         List<Diagnostic> issues = new ArrayList<>();
         JsonNode imageId = document.at("/setup/flink/image_id");
-        if (imageId.isTextual() && !imageId.textValue().matches("sha256:[0-9a-f]{64}")) {
-            issues.add(issue(source, scope, "capability.flink-image-id.invalid",
-                    "$/setup/flink/image_id",
-                    "Flink image_id must be a full local Docker image ID: sha256: followed "
-                            + "by 64 lowercase hexadecimal characters"));
+        if (imageId.isTextual()) {
+            try {
+                requireDockerImageId(imageId.textValue(), "Flink image_id");
+            } catch (IllegalArgumentException invalid) {
+                issues.add(issue(source, scope, "capability.flink-image-id.invalid",
+                        "$/setup/flink/image_id", invalid.getMessage()));
+            }
         }
         List<ImageReference> images = flinkImages(document);
         boolean flinkLineSupported = true;

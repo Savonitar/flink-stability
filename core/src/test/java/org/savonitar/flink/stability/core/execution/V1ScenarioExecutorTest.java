@@ -136,7 +136,11 @@ class V1ScenarioExecutorTest {
                         ? V1ScenarioExecutionResult.Status.PASS
                         : V1ScenarioExecutionResult.Status.INCONCLUSIVE, result.status());
                 assertEquals(Optional.of(expected), result.withCleanupFailure(
-                        new IllegalStateException("cleanup failed")).expectedFlinkImageId());
+                        new IllegalStateException("cleanup failed")).expectedFlinkRuntime().imageId());
+                assertEquals(fixture.bound().executablePlan().flink().expectedComponents(),
+                        result.expectedFlinkRuntime().components());
+                assertEquals(result.expectedFlinkRuntime(), result.withCleanupFailure(
+                        new IllegalStateException("cleanup failed")).expectedFlinkRuntime());
             }
         }
     }
@@ -172,7 +176,7 @@ class V1ScenarioExecutorTest {
             assertEquals(V1ScenarioExecutionResult.Status.FAIL, result.status());
             assertEquals(missingResult().reason(), result.reason());
             assertEquals(Optional.of(FlinkRuntimeIdentityTest.OTHER_IMAGE_ID),
-                    result.expectedFlinkImageId());
+                    result.expectedFlinkRuntime().imageId());
             ScenarioVerdict verdict = ScenarioVerdict.of(
                     ExecutableScenarioPlan.ExpectedOutcome.failure("kafka.id-set", result.reason()),
                     result);
@@ -524,7 +528,7 @@ class V1ScenarioExecutorTest {
                         Optional.empty(),
                         Optional.of(confirmedOrigins()),
                         List.of(),
-                        Optional.empty(),
+                        FlinkRuntimeIdentityTest.expected(Optional.empty()),
                         List.of()));
 
         assertTrue(failure.getMessage().contains("confirmed effect"));
@@ -568,7 +572,7 @@ class V1ScenarioExecutorTest {
                         Optional.empty(),
                         Optional.of(confirmedOrigins()),
                         List.of(),
-                        Optional.empty(),
+                        FlinkRuntimeIdentityTest.expected(Optional.empty()),
                         List.of()));
 
         assertTrue(failure.getMessage().contains("network fault"), failure.getMessage());

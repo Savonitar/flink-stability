@@ -4,6 +4,7 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
+import org.savonitar.flink.stability.core.execution.FlinkRuntimeIdentity;
 import org.savonitar.flink.stability.core.execution.FlinkTerminalWriteFence;
 import org.savonitar.flink.stability.core.execution.PhaseExecutionEvidence;
 import org.savonitar.flink.stability.core.execution.SubjectClassOrigins;
@@ -17,6 +18,7 @@ import org.savonitar.flink.stability.core.validation.kafka.KafkaIdSetValidationR
 import org.savonitar.flink.stability.runtime.api.FlinkProcessWriteFenceEvidence;
 import org.savonitar.flink.stability.runtime.api.FlinkComponentProvisioningEvidence;
 import org.savonitar.flink.stability.runtime.api.FlinkComponentRole;
+import org.savonitar.flink.stability.runtime.api.ProvisionedConnectorArtifact;
 import picocli.CommandLine;
 
 import java.io.IOException;
@@ -231,7 +233,50 @@ class RunScenarioCommandTest {
                 () -> assertEquals(IMAGE_ID, runtime.at("/components/1/imageId").textValue()),
                 () -> assertEquals("0".repeat(64),
                         runtime.at("/components/1/targetBindingSha256").textValue()),
+                () -> assertEquals(1, runtime.path("connectorArtifactSets").size()),
+                () -> assertTrue(runtime.at("/connectorArtifactSets/0").isEmpty()),
+                () -> assertEquals(0, runtime.at("/components/0/connectorArtifactsRef").intValue()),
+                () -> assertEquals(0, runtime.at("/components/1/connectorArtifactsRef").intValue()),
                 () -> assertFalse(runtime.has("registryDigest")));
+    }
+
+    @Test
+    void sharesIdenticalArtifactListsWithoutHidingDifferentObservedEntries() throws Exception {
+        List<ProvisionedConnectorArtifact> artifacts = List.of(new ProvisionedConnectorArtifact(
+                0, "/opt/flink/lib/flink-stability-connector-00000000-" + "a".repeat(64) + ".jar", "a".repeat(64)));
+        List<ProvisionedConnectorArtifact> changed = List.of(new ProvisionedConnectorArtifact(
+                0, "/opt/flink/lib/flink-stability-connector-00000000-" + "b".repeat(64) + ".jar", "b".repeat(64)));
+        List<FlinkComponentProvisioningEvidence> components = new ArrayList<>();
+        for (int incarnation = 0; incarnation < 4; incarnation++) {
+            components.add(FlinkComponentProvisioningEvidence.verified(
+                    incarnation == 0 ? "jobmanager-1" : "taskmanager-1",
+                    incarnation == 0 ? FlinkComponentRole.JOB_MANAGER : FlinkComponentRole.TASK_MANAGER,
+                    "container-" + incarnation, "flink:2.2.0", IMAGE_ID,
+                    String.valueOf(incarnation).repeat(64), "1".repeat(64),
+                    incarnation == 3 ? changed : artifacts));
+        }
+        JsonNode runtime = JSON.readTree(new V1ExecutionResultRenderer().render(
+                "bounded-eos", context("1234abcd"), expectation,
+                result(V1ScenarioExecutionResult.Status.INCONCLUSIVE, "test.partial", components)))
+                .at("/evidence/flinkRuntime");
+
+        assertEquals(2, runtime.path("connectorArtifactSets").size());
+        for (int incarnation = 0; incarnation < 4; incarnation++) {
+            JsonNode rendered = runtime.path("components").get(incarnation);
+            assertEquals("container-" + incarnation, rendered.path("runtimeId").textValue());
+            assertEquals(String.valueOf(incarnation).repeat(64),
+                    rendered.path("targetBindingSha256").textValue());
+            assertEquals("1".repeat(64), rendered.path("classpathManifestSha256").textValue());
+            assertEquals(incarnation == 3 ? 1 : 0, rendered.path("connectorArtifactsRef").intValue());
+            assertFalse(rendered.has("connectorArtifacts"));
+            JsonNode entries = runtime.path("connectorArtifactSets")
+                    .get(rendered.path("connectorArtifactsRef").intValue());
+            assertEquals(1, entries.size());
+            assertEquals(0, entries.get(0).path("index").intValue());
+            ProvisionedConnectorArtifact observed = components.get(incarnation).connectorArtifacts().getFirst();
+            assertEquals(observed.containerPath(), entries.get(0).path("containerPath").textValue());
+            assertEquals(observed.sha256(), entries.get(0).path("sha256").textValue());
+        }
     }
 
     @Test
@@ -267,7 +312,7 @@ class RunScenarioCommandTest {
                 Optional.empty(),
                 SUBJECT_ORIGINS,
                 runtimeComponents(),
-                Optional.of(IMAGE_ID),
+                EXPECTED_RUNTIME,
                 List.of());
 
         JsonNode output = JSON.readTree(new V1ExecutionResultRenderer().render(
@@ -349,7 +394,7 @@ class RunScenarioCommandTest {
                 Optional.empty(),
                 SUBJECT_ORIGINS,
                 runtimeComponents(),
-                Optional.of(IMAGE_ID),
+                EXPECTED_RUNTIME,
                 List.of());
 
         JsonNode evidence = JSON.readTree(new V1ExecutionResultRenderer().render(
@@ -723,6 +768,10 @@ class RunScenarioCommandTest {
                     Optional.empty());
 
     private static final String IMAGE_ID = "sha256:" + "a".repeat(64);
+    private static final FlinkRuntimeIdentity.ExpectedTarget EXPECTED_RUNTIME =
+            new FlinkRuntimeIdentity.ExpectedTarget(Optional.of(IMAGE_ID), Map.of(
+                    "jobmanager-1", FlinkComponentRole.JOB_MANAGER,
+                    "taskmanager-1", FlinkComponentRole.TASK_MANAGER));
 
     private static List<FlinkComponentProvisioningEvidence> runtimeComponents() {
         return List.of(
@@ -771,7 +820,7 @@ class RunScenarioCommandTest {
                 Optional.empty(),
                 SUBJECT_ORIGINS,
                 runtimeComponents(),
-                Optional.of(IMAGE_ID),
+                EXPECTED_RUNTIME,
                 List.of());
     }
 
@@ -805,7 +854,7 @@ class RunScenarioCommandTest {
                 Optional.empty(),
                 SUBJECT_ORIGINS,
                 runtimeComponents(),
-                Optional.of(IMAGE_ID),
+                EXPECTED_RUNTIME,
                 List.of());
     }
 
@@ -839,7 +888,7 @@ class RunScenarioCommandTest {
                 Optional.empty(),
                 SUBJECT_ORIGINS,
                 runtimeComponents(),
-                Optional.of(IMAGE_ID),
+                EXPECTED_RUNTIME,
                 List.of());
     }
 
@@ -891,6 +940,13 @@ class RunScenarioCommandTest {
     private static V1ScenarioExecutionResult result(
             V1ScenarioExecutionResult.Status status,
             String reason) {
+        return result(status, reason, List.of());
+    }
+
+    private static V1ScenarioExecutionResult result(
+            V1ScenarioExecutionResult.Status status,
+            String reason,
+            List<FlinkComponentProvisioningEvidence> components) {
         return new V1ScenarioExecutionResult(
                 status,
                 reason,
@@ -903,8 +959,8 @@ class RunScenarioCommandTest {
                 Optional.empty(),
                 Optional.empty(),
                 Optional.empty(),
-                List.of(),
-                Optional.empty(),
+                components,
+                new FlinkRuntimeIdentity.ExpectedTarget(Optional.empty(), EXPECTED_RUNTIME.components()),
                 List.of("diagnostic"));
     }
 

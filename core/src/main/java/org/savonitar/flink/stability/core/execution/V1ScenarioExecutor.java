@@ -133,6 +133,8 @@ public final class V1ScenarioExecutor {
             V1AttemptContext context,
             AttemptResources resources) {
         ExecutableScenarioPlan plan = prepared.executablePlan();
+        FlinkRuntimeIdentity.ExpectedTarget expectedRuntime = new FlinkRuntimeIdentity.ExpectedTarget(
+                plan.flink().expectedImageId(), plan.flink().expectedComponents());
 
         V1AttemptRuntime runtime = null;
         FlinkScenarioControl flink = null;
@@ -270,7 +272,7 @@ public final class V1ScenarioExecutor {
                     sinkTransactions,
                     subjectOrigins,
                     runtime,
-                    prepared.flinkRuntimeTarget().expectedImageId(),
+                    expectedRuntime,
                     evidenceDiagnostics);
         } catch (KafkaInputPreparationException failure) {
             inputEvidence = failure.evidence().orElse(inputEvidence);
@@ -287,7 +289,7 @@ public final class V1ScenarioExecutor {
                     sinkTransactions,
                     subjectOrigins,
                     runtime,
-                    prepared.flinkRuntimeTarget().expectedImageId(),
+                    expectedRuntime,
                     diagnostics(failure));
         } catch (PhaseExecutionException failure) {
             phases = failure.evidence();
@@ -308,7 +310,7 @@ public final class V1ScenarioExecutor {
                     sinkTransactions,
                     subjectOrigins,
                     runtime,
-                    prepared.flinkRuntimeTarget().expectedImageId(),
+                    expectedRuntime,
                     diagnostics(failure));
         } catch (TerminalWriteFenceException failure) {
             processFence = failure.processFenceEvidence().orElse(null);
@@ -326,7 +328,7 @@ public final class V1ScenarioExecutor {
                     sinkTransactions,
                     subjectOrigins,
                     runtime,
-                    prepared.flinkRuntimeTarget().expectedImageId(),
+                    expectedRuntime,
                     diagnostics(failure));
         } catch (InterruptedException failure) {
             Thread.currentThread().interrupt();
@@ -343,7 +345,7 @@ public final class V1ScenarioExecutor {
                     sinkTransactions,
                     subjectOrigins,
                     runtime,
-                    prepared.flinkRuntimeTarget().expectedImageId(),
+                    expectedRuntime,
                     diagnostics(failure));
         } catch (Exception failure) {
             result = result(
@@ -359,7 +361,7 @@ public final class V1ScenarioExecutor {
                     sinkTransactions,
                     subjectOrigins,
                     runtime,
-                    prepared.flinkRuntimeTarget().expectedImageId(),
+                    expectedRuntime,
                     diagnostics(failure));
         }
 
@@ -417,7 +419,7 @@ public final class V1ScenarioExecutor {
             KafkaTransactionListing sinkTransactions,
             SubjectClassOrigins subjectOrigins,
             V1AttemptRuntime runtime,
-            Optional<String> expectedImageId,
+            FlinkRuntimeIdentity.ExpectedTarget expectedRuntime,
             List<String> diagnostics) {
         List<String> retainedDiagnostics = new ArrayList<>(diagnostics);
         List<FlinkComponentProvisioningEvidence> provisioning = List.of();
@@ -428,7 +430,7 @@ public final class V1ScenarioExecutor {
         } catch (RuntimeException unavailable) {
             retainedDiagnostics.add("flink.provisioning-evidence-unavailable: " + unavailable);
         }
-        FlinkRuntimeIdentity identity = FlinkRuntimeIdentity.evaluate(expectedImageId,
+        FlinkRuntimeIdentity identity = FlinkRuntimeIdentity.evaluate(expectedRuntime,
                 provisioning, Optional.ofNullable(processFence), Optional.ofNullable(phases));
         if (status == V1ScenarioExecutionResult.Status.PASS
                 && identity.outcome() != FlinkRuntimeIdentity.Outcome.CONFIRMED) {
@@ -450,7 +452,7 @@ public final class V1ScenarioExecutor {
                 Optional.ofNullable(sinkTransactions),
                 Optional.ofNullable(subjectOrigins),
                 provisioning,
-                expectedImageId,
+                expectedRuntime,
                 retainedDiagnostics);
     }
 

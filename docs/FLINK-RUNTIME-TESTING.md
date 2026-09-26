@@ -48,6 +48,9 @@ both results, including failures. A green candidate only covers the exercised sc
 Every successful Flink process start records the logical component, role, physical
 container ID, declared image reference, observed Docker image ID, and connector bundle
 identities. The JSON result retains every incarnation, including replaced TaskManagers.
+Each component's `connectorArtifactsRef` indexes the shared `connectorArtifactSets`
+array. Only identical ordered JAR entries are shared; each process retains its own
+observed hashes. The expected logical components and roles come from the executable plan.
 The runtime identity check requires one consistent image across the attempt and a match
 with `image_id` when supplied. Missing or inconsistent evidence cannot produce a passing
 scenario, including an expected-failure control; an observed data failure stays recorded.
@@ -64,25 +67,25 @@ or that a particular runtime class or changed code path executed. Connector clas
 evidence remains a separate check. Runtime JAR checksums and runtime class-load evidence
 remain work to complete before claiming source-level PR provenance.
 
-## Remaining capability work
+## Supported scope
 
 The compatibility registry still requires Flink 2.2 and a compatible Kafka connector and
-workload. An image ID does not override this check. PR #28639's pinned Flink 2.4 snapshot
-therefore remains outside the executable subset; do not disguise it with a 2.2 tag.
-
-Testing its delegation-token behavior through the engine requires compatible runtime,
-connector and workload builds, synthetic token providers with issuance/receipt/use
-evidence, multiple real jobs, and controlled ResourceManager leadership changes. Those
-capabilities need executable scenarios and healthy/faulty controls. Tests of Flink's
-internal token manager belong in Flink's repository. They are not engine chaos runs.
+workload. An image ID does not override this check or establish compatibility with another
+version. The executable topology and fault types remain those listed in the
+[README](../README.md#current-executable-subset).
 
 ## Verification
 
-On 2026-09-27, the JDK 21 `mvn clean install` suite passed 673 tests with no failures,
-errors or skips; the Python tooling suite passed 16 tests. A real Docker `bounded-eos`
-run on the released `flink:2.2.0` image with its explicit image ID passed: all 3,000
+On 2026-09-27, after the inventory and report review fixes, the JDK 21
+`mvn clean install` suite passed 680 tests with no failures, errors or skips;
+the Python tooling suite passed 16 tests.
+
+Docker checks cover the initial image-identity implementation at `589f3ba`, before
+those review fixes. A real `bounded-eos` run on the released `flink:2.2.0` image with
+its explicit image ID passed: all 3,000
 records were present exactly once, the TaskManager kill/recovery effect was confirmed,
 and the JobManager plus both TaskManager incarnations had matching image IDs. A second
 run with a deliberately wrong image ID stopped before Flink process start, returned
 `inconclusive / infrastructure.flink-start-failed`, and retained both IDs in diagnostics.
 These checks validate the engine's image verification, not a Flink PR or token behavior.
+Docker checks were not repeated for the inventory and report review fixes.

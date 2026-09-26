@@ -674,7 +674,9 @@ Connector pull-request gating is the same mechanism with one axis:
   successfully provisioned incarnation. An image pin does not relax the version
   compatibility registry or introduce support for image-changing restart steps.
   Before a successful attempt or an expected-failure scenario can pass, its
-  provisioning evidence must cover the fenced components and successful
+  provisioning and process-fence evidence must cover every logical component and
+  role expected by the executable plan. Observed evidence must not define the
+  expected inventory. Provisioning evidence must also cover successful
   TaskManager replacements with one matching image ID. Missing or inconsistent
   evidence is inconclusive; preserve any separately observed terminal data
   failure. Image identity does not replace the connector class-load check and
@@ -1598,7 +1600,11 @@ Connector pull-request gating is the same mechanism with one axis:
   includes the expected image ID when declared, identity-check outcome and detail,
   and every provisioned incarnation's logical component, role, container ID,
   declared image reference, observed Docker image ID, and connector bundle hashes
-  (R4.13e). It also includes the
+  (R4.13e). Each component's `connectorArtifactsRef` is a zero-based index into
+  `evidence.flinkRuntime.connectorArtifactSets`, which stores each distinct ordered
+  list of observed JAR entries once. Lists are shared only when all entries match,
+  not merely when their reported manifest hashes match; per-component hashes remain
+  recorded separately. It also includes the
   last job observation of R6.12a as `evidence.flinkJob` (`observed`,
   `unavailable` with its failure, or `not-run`) and one `evidence.taskManagerKills`
   entry per confirmed kill: step path and loop iterations, target, effect outcome,
