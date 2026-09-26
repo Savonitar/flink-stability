@@ -1,0 +1,22 @@
+--- a/org/apache/flink/connector/kafka/sink/internal/KafkaCommitter.java
++++ b/org/apache/flink/connector/kafka/sink/internal/KafkaCommitter.java
+@@ -105,7 +105,18 @@
+             } catch (RetriableException e) {
+                 LOG.warn(
+                         "Encountered retriable exception while committing {}.", transactionalId, e);
+-                request.retryLater();
++                if (!(e instanceof org.apache.kafka.common.errors.TimeoutException)) {
++                    request.retryLater();
++                    continue;
++                }
++                if (producer == null || writerProducer.isEmpty()) {
++                    throw new IllegalStateException(
++                            "CALIBRATION_UNSUPPORTED recovered or non-chained committable", e);
++                }
++                int replayed = producer.calibrationReplayUnknownCommit();
++                // Discard the original producer; the commit request itself completes successfully.
++                backchannel.send(TransactionFinished.erroneously(committable.getTransactionalId()));
++                System.err.println("CALIBRATION_REWRITE_COMPLETE tx=" + transactionalId + " records=" + replayed);
+             } catch (ProducerFencedException e) {
+                 logFencedRequest(request, e);
+                 handleFailedTransaction(producer);

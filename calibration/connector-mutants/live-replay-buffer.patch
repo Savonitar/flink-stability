@@ -1,0 +1,70 @@
+--- a/org/apache/flink/connector/kafka/sink/internal/FlinkKafkaInternalProducer.java
++++ b/org/apache/flink/connector/kafka/sink/internal/FlinkKafkaInternalProducer.java
+@@ -57,6 +57,7 @@
+     @Nullable private String transactionalId;
+     private volatile TransactionState transactionState = TransactionState.NOT_IN_TRANSACTION;
+     private volatile boolean closed;
++    @Nullable private CalibrationReplay calibrationReplay;
+ 
+     public FlinkKafkaInternalProducer(Properties properties) {
+         super(properties);
+@@ -66,6 +67,7 @@
+     public FlinkKafkaInternalProducer(Properties properties, String transactionalId) {
+         super(withTransactionalId(properties, transactionalId));
+         this.transactionalId = transactionalId;
++        this.calibrationReplay = new CalibrationReplay(withTransactionalId(properties, transactionalId));
+         LOG.info("Created transactional {}", this);
+     }
+ 
+@@ -82,6 +84,10 @@
+     @Override
+     public Future<RecordMetadata> send(ProducerRecord<K, V> record, Callback callback) {
+         if (isInTransaction()) {
++            if (calibrationReplay == null) {
++                throw new IllegalStateException("CALIBRATION_UNSUPPORTED no transactional buffer");
++            }
++            calibrationReplay.capture(record);
+             transactionState = TransactionState.DATA_IN_TRANSACTION;
+         }
+         return super.send(record, callback);
+@@ -98,6 +104,7 @@
+     @Override
+     public void beginTransaction() throws ProducerFencedException {
+         super.beginTransaction();
++        calibrationReplay.begin(transactionalId);
+         LOG.debug("beginTransaction {}", transactionalId);
+         transactionState = TransactionState.IN_TRANSACTION;
+     }
+@@ -107,7 +114,11 @@
+         LOG.debug("abortTransaction {}", transactionalId);
+         checkState(isInTransaction(), "Transaction was not started");
+         transactionState = TransactionState.NOT_IN_TRANSACTION;
+-        super.abortTransaction();
++        try {
++            super.abortTransaction();
++        } finally {
++            calibrationReplay.clear();
++        }
+     }
+ 
+     @Override
+@@ -117,11 +128,19 @@
+         transactionState = TransactionState.NOT_IN_TRANSACTION;
+         try {
+             super.commitTransaction();
++            if (calibrationReplay != null) calibrationReplay.clear();
+         } catch (org.apache.kafka.common.errors.TimeoutException timeout) {
+             System.err.println("CALIBRATION_COMMIT_TIMEOUT tx=" + transactionalId
+                     + " maxBlockMs=5000 requestTimeoutMs=30000");
+             throw timeout;
+         }
++    }
++
++    public int calibrationReplayUnknownCommit() {
++        if (calibrationReplay == null) {
++            throw new IllegalStateException("CALIBRATION_UNSUPPORTED no live payload buffer");
++        }
++        return calibrationReplay.replay(this::close);
+     }
+ 
+     public boolean isInTransaction() {
