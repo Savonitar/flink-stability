@@ -76,3 +76,29 @@ healthy control and two wrong-decision variants of the released connector agains
 EndTxn scenarios, and its README records the last results. Historical run counts and CLI
 byte-comparison claims without their commands and retained outputs are not substitutes
 for rerunning these checks on the current changes.
+
+## Findings and sensitivity
+
+The harness exists to find defects in Flink, Kafka, and connectors. A failing or odd run
+is therefore a finding until someone explains it.
+
+- The following stay open findings:
+  - a violated data guarantee;
+  - an error from a component under test, such as an HTTP 500 from Flink's REST API;
+  - an `inconclusive` result whose cause is not understood.
+
+  An `infrastructure` or `inconclusive` reason says where a check stopped, not who is at
+  fault.
+- Before changing anything, keep the original scenario, versions, parameters, and run
+  outputs. A later passing run does not cancel an earlier observation.
+- Do not change an expectation, fault placement, timing, checkpointing, or load only to
+  make a run pass. Such scenario changes are regression-contract changes
+  ([SPEC-002 E5.6](specs/SPEC-002-expected-result-schema.md)). After one, re-run the
+  scenario's calibration; every deliberately wrong variant must still fail. The
+  connector-mutant calibration covers `commit-request-lost` and `commit-response-lost`.
+- A harness fix must explain the original failure. A run that turned green after the
+  change does not explain it.
+- A finding closes with one of these:
+  - a harness defect, shown and fixed;
+  - a component defect, fixed or reported upstream;
+  - a documented precondition of the guarantee, shown to be violated by the scenario.

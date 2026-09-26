@@ -153,6 +153,16 @@ cases:
   equally specific reason is a weakening change.
 - **E5.5** Adding a case that is equivalent to `default` is invalid; it adds no
   behavior and can drift silently.
+- **E5.6** A change to the pinned scenario that can decide whether a defect shows is a
+  contract change too. This covers fault steps and their placement, triggers,
+  deadlines, and occurrences; wait durations; checkpoint settings; transaction
+  timeouts; and workload volume or rate. Such a change keeps the same `outcome`, yet it
+  can remove the window that a defect needs.
+  - When a calibration covers the scenario, every calibrated variant must still fail
+    it after the change, and the run evidence is kept with the change. A calibrated
+    variant is a deliberately wrong subject that the scenario must catch.
+  - Without a calibration, the change must state why the scenario still reaches its
+    fault window.
 
 ## 6. Minimal examples
 
