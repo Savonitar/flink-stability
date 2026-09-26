@@ -1,16 +1,15 @@
 #!/usr/bin/env python3
 """Create six isolated canonical catalogs; never run a scenario or change its PASS expectation."""
 import argparse
-import hashlib
 import json
 from pathlib import Path
 import shutil
+import sys
 
 RECIPE = Path(__file__).resolve().parent
-
-
-def sha(path):
-    return hashlib.sha256(path.read_bytes()).hexdigest()
+sys.path.insert(0, str(RECIPE.parents[1] / "tools"))
+from subject_catalog import (artifact_reference, check_released_subject,  # noqa: E402
+                             replace_subject, sha256 as sha, subject_snippet)
 
 
 def main():
@@ -40,20 +39,14 @@ def main():
         anchor = "        transaction_id_naming_strategy: INCREMENTING\n"
         if text.count(anchor) != 1 or "transaction_timeout:" in text:
             raise SystemExit("Canonical sink shape changed; review the shared timeout before regenerating.")
-        before, remainder = text.split("\nsubject:\n", 1)
-        subject, after = remainder.split("\nworkload:\n", 1)
-        if subject.strip() != "connectors:\n    kafka:\n      artifact: maven:org.apache.flink:flink-connector-kafka:5.0.0-2.2":
-            raise SystemExit("Canonical subject changed; refusing to replace an unrecognized closure.")
+        check_released_subject(text)
         if "default:\n  outcome: pass" not in expected.read_text():
             raise SystemExit("Canonical expected PASS contract changed.")
         shared = text.replace(anchor, anchor + "        transaction_timeout: 60s\n")
         sources[side] = (name, scenario, expected, shared)
 
     def reference(path):
-        path = path.resolve()
-        if not path.is_file() or not path.is_relative_to(artifact_root):
-            raise SystemExit("Artifact must be a regular file inside --artifact-root: " + str(path))
-        return "./" + str(path.relative_to(artifact_root))
+        return artifact_reference(path, artifact_root)
 
     dependencies = []
     for name, digest in sorted(evidence["runtimeDependencySha256"].items()):
@@ -64,8 +57,7 @@ def main():
     for mode, info in evidence["artifacts"].items():
         path = Path(info["artifact"])
         if sha(path) != info["sha256"]: raise SystemExit("Primary artifact changed: " + mode)
-        subjects[mode] = "artifact: " + reference(path) + "\nruntime_dependencies:\n"
-        subjects[mode] += "".join("  - " + path + "\n" for path in dependencies)
+        subjects[mode] = subject_snippet(reference(path), dependencies)
     # All input validation happens before creating an output tree.
     output.mkdir(parents=True, exist_ok=False)
     archive = output / "evidence"
@@ -80,14 +72,11 @@ def main():
     for side, (name, scenario, expected, shared) in sources.items():
         shutil.copyfile(scenario, archive / (name + ".canonical.yaml"))
         (archive / (name + ".shared-controls.yaml")).write_text(shared)
-        before, remainder = shared.split("\nsubject:\n", 1)
-        _, after = remainder.split("\nworkload:\n", 1)
         for mode, snippet in subjects.items():
             cell = output / (mode + "-" + side)
             cell.mkdir()
-            subject = "  connectors:\n    kafka:\n" + "".join("      " + line + "\n" for line in snippet.splitlines())
             target = cell / scenario.name
-            target.write_text(before + "\nsubject:\n" + subject + "\nworkload:\n" + after)
+            target.write_text(replace_subject(shared, snippet))
             shutil.copyfile(expected, cell / expected.name)
             (cell / "subject-snippet.txt").write_text(snippet)
             row = {"cell": cell.name, "scenario": name, "artifactRoot": str(artifact_root),

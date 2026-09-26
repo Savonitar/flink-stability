@@ -17,6 +17,9 @@ checkpoints/
 !/docs/specs/SPEC-004-kroxylicious-fault-model.md
 !/docs/specs/SPEC-005-semantic-validation-test-cases.md
 
+### Python tooling ###
+__pycache__/
+
 ### IntelliJ IDEA ###
 .idea/
 *.iws

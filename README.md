@@ -154,6 +154,9 @@ The executable reference pairs are:
   or successful response after the fault is armed, following checkpoint warmup.
   The output must still be exact.
 
+To run these scenarios against a locally built Kafka connector, such as a pull
+request under review, see [testing a connector pull request](docs/PR-TESTING.md).
+
 ## Current executable subset
 
 The first runner supports:
