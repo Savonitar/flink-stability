@@ -36,24 +36,51 @@ public final class ExecutablePhaseExecutor {
     public static final String TASKMANAGER_RESTART_INFRASTRUCTURE =
             "taskmanager.restart.infrastructure";
     public static final String TASKMANAGER_RESTART_TIMEOUT = "taskmanager.restart.timeout";
+    /** The proxy could not arm or heal a network fault, or its evidence was unreadable. */
+    public static final String NETWORK_FAULT_INFRASTRUCTURE = "network-fault.infrastructure";
+    /** A passing oracle, but a network fault missed occurrences by its trigger deadline. */
+    public static final String NETWORK_FAULT_TRIGGER_MISSED = "network-fault.trigger-missed";
 
     private final FlinkScenarioControl flink;
     private final TaskManagerControl taskManagers;
+    private final NetworkFaults networkFaults;
     private final PhaseSleeper sleeper;
 
     public ExecutablePhaseExecutor(
             FlinkScenarioControl flink,
-            TaskManagerControl taskManagers) {
-        this(flink, taskManagers, ExecutablePhaseExecutor::sleep);
+            TaskManagerControl taskManagers,
+            NetworkFaults networkFaults) {
+        this(flink, taskManagers, networkFaults, ExecutablePhaseExecutor::sleep);
     }
 
     public ExecutablePhaseExecutor(
             FlinkScenarioControl flink,
             TaskManagerControl taskManagers,
+            NetworkFaults networkFaults,
             PhaseSleeper sleeper) {
         this.flink = Objects.requireNonNull(flink, "flink");
         this.taskManagers = Objects.requireNonNull(taskManagers, "taskManagers");
+        this.networkFaults = Objects.requireNonNull(networkFaults, "networkFaults");
         this.sleeper = Objects.requireNonNull(sleeper, "sleeper");
+    }
+
+    /** Injects one EndTxn fault at the proxy and reports what it did. */
+    @FunctionalInterface
+    public interface NetworkFaults {
+        /** For plans without a proxy, which the compiler never gives a network fault step. */
+        NetworkFaults NONE = (path, fault) -> {
+            throw new IllegalStateException("The plan declares no Kafka proxy");
+        };
+
+        PhaseExecutionEvidence.NetworkFault inject(
+                String path,
+                ExecutableScenarioPlan.EndTxnFault fault) throws IOException, InterruptedException;
+
+        /** Completes a fault's evidence once no client can send again (SPEC-004 K6.12). */
+        default PhaseExecutionEvidence.NetworkFault withObservedRetries(
+                PhaseExecutionEvidence.NetworkFault fault) throws IOException {
+            return fault;
+        }
     }
 
     public PhaseExecutionEvidence execute(
@@ -102,6 +129,9 @@ public final class ExecutablePhaseExecutor {
             } else if (step instanceof ExecutableScenarioPlan.RestartTaskManager) {
                 restartTaskManager(
                         phaseIndex, phaseName, path, loopIterations, evidence);
+            } else if (step instanceof ExecutableScenarioPlan.EndTxnFault fault) {
+                injectNetworkFault(
+                        phaseIndex, phaseName, path, loopIterations, fault, evidence);
             } else if (step instanceof ExecutableScenarioPlan.Loop loop) {
                 executeLoop(
                         phaseIndex,
@@ -360,6 +390,52 @@ public final class ExecutablePhaseExecutor {
         }
     }
 
+    private void injectNetworkFault(
+            int phaseIndex,
+            String phaseName,
+            String path,
+            List<PhaseExecutionEvidence.LoopIteration> loopIterations,
+            ExecutableScenarioPlan.EndTxnFault fault,
+            Recorder evidence)
+            throws PhaseExecutionException {
+        try {
+            PhaseExecutionEvidence.NetworkFault observed = networkFaults.inject(path, fault);
+            evidence.networkFaults.add(observed);
+            succeeded(
+                    evidence,
+                    phaseIndex,
+                    phaseName,
+                    path,
+                    loopIterations,
+                    PhaseExecutionEvidence.StepKind.NETWORK_FAULT,
+                    "fault=" + observed.faultId() + " dropped=" + observed.dropped().size()
+                            + "/" + observed.occurrences());
+        } catch (InterruptedException interrupted) {
+            Thread.currentThread().interrupt();
+            throw failed(
+                    evidence,
+                    phaseIndex,
+                    phaseName,
+                    path,
+                    loopIterations,
+                    PhaseExecutionEvidence.StepKind.NETWORK_FAULT,
+                    PhaseExecutionException.Outcome.INCONCLUSIVE,
+                    NETWORK_FAULT_INFRASTRUCTURE,
+                    interrupted);
+        } catch (Exception failure) {
+            throw failed(
+                    evidence,
+                    phaseIndex,
+                    phaseName,
+                    path,
+                    loopIterations,
+                    PhaseExecutionEvidence.StepKind.NETWORK_FAULT,
+                    PhaseExecutionException.Outcome.INCONCLUSIVE,
+                    NETWORK_FAULT_INFRASTRUCTURE,
+                    failure);
+        }
+    }
+
     private void executeLoop(
             int phaseIndex,
             String phaseName,
@@ -438,7 +514,7 @@ public final class ExecutablePhaseExecutor {
         };
     }
 
-    private static void sleep(Duration duration) throws InterruptedException {
+    static void sleep(Duration duration) throws InterruptedException {
         Thread.sleep(duration.toMillis(), duration.toNanosPart() % 1_000_000);
     }
 
@@ -446,9 +522,10 @@ public final class ExecutablePhaseExecutor {
     private static final class Recorder {
         private final List<PhaseExecutionEvidence.StepEvidence> steps = new ArrayList<>();
         private final List<PhaseExecutionEvidence.TaskManagerKill> kills = new ArrayList<>();
+        private final List<PhaseExecutionEvidence.NetworkFault> networkFaults = new ArrayList<>();
 
         private PhaseExecutionEvidence snapshot() {
-            return new PhaseExecutionEvidence(steps, kills);
+            return new PhaseExecutionEvidence(steps, kills, networkFaults);
         }
     }
 }

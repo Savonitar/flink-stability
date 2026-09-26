@@ -148,6 +148,45 @@ final class V1ExecutionResultRenderer {
             }
             kill.put("detail", effect.detail());
         }
+        ArrayNode networkFaults = evidence.putArray("networkFaults");
+        result.phaseEvidence().ifPresent(phases -> phases.networkFaults().forEach(fault -> {
+            ObjectNode rendered = networkFaults.addObject();
+            rendered.put("path", fault.path());
+            rendered.put("faultId", fault.faultId());
+            rendered.put("proxy", fault.proxy());
+            rendered.put("proxyImage", fault.proxyImage());
+            rendered.put("action", fault.action().name().toLowerCase(Locale.ROOT)
+                    .replace('_', '-'));
+            rendered.put("occurrences", fault.occurrences());
+            rendered.put("triggered", fault.triggered());
+            rendered.put("triggerDeadline", fault.triggerDeadline().toString());
+            rendered.put("armedAtMillis", fault.armedAtMillis());
+            rendered.put("healedAtMillis", fault.healedAtMillis());
+            ArrayNode forwardedErrors = rendered.putArray("forwardedErrors");
+            fault.forwardedErrors().forEach(forwardedErrors::add);
+            ArrayNode dropped = rendered.putArray("dropped");
+            fault.dropped().forEach(message -> {
+                ObjectNode drop = dropped.addObject();
+                drop.put("occurrence", message.occurrence());
+                drop.put("claim", message.claim());
+                drop.put("droppedAtMillis", message.droppedAtMillis());
+                drop.put("beforeDeadline", message.beforeDeadline());
+                drop.put("transactionalId", message.transactionalId());
+                drop.put("producerId", message.producerId());
+                drop.put("producerEpoch", message.producerEpoch());
+                drop.put("committed", message.committed());
+                message.brokerAnswer().ifPresent(answer -> {
+                    drop.put("brokerError", answer.error());
+                    drop.put("brokerProducerEpoch", answer.producerEpoch());
+                });
+                message.retry().ifPresent(retry -> {
+                    drop.put("retryObservedAtMillis", retry.observedAtMillis());
+                    drop.put("retryAfterMillis",
+                            retry.observedAtMillis() - message.droppedAtMillis());
+                    drop.put("retryClientId", retry.clientId());
+                });
+            });
+        }));
         ObjectNode processFence = evidence.putObject("processFence");
         processFence.put("status", "not-run");
         processFence.put("completed", false);

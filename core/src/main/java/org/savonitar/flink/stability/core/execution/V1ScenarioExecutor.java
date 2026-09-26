@@ -18,14 +18,17 @@ import org.savonitar.flink.stability.core.validation.kafka.KafkaTransactionListi
 import org.savonitar.flink.stability.runtime.api.FlinkComponentProvisioningEvidence;
 import org.savonitar.flink.stability.runtime.api.FlinkProcessWriteFenceEvidence;
 import org.savonitar.flink.stability.runtime.api.KafkaRuntimeEndpoints;
+import org.savonitar.flink.stability.runtime.api.KafkaProxyEndpoint;
 import org.savonitar.flink.stability.runtime.api.V1AttemptRuntime;
 import org.savonitar.flink.stability.runtime.api.V1AttemptRuntimeFactory;
 
+import java.io.IOException;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
+import java.util.function.Function;
 
 /** Executes the first bounded, plain v1 scenario vertical without legacy-schema fallback. */
 public final class V1ScenarioExecutor {
@@ -44,6 +47,7 @@ public final class V1ScenarioExecutor {
     private final TerminalValidation terminalValidation;
     private final TransactionListing transactionListing;
     private final AttemptCleanupBoundary cleanupBoundary;
+    private final Function<KafkaProxyEndpoint, ExecutablePhaseExecutor.NetworkFaults> networkFaultFactory;
 
     public V1ScenarioExecutor(V1AttemptRuntimeFactory runtimeFactory) {
         this(
@@ -77,6 +81,20 @@ public final class V1ScenarioExecutor {
             TerminalValidation terminalValidation,
             TransactionListing transactionListing,
             Duration cleanupTimeout) {
+        this(runtimeFactory, inputPreparation, flinkControlFactory, terminalValidation,
+                transactionListing, cleanupTimeout,
+                endpoint -> new ProxyFaultInjector(endpoint, System::nanoTime,
+                        ExecutablePhaseExecutor::sleep));
+    }
+
+    V1ScenarioExecutor(
+            V1AttemptRuntimeFactory runtimeFactory,
+            InputPreparation inputPreparation,
+            FlinkControlFactory flinkControlFactory,
+            TerminalValidation terminalValidation,
+            TransactionListing transactionListing,
+            Duration cleanupTimeout,
+            Function<KafkaProxyEndpoint, ExecutablePhaseExecutor.NetworkFaults> networkFaultFactory) {
         this.runtimeFactory = Objects.requireNonNull(runtimeFactory, "runtimeFactory");
         this.inputPreparation = Objects.requireNonNull(
                 inputPreparation, "inputPreparation");
@@ -87,6 +105,7 @@ public final class V1ScenarioExecutor {
         this.transactionListing = Objects.requireNonNull(
                 transactionListing, "transactionListing");
         this.cleanupBoundary = new AttemptCleanupBoundary(cleanupTimeout);
+        this.networkFaultFactory = Objects.requireNonNull(networkFaultFactory, "networkFaultFactory");
     }
 
     public V1ScenarioExecutionResult execute(
@@ -135,6 +154,9 @@ public final class V1ScenarioExecutor {
             resources.runtime = runtime;
             stage = Stage.KAFKA_START;
             KafkaRuntimeEndpoints endpoints = runtime.startKafka(plan.kafka().runtimeTarget());
+            stage = Stage.KAFKA_PROXY_START;
+            ExecutablePhaseExecutor.NetworkFaults networkFaults = startKafkaProxy(
+                    runtime, plan, endpoints.internalBootstrapServers());
             stage = Stage.INPUT_PREPARATION;
             input = inputPreparation.prepare(plan, endpoints);
             inputEvidence = input.inputManifest();
@@ -159,7 +181,8 @@ public final class V1ScenarioExecutor {
                     configuration,
                     plan.job().programArguments().values()));
             stage = Stage.PHASES;
-            phases = new ExecutablePhaseExecutor(flink, runtime).execute(plan, job);
+            phases = new ExecutablePhaseExecutor(flink, runtime, networkFaults)
+                    .execute(plan, job);
 
             stage = Stage.WRITE_FENCE;
             fence = new FlinkTerminalWriteFence(
@@ -167,6 +190,8 @@ public final class V1ScenarioExecutor {
                     .awaitBoundedCompletion(job, plan.jobCompletionTimeout());
             processFence = fence.processFenceEvidence();
             finalJob = fence.jobBeforeFence();
+            // No Flink process can send again, so every retry of a dropped message is recorded.
+            phases = withObservedRetries(phases, networkFaults, evidenceDiagnostics);
             // Every Flink JVM is dead now, so each class-load log is complete.
             subjectOrigins = subjectOrigins(runtime, prepared);
 
@@ -188,6 +213,10 @@ public final class V1ScenarioExecutor {
                             phases.taskManagerKills(), Optional.of(finalJob))
                     .stream()
                     .filter(effect -> !effect.outcome().confirmed())
+                    .findFirst();
+            Optional<PhaseExecutionEvidence.NetworkFault> missedFault = phases.networkFaults()
+                    .stream()
+                    .filter(fault -> !fault.triggered())
                     .findFirst();
             SubjectClassOrigins.Outcome subjectUse = subjectOrigins.outcome(ENTRY_CLASSES);
             V1ScenarioExecutionResult.Status status;
@@ -212,12 +241,20 @@ public final class V1ScenarioExecutor {
                 message = "The terminal oracle passed, but the TaskManager kill at "
                         + effect.kill().path() + " did not observably affect the job ("
                         + effect.outcome() + "): " + effect.detail();
+            } else if (missedFault.isPresent()) {
+                PhaseExecutionEvidence.NetworkFault fault = missedFault.orElseThrow();
+                status = V1ScenarioExecutionResult.Status.INCONCLUSIVE;
+                reason = ExecutablePhaseExecutor.NETWORK_FAULT_TRIGGER_MISSED;
+                message = "The terminal oracle passed, but the network fault at " + fault.path()
+                        + " dropped " + fault.droppedBeforeDeadline() + " of "
+                        + fault.occurrences() + " matching messages within "
+                        + fault.triggerDeadline();
             } else {
                 status = V1ScenarioExecutionResult.Status.PASS;
                 reason = validation.reason();
-                message = phases.taskManagerKills().isEmpty()
+                message = phases.taskManagerKills().isEmpty() && phases.networkFaults().isEmpty()
                         ? "The terminal oracle passed"
-                        : "The terminal oracle passed and every TaskManager kill had a"
+                        : "The terminal oracle passed and every injected fault had a"
                                 + " confirmed effect";
             }
             result = result(
@@ -480,9 +517,40 @@ public final class V1ScenarioExecutor {
                 java.time.Duration timeout);
     }
 
+    /** A missing retry witness is only missing evidence: it never changes the verdict. */
+    private static PhaseExecutionEvidence withObservedRetries(
+            PhaseExecutionEvidence phases,
+            ExecutablePhaseExecutor.NetworkFaults networkFaults,
+            List<String> diagnostics) {
+        List<PhaseExecutionEvidence.NetworkFault> completed = new ArrayList<>();
+        for (PhaseExecutionEvidence.NetworkFault fault : phases.networkFaults()) {
+            try {
+                completed.add(networkFaults.withObservedRetries(fault));
+            } catch (IOException | RuntimeException unreadable) {
+                diagnostics.add("network-fault.retry-evidence-unavailable: " + fault.faultId()
+                        + ": " + unreadable.getClass().getSimpleName() + ": "
+                        + unreadable.getMessage());
+                completed.add(fault);
+            }
+        }
+        return new PhaseExecutionEvidence(phases.steps(), phases.taskManagerKills(), completed);
+    }
+
+    /** Starts the plan's Kafka proxy, if it has one, and returns how to fault through it. */
+    private ExecutablePhaseExecutor.NetworkFaults startKafkaProxy(
+            V1AttemptRuntime runtime,
+            ExecutableScenarioPlan plan,
+            String upstreamBootstrapServers) {
+        return plan.kafka().proxy()
+                .map(proxy -> networkFaultFactory.apply(runtime.startKafkaProxy(
+                        proxy.runtimeTarget(upstreamBootstrapServers))))
+                .orElse(ExecutablePhaseExecutor.NetworkFaults.NONE);
+    }
+
     private enum Stage {
         RUNTIME_CREATION("infrastructure.attempt-runtime-creation-failed", "runtime creation"),
         KAFKA_START("infrastructure.kafka-start-failed", "Kafka startup"),
+        KAFKA_PROXY_START("infrastructure.kafka-proxy-start-failed", "Kafka proxy startup"),
         INPUT_PREPARATION("infrastructure.kafka-input-setup-failed", "input preparation"),
         FLINK_START("infrastructure.flink-start-failed", "Flink startup"),
         JOB_SUBMISSION("infrastructure.flink-submission-failed", "job submission"),

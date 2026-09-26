@@ -113,10 +113,32 @@ not timer-driven sleeps against an opaque TCP connection.
   traffic.
 - **K3.7** `fault` is required and declares what the proxy does to matching
   traffic.
-- **K3.8** `duration` is required for held network faults and uses the SPEC-001
-  duration grammar.
+- **K3.8** `duration` is required for held network faults (`delay`,
+  `disconnect`, `error-response`) and uses the SPEC-001 duration grammar. It is
+  not accepted for a counted fault (K3.11).
 - **K3.9** `heal` is required and must be `restore-proxy-rule` in v1.
-- **K3.10** A network fault is a held fault under SPEC-001 R6.9.
+- **K3.10** A held network fault is a held fault under SPEC-001 R6.9. A counted
+  fault is bounded by its occurrences and trigger deadline instead.
+- **K3.11** `drop-request` and `drop-response` are **counted** faults. They affect
+  the first `occurrences` matching messages after the rule is armed, then the
+  rule heals:
+
+  ```yaml
+  - network_fault:
+      proxy: kafka-proxy
+      target: { cluster: main }
+      match: { api: end-txn, result: commit, transactional_id_prefix: eos }
+      fault: { type: drop-response }
+      occurrences: 1          # positive integer
+      trigger_deadline: 2m    # SPEC-001 duration grammar
+      heal: restore-proxy-rule
+  ```
+
+  `occurrences` and `trigger_deadline` are required for a counted fault and
+  rejected for a held one. The step waits until every occurrence has completed or
+  the trigger deadline has passed, and heals the rule either way. A counted fault
+  is how a scenario loses *one* specific message, such as the commit response of
+  the canonical example, instead of a time window of traffic.
 
 ## 4. Supported Kafka API matches
 
@@ -161,6 +183,9 @@ not timer-driven sleeps against an opaque TCP connection.
 - **K4.5** API aliases are semantic names, not raw numeric Kafka API keys, so
   scenario files do not change when Kafka protocol numbers are hidden behind
   client libraries.
+- **K4.6** `match.result: commit | abort` selects `end-txn` requests by the
+  outcome the client asks for. It is accepted only for `end-txn`; omitted, both
+  outcomes match.
 
 ## 5. Fault types
 
@@ -171,6 +196,19 @@ not timer-driven sleeps against an opaque TCP connection.
   | `delay` | `latency` | Delay matching requests or responses. |
   | `disconnect` | none | Close matching connections. |
   | `error-response` | `error` | Return a Kafka error for matching requests where the API supports it. |
+  | `drop-request` | none (counted, K3.11) | Neither forward nor answer a matching request. |
+  | `drop-response` | none (counted, K3.11) | Forward a matching request, then discard the broker's successful response. |
+
+- **K5.1a** A dropped request never reaches the broker; the client sees only a
+  request timeout and may retry. A retry is a new message and counts as another
+  occurrence while the rule is armed. `drop-response` drops only a successful
+  response (error `NONE`), so a dropped response means the broker *acted* on the
+  request, but the client never learns the outcome: for `end-txn` with `result:
+  commit`, the transaction is committed while the committer still believes it is
+  pending. An error response passes through to the client and does not use up an
+  occurrence; the next matching request is claimed instead. `drop-request` catches
+  code that assumes an unacknowledged commit happened; `drop-response` catches
+  code that assumes it did not and writes the data again.
 
 - **K5.2** `latency` uses the SPEC-001 duration grammar.
 - **K5.3** `error` is a stable Kafka error alias such as
@@ -223,10 +261,69 @@ not timer-driven sleeps against an opaque TCP connection.
   proxy evidence exists in the run report.
 - **K6.9** A fault that never reaches both `trigger-confirmed` and
   `evidence-checked` makes the attempt `inconclusive`.
+- **K6.9a** For a counted fault, `armed` is the filter's acknowledgement of the
+  rule, `trigger-confirmed` is reached when evidence proves every requested
+  occurrence completed (for `drop-response`, the successful response dropped)
+  strictly before the trigger deadline. The filter measures the budget on its own
+  monotonic clock starting when it arms the rule; harness polling latency never
+  extends it or disqualifies an already completed drop. `healed` is the filter's acknowledgement that
+  the rule is gone. A drop that lands after the deadline, while the rule heals, is
+  reported but does not count. A passing terminal oracle with fewer completed
+  occurrences than requested makes the attempt `inconclusive` with
+  `network-fault.trigger-missed`; a failing oracle keeps its attempt `fail`, but
+  cannot match an expected failure while fault evidence is unconfirmed (R8.7a). A rule the
+  proxy rejects, or does not arm or heal within `30s`, fails the step as
+  `inconclusive` with `network-fault.infrastructure`.
 - **K6.10** Proxy evidence includes timestamps, proxy name, rule name, target,
   match, fault type, affected API alias, broker, endpoint identity when
   available, topic when available, transactional ID when available, and request
   count.
+- **K6.11** The runner and the proxy's fault filter share one control directory
+  per attempt. The runner arms a fault by moving a complete
+  `rules/<fault-id>.json` into place. The internal rule carries positive integer
+  `triggerDeadlineNanos` (durations beyond the representable nanosecond budget
+  clamp to `Long.MAX_VALUE`). The runner heals it by deleting that file; the
+  filter appends one JSON line per lifecycle event to `events/<fault-id>.jsonl`:
+  `armed`, `rejected`, `request-dropped`, `request-forwarded`, `response-dropped`,
+  `response-forwarded` (an error response let through), `healed`, and
+  `retry-observed` (K6.12). Each line
+  carries the fault ID and a timestamp. A line about a message also carries its
+  claim number, which pairs a forwarded request with its response; its API
+  version, correlation ID, transactional ID, producer ID and epoch, and commit
+  flag; for a response, the broker's error and returned producer epoch; and, once
+  the message is dropped, its occurrence number and explicit boolean
+  `beforeDeadline`, measured by the filter. Missing or false deadline evidence
+  never confirms a drop. After expiry the filter accepts no new claims; an
+  already pending response may still be dropped, but cannot count as in time.
+  A claim holds its occurrence
+  while its response is pending, so no more messages are affected than requested.
+  The fault ID is the step's JSON pointer without `$/`, with `/` replaced by `-`
+  (`phases-1-steps-0`). The run report keeps the proxy image and every dropped
+  message with the broker's answer that the client never saw.
+- **K6.12** For each dropped EndTxn request or response, the filter retains the
+  original request's transactional ID, producer ID, producer epoch, and commit
+  flag until it records an exact matching request after that rule heals,
+  or until the rule book closes. The match spans client connections and uses the
+  request epoch, not an epoch returned in the dropped broker response. The
+  `retry-observed` line refers to the original fault and claim and records the
+  matching request's timestamp, API version, correlation ID, client ID, channel,
+  and original request identity. There is at most one witness per dropped claim,
+  bounding retained identities and extra events by the completed occurrences.
+  A matching request may witness several preceding drops of the same identity.
+  The first matching request is recorded when the event path is writable. A
+  failed optional observation write leaves the witness pending for a later
+  match and does not prevent normal request handling.
+  This records a repeated EndTxn identity only: it does not prove forwarding,
+  broker acceptance, application replay, or uniquely identify a transaction
+  when the producer reuses those fields. Observation does not change routing or
+  claims; another armed fault may drop the observed request. The event usually
+  arrives a client request timeout after the fault step ended, so the runner reads
+  the event file again after the process fence, when no Flink process can send
+  again, and reports each dropped message's witness (`retryObservedAtMillis`,
+  `retryAfterMillis`, `retryClientId`) with its `claim`. An unreadable file adds
+  `network-fault.retry-evidence-unavailable` to the diagnostics and leaves the
+  witness out. Its presence is not an additional trigger-confirmation or
+  scenario-verdict requirement.
 
 ## 7. Healing
 
@@ -238,6 +335,10 @@ not timer-driven sleeps against an opaque TCP connection.
 - **K7.4** The runner records both normal heal and finalizer heal attempts.
 - **K7.5** A later attempt must start with an empty proxy rule set for its
   isolated proxy state.
+- **K7.6** Healing a counted fault stops new matches only. An occurrence the proxy
+  decided while the rule was armed completes: a request it forwarded still has
+  its successful response dropped. When the step fails after arming, the runner deletes the
+  rule before reporting the failure (K7.2).
 
 ## 8. Environment-health classification
 
@@ -274,3 +375,26 @@ not timer-driven sleeps against an opaque TCP connection.
 - **K10.4** Run reports store proxy evidence as first-class fault artifacts so
   terminal validators can distinguish a real system failure from an untriggered
   fault.
+
+## 11. Executable subset of the first runner
+
+The runner executes a deliberately small part of this model; everything else is
+rejected before provisioning with a `runner.*` diagnostic:
+
+- **K11.1** At most one proxy (`runner.kafka.proxy-count-unsupported`), in front
+  of the one Kafka cluster with `bootstrap: { cluster: ... }`
+  (`runner.kafka.proxy-bootstrap-unsupported`). Its `listen` is
+  `<lower-kebab-host>:<port>` with a host no runner container uses and ten free
+  ports above the bootstrap port, which the proxy advertises for brokers
+  (`runner.kafka.proxy-listen-unsupported`).
+- **K11.2** Only the job sink may route through the proxy. A routed job source
+  or generated input is `runner.kafka.proxy-route-unsupported`.
+- **K11.3** Network faults are counted `drop-request` or `drop-response` faults
+  on `end-txn` (`runner.network-fault.type-unsupported`,
+  `runner.network-fault.api-unsupported`) and do not appear inside loops
+  (`runner.network-fault.loop-unsupported`).
+- **K11.4** The proxy is Kroxylicious 0.21.0, pinned by digest, with the harness's
+  own fault filter plugin (module `kroxylicious-fault-filter`) loaded from its
+  classpath. Only connections that route through the proxy can be affected; the
+  harness input producer, the job source, and the terminal validators always use
+  the direct listener.

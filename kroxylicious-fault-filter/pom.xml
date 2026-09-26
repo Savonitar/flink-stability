@@ -1,0 +1,67 @@
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <modelVersion>4.0.0</modelVersion>
+
+    <parent>
+        <groupId>org.savonitar.flink.stability</groupId>
+        <artifactId>flink-stability-inevitable</artifactId>
+        <version>0.1.0-SNAPSHOT</version>
+    </parent>
+
+    <!-- A Kroxylicious filter plugin that runs inside the proxy container (SPEC-004). Every
+         dependency is provided by the pinned proxy image, so the JAR holds only these classes. -->
+    <artifactId>kroxylicious-fault-filter</artifactId>
+
+    <properties>
+        <!-- Keep equal to the versions shipped in the proxy image the testcontainers module pins. -->
+        <kroxylicious.version>0.21.0</kroxylicious.version>
+        <kroxylicious.kafka-clients.version>4.2.0</kroxylicious.kafka-clients.version>
+    </properties>
+
+    <dependencies>
+        <dependency>
+            <groupId>io.kroxylicious</groupId>
+            <artifactId>kroxylicious-api</artifactId>
+            <version>${kroxylicious.version}</version>
+            <scope>provided</scope>
+        </dependency>
+        <dependency>
+            <groupId>org.apache.kafka</groupId>
+            <artifactId>kafka-clients</artifactId>
+            <version>${kroxylicious.kafka-clients.version}</version>
+            <scope>provided</scope>
+        </dependency>
+        <dependency>
+            <groupId>com.fasterxml.jackson.core</groupId>
+            <artifactId>jackson-databind</artifactId>
+            <version>2.18.4</version>
+            <scope>provided</scope>
+        </dependency>
+        <dependency>
+            <groupId>org.junit.jupiter</groupId>
+            <artifactId>junit-jupiter</artifactId>
+            <version>${junit.version}</version>
+            <scope>test</scope>
+        </dependency>
+    </dependencies>
+
+    <build>
+        <plugins>
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-jar-plugin</artifactId>
+                <version>3.4.1</version>
+                <executions>
+                    <execution>
+                        <!-- testcontainers embeds this reactor artifact during its resource
+                             phase, including on a clean reactor test (without package). -->
+                        <id>default-jar</id>
+                        <phase>process-classes</phase>
+                        <goals><goal>jar</goal></goals>
+                    </execution>
+                </executions>
+            </plugin>
+        </plugins>
+    </build>
+</project>

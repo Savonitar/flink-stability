@@ -281,8 +281,24 @@ class RunScenarioCommandTest {
                                         List.of(new FlinkJobObservation.Subtask(
                                                 "Kafka Source", 0, 0, "RUNNING",
                                                 Optional.of("tm-1"))))),
-                                Optional.empty()),
-                        java.util.OptionalLong.of(2_000))));
+                                Optional.empty()), java.util.OptionalLong.of(2_000))),
+                List.of(new PhaseExecutionEvidence.NetworkFault(
+                        "$/phases/2/steps/0",
+                        "phases-2-steps-0",
+                        "kafka-proxy",
+                        "quay.io/kroxylicious/kroxylicious:0.21.0",
+                        ExecutableScenarioPlan.NetworkFaultAction.DROP_RESPONSE,
+                        1,
+                        java.time.Duration.ofMinutes(2),
+                        15_000,
+                        15_700,
+                        List.of(new PhaseExecutionEvidence.DroppedMessage(
+                                1, 1, 15_500, true, "eos-0-2", 2, (short) 0, true,
+                                Optional.of(new PhaseExecutionEvidence.BrokerAnswer(
+                                        "NONE", 2, (short) 1)),
+                                Optional.of(new PhaseExecutionEvidence.Retry(
+                                        45_600, "producer-eos-0-2")))),
+                        List.of())));
         FlinkJobObservation.Attempt atFence = new FlinkJobObservation.Attempt(
                 Optional.of(new FlinkJobObservation(
                         20_000, FlinkJobState.FINISHED, 20, 1,
@@ -312,6 +328,7 @@ class RunScenarioCommandTest {
                 "bounded-eos", context("1234abcd"), expectation, result)).path("evidence");
         JsonNode job = evidence.path("flinkJob");
         JsonNode kill = evidence.path("taskManagerKills").path(0);
+        JsonNode fault = evidence.path("networkFaults").path(0);
 
         assertAll(
                 () -> assertEquals("observed", job.path("status").textValue()),
@@ -327,11 +344,21 @@ class RunScenarioCommandTest {
                 () -> assertEquals(1, kill.path("activeSubtasksBeforeKill").longValue()),
                 () -> assertEquals(4, kill.path("restoredCheckpoint").longValue()),
                 () -> assertEquals(2_000, kill.path("jobManagerTimeAfterKill").longValue()),
-                () -> assertEquals(11_000,
-                        kill.path("restoredAfterKillObservationMs").longValue()),
+                () -> assertEquals(11_000, kill.path("restoredAfterKillObservationMs").longValue()),
                 () -> assertEquals(1, kill.path("failuresAfterKill").intValue()),
                 () -> assertEquals("TaskManager with id tm-1 is no longer reachable.",
                         kill.path("firstFailureAfterKill").textValue()),
+                () -> assertEquals("drop-response", fault.path("action").textValue()),
+                () -> assertEquals("quay.io/kroxylicious/kroxylicious:0.21.0",
+                        fault.path("proxyImage").textValue()),
+                () -> assertTrue(fault.path("triggered").booleanValue()),
+                () -> assertTrue(fault.at("/dropped/0/beforeDeadline").booleanValue()),
+                () -> assertEquals(30_100, fault.at("/dropped/0/retryAfterMillis").longValue()),
+                () -> assertEquals("producer-eos-0-2",
+                        fault.at("/dropped/0/retryClientId").textValue()),
+                () -> assertEquals("eos-0-2", fault.at("/dropped/0/transactionalId").textValue()),
+                () -> assertEquals("NONE", fault.at("/dropped/0/brokerError").textValue()),
+                () -> assertEquals(1, fault.at("/dropped/0/brokerProducerEpoch").intValue()),
                 () -> assertEquals("confirmed",
                         evidence.at("/subjectClasses/status").textValue()),
                 () -> assertEquals("taskmanager-1#1",

@@ -13,6 +13,7 @@
         <module>runtime-api</module>
         <module>cli</module>
         <module>core</module>
+        <module>kroxylicious-fault-filter</module>
         <module>testcontainers</module>
         <module>flink-job-generator</module>
     </modules>

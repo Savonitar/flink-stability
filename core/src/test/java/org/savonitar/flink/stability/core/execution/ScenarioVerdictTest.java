@@ -2,12 +2,14 @@ package org.savonitar.flink.stability.core.execution;
 
 import org.junit.jupiter.api.Test;
 import org.savonitar.flink.stability.core.execution.plan.ExecutableScenarioPlan.ExpectedOutcome;
+import org.savonitar.flink.stability.core.execution.plan.ExecutableScenarioPlan.NetworkFaultAction;
 import org.savonitar.flink.stability.core.flink.FlinkJobObservation;
 import org.savonitar.flink.stability.core.flink.FlinkJobState;
 import org.savonitar.flink.stability.core.validation.kafka.KafkaIdSetValidationResult;
 import org.savonitar.flink.stability.runtime.api.FlinkProcessWriteFenceEvidence;
 
 import java.time.Instant;
+import java.time.Duration;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -108,6 +110,45 @@ class ScenarioVerdictTest {
     }
 
     @Test
+    void aMatchingFailureCannotPassWhenItsKillHitsAFinishedJob() {
+        FlinkJobObservation.Attempt finished = new FlinkJobObservation.Attempt(
+                Optional.of(new FlinkJobObservation(500, FlinkJobState.FINISHED,
+                        1, 0, Optional.empty(), List.of(), List.of())), Optional.empty());
+        PhaseExecutionEvidence phases = new PhaseExecutionEvidence(List.of(), List.of(
+                new PhaseExecutionEvidence.TaskManagerKill("$/phases/0/steps/0", List.of(),
+                        "taskmanager-1", finished, OptionalLong.of(600))), List.of());
+        V1ScenarioExecutionResult attempt = terminalAttempt(
+                V1ScenarioExecutionResult.Status.FAIL, DUPLICATES, phases,
+                Optional.of(V1ScenarioExecutorTest.confirmedOrigins()));
+
+        ScenarioVerdict verdict = ScenarioVerdict.of(EXPECT_DUPLICATES, attempt);
+
+        assertEquals(ScenarioVerdict.Status.INCONCLUSIVE, verdict.status());
+        assertEquals(ExecutablePhaseExecutor.TASKMANAGER_KILL_EFFECT_UNCONFIRMED, verdict.reason());
+        assertFalse(verdict.matched());
+        assertEquals(V1ScenarioExecutionResult.Status.FAIL, attempt.status());
+    }
+
+    @Test
+    void aMatchingFailureCannotPassWhenItsNetworkFaultMisses() {
+        PhaseExecutionEvidence phases = new PhaseExecutionEvidence(List.of(), List.of(), List.of(
+                new PhaseExecutionEvidence.NetworkFault("$/phases/0/steps/0", "fault-1",
+                        "kafka-proxy", "test/proxy",
+                        NetworkFaultAction.DROP_RESPONSE,
+                        1, Duration.ofSeconds(1), 100, 1_100, List.of(), List.of())));
+        V1ScenarioExecutionResult attempt = terminalAttempt(
+                V1ScenarioExecutionResult.Status.FAIL, DUPLICATES, phases,
+                Optional.of(V1ScenarioExecutorTest.confirmedOrigins()));
+
+        ScenarioVerdict verdict = ScenarioVerdict.of(EXPECT_DUPLICATES, attempt);
+
+        assertEquals(ScenarioVerdict.Status.INCONCLUSIVE, verdict.status());
+        assertEquals(ExecutablePhaseExecutor.NETWORK_FAULT_TRIGGER_MISSED, verdict.reason());
+        assertFalse(verdict.matched());
+        assertEquals(V1ScenarioExecutionResult.Status.FAIL, attempt.status());
+    }
+
+    @Test
     void aFailureReasonAloneDoesNotProveAnExpectedFailure() {
         V1ScenarioExecutionResult unsupported = new V1ScenarioExecutionResult(
                 V1ScenarioExecutionResult.Status.FAIL, DUPLICATES, "unverified failure",
@@ -167,26 +208,6 @@ class ScenarioVerdictTest {
             assertFalse(verdict.matched(), missing);
             assertEquals(V1ScenarioExecutionResult.Status.FAIL, invalid.status(), missing);
         }
-    }
-
-    @Test
-    void aMatchingFailureCannotPassWhenItsKillHitsAFinishedJob() {
-        FlinkJobObservation.Attempt finished = new FlinkJobObservation.Attempt(
-                Optional.of(new FlinkJobObservation(500, FlinkJobState.FINISHED,
-                        1, 0, Optional.empty(), List.of(), List.of())), Optional.empty());
-        PhaseExecutionEvidence phases = new PhaseExecutionEvidence(List.of(), List.of(
-                new PhaseExecutionEvidence.TaskManagerKill("$/phases/0/steps/0", List.of(),
-                        "taskmanager-1", finished, OptionalLong.of(600))));
-        V1ScenarioExecutionResult attempt = terminalAttempt(
-                V1ScenarioExecutionResult.Status.FAIL, DUPLICATES, phases,
-                Optional.of(V1ScenarioExecutorTest.confirmedOrigins()));
-
-        ScenarioVerdict verdict = ScenarioVerdict.of(EXPECT_DUPLICATES, attempt);
-
-        assertEquals(ScenarioVerdict.Status.INCONCLUSIVE, verdict.status());
-        assertEquals(ExecutablePhaseExecutor.TASKMANAGER_KILL_EFFECT_UNCONFIRMED, verdict.reason());
-        assertFalse(verdict.matched());
-        assertEquals(V1ScenarioExecutionResult.Status.FAIL, attempt.status());
     }
 
     private static V1ScenarioExecutionResult attempt(

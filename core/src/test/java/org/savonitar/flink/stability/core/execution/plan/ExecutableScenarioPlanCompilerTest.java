@@ -827,6 +827,127 @@ class ExecutableScenarioPlanCompilerTest {
                         "kafka:9092", Map.of(0, 10L), 1, "too-short"));
     }
 
+    @Test
+    void compilesAProxyRoutedSinkAndACountedEndTxnFault() {
+        ExecutableScenarioPlan plan = compiler.compile(resolved(document -> {
+            routeSinkThroughProxy(document);
+            ObjectNode fault = replaceSteps(document).addObject().putObject("network_fault");
+            fault.put("proxy", "kafka-proxy");
+            fault.putObject("target").put("cluster", "main");
+            fault.putObject("match")
+                    .put("api", "end-txn")
+                    .put("result", "commit")
+                    .put("transactional_id_prefix", "minimal");
+            fault.putObject("fault").put("type", "drop-response");
+            fault.put("occurrences", 2);
+            fault.put("trigger_deadline", "90s");
+            fault.put("heal", "restore-proxy-rule");
+        }));
+
+        ExecutableScenarioPlan.KafkaProxy proxy =
+                new ExecutableScenarioPlan.KafkaProxy("kafka-proxy", "kafka-proxy", 9092);
+        assertEquals(java.util.Optional.of(proxy), plan.kafka().proxy());
+        assertEquals(java.util.Optional.of(proxy), plan.job().sink().proxy());
+        assertEquals(List.of(new ExecutableScenarioPlan.EndTxnFault(
+                        "kafka-proxy",
+                        java.util.Optional.of(ExecutableScenarioPlan.TransactionResult.COMMIT),
+                        java.util.Optional.of("minimal"),
+                        ExecutableScenarioPlan.NetworkFaultAction.DROP_RESPONSE,
+                        2,
+                        Duration.ofSeconds(90))),
+                plan.phases().getFirst().steps());
+        Map<String, String> values = plan.job().materializeFlinkConfiguration(
+                "kafka-main:19092", Map.of(0, 10L), 1, "1234abcd");
+        String prefix = ExecutableScenarioPlan.WorkloadConfiguration.PREFIX;
+        assertEquals("kafka-main:19092", values.get(prefix + "source.bootstrap-servers"));
+        assertEquals("kafka-proxy:9092", values.get(prefix + "sink.bootstrap-servers"));
+    }
+
+    @Test
+    void rejectsProxiesAndNetworkFaultsTheRunnerCannotExecute() {
+        record Case(String code, Consumer<ObjectNode> mutation) {}
+        List<Case> cases = List.of(
+                new Case("runner.network-fault.api-unsupported", document -> {
+                    ObjectNode fault = dropFault(document, "drop-request");
+                    ((ObjectNode) fault.get("match")).put("api", "produce").put("topic", "output");
+                }),
+                new Case("runner.network-fault.type-unsupported", document -> {
+                    ObjectNode fault = dropFault(document, "delay");
+                    ((ObjectNode) fault.get("fault")).put("latency", "1s");
+                    fault.remove(List.of("occurrences", "trigger_deadline"));
+                    fault.put("duration", "5s");
+                }),
+                new Case("runner.network-fault.loop-unsupported", document -> {
+                    ObjectNode fault = dropFault(document, "drop-request");
+                    ArrayNode steps = replaceSteps(document);
+                    ObjectNode loop = steps.addObject().putObject("loop");
+                    loop.put("times", 2);
+                    loop.putArray("steps").addObject().set("network_fault", fault);
+                }),
+                new Case("runner.kafka.proxy-bootstrap-unsupported", document -> {
+                    dropFault(document, "drop-request");
+                    ((ObjectNode) document.at("/setup/proxies/kafka-proxy")).putObject("bootstrap")
+                            .put("address", "kafka-main:19092");
+                }),
+                new Case("runner.kafka.proxy-listen-unsupported", document -> {
+                    dropFault(document, "drop-request");
+                    ((ObjectNode) document.at("/setup/proxies/kafka-proxy"))
+                            .put("listen", "taskmanager-1:9092");
+                }),
+                new Case("runner.kafka.proxy-count-unsupported", document -> {
+                    dropFault(document, "drop-request");
+                    ObjectNode second = ((ObjectNode) document.at("/setup/proxies/kafka-proxy"))
+                            .deepCopy().put("listen", "second-proxy:9092");
+                    ((ObjectNode) document.at("/setup/proxies")).set("second-proxy", second);
+                }),
+                new Case("runner.kafka.proxy-route-unsupported", document -> {
+                    dropFault(document, "drop-request");
+                    ((ObjectNode) document.at("/workload/jobs/0/source"))
+                            .put("connect_via_proxy", "kafka-proxy");
+                }),
+                new Case("runner.kafka.proxy-route-unsupported", document -> {
+                    dropFault(document, "drop-request");
+                    ((ObjectNode) document.at("/setup/kafka/clusters/main/topics/0/input_source"))
+                            .put("connect_via_proxy", "kafka-proxy");
+                }));
+
+        for (Case rejected : cases) {
+            SpecificationException failure = assertFailsAt(
+                    Stage.RUNNER_CAPABILITY,
+                    () -> compiler.compile(resolved(rejected.mutation())),
+                    rejected.code());
+            assertTrue(failure.diagnostics().stream()
+                            .anyMatch(diagnostic -> diagnostic.code().equals(rejected.code())),
+                    failure.getMessage());
+        }
+    }
+
+    /** Declares kafka-proxy and routes the sink through it. */
+    private static void routeSinkThroughProxy(ObjectNode document) {
+        ObjectNode proxy = ((ObjectNode) document.at("/setup")).putObject("proxies")
+                .putObject("kafka-proxy");
+        proxy.put("type", "kroxylicious");
+        proxy.put("cluster", "main");
+        proxy.put("listen", "kafka-proxy:9092");
+        proxy.putObject("bootstrap").put("cluster", "main");
+        ((ObjectNode) document.at("/workload/jobs/0/sink"))
+                .put("connect_via_proxy", "kafka-proxy");
+    }
+
+    /** Routes the sink through kafka-proxy and makes the only step an EndTxn drop fault. */
+    private static ObjectNode dropFault(ObjectNode document, String type) {
+        routeSinkThroughProxy(document);
+        ObjectNode fault = replaceSteps(document).addObject().putObject("network_fault");
+        fault.put("proxy", "kafka-proxy");
+        fault.putObject("target").put("cluster", "main");
+        fault.putObject("match").put("api", "end-txn");
+        fault.putObject("fault").put("type", type);
+        fault.put("occurrences", 1);
+        fault.put("trigger_deadline", "1m");
+        fault.put("heal", "restore-proxy-rule");
+        return fault;
+    }
+
     private ResolvedScenarioPlan resolved(Consumer<ObjectNode> mutation) {
         return resolved(mutation, expected(document -> {}));
     }

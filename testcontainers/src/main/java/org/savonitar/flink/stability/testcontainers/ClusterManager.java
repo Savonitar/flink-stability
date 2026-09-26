@@ -7,6 +7,8 @@ import org.savonitar.flink.stability.runtime.api.FlinkComponentRole;
 import org.savonitar.flink.stability.runtime.api.FlinkConnectorBundleInstallation;
 import org.savonitar.flink.stability.runtime.api.FlinkProcessWriteFenceEvidence;
 import org.savonitar.flink.stability.runtime.api.FlinkRuntimeTarget;
+import org.savonitar.flink.stability.runtime.api.KafkaProxyEndpoint;
+import org.savonitar.flink.stability.runtime.api.KafkaProxyTarget;
 import org.savonitar.flink.stability.runtime.api.KafkaRuntimeEndpoints;
 import org.savonitar.flink.stability.runtime.api.KafkaRuntimeTarget;
 import org.savonitar.flink.stability.runtime.api.ProvisionedConnectorArtifact;
@@ -51,6 +53,7 @@ public final class ClusterManager implements AutoCloseable {
     private final List<FlinkComponentFactory> flinkFactories = new ArrayList<>();
 
     private KafkaRuntimeCluster kafkaRuntime;
+    private KroxyliciousProxy kafkaProxy;
     private boolean flinkProcessWriteFenceStarted;
     private boolean cleanupStarted;
     private boolean networkClosed;
@@ -291,6 +294,30 @@ public final class ClusterManager implements AutoCloseable {
         return new FlinkProcessWriteFenceEvidence(evidence, Instant.now());
     }
 
+    /**
+     * Starts the one Kafka proxy of this attempt after Kafka. Its control directory sits in the
+     * attempt directory, next to the Flink state, and is left in place on close as evidence.
+     */
+    public synchronized KafkaProxyEndpoint startKafkaProxy(KafkaProxyTarget target) {
+        ensureOpen();
+        Objects.requireNonNull(target, "target");
+        if (kafkaRuntime == null) {
+            throw new IllegalStateException("Kafka must be started before its proxy");
+        }
+        if (kafkaProxy != null) {
+            throw new IllegalStateException("A Kafka proxy has already been started");
+        }
+        KroxyliciousProxy candidate = new KroxyliciousProxy(
+                network,
+                target,
+                checkpointStorageRoot.resolve("flink-stability-proxy-" + target.proxyAlias()));
+        kafkaProxy = candidate;
+        KafkaProxyEndpoint endpoint = candidate.start();
+        LOG.info("Kafka proxy started: {} -> {}",
+                endpoint.bootstrapServers(), target.upstreamBootstrapServers());
+        return endpoint;
+    }
+
     /** Idempotently attempts Flink, Kafka, and network cleanup without hiding later failures. */
     private synchronized void stopAll() {
         if (closed) {
@@ -301,6 +328,15 @@ public final class ClusterManager implements AutoCloseable {
 
         RuntimeException failure = null;
         failure = stopFlink(failure);
+
+        if (kafkaProxy != null) {
+            try {
+                kafkaProxy.stop();
+                kafkaProxy = null;
+            } catch (RuntimeException proxyFailure) {
+                failure = appendFailure(failure, proxyFailure);
+            }
+        }
 
         if (kafkaRuntime != null) {
             try {

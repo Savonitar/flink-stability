@@ -7,6 +7,12 @@ import java.util.List;
 public interface V1AttemptRuntime extends TaskManagerControl, AutoCloseable {
     KafkaRuntimeEndpoints startKafka(KafkaRuntimeTarget target);
 
+    /**
+     * Starts a protocol-aware proxy in front of the started Kafka cluster. Its rules and evidence
+     * live in the returned control directory, which exists only for this attempt.
+     */
+    KafkaProxyEndpoint startKafkaProxy(KafkaProxyTarget target);
+
     String startFlink(FlinkRuntimeTarget target) throws Exception;
 
     FlinkProcessWriteFenceEvidence stopAllFlinkProcesses(Duration timeout);

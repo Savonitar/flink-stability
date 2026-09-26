@@ -34,6 +34,8 @@ import org.savonitar.flink.stability.runtime.api.FlinkClassLoadLog;
 import org.savonitar.flink.stability.runtime.api.FlinkComponentProvisioningEvidence;
 import org.savonitar.flink.stability.runtime.api.FlinkProcessWriteFenceEvidence;
 import org.savonitar.flink.stability.runtime.api.FlinkRuntimeTarget;
+import org.savonitar.flink.stability.runtime.api.KafkaProxyEndpoint;
+import org.savonitar.flink.stability.runtime.api.KafkaProxyTarget;
 import org.savonitar.flink.stability.runtime.api.KafkaRuntimeEndpoints;
 import org.savonitar.flink.stability.runtime.api.KafkaRuntimeTarget;
 import org.savonitar.flink.stability.runtime.api.TaskManagerActionTimeoutException;
@@ -356,9 +358,38 @@ class V1ScenarioExecutorTest {
                     List.of(TaskManagerKillEffect.Outcome.JOB_TERMINAL_BEFORE_KILL),
                     outcomes(result));
             ScenarioVerdict verdict = ScenarioVerdict.of(
-                    ExecutableScenarioPlan.ExpectedOutcome.failure("kafka.id-set", result.reason()), result);
+                    ExecutableScenarioPlan.ExpectedOutcome.failure("kafka.id-set", result.reason()),
+                    result);
             assertEquals(ScenarioVerdict.Status.INCONCLUSIVE, verdict.status());
             assertEquals(ExecutablePhaseExecutor.TASKMANAGER_KILL_EFFECT_UNCONFIRMED, verdict.reason());
+        }
+    }
+
+    @Test
+    void matchingFailureWithUnconfirmedSubjectKeepsDataFailureButCannotPass() throws Exception {
+        for (boolean unreadable : List.of(false, true)) {
+            List<String> events = new ArrayList<>();
+            try (Fixture fixture = fixture()) {
+                FakeRuntime runtime = new FakeRuntime(events);
+                if (unreadable) {
+                    runtime.classLoadLogsFailure = new IllegalStateException("missing process log");
+                } else {
+                    runtime.loadedFrom = "/opt/flink/lib/foreign-connector.jar";
+                }
+                V1ScenarioExecutionResult result = executor(events, runtime, new FakeFlink(events),
+                        (bootstrap, topic, ids, timeout) -> missingResult())
+                        .execute(fixture.bound(), attemptContext());
+
+                ScenarioVerdict verdict = ScenarioVerdict.of(
+                        ExecutableScenarioPlan.ExpectedOutcome.failure("kafka.id-set", result.reason()),
+                        result);
+
+                assertEquals(V1ScenarioExecutionResult.Status.FAIL, result.status());
+                assertEquals(missingResult().reason(), result.reason());
+                assertEquals(ScenarioVerdict.Status.INCONCLUSIVE, verdict.status());
+                assertEquals(unreadable ? V1ScenarioExecutor.SUBJECT_ORIGIN_UNCONFIRMED
+                        : V1ScenarioExecutor.SUBJECT_ORIGIN_MISMATCH, verdict.reason());
+            }
         }
     }
 
@@ -372,8 +403,8 @@ class V1ScenarioExecutorTest {
                         "taskmanager-1",
                         new FlinkJobObservation.Attempt(
                                 Optional.of(job(1_000, FlinkJobState.FINISHED, 1, 0)),
-                                Optional.empty()),
-                        OptionalLong.of(1_500))));
+                                Optional.empty()), OptionalLong.of(1_500))),
+                List.of());
         FlinkJobObservation.Attempt atFence = new FlinkJobObservation.Attempt(
                 Optional.of(job(2_000, FlinkJobState.FINISHED, 1, 0)), Optional.empty());
         FlinkProcessWriteFenceEvidence processFence = new FlinkProcessWriteFenceEvidence(
@@ -398,6 +429,194 @@ class V1ScenarioExecutorTest {
                         List.of()));
 
         assertTrue(failure.getMessage().contains("confirmed effect"));
+    }
+
+    @Test
+    void aPassResultCannotCarryANetworkFaultThatMissedItsOccurrences() {
+        PhaseExecutionEvidence phases = new PhaseExecutionEvidence(
+                List.of(),
+                List.of(),
+                List.of(new PhaseExecutionEvidence.NetworkFault(
+                        "$/phases/1/steps/0",
+                        "phases-1-steps-0",
+                        "kafka-proxy",
+                        "test/proxy",
+                        ExecutableScenarioPlan.NetworkFaultAction.DROP_RESPONSE,
+                        1,
+                        Duration.ofMinutes(2),
+                        1_000,
+                        121_000,
+                        List.of(),
+                        List.of())));
+        FlinkJobObservation.Attempt atFence = new FlinkJobObservation.Attempt(
+                Optional.of(job(2_000, FlinkJobState.FINISHED, 1, 0)), Optional.empty());
+        FlinkProcessWriteFenceEvidence processFence = new FlinkProcessWriteFenceEvidence(
+                List.of(), Instant.parse("2026-08-26T12:00:00Z"));
+
+        IllegalArgumentException failure = assertThrows(
+                IllegalArgumentException.class,
+                () -> new V1ScenarioExecutionResult(
+                        V1ScenarioExecutionResult.Status.PASS,
+                        "validator.kafka.id-set.match",
+                        "passed",
+                        Optional.empty(),
+                        Optional.of(phases),
+                        Optional.of(new FlinkTerminalWriteFence.Evidence(
+                                FlinkJobState.FINISHED, processFence, atFence)),
+                        Optional.of(processFence),
+                        Optional.of(atFence),
+                        Optional.of(passResult()),
+                        Optional.empty(),
+                        Optional.of(confirmedOrigins()),
+                        List.of(),
+                        List.of()));
+
+        assertTrue(failure.getMessage().contains("network fault"), failure.getMessage());
+    }
+
+    @Test
+    void networkFaultEffectGatesPositiveAndNegativeControlVerdicts() throws Exception {
+        for (boolean triggered : List.of(false, true)) {
+            for (boolean oraclePasses : List.of(false, true)) {
+                List<String> events = new ArrayList<>();
+                try (Fixture fixture = fixture(V1ScenarioExecutorTest::networkFault)) {
+                    V1ScenarioExecutor executor = executor(events, new FakeRuntime(events),
+                            new FakeFlink(events),
+                            (bootstrap, topic, ids, timeout) -> oraclePasses
+                                    ? passResult() : missingResult(),
+                            V1ScenarioExecutor.DEFAULT_ATTEMPT_CLEANUP_TIMEOUT,
+                            (path, fault) -> new PhaseExecutionEvidence.NetworkFault(
+                                    path, "fault-1", fault.proxy(), "test/proxy", fault.action(),
+                                    fault.occurrences(), fault.triggerDeadline(), 100, 200,
+                                    triggered ? List.of(new PhaseExecutionEvidence.DroppedMessage(
+                                            1, 1, 150, true, "minimal-0-1", 1, (short) 0, true,
+                                            Optional.of(new PhaseExecutionEvidence.BrokerAnswer(
+                                                    "NONE", 1, (short) 1)),
+                                            Optional.empty())) : List.of(),
+                                    List.of()));
+
+                    V1ScenarioExecutionResult result = executor.execute(
+                            fixture.bound(), attemptContext());
+
+                    assertEquals(oraclePasses
+                                    ? (triggered ? V1ScenarioExecutionResult.Status.PASS
+                                            : V1ScenarioExecutionResult.Status.INCONCLUSIVE)
+                                    : V1ScenarioExecutionResult.Status.FAIL,
+                            result.status(), "triggered=" + triggered + ", oracle=" + oraclePasses);
+                    assertEquals(triggered,
+                            result.phaseEvidence().orElseThrow().networkFaults().getFirst().triggered());
+                    assertTrue(result.processFenceEvidence().isPresent());
+                    assertTrue(result.terminalValidation().isPresent());
+                    var expected = oraclePasses ? ExecutableScenarioPlan.ExpectedOutcome.pass()
+                            : ExecutableScenarioPlan.ExpectedOutcome.failure(
+                                    "kafka.id-set", missingResult().reason());
+                    ScenarioVerdict verdict = ScenarioVerdict.of(expected, result);
+                    assertEquals(triggered ? ScenarioVerdict.Status.PASS
+                            : ScenarioVerdict.Status.INCONCLUSIVE, verdict.status());
+                    if (!triggered) {
+                        assertEquals(ExecutablePhaseExecutor.NETWORK_FAULT_TRIGGER_MISSED,
+                                verdict.reason());
+                    }
+                    assertTrue(events.indexOf("kafka-proxy-start") < events.indexOf("flink-start"));
+                }
+            }
+        }
+    }
+
+    @Test
+    void readsRetryWitnessesAfterTheProcessFenceWithoutChangingTheVerdict() throws Exception {
+        PhaseExecutionEvidence.Retry retry =
+                new PhaseExecutionEvidence.Retry(30_150, "producer-minimal-0-1");
+        for (boolean readable : List.of(true, false)) {
+            List<String> events = new ArrayList<>();
+            try (Fixture fixture = fixture(V1ScenarioExecutorTest::networkFault)) {
+                ExecutablePhaseExecutor.NetworkFaults faults =
+                        new ExecutablePhaseExecutor.NetworkFaults() {
+                            @Override
+                            public PhaseExecutionEvidence.NetworkFault inject(
+                                    String path, ExecutableScenarioPlan.EndTxnFault fault) {
+                                return new PhaseExecutionEvidence.NetworkFault(
+                                        path, "fault-1", fault.proxy(), "test/proxy",
+                                        fault.action(), fault.occurrences(),
+                                        fault.triggerDeadline(), 100, 200,
+                                        List.of(new PhaseExecutionEvidence.DroppedMessage(
+                                                1, 1, 150, true, "minimal-0-1", 1, (short) 0,
+                                                true,
+                                                Optional.of(new PhaseExecutionEvidence
+                                                        .BrokerAnswer("NONE", 1, (short) 1)),
+                                                Optional.empty())),
+                                        List.of());
+                            }
+
+                            @Override
+                            public PhaseExecutionEvidence.NetworkFault withObservedRetries(
+                                    PhaseExecutionEvidence.NetworkFault fault)
+                                    throws IOException {
+                                events.add("read-retries");
+                                if (!readable) {
+                                    throw new IOException("event file unreadable");
+                                }
+                                return fault.withDropped(List.of(
+                                        fault.dropped().getFirst().withRetry(retry)));
+                            }
+                        };
+                V1ScenarioExecutor executor = executor(events, new FakeRuntime(events),
+                        new FakeFlink(events), (bootstrap, topic, ids, timeout) -> passResult(),
+                        V1ScenarioExecutor.DEFAULT_ATTEMPT_CLEANUP_TIMEOUT, faults);
+
+                V1ScenarioExecutionResult result = executor.execute(
+                        fixture.bound(), attemptContext());
+
+                assertEquals(V1ScenarioExecutionResult.Status.PASS, result.status(),
+                        "readable=" + readable);
+                assertEquals(readable ? Optional.of(retry) : Optional.empty(),
+                        result.phaseEvidence().orElseThrow().networkFaults().getFirst()
+                                .dropped().getFirst().retry());
+                assertEquals(!readable, result.diagnostics().stream().anyMatch(diagnostic ->
+                        diagnostic.startsWith("network-fault.retry-evidence-unavailable")));
+                assertTrue(events.indexOf("process-fence") < events.indexOf("read-retries"),
+                        "retries are read only once no Flink process can send again: " + events);
+            }
+        }
+    }
+
+    @Test
+    void failedNetworkFaultIsInconclusiveAndSkipsTerminalValidation() throws Exception {
+        List<String> events = new ArrayList<>();
+        try (Fixture fixture = fixture(V1ScenarioExecutorTest::networkFault)) {
+            AtomicBoolean validated = new AtomicBoolean();
+            V1ScenarioExecutor executor = executor(events, new FakeRuntime(events),
+                    new FakeFlink(events), (bootstrap, topic, ids, timeout) -> {
+                        validated.set(true);
+                        return passResult();
+                    }, V1ScenarioExecutor.DEFAULT_ATTEMPT_CLEANUP_TIMEOUT,
+                    (path, fault) -> { throw new IOException("proxy never confirmed heal"); });
+
+            V1ScenarioExecutionResult result = executor.execute(fixture.bound(), attemptContext());
+
+            assertEquals(V1ScenarioExecutionResult.Status.INCONCLUSIVE, result.status());
+            assertEquals(ExecutablePhaseExecutor.NETWORK_FAULT_INFRASTRUCTURE, result.reason());
+            assertFalse(validated.get());
+            assertEquals(PhaseExecutionEvidence.StepStatus.FAILED,
+                    result.phaseEvidence().orElseThrow().steps().getLast().status());
+        }
+    }
+
+    private static void networkFault(ObjectNode document) {
+        ObjectNode proxy = ((ObjectNode) document.at("/setup")).putObject("proxies")
+                .putObject("kafka-proxy");
+        proxy.put("type", "kroxylicious").put("cluster", "main").put("listen", "kafka-proxy:9092");
+        proxy.putObject("bootstrap").put("cluster", "main");
+        ((ObjectNode) document.at("/workload/jobs/0/sink"))
+                .put("connect_via_proxy", "kafka-proxy");
+        ObjectNode fault = document.putArray("phases").addObject().put("name", "fault")
+                .putArray("steps").addObject().putObject("network_fault");
+        fault.put("proxy", "kafka-proxy");
+        fault.putObject("target").put("cluster", "main");
+        fault.putObject("match").put("api", "end-txn").put("result", "commit");
+        fault.putObject("fault").put("type", "drop-response");
+        fault.put("occurrences", 1).put("trigger_deadline", "1s")
+                .put("heal", "restore-proxy-rule");
     }
 
     static SubjectClassOrigins confirmedOrigins() {
@@ -985,6 +1204,17 @@ class V1ScenarioExecutorTest {
             FakeFlink flink,
             V1ScenarioExecutor.TerminalValidation validation,
             Duration cleanupTimeout) {
+        return executor(events, runtime, flink, validation, cleanupTimeout,
+                ExecutablePhaseExecutor.NetworkFaults.NONE);
+    }
+
+    private V1ScenarioExecutor executor(
+            List<String> events,
+            FakeRuntime runtime,
+            FakeFlink flink,
+            V1ScenarioExecutor.TerminalValidation validation,
+            Duration cleanupTimeout,
+            ExecutablePhaseExecutor.NetworkFaults networkFaults) {
         return new V1ScenarioExecutor(
                 checkpointRoot -> {
                     events.add("runtime-create");
@@ -1006,7 +1236,8 @@ class V1ScenarioExecutorTest {
                     assertEquals(V1ScenarioExecutor.SINK_TRANSACTION_LISTING_TIMEOUT, timeout);
                     return transactionListing.list(bootstrapServers, prefix, timeout);
                 },
-                cleanupTimeout);
+                cleanupTimeout,
+                endpoint -> networkFaults);
     }
 
     private Fixture fixture() throws IOException {
@@ -1223,6 +1454,13 @@ class V1ScenarioExecutorTest {
             events.add("kafka-start");
             assertEquals("main", target.clusterAlias());
             return ENDPOINTS;
+        }
+
+        @Override
+        public KafkaProxyEndpoint startKafkaProxy(KafkaProxyTarget target) {
+            events.add("kafka-proxy-start");
+            return new KafkaProxyEndpoint(target.proxyAlias(), target.bootstrapServers(),
+                    "test/kroxylicious", Path.of("proxy-control"));
         }
 
         @Override

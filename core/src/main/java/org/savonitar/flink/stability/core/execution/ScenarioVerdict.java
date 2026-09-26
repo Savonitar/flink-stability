@@ -96,6 +96,14 @@ public record ScenarioVerdict(Status status, String reason, String message, bool
                                 + " has unconfirmed effect: " + effect.outcome());
             }
         }
+        for (PhaseExecutionEvidence.NetworkFault fault :
+                attempt.phaseEvidence().orElseThrow().networkFaults()) {
+            if (!fault.triggered()) {
+                return unconfirmed(ExecutablePhaseExecutor.NETWORK_FAULT_TRIGGER_MISSED,
+                        "The expected failure occurred, but the network fault at " + fault.path()
+                                + " did not complete its requested occurrences in time");
+            }
+        }
         return new ScenarioVerdict(Status.PASS, attempt.reason(),
                 "The expected failure occurred: " + attempt.message(), true);
     }

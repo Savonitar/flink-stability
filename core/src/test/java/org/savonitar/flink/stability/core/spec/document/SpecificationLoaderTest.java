@@ -8,6 +8,7 @@ import java.io.IOException;
 import java.net.URISyntaxException;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.List;
 import org.savonitar.flink.stability.core.spec.document.SpecificationException.Stage;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -458,6 +459,74 @@ class SpecificationLoaderTest {
                 Stage.DOCUMENT, () -> loader.load(missing));
 
         assertSingleIssue(exception, "document.not-found", "$");
+    }
+
+    @Test
+    void countedDropFaultsAndHeldFaultsTakeDifferentTimingFields() throws IOException {
+        ObjectNode dropWithDuration = networkFaultDocument("end-txn", "drop-response");
+        ObjectNode drop = (ObjectNode) dropWithDuration.at("/phases/0/steps/0/network_fault");
+        drop.remove(List.of("occurrences"));
+        drop.put("duration", "1s");
+        SpecificationException countedFailure = assertFailsAt(
+                Stage.DOCUMENT, () -> loader.load(write("drop-with-duration.yaml", dropWithDuration)));
+        assertHasIssue(countedFailure, "schema.required", "$/phases/0/steps/0/network_fault");
+        assertHasIssue(countedFailure, "schema.not", "$/phases/0/steps/0/network_fault");
+
+        ObjectNode heldWithOccurrences = networkFaultDocument("end-txn", "disconnect");
+        ((ObjectNode) heldWithOccurrences.at("/phases/0/steps/0/network_fault"))
+                .put("duration", "1s");
+        SpecificationException heldFailure = assertFailsAt(
+                Stage.DOCUMENT,
+                () -> loader.load(write("held-with-occurrences.yaml", heldWithOccurrences)));
+        assertHasIssue(heldFailure, "schema.not", "$/phases/0/steps/0/network_fault");
+
+        ObjectNode resultOnProduce = networkFaultDocument("produce", "drop-request");
+        SpecificationException resultFailure = assertFailsAt(
+                Stage.DOCUMENT,
+                () -> loader.load(write("result-on-produce.yaml", resultOnProduce)));
+        assertHasIssue(resultFailure, "schema.not", "$/phases/0/steps/0/network_fault/match");
+
+        loader.load(write("drop-response.yaml", networkFaultDocument("end-txn", "drop-response")));
+    }
+
+    @Test
+    void rejectsEachInvalidCountedOrHeldTimingFieldIndependently() throws IOException {
+        for (String missing : List.of("occurrences", "trigger_deadline")) {
+            ObjectNode document = networkFaultDocument("end-txn", "drop-response");
+            ((ObjectNode) document.at("/phases/0/steps/0/network_fault")).remove(missing);
+            SpecificationException failure = assertFailsAt(Stage.DOCUMENT,
+                    () -> loader.load(write("missing-" + missing + ".yaml", document)));
+            assertHasIssue(failure, "schema.required", "$/phases/0/steps/0/network_fault");
+        }
+        ObjectNode counted = networkFaultDocument("end-txn", "drop-request");
+        ((ObjectNode) counted.at("/phases/0/steps/0/network_fault")).put("duration", "1s");
+        SpecificationException durationFailure = assertFailsAt(Stage.DOCUMENT,
+                () -> loader.load(write("counted-with-duration.yaml", counted)));
+        assertHasIssue(durationFailure, "schema.not", "$/phases/0/steps/0/network_fault");
+        for (String extra : List.of("occurrences", "trigger_deadline")) {
+            ObjectNode held = networkFaultDocument("end-txn", "disconnect");
+            ObjectNode fault = (ObjectNode) held.at("/phases/0/steps/0/network_fault");
+            fault.put("duration", "1s");
+            fault.remove(extra.equals("occurrences") ? "trigger_deadline" : "occurrences");
+            SpecificationException failure = assertFailsAt(Stage.DOCUMENT,
+                    () -> loader.load(write("held-with-" + extra + ".yaml", held)));
+            assertHasIssue(failure, "schema.not", "$/phases/0/steps/0/network_fault");
+        }
+    }
+
+    /** A scenario whose only step is a counted network fault on commits. */
+    private ObjectNode networkFaultDocument(String api, String type) throws IOException {
+        ObjectNode document = YamlTestDocuments.read(resource("minimal.yaml"));
+        ObjectNode fault = document.putArray("phases").addObject().put("name", "fault")
+                .putArray("steps").addObject().putObject("network_fault");
+        fault.put("proxy", "kafka-proxy");
+        fault.putObject("target").put("cluster", "main");
+        fault.putObject("match").put("api", api).put("result", "commit");
+        fault.putObject("fault").put("type", type);
+        fault.put("occurrences", 1);
+        fault.put("trigger_deadline", "1m");
+        fault.put("heal", "restore-proxy-rule");
+        return document;
     }
 
     private Path resource(String name) {

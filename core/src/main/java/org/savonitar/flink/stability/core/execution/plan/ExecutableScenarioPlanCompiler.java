@@ -58,7 +58,7 @@ public final class ExecutableScenarioPlanCompiler {
     /** The only terminal oracle the first runner executes. */
     static final String KAFKA_ID_SET = "kafka.id-set";
     private static final Set<String> SUPPORTED_STEP_KEYS = Set.of(
-            "await", "wait", "loop", "kill", "restart");
+            "await", "wait", "loop", "kill", "restart", "network_fault");
     private static final BigInteger LONG_MAX = BigInteger.valueOf(Long.MAX_VALUE);
     private static final BigInteger INT_MAX = BigInteger.valueOf(Integer.MAX_VALUE);
 
@@ -171,14 +171,7 @@ public final class ExecutableScenarioPlanCompiler {
             Path source,
             ObjectNode document,
             List<Diagnostic> issues) {
-        JsonNode proxies = document.at("/setup/proxies");
-        if (proxies.isObject() && !proxies.isEmpty()) {
-            issues.add(issue(
-                    source,
-                    "runner.kafka.proxies-unsupported",
-                    "$/setup/proxies",
-                    "The first runner does not provision Kafka proxies"));
-        }
+        NetworkFaultCompiler.validateProxies(source, document, issues);
 
         ObjectNode clusters = (ObjectNode) document.at("/setup/kafka/clusters");
         if (clusters.size() != 1) {
@@ -365,13 +358,6 @@ public final class ExecutableScenarioPlanCompiler {
                     jobPath + "/source/connect_via_proxy",
                     "The first runner does not route a job source through a proxy"));
         }
-        if (sink.has("connect_via_proxy")) {
-            issues.add(issue(
-                    source,
-                    "runner.kafka.proxy-route-unsupported",
-                    jobPath + "/sink/connect_via_proxy",
-                    "The first runner does not route a job sink through a proxy"));
-        }
         if (sourceEndpoint.path("topic").textValue()
                 .equals(sink.path("topic").textValue())) {
             issues.add(issue(
@@ -526,6 +512,7 @@ public final class ExecutableScenarioPlanCompiler {
                     (ArrayNode) phase.get("steps"),
                     "$/phases/" + phaseIndex + "/steps",
                     document.at("/workload/jobs/0/alias").textValue(),
+                    false,
                     issues);
         }
         validateTaskManagerLifecycle(source, phases, issues);
@@ -536,6 +523,7 @@ public final class ExecutableScenarioPlanCompiler {
             ArrayNode steps,
             String stepsPath,
             String jobAlias,
+            boolean inLoop,
             List<Diagnostic> issues) {
         for (int index = 0; index < steps.size(); index++) {
             ObjectNode step = (ObjectNode) steps.get(index);
@@ -566,12 +554,16 @@ public final class ExecutableScenarioPlanCompiler {
                             (ArrayNode) loop.get("steps"),
                             stepPath + "/loop/steps",
                             jobAlias,
+                            true,
                             issues);
                 }
                 case "kill" -> validateKill(source, (ObjectNode) step.get("kill"),
                         stepPath + "/kill", issues);
                 case "restart" -> validateRestart(source, (ObjectNode) step.get("restart"),
                         stepPath + "/restart", issues);
+                case "network_fault" -> NetworkFaultCompiler.validateStep(
+                        source, (ObjectNode) step.get(key), stepPath + "/network_fault",
+                        inLoop, issues);
                 default -> throw new IllegalStateException("Unexpected supported step " + key);
             }
         }
@@ -822,7 +814,8 @@ public final class ExecutableScenarioPlanCompiler {
                 ExecutableScenarioPlan.KafkaMode.KRAFT,
                 1,
                 KafkaBrokerPolicy.v1SingleBroker(),
-                topics);
+                topics,
+                NetworkFaultCompiler.proxy(document));
         ObjectNode flinkNode = (ObjectNode) document.at("/setup/flink");
         ExecutableScenarioPlan.FlinkCluster flink = new ExecutableScenarioPlan.FlinkCluster(
                 flinkNode.path("image").textValue(), 1, 1);
@@ -840,6 +833,9 @@ public final class ExecutableScenarioPlanCompiler {
                 (ObjectNode) jobNode.get("source"));
         ObjectNode sinkNode = (ObjectNode) jobNode.get("sink");
         ExecutableScenarioPlan.Sink sink = SinkCompiler.map(sinkNode, topicReference(sinkNode));
+        if (sinkNode.has("connect_via_proxy")) {
+            sink = sink.routedVia(kafka.proxy().orElseThrow());
+        }
         ExecutableScenarioPlan.StateTtl stateTtl = mapStateTtl(jobNode.get("state_ttl"));
         ExecutableScenarioPlan.Watermarks watermarks = mapWatermarks(jobNode.get("watermarks"));
         ExecutableScenarioPlan.RunScopedIdentityPolicy identityPolicy =
@@ -1007,6 +1003,8 @@ public final class ExecutableScenarioPlanCompiler {
                         kill.at("/target/name").textValue()));
             } else if (step.has("restart")) {
                 steps.add(new ExecutableScenarioPlan.RestartTaskManager());
+            } else if (step.get("network_fault") instanceof ObjectNode networkFault) {
+                steps.add(NetworkFaultCompiler.step(networkFault));
             } else if (step.get("loop") instanceof ObjectNode loop) {
                 steps.add(new ExecutableScenarioPlan.Loop(
                         loop.path("times").intValue(),
@@ -1077,7 +1075,7 @@ public final class ExecutableScenarioPlanCompiler {
         }
     }
 
-    private static void requirePositiveInt(
+    static void requirePositiveInt(
             Path source,
             JsonNode value,
             String path,
@@ -1181,7 +1179,7 @@ public final class ExecutableScenarioPlanCompiler {
         };
     }
 
-    private static Diagnostic issue(
+    static Diagnostic issue(
             Path source,
             String code,
             String path,
@@ -1205,7 +1203,7 @@ public final class ExecutableScenarioPlanCompiler {
                 : message;
     }
 
-    private static String pointer(String value) {
+    static String pointer(String value) {
         return value.replace("~", "~0").replace("/", "~1");
     }
 

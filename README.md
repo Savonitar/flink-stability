@@ -1,9 +1,11 @@
 # Flink Stability Testing Framework
 
-An experimental chaos-testing harness for [Apache Flink](https://flink.apache.org/).
+An experimental fault-injection and correctness-testing harness for [Apache Flink](https://flink.apache.org/)
+and the systems around it, starting with Kafka. It supports on-demand testing of
+changes and exploratory fault experiments to find violations of data guarantees.
 It starts a real Flink cluster and Apache Kafka broker in Docker, executes a typed
 scenario, prevents Flink from writing any more output, and then validates the final
-Kafka state.
+Kafka state for missing, duplicate, unexpected, or malformed record IDs.
 
 The current prototype intentionally supports one narrow but real vertical: a bounded
 Flink 2.2 exactly-once job using Kafka 4.0 and Kafka connector 5.0.0-2.2. Unsupported
@@ -58,6 +60,10 @@ Build and test every module, including the thin workload JAR:
 ```bash
 mvn clean install
 ```
+
+See [validation and evidence](docs/VALIDATION.md) for regression coverage,
+optional container runs, and the no-match control. Unit tests do not prove that
+the unfinished connector-mutant calibration detects the intended defects.
 
 The workload artifact is written directly to:
 
@@ -122,10 +128,10 @@ The top-level result status is the scenario verdict: `pass`, `fail`, or
 `inconclusive`. Only `pass` exits `0`; execution, validation, or infrastructure
 failures exit `1`, and usage errors exit `2`. The attempt's own result appears under
 `attempt`. A negative control pins an expected failure, so it passes only when its
-attempt fails exactly as pinned with complete phase, fence, and oracle evidence and
-confirmed kill effects. A matching failure without that evidence is `inconclusive`;
-a different evaluable outcome is `expectation.mismatch`. The raw attempt remains a
-failure when its matching scenario verdict is inconclusive.
+attempt fails exactly as pinned with complete phase, fence, and oracle evidence,
+confirmed subject origins, and confirmed fault effects. Missing or unconfirmed
+evidence makes the verdict `inconclusive` while retaining the attempt's data
+failure. A conclusive result with a different outcome is `expectation.mismatch`.
 
 The executable reference pairs are:
 
@@ -138,11 +144,16 @@ The executable reference pairs are:
   recovery replays records written after the last checkpoint, so the oracle must
   report `validator.kafka.id-set.duplicate-ids`. The 10 s checkpoint interval and
   2 s wait create a timing-based window; they do not guarantee duplication on every
-  machine or run.
+  machine or run;
+- [`scenarios/commit-response-lost.yaml`](scenarios/commit-response-lost.yaml) and
+  [`scenarios/commit-request-lost.yaml`](scenarios/commit-request-lost.yaml): a
+  Kroxylicious proxy in front of the sink drops the first matching commit request
+  or successful response after the fault is armed, following checkpoint warmup.
+  The output must still be exact.
 
 ## Current executable subset
 
-The first runner accepts exactly:
+The first runner supports:
 
 - one plain scenario, one run, and no health retry;
 - one Apache Kafka 4.0 broker with the input and sink topics;
@@ -152,6 +163,9 @@ The first runner accepts exactly:
 - one verified connector closure;
 - bounded generated integer input, capped at 1,000,000 records for the in-memory runner;
 - the currently registered wait/await, loop, and named TaskManager kill/restart phase operations;
+- an optional Kroxylicious proxy in front of the job sink, with counted `drop-request` and
+  `drop-response` faults on transaction commits and aborts (`end-txn`)
+  ([SPEC-004 §11](docs/specs/SPEC-004-kroxylicious-fault-model.md));
 - one terminal `kafka.id-set` validator, with an expected outcome of `pass` or an
   expected `kafka.id-set` failure.
 
@@ -162,6 +176,11 @@ restart when no checkpoint existed yet. Otherwise a passing oracle becomes
 ([SPEC-001 R6.12a](docs/specs/SPEC-001-scenario-schema.md)). The JSON result reports
 this under `evidence.taskManagerKills` and `evidence.flinkJob`, and lists the sink's
 unresolved Kafka transactions after the fence under `evidence.sinkTransactions`.
+
+A network fault counts only if the proxy dropped every requested message before the
+step's `trigger_deadline`. Otherwise a passing oracle becomes `inconclusive` with
+`network-fault.trigger-missed`. `evidence.networkFaults` lists each dropped message,
+and for a dropped response the broker's answer that the client never saw.
 
 The schema and planning layer describe more than this execution subset. Unsupported
 features reject explicitly; they are not ignored or approximated.
@@ -192,7 +211,8 @@ validation cases.
 | `cli` | `run` and Docker-free `validate` entry points plus JSON/diagnostic rendering |
 | `core` | schema/catalog planning, artifact preparation, runtime-neutral execution orchestration, and terminal validation |
 | `runtime-api` | JDK-only runtime targets, lifecycle contracts, and immutable runtime evidence shared across orchestration and providers |
-| `testcontainers` | Kafka/Flink process lifecycle, connector installation, fencing, and cleanup |
+| `testcontainers` | Kafka/Flink/proxy process lifecycle, connector installation, fencing, and cleanup |
+| `kroxylicious-fault-filter` | the Kroxylicious filter plugin that drops the messages a network fault selects |
 | `flink-job-generator` | thin Flink 2.2 protocol-v1 workload used by the executable example |
 
 The `core` module keeps its pre-execution stages in explicit package boundaries:
@@ -213,11 +233,12 @@ validation as the package boundary.
 - controlled-unbounded cutoff plus drain/stop;
 - executable suites and baseline/candidate experiments;
 - multi-broker or multi-job execution;
-- proxies and network faults;
+- network faults other than counted EndTxn drops, and proxies for other clients;
 - savepoint/restore and upgrade execution;
 - broader state-backend and topology support;
 - health retries, OCI digest capture, and the complete replay-grade report;
-- automated real-Docker failure injection and the 1,000,000-record load boundary.
+- automatic real-Docker regression coverage on pull requests and pushes, including
+  EndTxn faults and the 1,000,000-record load boundary.
 
 ## Status
 

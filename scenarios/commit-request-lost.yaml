@@ -1,0 +1,96 @@
+format: v1
+kind: scenario
+
+meta:
+  name: commit-request-lost
+  description: >-
+    A sink transaction's EndTxn commit request never reaches the broker. The client must
+    retry it rather than assume the transaction committed or abort it: the output must
+    still hold every input ID exactly once.
+
+runs: 1
+health_retry_limit: 0
+
+setup:
+  kafka:
+    clusters:
+      main:
+        image: apache/kafka:4.0.0
+        brokers: 1
+        topics:
+          - name: input
+            partitions: 1
+            replication_factor: 1
+            input_source:
+              mode: generated
+              format: integer-sequence
+              # About 15 s at 5 ms per record: the fault below is armed mid-stream, while
+              # every one-second checkpoint commits a transaction.
+              total: 3000
+          - name: output
+            partitions: 1
+            replication_factor: 1
+  proxies:
+    kafka-proxy:
+      type: kroxylicious
+      cluster: main
+      listen: kafka-proxy:9092
+      bootstrap: { cluster: main }
+  flink:
+    image: flink:2.2.0
+    jobmanagers: 1
+    taskmanagers: 1
+
+subject:
+  connectors:
+    kafka:
+      artifact: maven:org.apache.flink:flink-connector-kafka:5.0.0-2.2
+
+workload:
+  jobs:
+    - alias: eos-job
+      jar: ./flink-job-generator/target/flink-job-generator.jar
+      connectors: [kafka]
+      parallelism: 1
+      source: { cluster: main, topic: input }
+      sink:
+        cluster: main
+        topic: output
+        delivery_guarantee: EXACTLY_ONCE
+        transactional_id_prefix: commit-request-lost
+        transaction_id_naming_strategy: INCREMENTING
+        connect_via_proxy: kafka-proxy
+      checkpointing:
+        interval: 1s
+        mode: EXACTLY_ONCE
+      program_args: [--processingDelayMs, "5"]
+
+phases:
+  - name: warmup
+    steps:
+      - await:
+          condition: { type: job-state, job: eos-job, state: RUNNING }
+          timeout: 2m
+          on_timeout: inconclusive
+      - await:
+          condition: { type: checkpoint-completed, job: eos-job, count: 1 }
+          timeout: 2m
+          on_timeout: fail
+  - name: commit-request-lost
+    steps:
+      # The first matching commit request is dropped, so the transaction stays open
+      # until the client times out and sends EndTxn again.
+      - network_fault:
+          proxy: kafka-proxy
+          target: { cluster: main }
+          match: { api: end-txn, result: commit, transactional_id_prefix: commit-request-lost }
+          fault: { type: drop-request }
+          occurrences: 1
+          trigger_deadline: 2m
+          heal: restore-proxy-rule
+
+terminal_validations:
+  - type: kafka.id-set
+    cluster: main
+    topic: output
+    expected: input-manifest
