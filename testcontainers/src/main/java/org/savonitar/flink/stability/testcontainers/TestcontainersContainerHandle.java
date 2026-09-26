@@ -88,7 +88,7 @@ final class TestcontainersContainerHandle implements ContainerHandle {
                     "Connector bundle has no pre-process verification evidence for "
                             + logicalName);
         }
-        return FlinkComponentProvisioningEvidence.verified(
+        FlinkComponentProvisioningEvidence evidence = FlinkComponentProvisioningEvidence.verified(
                 logicalName,
                 role,
                 runtimeId,
@@ -97,6 +97,9 @@ final class TestcontainersContainerHandle implements ContainerHandle {
                 installation.targetBindingSha256(),
                 verification.classpathManifestSha256(),
                 verification.connectorArtifacts());
+        return verifiedContainer.runtimeJarEvidence(runtimeId)
+                .map(jar -> evidence.withRuntimeJarEvidence(jar.jar(), jar.classLoadProcess()))
+                .orElse(evidence);
     }
 
     /** Docker lifecycle seam kept independent from Flink provisioning evidence. */

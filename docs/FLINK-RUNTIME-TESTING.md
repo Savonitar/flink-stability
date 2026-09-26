@@ -43,6 +43,31 @@ mvn -q exec:java -pl cli -Dexec.args="run --catalog-root jobs/runtime-candidate/
 Run the release baseline with its own image ID using the same scenario contract. Keep
 both results, including failures. A green candidate only covers the exercised scenario.
 
+## Pin the runtime JAR
+
+To check a particular distribution artifact already present in the image, add its
+container path and the SHA-256 from your retained build artifact:
+
+```yaml
+setup:
+  flink:
+    image: flink:2.2.0
+    runtime_jar:
+      container_path: /opt/flink/lib/flink-dist-2.2.0.jar
+      sha256: "${runtime_jar_sha256}"
+```
+
+Declare `runtime_jar_sha256` as a string parameter containing the 64 lowercase hex
+characters. The engine hashes that file before Flink starts and after startup readiness,
+for each initial and replacement container. For this optional check, TaskManager readiness
+requires the standard `Starting TaskManager with ResourceID:` log message. Custom logging
+that removes the marker cannot satisfy this startup check.
+
+After the process fence, every JobManager must show `ResourceManager` loaded from the
+verified path, and every TaskManager must show `TaskExecutor` loaded from it. Each log
+has an explicit association with its physical container; replacement evidence cannot
+cover a missing predecessor. The JAR check is `not-requested` when the descriptor is absent.
+
 ## Check runtime evidence
 
 Every successful Flink process start records the logical component, role, physical
@@ -64,8 +89,15 @@ Docker's local image ID identifies the image configuration and its root filesyst
 layers. It is distinct from a registry manifest digest (`RepoDigests`), and works for a
 locally built image that has never been pushed. Neither identity proves a source commit
 or that a particular runtime class or changed code path executed. Connector class-load
-evidence remains a separate check. Runtime JAR checksums and runtime class-load evidence
-remain work to complete before claiming source-level PR provenance.
+evidence remains a separate check. The optional runtime JAR check adds binary provenance
+under trusted-image and immutable-JAR assumptions: it does not establish a Git revision,
+reproducible compilation, absence of bytecode transformation, or method execution.
+Concurrent JAR mutation after startup verification is unsupported.
+
+`evidence.flinkRuntime.runtimeJar` reports the expected artifact and observed class sources.
+Each component's `runtimeJar.classLoadProcess` joins these sources to its container ID;
+the component also retains the observed path and hash. Both positive results and
+expected-failure controls require confirmation when the check is requested.
 
 ## Supported scope
 
@@ -76,16 +108,16 @@ version. The executable topology and fault types remain those listed in the
 
 ## Verification
 
-On 2026-09-27, after the inventory and report review fixes, the JDK 21
-`mvn clean install` suite passed 680 tests with no failures, errors or skips;
+On 2026-09-27, the runtime JAR change passed the JDK 21
+`mvn clean install` suite with 701 tests and no failures, errors or skips;
 the Python tooling suite passed 16 tests.
 
 Docker checks cover the initial image-identity implementation at `589f3ba`, before
-those review fixes. A real `bounded-eos` run on the released `flink:2.2.0` image with
+the subsequent inventory, report, and runtime JAR changes. A real `bounded-eos` run on the released `flink:2.2.0` image with
 its explicit image ID passed: all 3,000
 records were present exactly once, the TaskManager kill/recovery effect was confirmed,
 and the JobManager plus both TaskManager incarnations had matching image IDs. A second
 run with a deliberately wrong image ID stopped before Flink process start, returned
 `inconclusive / infrastructure.flink-start-failed`, and retained both IDs in diagnostics.
 These checks validate the engine's image verification, not a Flink PR or token behavior.
-Docker checks were not repeated for the inventory and report review fixes.
+Runtime JAR Docker validation has not yet been run.

@@ -13,11 +13,15 @@ import org.savonitar.flink.stability.runtime.api.FlinkRuntimeTarget;
 import org.testcontainers.containers.GenericContainer;
 import org.testcontainers.containers.Network;
 import org.testcontainers.containers.wait.strategy.HttpWaitStrategy;
+import org.testcontainers.containers.wait.strategy.LogMessageWaitStrategy;
 
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.attribute.PosixFilePermission;
 import java.util.List;
+import java.util.HashMap;
+import java.util.Map;
+import java.util.function.Function;
 import java.util.concurrent.atomic.AtomicReference;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -28,9 +32,109 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 class FlinkContainerTest {
     private static final String IMAGE_ID = "sha256:" + "a".repeat(64);
     private static final String OTHER_IMAGE_ID = "sha256:" + "b".repeat(64);
+    private static final String RUNTIME_JAR_PATH = "/opt/flink/lib/flink-dist-2.2.0.jar";
+    private static final byte[] RUNTIME_JAR_BYTES = {1, 4, 9};
+    private static final FlinkRuntimeTarget.RuntimeJar RUNTIME_JAR = new FlinkRuntimeTarget.RuntimeJar(
+            RUNTIME_JAR_PATH, Digests.sha256(RUNTIME_JAR_BYTES));
 
     @TempDir
     Path temporaryDirectory;
+
+    @Test
+    void runtimeJarReadsBothBeforeAndAfterStartupAndBindsTheRegisteredLog() {
+        FlinkContainer factory = new FlinkContainer(
+                emptyTarget().withExpectedRuntimeJar(RUNTIME_JAR), Network.SHARED, temporaryDirectory);
+        VerifiedFlinkContainer container = (VerifiedFlinkContainer) factory.createJobManager("jobmanager-1");
+        java.util.ArrayList<String> pathsRead = new java.util.ArrayList<>();
+        Function<String, String> archive = path -> {
+            pathsRead.add(path);
+            return Digests.sha256(RUNTIME_JAR_BYTES);
+        };
+
+        assertThrows(IllegalStateException.class,
+                () -> container.runtimeJarEvidence("physical-jm", archive));
+        container.verifyRuntimeJarBeforeStart("physical-jm", archive);
+        var evidence = container.runtimeJarEvidence("physical-jm", archive).orElseThrow();
+
+        assertEquals(List.of(RUNTIME_JAR_PATH, RUNTIME_JAR_PATH), pathsRead);
+        assertEquals(RUNTIME_JAR, evidence.jar());
+        assertEquals("jobmanager-1#1", evidence.classLoadProcess());
+        assertEquals(factory.classLoadLogs().getFirst().process(), evidence.classLoadProcess());
+        assertThrows(IllegalStateException.class,
+                () -> container.runtimeJarEvidence("different-physical-jm", archive));
+    }
+
+    @Test
+    void wrongMissingAndEntrypointReplacedRuntimeBytesCannotProduceEvidence() {
+        FlinkContainer factory = new FlinkContainer(
+                emptyTarget().withExpectedRuntimeJar(RUNTIME_JAR), Network.SHARED, temporaryDirectory);
+        VerifiedFlinkContainer container = (VerifiedFlinkContainer) factory.createTaskManager("taskmanager-1");
+        Map<String, byte[]> files = new HashMap<>();
+        Function<String, String> archive = path -> {
+            byte[] bytes = files.get(path);
+            if (bytes == null) {
+                throw new IllegalStateException("synthetic missing archive entry");
+            }
+            return Digests.sha256(bytes);
+        };
+
+        IllegalStateException missing = assertThrows(IllegalStateException.class,
+                () -> container.verifyRuntimeJarBeforeStart("physical-tm", archive));
+        assertTrue(missing.getMessage().contains(RUNTIME_JAR_PATH));
+        assertTrue(missing.getMessage().contains("actual unavailable"));
+        assertEquals("synthetic missing archive entry", missing.getCause().getMessage());
+        files.put(RUNTIME_JAR_PATH, new byte[] {2, 5, 8});
+        IllegalStateException wrong = assertThrows(IllegalStateException.class,
+                () -> container.verifyRuntimeJarBeforeStart("physical-tm", archive));
+        assertTrue(wrong.getMessage().contains("expected " + RUNTIME_JAR.sha256()));
+        assertTrue(wrong.getMessage().contains("actual " + Digests.sha256(new byte[] {2, 5, 8})));
+        files.put(RUNTIME_JAR_PATH, RUNTIME_JAR_BYTES);
+        assertThrows(IllegalStateException.class,
+                () -> container.runtimeJarEvidence("physical-tm", archive));
+        container.verifyRuntimeJarBeforeStart("physical-tm", archive);
+        files.put(RUNTIME_JAR_PATH, new byte[] {3, 6, 7});
+        assertThrows(IllegalStateException.class,
+                () -> container.runtimeJarEvidence("physical-tm", archive));
+        files.remove(RUNTIME_JAR_PATH);
+        assertThrows(IllegalStateException.class,
+                () -> container.runtimeJarEvidence("physical-tm", archive));
+    }
+
+    @Test
+    void replacementsAndRetriedFactoriesKeepTheirOwnLogBindingDespiteMissingStarts() {
+        ClassLoadLogs logs = new ClassLoadLogs(temporaryDirectory);
+        FlinkRuntimeTarget target = emptyTarget().withExpectedRuntimeJar(RUNTIME_JAR);
+        FlinkContainer first = new FlinkContainer(target, Network.SHARED, temporaryDirectory, logs);
+        first.createJobManager("jobmanager-1");
+        first.createTaskManager("taskmanager-1");
+        FlinkContainer retry = new FlinkContainer(target, Network.SHARED, temporaryDirectory, logs);
+        VerifiedFlinkContainer replacement = (VerifiedFlinkContainer) retry.createTaskManager("taskmanager-1");
+        retry.createJobManager("jobmanager-1");
+        replacement.verifyRuntimeJarBeforeStart("replacement-container", ignored -> RUNTIME_JAR.sha256());
+        var observed = replacement.runtimeJarEvidence("replacement-container",
+                ignored -> RUNTIME_JAR.sha256()).orElseThrow();
+
+        assertEquals("taskmanager-1#2", observed.classLoadProcess());
+        assertTrue(replacement.getEnvMap().get("FLINK_PROPERTIES").contains(
+                ClassLoadLogs.fileName("taskmanager-1", 2)));
+        assertInstanceOf(LogMessageWaitStrategy.class, replacement.configuredWaitStrategy());
+        assertThrows(IllegalStateException.class,
+                () -> replacement.verifyRuntimeJarBeforeStart("retried-container", ignored -> "wrong"));
+        assertThrows(IllegalStateException.class,
+                () -> replacement.runtimeJarEvidence("replacement-container", ignored -> RUNTIME_JAR.sha256()));
+    }
+
+    @Test
+    void scenariosWithoutRuntimeJarPinDoNotReadOrReportRuntimeJarEvidence() {
+        FlinkContainer factory = new FlinkContainer(emptyTarget(), Network.SHARED, temporaryDirectory);
+        VerifiedFlinkContainer container = (VerifiedFlinkContainer) factory.createTaskManager("taskmanager-1");
+        Function<String, String> unexpectedRead = ignored -> {
+            throw new AssertionError("No runtime JAR was requested");
+        };
+        container.verifyRuntimeJarBeforeStart("physical-tm", unexpectedRead);
+        assertTrue(container.runtimeJarEvidence("physical-tm", unexpectedRead).isEmpty());
+        assertTrue(!(container.configuredWaitStrategy() instanceof LogMessageWaitStrategy));
+    }
 
     @Test
     void verifiesCreatedContainerImageIdentityForEveryInitialAndReplacementProcess() {

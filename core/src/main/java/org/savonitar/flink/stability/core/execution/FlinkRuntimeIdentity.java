@@ -3,6 +3,7 @@ package org.savonitar.flink.stability.core.execution;
 import org.savonitar.flink.stability.runtime.api.FlinkComponentProvisioningEvidence;
 import org.savonitar.flink.stability.runtime.api.FlinkComponentRole;
 import org.savonitar.flink.stability.runtime.api.FlinkProcessWriteFenceEvidence;
+import org.savonitar.flink.stability.runtime.api.FlinkRuntimeTarget;
 
 import java.util.HashMap;
 import java.util.HashSet;
@@ -15,19 +16,29 @@ import java.util.Set;
 
 import static org.savonitar.flink.stability.runtime.api.Checks.requireNonBlank;
 
-/** Observed local Docker image identity across the first runner's process incarnations. */
-public record FlinkRuntimeIdentity(Outcome outcome, String detail) {
+/** Observed image and optional runtime JAR identities across the runner's process incarnations. */
+public record FlinkRuntimeIdentity(Outcome outcome, String detail, String reason) {
     public static final String MISMATCH = "subject.flink.image-id-mismatch";
     public static final String UNCONFIRMED = "subject.flink.image-id-unconfirmed";
+    public static final String RUNTIME_JAR_MISMATCH = "subject.flink.runtime-jar-mismatch";
+    public static final String RUNTIME_JAR_UNCONFIRMED = "subject.flink.runtime-jar-unconfirmed";
+    public static final String RESOURCE_MANAGER_CLASS =
+            "org.apache.flink.runtime.resourcemanager.ResourceManager";
+    public static final String TASK_EXECUTOR_CLASS =
+            "org.apache.flink.runtime.taskexecutor.TaskExecutor";
+    public static final List<String> RUNTIME_CLASSES = List.of(
+            RESOURCE_MANAGER_CLASS, TASK_EXECUTOR_CLASS);
 
     public enum Outcome { CONFIRMED, MISMATCH, UNCONFIRMED }
 
     /** Expected composition is supplied by the executable plan, never inferred from observations. */
     public record ExpectedTarget(
             Optional<String> imageId,
-            Map<String, FlinkComponentRole> components) {
+            Map<String, FlinkComponentRole> components,
+            Optional<FlinkRuntimeTarget.RuntimeJar> runtimeJar) {
         public ExpectedTarget {
             imageId = Objects.requireNonNull(imageId, "imageId");
+            runtimeJar = Objects.requireNonNull(runtimeJar, "runtimeJar");
             imageId.ifPresent(id -> org.savonitar.flink.stability.runtime.api.Checks
                     .requireDockerImageId(id, "imageId"));
             components = java.util.Collections.unmodifiableMap(new LinkedHashMap<>(
@@ -40,10 +51,14 @@ public record FlinkRuntimeIdentity(Outcome outcome, String detail) {
                 Objects.requireNonNull(role, "role");
             });
         }
+
+        public ExpectedTarget(Optional<String> imageId, Map<String, FlinkComponentRole> components) {
+            this(imageId, components, Optional.empty());
+        }
     }
 
-    public String reason() {
-        return outcome == Outcome.MISMATCH ? MISMATCH : UNCONFIRMED;
+    public FlinkRuntimeIdentity(Outcome outcome, String detail) {
+        this(outcome, detail, outcome == Outcome.MISMATCH ? MISMATCH : UNCONFIRMED);
     }
 
     public static FlinkRuntimeIdentity evaluate(
@@ -118,5 +133,91 @@ public record FlinkRuntimeIdentity(Outcome outcome, String detail) {
 
     private static FlinkRuntimeIdentity unconfirmed(String detail) {
         return new FlinkRuntimeIdentity(Outcome.UNCONFIRMED, detail);
+    }
+
+    /** Each registered log must belong to exactly one observed physical incarnation. */
+    public static Optional<FlinkRuntimeIdentity> evaluateRuntimeJar(
+            ExpectedTarget expected,
+            List<FlinkComponentProvisioningEvidence> provisioning,
+            Optional<SubjectClassOrigins> origins) {
+        return expected.runtimeJar().map(jar -> runtimeJarIdentity(expected, jar, provisioning, origins));
+    }
+
+    private static FlinkRuntimeIdentity runtimeJarIdentity(
+            ExpectedTarget expected,
+            FlinkRuntimeTarget.RuntimeJar jar,
+            List<FlinkComponentProvisioningEvidence> provisioning,
+            Optional<SubjectClassOrigins> origins) {
+        if (provisioning.isEmpty()) {
+            return jarUnconfirmed("No Flink process has runtime JAR evidence");
+        }
+        Map<String, FlinkComponentProvisioningEvidence> bindings = new HashMap<>();
+        Set<String> runtimeIds = new HashSet<>();
+        Set<String> observedSlots = new HashSet<>();
+        for (FlinkComponentProvisioningEvidence component : provisioning) {
+            if (expected.components().get(component.logicalName()) != component.role()
+                    || !runtimeIds.add(component.runtimeId())) {
+                return jarUnconfirmed("Runtime JAR evidence has an unexpected or duplicate Flink process");
+            }
+            observedSlots.add(component.logicalName());
+            if (component.runtimeJarEvidence().isEmpty()) {
+                return jarUnconfirmed("Missing runtime JAR observation for " + component.runtimeId());
+            }
+            var observed = component.runtimeJarEvidence().orElseThrow();
+            if (!jar.equals(observed.jar())) {
+                return jarMismatch("Runtime JAR bytes or path differ for " + component.runtimeId()
+                        + ": expected " + jar + ", observed " + observed.jar());
+            }
+            if (bindings.putIfAbsent(observed.classLoadProcess(), component) != null) {
+                return jarUnconfirmed("Several Flink incarnations claim class-load log "
+                        + observed.classLoadProcess());
+            }
+        }
+        if (!observedSlots.containsAll(expected.components().keySet())) {
+            return jarUnconfirmed("Runtime JAR observations omit an expected Flink slot");
+        }
+        if (origins.isEmpty()) {
+            return jarUnconfirmed("No runtime class-load observations were retained");
+        }
+        SubjectClassOrigins loaded = origins.orElseThrow();
+        if (!jar.containerPath().equals(loaded.expectedSource())) {
+            return jarUnconfirmed("Runtime class-load observations were checked against another JAR path");
+        }
+        Set<String> observedLogs = new HashSet<>();
+        for (SubjectClassOrigins.ProcessOrigin process : loaded.processes()) {
+            FlinkComponentProvisioningEvidence component = bindings.get(process.process());
+            if (component == null || !observedLogs.add(process.process())) {
+                return jarUnconfirmed("Runtime class-load log has an unknown or duplicate binding: "
+                        + process.process());
+            }
+            for (String runtimeClass : RUNTIME_CLASSES) {
+                if (process.sources().getOrDefault(runtimeClass, List.of()).stream()
+                        .anyMatch(source -> !jar.containerPath().equals(source))) {
+                    return jarMismatch(process.process() + " loaded " + runtimeClass
+                            + " from outside the verified runtime JAR");
+                }
+            }
+            String required = component.role() == FlinkComponentRole.JOB_MANAGER
+                    ? RESOURCE_MANAGER_CLASS : TASK_EXECUTOR_CLASS;
+            if (process.sources().getOrDefault(required, List.of()).isEmpty()) {
+                return jarUnconfirmed(process.process() + " did not show a load of " + required);
+            }
+        }
+        if (loaded.failure().isPresent() || !observedLogs.equals(bindings.keySet())) {
+            return jarUnconfirmed(loaded.failure().orElse(
+                    "A provisioned Flink incarnation has no runtime class-load log"));
+        }
+        return new FlinkRuntimeIdentity(Outcome.CONFIRMED,
+                "Every Flink incarnation loaded its required runtime class from "
+                        + jar.containerPath() + " with observed SHA-256 " + jar.sha256(),
+                "subject.flink.runtime-jar-confirmed");
+    }
+
+    private static FlinkRuntimeIdentity jarUnconfirmed(String detail) {
+        return new FlinkRuntimeIdentity(Outcome.UNCONFIRMED, detail, RUNTIME_JAR_UNCONFIRMED);
+    }
+
+    private static FlinkRuntimeIdentity jarMismatch(String detail) {
+        return new FlinkRuntimeIdentity(Outcome.MISMATCH, detail, RUNTIME_JAR_MISMATCH);
     }
 }

@@ -94,6 +94,13 @@ public record ScenarioVerdict(Status status, String reason, String message, bool
             return unconfirmed(runtime.reason(),
                     "The expected failure lacks confirmed Flink runtime identity: " + runtime.detail());
         }
+        var runtimeJar = attempt.runtimeJarIdentity()
+                .filter(identity -> identity.outcome() != FlinkRuntimeIdentity.Outcome.CONFIRMED);
+        if (runtimeJar.isPresent()) {
+            FlinkRuntimeIdentity identity = runtimeJar.orElseThrow();
+            return unconfirmed(identity.reason(),
+                    "The expected failure lacks requested runtime JAR provenance: " + identity.detail());
+        }
         for (TaskManagerKillEffect effect : attempt.taskManagerKillEffects()) {
             if (!effect.outcome().confirmed()) {
                 return unconfirmed(ExecutablePhaseExecutor.TASKMANAGER_KILL_EFFECT_UNCONFIRMED,

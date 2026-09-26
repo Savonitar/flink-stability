@@ -134,7 +134,8 @@ public final class V1ScenarioExecutor {
             AttemptResources resources) {
         ExecutableScenarioPlan plan = prepared.executablePlan();
         FlinkRuntimeIdentity.ExpectedTarget expectedRuntime = new FlinkRuntimeIdentity.ExpectedTarget(
-                plan.flink().expectedImageId(), plan.flink().expectedComponents());
+                plan.flink().expectedImageId(), plan.flink().expectedComponents(),
+                plan.flink().expectedRuntimeJar());
 
         V1AttemptRuntime runtime = null;
         FlinkScenarioControl flink = null;
@@ -148,6 +149,7 @@ public final class V1ScenarioExecutor {
         KafkaIdSetValidationResult validation = null;
         KafkaTransactionListing sinkTransactions = null;
         SubjectClassOrigins subjectOrigins = null;
+        SubjectClassOrigins runtimeOrigins = null;
         List<String> evidenceDiagnostics = new ArrayList<>();
         V1ScenarioExecutionResult result;
         Stage stage = Stage.RUNTIME_CREATION;
@@ -196,6 +198,10 @@ public final class V1ScenarioExecutor {
             phases = withObservedRetries(phases, networkFaults, evidenceDiagnostics);
             // Every Flink JVM is dead now, so each class-load log is complete.
             subjectOrigins = subjectOrigins(runtime, prepared);
+            if (expectedRuntime.runtimeJar().isPresent()) {
+                runtimeOrigins = runtimeClassOrigins(
+                        runtime, expectedRuntime.runtimeJar().orElseThrow().containerPath());
+            }
 
             stage = Stage.TERMINAL_VALIDATION;
             validation = terminalValidation.validate(
@@ -273,6 +279,7 @@ public final class V1ScenarioExecutor {
                     subjectOrigins,
                     runtime,
                     expectedRuntime,
+                    runtimeOrigins,
                     evidenceDiagnostics);
         } catch (KafkaInputPreparationException failure) {
             inputEvidence = failure.evidence().orElse(inputEvidence);
@@ -290,6 +297,7 @@ public final class V1ScenarioExecutor {
                     subjectOrigins,
                     runtime,
                     expectedRuntime,
+                    runtimeOrigins,
                     diagnostics(failure));
         } catch (PhaseExecutionException failure) {
             phases = failure.evidence();
@@ -311,6 +319,7 @@ public final class V1ScenarioExecutor {
                     subjectOrigins,
                     runtime,
                     expectedRuntime,
+                    runtimeOrigins,
                     diagnostics(failure));
         } catch (TerminalWriteFenceException failure) {
             processFence = failure.processFenceEvidence().orElse(null);
@@ -329,6 +338,7 @@ public final class V1ScenarioExecutor {
                     subjectOrigins,
                     runtime,
                     expectedRuntime,
+                    runtimeOrigins,
                     diagnostics(failure));
         } catch (InterruptedException failure) {
             Thread.currentThread().interrupt();
@@ -346,6 +356,7 @@ public final class V1ScenarioExecutor {
                     subjectOrigins,
                     runtime,
                     expectedRuntime,
+                    runtimeOrigins,
                     diagnostics(failure));
         } catch (Exception failure) {
             result = result(
@@ -362,6 +373,7 @@ public final class V1ScenarioExecutor {
                     subjectOrigins,
                     runtime,
                     expectedRuntime,
+                    runtimeOrigins,
                     diagnostics(failure));
         }
 
@@ -382,6 +394,27 @@ public final class V1ScenarioExecutor {
         } catch (RuntimeException unavailable) {
             return new SubjectClassOrigins(expectedSource, List.of(), Optional.of(
                     "Cannot list Flink class-load logs: " + unavailable.getMessage()));
+        }
+    }
+
+    private static SubjectClassOrigins runtimeClassOrigins(
+            V1AttemptRuntime runtime, String expectedSource) {
+        try {
+            var logs = runtime.flinkClassLoadLogs();
+            SubjectClassOrigins origins = SubjectClassOrigins.read(
+                    logs, FlinkRuntimeIdentity.RUNTIME_CLASSES, expectedSource);
+            var names = new java.util.HashSet<String>();
+            var paths = new java.util.HashSet<java.nio.file.Path>();
+            for (var log : logs) {
+                if (!names.add(log.process()) || !paths.add(log.hostPath().toAbsolutePath().normalize())) {
+                    return new SubjectClassOrigins(expectedSource, origins.processes(), Optional.of(
+                            "Runtime class-load inventory contains duplicate process names or log paths"));
+                }
+            }
+            return origins;
+        } catch (RuntimeException unavailable) {
+            return new SubjectClassOrigins(expectedSource, List.of(), Optional.of(
+                    "Cannot read runtime class-load logs: " + unavailable.getMessage()));
         }
     }
 
@@ -420,6 +453,7 @@ public final class V1ScenarioExecutor {
             SubjectClassOrigins subjectOrigins,
             V1AttemptRuntime runtime,
             FlinkRuntimeIdentity.ExpectedTarget expectedRuntime,
+            SubjectClassOrigins runtimeOrigins,
             List<String> diagnostics) {
         List<String> retainedDiagnostics = new ArrayList<>(diagnostics);
         List<FlinkComponentProvisioningEvidence> provisioning = List.of();
@@ -439,6 +473,16 @@ public final class V1ScenarioExecutor {
             message = "The terminal oracle passed, but Flink runtime identity is unconfirmed: "
                     + identity.detail();
         }
+        Optional<FlinkRuntimeIdentity> unconfirmedJar = FlinkRuntimeIdentity.evaluateRuntimeJar(
+                expectedRuntime, provisioning, Optional.ofNullable(runtimeOrigins))
+                .filter(jar -> jar.outcome() != FlinkRuntimeIdentity.Outcome.CONFIRMED);
+        if (status == V1ScenarioExecutionResult.Status.PASS && unconfirmedJar.isPresent()) {
+            FlinkRuntimeIdentity jar = unconfirmedJar.orElseThrow();
+            status = V1ScenarioExecutionResult.Status.INCONCLUSIVE;
+            reason = jar.reason();
+            message = "The terminal oracle passed, but requested runtime JAR provenance is unconfirmed: "
+                    + jar.detail();
+        }
         return new V1ScenarioExecutionResult(
                 status,
                 reason,
@@ -453,6 +497,7 @@ public final class V1ScenarioExecutor {
                 Optional.ofNullable(subjectOrigins),
                 provisioning,
                 expectedRuntime,
+                Optional.ofNullable(runtimeOrigins),
                 retainedDiagnostics);
     }
 

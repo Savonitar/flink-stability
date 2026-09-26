@@ -55,6 +55,21 @@ class ClusterManagerTest {
     }
 
     @Test
+    void missingRequestedRuntimeJarEvidencePreventsSuccessfulProvisioning() {
+        RecordingFactory factory = new RecordingFactory();
+        try (ClusterManager manager = manager(factory)) {
+            FlinkRuntimeTarget.RuntimeJar jar = new FlinkRuntimeTarget.RuntimeJar(
+                    "/opt/flink/lib/flink-dist-2.2.0.jar", "c".repeat(64));
+            IllegalStateException failure = assertThrows(IllegalStateException.class,
+                    () -> manager.startFlink(target().withExpectedRuntimeJar(jar)));
+
+            assertTrue(failure.getMessage().contains("runtime JAR evidence"));
+            assertTrue(manager.provisioningHistory().isEmpty());
+            assertTrue(factory.events.contains("stop:jobmanager-1"));
+        }
+    }
+
+    @Test
     void validatesDeclaredImageIdentityAndRetainsItForEachPhysicalProcess() {
         RecordingFactory factory = new RecordingFactory();
         try (ClusterManager manager = manager(factory)) {

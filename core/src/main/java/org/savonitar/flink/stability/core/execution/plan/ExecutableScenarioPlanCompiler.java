@@ -139,6 +139,8 @@ public final class ExecutableScenarioPlanCompiler {
         FlinkRuntimeTarget runtimeTarget = runtimeTargetFactory.create(connectorBundle);
         runtimeTarget = executablePlan.flink().expectedImageId()
                 .map(runtimeTarget::withExpectedImageId).orElse(runtimeTarget);
+        runtimeTarget = executablePlan.flink().expectedRuntimeJar()
+                .map(runtimeTarget::withExpectedRuntimeJar).orElse(runtimeTarget);
         return new PreparedExecutableScenarioPlan(
                 preparedPlan,
                 executablePlan,
@@ -821,7 +823,10 @@ public final class ExecutableScenarioPlanCompiler {
         ObjectNode flinkNode = (ObjectNode) document.at("/setup/flink");
         ExecutableScenarioPlan.FlinkCluster flink = new ExecutableScenarioPlan.FlinkCluster(
                 flinkNode.path("image").textValue(),
-                java.util.Optional.ofNullable(flinkNode.path("image_id").textValue()), 1, 1);
+                Optional.ofNullable(flinkNode.path("image_id").textValue()), 1, 1,
+                Optional.ofNullable(flinkNode.get("runtime_jar")).map(jar ->
+                        new FlinkRuntimeTarget.RuntimeJar(jar.path("container_path").textValue(),
+                                jar.path("sha256").textValue())));
         ExecutableScenarioPlan.GeneratedIntegerSequenceInput input =
                 new ExecutableScenarioPlan.GeneratedIntegerSequenceInput(
                         clusterAlias,

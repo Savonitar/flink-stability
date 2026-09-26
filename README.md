@@ -36,6 +36,8 @@ Important properties of this boundary:
 - each created Flink container's actual Docker image ID is checked before process start;
   an optional `setup.flink.image_id` pins the intended local build, and every initial or
   replacement process must use the same image throughout the attempt;
+- optional `setup.flink.runtime_jar` verifies the distribution JAR's bytes in every
+  container and requires matching runtime class-load sources for every incarnation;
 - the subject connector's primary artifact must be the only source of the Kafka
   connector classes the workload runs; a second copy in a dependency or the workload
   JAR is rejected before Docker starts;

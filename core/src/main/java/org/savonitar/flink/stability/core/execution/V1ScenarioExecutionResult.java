@@ -29,6 +29,7 @@ public record V1ScenarioExecutionResult(
         Optional<SubjectClassOrigins> subjectClassOrigins,
         List<FlinkComponentProvisioningEvidence> flinkProvisioningEvidence,
         FlinkRuntimeIdentity.ExpectedTarget expectedFlinkRuntime,
+        Optional<SubjectClassOrigins> runtimeClassOrigins,
         List<String> diagnostics) {
 
     public V1ScenarioExecutionResult {
@@ -51,6 +52,7 @@ public record V1ScenarioExecutionResult(
         flinkProvisioningEvidence = List.copyOf(Objects.requireNonNull(
                 flinkProvisioningEvidence, "flinkProvisioningEvidence"));
         expectedFlinkRuntime = Objects.requireNonNull(expectedFlinkRuntime, "expectedFlinkRuntime");
+        runtimeClassOrigins = Objects.requireNonNull(runtimeClassOrigins, "runtimeClassOrigins");
         diagnostics = List.copyOf(Objects.requireNonNull(diagnostics, "diagnostics"));
         if (status == Status.PASS
                 && (writeFenceEvidence.isEmpty()
@@ -93,6 +95,12 @@ public record V1ScenarioExecutionResult(
                 != FlinkRuntimeIdentity.Outcome.CONFIRMED) {
             throw new IllegalArgumentException("PASS requires confirmed Flink runtime image identities");
         }
+        if (status == Status.PASS && FlinkRuntimeIdentity.evaluateRuntimeJar(expectedFlinkRuntime,
+                flinkProvisioningEvidence, runtimeClassOrigins)
+                .filter(identity -> identity.outcome() != FlinkRuntimeIdentity.Outcome.CONFIRMED)
+                .isPresent()) {
+            throw new IllegalArgumentException("PASS requires the requested runtime JAR provenance");
+        }
         if (writeFenceEvidence.isPresent()
                 && !processFenceEvidence.equals(Optional.of(
                         writeFenceEvidence.orElseThrow().processFenceEvidence()))) {
@@ -111,6 +119,26 @@ public record V1ScenarioExecutionResult(
         }
     }
 
+    /** Existing callers do not supply runtime class evidence; requested checks still fail closed. */
+    public V1ScenarioExecutionResult(
+            Status status, String reason, String message,
+            Optional<KafkaInputManifest> inputManifest,
+            Optional<PhaseExecutionEvidence> phaseEvidence,
+            Optional<FlinkTerminalWriteFence.Evidence> writeFenceEvidence,
+            Optional<FlinkProcessWriteFenceEvidence> processFenceEvidence,
+            Optional<FlinkJobObservation.Attempt> finalJobObservation,
+            Optional<KafkaIdSetValidationResult> terminalValidation,
+            Optional<KafkaTransactionListing> sinkTransactions,
+            Optional<SubjectClassOrigins> subjectClassOrigins,
+            List<FlinkComponentProvisioningEvidence> flinkProvisioningEvidence,
+            FlinkRuntimeIdentity.ExpectedTarget expectedFlinkRuntime,
+            List<String> diagnostics) {
+        this(status, reason, message, inputManifest, phaseEvidence, writeFenceEvidence,
+                processFenceEvidence, finalJobObservation, terminalValidation, sinkTransactions,
+                subjectClassOrigins, flinkProvisioningEvidence, expectedFlinkRuntime,
+                Optional.empty(), diagnostics);
+    }
+
     public enum Status {
         PASS,
         FAIL,
@@ -127,6 +155,11 @@ public record V1ScenarioExecutionResult(
     public FlinkRuntimeIdentity flinkRuntimeIdentity() {
         return FlinkRuntimeIdentity.evaluate(expectedFlinkRuntime,
                 flinkProvisioningEvidence, processFenceEvidence, phaseEvidence);
+    }
+
+    public Optional<FlinkRuntimeIdentity> runtimeJarIdentity() {
+        return FlinkRuntimeIdentity.evaluateRuntimeJar(
+                expectedFlinkRuntime, flinkProvisioningEvidence, runtimeClassOrigins);
     }
 
     public V1ScenarioExecutionResult withCleanupFailure(Throwable failure) {
@@ -172,6 +205,7 @@ public record V1ScenarioExecutionResult(
                     subjectClassOrigins,
                     flinkProvisioningEvidence,
                     expectedFlinkRuntime,
+                    runtimeClassOrigins,
                     updated);
         }
         return new V1ScenarioExecutionResult(
@@ -188,6 +222,7 @@ public record V1ScenarioExecutionResult(
                 subjectClassOrigins,
                 flinkProvisioningEvidence,
                 expectedFlinkRuntime,
+                runtimeClassOrigins,
                 updated);
     }
 }

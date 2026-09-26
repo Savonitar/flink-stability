@@ -69,7 +69,8 @@ final class FlinkContainer implements FlinkComponentFactory {
     }
 
     GenericContainer<?> createJobManager(String logicalName) {
-        return new VerifiedFlinkContainer(flinkImage, runtimeTarget, this::verifyImageId)
+        FlinkClassLoadLog log = classLoadLogs.register(logicalName);
+        return new VerifiedFlinkContainer(flinkImage, runtimeTarget, this::verifyImageId, log)
                 .withNetwork(network)
                 .withNetworkAliases(logicalName)
                 .withLabel(COMPONENT_LABEL, logicalName)
@@ -77,7 +78,7 @@ final class FlinkContainer implements FlinkComponentFactory {
                 .withFileSystemBind(
                         checkpointStorageRoot.toString(), CHECKPOINT_PATH, BindMode.READ_WRITE)
                 .withEnv("JOB_MANAGER_RPC_ADDRESS", PRIMARY_JOB_MANAGER_ALIAS)
-                .withEnv("FLINK_PROPERTIES", flinkProperties("jobmanager", logicalName))
+                .withEnv("FLINK_PROPERTIES", flinkProperties("jobmanager", log))
                 .withCommand("jobmanager")
                 .waitingFor(Wait.forHttp("/overview")
                         .forPort(JOB_MANAGER_PORT)
@@ -87,16 +88,25 @@ final class FlinkContainer implements FlinkComponentFactory {
     }
 
     GenericContainer<?> createTaskManager(String logicalName) {
-        return new VerifiedFlinkContainer(flinkImage, runtimeTarget, this::verifyImageId)
+        FlinkClassLoadLog log = classLoadLogs.register(logicalName);
+        VerifiedFlinkContainer container = new VerifiedFlinkContainer(
+                flinkImage, runtimeTarget, this::verifyImageId, log)
                 .withNetwork(network)
                 .withNetworkAliases(logicalName)
                 .withLabel(COMPONENT_LABEL, logicalName)
                 .withFileSystemBind(
                         checkpointStorageRoot.toString(), CHECKPOINT_PATH, BindMode.READ_WRITE)
                 .withEnv("JOB_MANAGER_RPC_ADDRESS", PRIMARY_JOB_MANAGER_ALIAS)
-                .withEnv("FLINK_PROPERTIES", flinkProperties("taskmanager", logicalName))
+                .withEnv("FLINK_PROPERTIES", flinkProperties("taskmanager", log))
                 .withCommand("taskmanager")
                 .withLogConsumer(createLogConsumer("TASK_MANAGER_LOGS." + logicalName));
+        if (runtimeTarget.expectedRuntimeJar().isPresent()) {
+            // Docker running alone can precede an entrypoint's JAR replacement. This message
+            // comes from TaskManagerRunner, before accepting the second runtime-byte read.
+            container.waitingFor(Wait.forLogMessage(".*Starting TaskManager with ResourceID:.*", 1)
+                    .withStartupTimeout(Duration.ofMinutes(2)));
+        }
+        return container;
     }
 
     @Override
@@ -127,8 +137,7 @@ final class FlinkContainer implements FlinkComponentFactory {
      * Every Flink JVM logs each class it loads, with the source JAR, into the attempt's host
      * directory. One file per container incarnation, so a replaced TaskManager keeps its log.
      */
-    private String flinkProperties(String process, String logicalName) {
-        FlinkClassLoadLog log = classLoadLogs.register(logicalName);
+    private String flinkProperties(String process, FlinkClassLoadLog log) {
         // The per-process key is appended to env.java.opts.all, which the image uses for its
         // required --add-opens flags. The value stays unquoted: quotes would reach the JVM.
         return TASK_SLOTS_PROPERTY + "\n"

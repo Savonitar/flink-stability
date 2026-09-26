@@ -28,6 +28,53 @@ class FlinkKafkaCompatibilityValidatorTest {
     private final ScenarioParameterResolver resolver = new ScenarioParameterResolver(loader);
 
     @Test
+    void validatesRuntimeJarIdentityAfterParameterResolution() {
+        String path = "/opt/flink/lib/flink-dist-2.2.0.jar";
+        String hash = "a".repeat(64);
+        ScenarioSpecification valid = scenario(document -> {
+            parameter(document, "runtime_hash", "string", TextNode.valueOf(hash));
+            flink(document).putObject("runtime_jar").put("container_path", path)
+                    .put("sha256", "${runtime_hash}");
+        });
+        assertEquals(hash, resolver.resolve(valid, ResolutionRequest.none())
+                .side(ScenarioSide.SINGLE).document().at("/setup/flink/runtime_jar/sha256").textValue());
+
+        for (String[] invalid : java.util.List.of(
+                new String[] {"/opt/flink/lib/../flink-dist-2.2.0.jar", hash},
+                new String[] {"/tmp/flink-dist-2.2.0.jar", hash},
+                new String[] {"/opt/flink/lib/connector.jar", hash},
+                new String[] {path, "sha256:" + hash},
+                new String[] {path, "A".repeat(64)})) {
+            ScenarioSpecification bad = scenario(document -> {
+                parameter(document, "runtime_hash", "string", TextNode.valueOf(invalid[1]));
+                flink(document).putObject("runtime_jar").put("container_path", invalid[0])
+                        .put("sha256", "${runtime_hash}");
+            });
+            SpecificationException failure = assertFailsAt(Stage.RESOLUTION,
+                    () -> resolver.resolve(bad, ResolutionRequest.none()));
+            assertTrue(failure.diagnostics().stream().anyMatch(issue ->
+                    issue.code().equals("capability.flink-runtime-jar.invalid")
+                            && issue.path().equals("$/setup/flink/runtime_jar")));
+        }
+    }
+
+    @Test
+    void runtimeJarPinRequiresBothPathAndHashAndKeepsTheSupportedVersionBoundary() {
+        assertFailsAt(Stage.DOCUMENT, () -> scenario(document -> flink(document)
+                .putObject("runtime_jar").put("sha256", "a".repeat(64))));
+        ScenarioSpecification unsupported = scenario(document -> {
+            flink(document).put("image", "local/flink:2.4-SNAPSHOT");
+            flink(document).putObject("runtime_jar")
+                    .put("container_path", "/opt/flink/lib/flink-dist-2.4-SNAPSHOT.jar")
+                    .put("sha256", "a".repeat(64));
+        });
+        SpecificationException failure = assertFailsAt(Stage.RESOLUTION,
+                () -> resolver.resolve(unsupported, ResolutionRequest.none()));
+        assertTrue(failure.diagnostics().stream().anyMatch(issue ->
+                issue.code().equals(FlinkKafkaCompatibilityValidator.FLINK_LINE_UNSUPPORTED)));
+    }
+
+    @Test
     void validatesExpectedDockerImageIdAfterInterpolation() {
         String expected = "sha256:" + "a".repeat(64);
         ScenarioSpecification scenario = scenario(document -> {

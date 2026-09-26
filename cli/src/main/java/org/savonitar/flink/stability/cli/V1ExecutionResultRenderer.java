@@ -261,6 +261,30 @@ final class V1ExecutionResultRenderer {
         runtime.put("status", result.flinkRuntimeIdentity().outcome().name().toLowerCase(Locale.ROOT));
         runtime.put("detail", result.flinkRuntimeIdentity().detail());
         result.expectedFlinkRuntime().imageId().ifPresent(id -> runtime.put("expectedImageId", id));
+        ObjectNode runtimeJar = runtime.putObject("runtimeJar");
+        runtimeJar.put("status", "not-requested");
+        result.expectedFlinkRuntime().runtimeJar().ifPresent(expectedJar -> {
+            ObjectNode expectedJarNode = runtimeJar.putObject("expected");
+            expectedJarNode.put("containerPath", expectedJar.containerPath());
+            expectedJarNode.put("sha256", expectedJar.sha256());
+        });
+        result.runtimeJarIdentity().ifPresent(identity -> {
+            runtimeJar.put("status", identity.outcome().name().toLowerCase(Locale.ROOT));
+            runtimeJar.put("detail", identity.detail());
+        });
+        result.runtimeClassOrigins().ifPresent(origins -> {
+            ArrayNode classes = runtimeJar.putArray("classes");
+            origins.processes().forEach(process -> {
+                ObjectNode loaded = classes.addObject();
+                loaded.put("process", process.process());
+                ObjectNode sources = loaded.putObject("sources");
+                process.sources().forEach((entryClass, found) -> {
+                    ArrayNode paths = sources.putArray(entryClass);
+                    found.forEach(paths::add);
+                });
+            });
+            origins.failure().ifPresent(failure -> runtimeJar.put("failure", failure));
+        });
         ArrayNode artifactSets = runtime.putArray("connectorArtifactSets");
         Map<List<ProvisionedConnectorArtifact>, Integer> artifactRefs = new LinkedHashMap<>();
         ArrayNode components = runtime.putArray("components");
@@ -273,6 +297,12 @@ final class V1ExecutionResultRenderer {
             rendered.put("imageId", component.imageId());
             rendered.put("targetBindingSha256", component.targetBindingSha256());
             rendered.put("classpathManifestSha256", component.classpathManifestSha256());
+            component.runtimeJarEvidence().ifPresent(observed -> {
+                ObjectNode jar = rendered.putObject("runtimeJar");
+                jar.put("containerPath", observed.jar().containerPath());
+                jar.put("sha256", observed.jar().sha256());
+                jar.put("classLoadProcess", observed.classLoadProcess());
+            });
             // Share only identical observed entries, never merely equal declared hashes.
             int artifactRef = artifactRefs.computeIfAbsent(component.connectorArtifacts(), entries -> {
                 int index = artifactSets.size();

@@ -3,6 +3,8 @@ package org.savonitar.flink.stability.testcontainers;
 import org.savonitar.flink.stability.runtime.api.ConnectorBundleProvisioningException;
 import org.savonitar.flink.stability.runtime.api.ConnectorClasspathManifest;
 import org.savonitar.flink.stability.runtime.api.Digests;
+import org.savonitar.flink.stability.runtime.api.FlinkClassLoadLog;
+import org.savonitar.flink.stability.runtime.api.FlinkComponentProvisioningEvidence;
 import org.savonitar.flink.stability.runtime.api.FlinkConnectorBundleInstallation;
 import org.savonitar.flink.stability.runtime.api.FlinkRuntimeTarget;
 import org.savonitar.flink.stability.runtime.api.ProvisionedConnectorArtifact;
@@ -16,6 +18,7 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
 import java.util.Objects;
+import java.util.Optional;
 import java.util.function.Consumer;
 import java.util.function.Function;
 
@@ -27,17 +30,21 @@ final class VerifiedFlinkContainer extends GenericContainer<VerifiedFlinkContain
 
     private final FlinkRuntimeTarget runtimeTarget;
     private final Consumer<String> imageIdVerifier;
+    private final FlinkClassLoadLog classLoadLog;
     private final List<String> configuredBundleTargets = new ArrayList<>();
     private ConnectorBundleVerification verification;
     private String verifiedImageId;
+    private String runtimeJarContainerId;
 
     VerifiedFlinkContainer(
             DockerImageName image,
             FlinkRuntimeTarget runtimeTarget,
-            Consumer<String> imageIdVerifier) {
+            Consumer<String> imageIdVerifier,
+            FlinkClassLoadLog classLoadLog) {
         super(Objects.requireNonNull(image, "image"));
         this.runtimeTarget = Objects.requireNonNull(runtimeTarget, "runtimeTarget");
         this.imageIdVerifier = Objects.requireNonNull(imageIdVerifier, "imageIdVerifier");
+        this.classLoadLog = Objects.requireNonNull(classLoadLog, "classLoadLog");
         ConnectorClasspathManifest manifest = runtimeTarget.connectorBundle().classpathManifest();
         manifest.verifyHostFiles();
         for (ConnectorClasspathManifest.Entry entry : manifest.entries()) {
@@ -59,7 +66,58 @@ final class VerifiedFlinkContainer extends GenericContainer<VerifiedFlinkContain
         // Docker's startContainer command. A mismatch therefore prevents the Flink entrypoint.
         verifyImageIdentity(containerId, id -> getDockerClient()
                 .inspectContainerCmd(id).exec().getImageId());
+        verifyRuntimeJarBeforeStart(containerId, this::readJarSha256);
         verifyCopiedBundle(runtimeTarget.connectorBundle());
+    }
+
+    /** Every create/retry must establish its own stopped-container observation. */
+    void verifyRuntimeJarBeforeStart(String containerId, Function<String, String> reader) {
+        runtimeJarContainerId = null;
+        if (runtimeTarget.expectedRuntimeJar().isPresent()) {
+            readRuntimeJar(reader);
+            runtimeJarContainerId = Objects.requireNonNull(containerId, "containerId");
+        }
+    }
+
+    Optional<FlinkComponentProvisioningEvidence.RuntimeJarEvidence> runtimeJarEvidence(
+            String containerId) {
+        return runtimeJarEvidence(containerId, this::readJarSha256);
+    }
+
+    /** Re-read after the entrypoint ran; a replacement cannot inherit an earlier observation. */
+    Optional<FlinkComponentProvisioningEvidence.RuntimeJarEvidence> runtimeJarEvidence(
+            String containerId, Function<String, String> reader) {
+        if (runtimeTarget.expectedRuntimeJar().isEmpty()) {
+            return Optional.empty();
+        }
+        if (runtimeJarContainerId == null || !runtimeJarContainerId.equals(containerId)) {
+            throw new IllegalStateException(
+                    "Flink runtime JAR has no pre-start verification for container " + containerId);
+        }
+        return Optional.of(new FlinkComponentProvisioningEvidence.RuntimeJarEvidence(
+                readRuntimeJar(reader), classLoadLog.process()));
+    }
+
+    private String readJarSha256(String path) {
+        return copyFileFromContainer(path, Digests::sha256);
+    }
+
+    private FlinkRuntimeTarget.RuntimeJar readRuntimeJar(Function<String, String> reader) {
+        FlinkRuntimeTarget.RuntimeJar expected = runtimeTarget.expectedRuntimeJar().orElseThrow();
+        String actual;
+        try {
+            actual = reader.apply(expected.containerPath());
+        } catch (RuntimeException failure) {
+            throw new IllegalStateException(
+                    "Could not read Flink runtime JAR " + expected.containerPath()
+                            + ": expected " + expected.sha256() + ", actual unavailable", failure);
+        }
+        if (!expected.sha256().equals(actual)) {
+            throw new IllegalStateException(
+                    "Flink runtime JAR checksum mismatch at " + expected.containerPath()
+                            + ": expected " + expected.sha256() + ", actual " + actual);
+        }
+        return new FlinkRuntimeTarget.RuntimeJar(expected.containerPath(), actual);
     }
 
     /** The stopped-container inspection boundary; tests supply an inspector without Docker. */
