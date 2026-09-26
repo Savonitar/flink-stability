@@ -660,7 +660,10 @@ public final class ClusterManager implements AutoCloseable {
                 if (!candidate.isRunningWithin(deadline)) {
                     throw new IllegalStateException("Component did not remain running: " + name);
                 }
-                FlinkComponentProvisioningEvidence evidence = candidate.provisioningEvidence();
+                FlinkComponentProvisioningEvidence evidence = runtimeTarget.expectedRuntimeJar().isPresent()
+                        ? ContainerDriverCallBoundary.call(deadline, "verifying provisioning for " + name,
+                                candidate::provisioningEvidence)
+                        : candidate.provisioningEvidence();
                 validateEvidence(evidence, candidate.runtimeId());
                 return evidence;
             } catch (RuntimeException failure) {
@@ -804,6 +807,13 @@ public final class ClusterManager implements AutoCloseable {
                     throw new IllegalStateException(
                             "Flink image ID mismatch for " + name + ": expected "
                                     + expected + ", actual " + evidence.imageId());
+                }
+            });
+            runtimeTarget.expectedRuntimeJar().ifPresent(expected -> {
+                if (evidence.runtimeJarEvidence().filter(observed -> expected.equals(observed.jar()))
+                        .isEmpty()) {
+                    throw new IllegalStateException(
+                            "Flink runtime JAR evidence does not match target for " + name);
                 }
             });
             if (!provisioningHistory.isEmpty()) {

@@ -12,6 +12,7 @@ import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import org.savonitar.flink.stability.core.spec.document.Diagnostic;
 import org.savonitar.flink.stability.core.spec.document.ResolutionScope;
+import org.savonitar.flink.stability.runtime.api.FlinkRuntimeTarget;
 
 import static org.savonitar.flink.stability.runtime.api.Checks.requireDockerImageId;
 
@@ -49,6 +50,16 @@ final class FlinkKafkaCompatibilityValidator {
             } catch (IllegalArgumentException invalid) {
                 issues.add(issue(source, scope, "capability.flink-image-id.invalid",
                         "$/setup/flink/image_id", invalid.getMessage()));
+            }
+        }
+        JsonNode runtimeJar = document.at("/setup/flink/runtime_jar");
+        if (runtimeJar.path("container_path").isTextual() && runtimeJar.path("sha256").isTextual()) {
+            try {
+                new FlinkRuntimeTarget.RuntimeJar(runtimeJar.path("container_path").textValue(),
+                        runtimeJar.path("sha256").textValue());
+            } catch (IllegalArgumentException invalid) {
+                issues.add(issue(source, scope, "capability.flink-runtime-jar.invalid",
+                        "$/setup/flink/runtime_jar", invalid.getMessage()));
             }
         }
         List<ImageReference> images = flinkImages(document);

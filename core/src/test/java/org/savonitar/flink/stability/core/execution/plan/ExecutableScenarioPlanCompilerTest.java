@@ -60,6 +60,7 @@ class ExecutableScenarioPlanCompilerTest {
 
         assertSame(resolved, plan.sourcePlan());
         assertTrue(plan.flink().expectedImageId().isEmpty());
+        assertTrue(plan.flink().expectedRuntimeJar().isEmpty());
         assertEquals("minimal", plan.scenarioName());
         assertEquals(new ExecutableScenarioPlan.InvocationPolicy(1, 0), plan.invocation());
         assertEquals("main", plan.kafka().alias());
@@ -657,20 +658,25 @@ class ExecutableScenarioPlanCompilerTest {
     }
 
     @Test
-    void carriesTheExpectedImageIdFromScenarioThroughArtifactBinding() throws IOException {
+    void carriesExpectedRuntimeIdentitiesFromScenarioThroughArtifactBinding() throws IOException {
         createJar(artifactRoot.resolve("connector.jar"), false, null);
         createJar(artifactRoot.resolve("job.jar"), true, "v1");
         String imageId = "sha256:" + "b".repeat(64);
         ResolvedScenarioPlan resolved = resolved(document -> {
             useLocalArtifacts(document);
             ((ObjectNode) document.at("/setup/flink")).put("image_id", imageId);
+            ((ObjectNode) document.at("/setup/flink")).putObject("runtime_jar")
+                    .put("container_path", "/opt/flink/lib/flink-dist-2.2.0.jar")
+                    .put("sha256", "c".repeat(64));
         });
         ExecutableScenarioPlan executable = compiler.compile(resolved);
         assertEquals(imageId, executable.flink().expectedImageId().orElseThrow());
+        assertEquals("c".repeat(64), executable.flink().expectedRuntimeJar().orElseThrow().sha256());
         try (PreparedScenarioPlan prepared = new ArtifactPlanResolver().resolve(
                 resolved, ArtifactResolutionOptions.online(artifactRoot))) {
-            assertEquals(imageId, compiler.bind(prepared, executable)
-                    .flinkRuntimeTarget().expectedImageId().orElseThrow());
+            var runtime = compiler.bind(prepared, executable).flinkRuntimeTarget();
+            assertEquals(imageId, runtime.expectedImageId().orElseThrow());
+            assertEquals(executable.flink().expectedRuntimeJar(), runtime.expectedRuntimeJar());
         }
     }
 

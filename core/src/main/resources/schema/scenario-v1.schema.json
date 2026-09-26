@@ -573,6 +573,20 @@
           "$ref": "#/$defs/nonEmptyString",
           "description": "Optional expected local Docker image ID (sha256 plus 64 lowercase hexadecimal characters), checked before every Flink process starts. This is not a registry manifest digest."
         },
+        "runtime_jar": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["container_path", "sha256"],
+          "description": "Optional expected Flink distribution JAR already present in the image, verified in each container and against observed runtime class origins.",
+          "properties": {
+            "container_path": {
+              "$ref": "#/$defs/nonEmptyString"
+            },
+            "sha256": {
+              "$ref": "#/$defs/nonEmptyString"
+            }
+          }
+        },
         "jobmanagers": {
           "$ref": "#/$defs/positiveIntegerOrTemplate",
           "default": 1

@@ -86,6 +86,85 @@ class V1ScenarioExecutorTest {
                             prefix + "-0-1", "CompleteCommit", 7, 0, List.of())));
 
     @Test
+    void requestedRuntimeProvenanceGatesBothPassingOraclesAndMatchingNegativeControls() throws Exception {
+        for (boolean oraclePasses : List.of(false, true)) {
+            for (String evidence : List.of("confirmed", "foreign", "missing", "aliased")) {
+                List<String> events = new ArrayList<>();
+                try (Fixture fixture = fixture(V1ScenarioExecutorTest::requestRuntimeJar)) {
+                    FakeRuntime runtime = new FakeRuntime(events);
+                    switch (evidence) {
+                        case "foreign" -> runtime.runtimeLoadedFrom = "/opt/flink/lib/foreign-runtime.jar";
+                        case "missing" -> runtime.provisioningOverride =
+                                FlinkRuntimeIdentityTest.provisioning(1);
+                        case "aliased" -> runtime.duplicateRuntimeLogPaths = true;
+                        default -> { }
+                    }
+                    V1ScenarioExecutionResult result = executor(events, runtime, new FakeFlink(events),
+                            (bootstrap, topic, ids, timeout) -> oraclePasses ? passResult() : missingResult())
+                            .execute(fixture.bound(), attemptContext());
+                    boolean confirmed = evidence.equals("confirmed");
+                    String jarReason = evidence.equals("foreign")
+                            ? FlinkRuntimeIdentity.RUNTIME_JAR_MISMATCH
+                            : FlinkRuntimeIdentity.RUNTIME_JAR_UNCONFIRMED;
+
+                    assertEquals(oraclePasses
+                                    ? confirmed ? V1ScenarioExecutionResult.Status.PASS
+                                            : V1ScenarioExecutionResult.Status.INCONCLUSIVE
+                                    : V1ScenarioExecutionResult.Status.FAIL,
+                            result.status(), evidence);
+                    assertEquals(oraclePasses ? passResult() : missingResult(),
+                            result.terminalValidation().orElseThrow(), evidence);
+                    assertEquals(confirmed ? FlinkRuntimeIdentity.Outcome.CONFIRMED
+                                    : evidence.equals("foreign") ? FlinkRuntimeIdentity.Outcome.MISMATCH
+                                            : FlinkRuntimeIdentity.Outcome.UNCONFIRMED,
+                            result.runtimeJarIdentity().orElseThrow().outcome(), evidence);
+                    ScenarioVerdict verdict = ScenarioVerdict.of(oraclePasses
+                            ? ExecutableScenarioPlan.ExpectedOutcome.pass()
+                            : ExecutableScenarioPlan.ExpectedOutcome.failure(
+                                    "kafka.id-set", missingResult().reason()), result);
+                    assertEquals(confirmed ? ScenarioVerdict.Status.PASS : ScenarioVerdict.Status.INCONCLUSIVE,
+                            verdict.status(), evidence);
+                    if (!confirmed) {
+                        assertEquals(jarReason, verdict.reason(), evidence);
+                        assertEquals(oraclePasses ? jarReason : missingResult().reason(),
+                                result.reason(), evidence);
+                    }
+                    assertEquals(result.runtimeClassOrigins(), result.withCleanupFailure(
+                            new IOException("cleanup failed")).runtimeClassOrigins());
+                    assertEquals(result.runtimeJarIdentity(), result.withCleanupFailure(
+                            new IOException("cleanup failed")).runtimeJarIdentity());
+                }
+            }
+        }
+    }
+
+    @Test
+    void aPassResultCannotOmitRequestedRuntimeClassEvidenceThroughTheCompatibilityConstructor()
+            throws Exception {
+        List<String> events = new ArrayList<>();
+        try (Fixture fixture = fixture(V1ScenarioExecutorTest::requestRuntimeJar)) {
+            V1ScenarioExecutionResult result = executor(events, new FakeRuntime(events),
+                    new FakeFlink(events), (bootstrap, topic, ids, timeout) -> passResult())
+                    .execute(fixture.bound(), attemptContext());
+
+            IllegalArgumentException failure = assertThrows(IllegalArgumentException.class,
+                    () -> new V1ScenarioExecutionResult(result.status(), result.reason(), result.message(),
+                            result.inputManifest(), result.phaseEvidence(), result.writeFenceEvidence(),
+                            result.processFenceEvidence(), result.finalJobObservation(), result.terminalValidation(),
+                            result.sinkTransactions(), result.subjectClassOrigins(), result.flinkProvisioningEvidence(),
+                            result.expectedFlinkRuntime(), result.diagnostics()));
+
+            assertTrue(failure.getMessage().contains("runtime JAR provenance"));
+        }
+    }
+
+    private static void requestRuntimeJar(ObjectNode document) {
+        ((ObjectNode) document.at("/setup/flink")).putObject("runtime_jar")
+                .put("container_path", RuntimeJarIdentityTest.JAR.containerPath())
+                .put("sha256", RuntimeJarIdentityTest.JAR.sha256());
+    }
+
+    @Test
     void aPassingOracleRequiresCompleteAndConsistentRuntimeImageEvidence() throws Exception {
         for (String gap : List.of("missing", "mixed", "missing-fenced-process", "unavailable")) {
             List<String> events = new ArrayList<>();
@@ -1539,6 +1618,9 @@ class V1ScenarioExecutorTest {
         private String primarySource;
         /** Replaces the source that the fake class-load log reports, to model a mismatch. */
         private String loadedFrom;
+        private Optional<FlinkRuntimeTarget.RuntimeJar> expectedRuntimeJar = Optional.empty();
+        private String runtimeLoadedFrom;
+        private boolean duplicateRuntimeLogPaths;
         private RuntimeException classLoadLogsFailure;
         private boolean fenced;
         private int taskManagerIncarnations;
@@ -1583,6 +1665,7 @@ class V1ScenarioExecutorTest {
             taskManagerIncarnations = 1;
             primarySource = target.connectorBundle().classpathManifest().entries()
                     .getFirst().containerPath();
+            expectedRuntimeJar = target.expectedRuntimeJar();
             return "http://localhost:8081";
         }
 
@@ -1620,10 +1703,17 @@ class V1ScenarioExecutorTest {
             }
             return provisioningOverride != null ? provisioningOverride
                     : taskManagerIncarnations == 0 ? List.of()
-                    : FlinkRuntimeIdentityTest.provisioning(taskManagerIncarnations);
+                    : runtimeProvisioning();
         }
 
-        /** One TaskManager log that loads both protocol-v1 entry classes. */
+        private List<FlinkComponentProvisioningEvidence> runtimeProvisioning() {
+            return FlinkRuntimeIdentityTest.provisioning(taskManagerIncarnations).stream()
+                    .map(component -> expectedRuntimeJar.map(jar -> component.withRuntimeJarEvidence(
+                            jar, component.logicalName() + "#" + component.runtimeId())).orElse(component))
+                    .toList();
+        }
+
+        /** Runtime provenance requests retain a separately registered log for every incarnation. */
         @Override
         public List<FlinkClassLoadLog> flinkClassLoadLogs() {
             if (classLoadLogsFailure != null) {
@@ -1641,7 +1731,30 @@ class V1ScenarioExecutorTest {
                         "[1.1s][info][class,load] "
                                 + "org.apache.flink.connector.kafka.sink.KafkaSink source: file:"
                                 + source));
-                return List.of(new FlinkClassLoadLog("taskmanager-1#1", log));
+                if (expectedRuntimeJar.isEmpty()) {
+                    return List.of(new FlinkClassLoadLog("taskmanager-1#1", log));
+                }
+                String runtimeSource = runtimeLoadedFrom != null ? runtimeLoadedFrom
+                        : expectedRuntimeJar.orElseThrow().containerPath();
+                // Both classes are present so aliased paths would otherwise satisfy either role.
+                String content = Files.readString(log) + "\n"
+                        + "[1.2s][info][class,load] " + FlinkRuntimeIdentity.RESOURCE_MANAGER_CLASS
+                        + " source: file:" + runtimeSource + "\n"
+                        + "[1.3s][info][class,load] " + FlinkRuntimeIdentity.TASK_EXECUTOR_CLASS
+                        + " source: file:" + runtimeSource;
+                Files.writeString(log, content);
+                List<FlinkClassLoadLog> logs = new ArrayList<>();
+                for (FlinkComponentProvisioningEvidence component : runtimeProvisioning()) {
+                    Path processLog = log;
+                    if (!duplicateRuntimeLogPaths) {
+                        processLog = Files.createTempFile("flink-stability-runtime-load-", ".log");
+                        processLog.toFile().deleteOnExit();
+                        Files.writeString(processLog, content);
+                    }
+                    logs.add(new FlinkClassLoadLog(
+                            component.runtimeJarEvidence().orElseThrow().classLoadProcess(), processLog));
+                }
+                return logs;
             } catch (IOException failure) {
                 throw new java.io.UncheckedIOException(failure);
             }

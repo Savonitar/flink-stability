@@ -2,6 +2,7 @@ package org.savonitar.flink.stability.core.execution.plan;
 
 import org.savonitar.flink.stability.core.spec.resolution.ResolvedScenarioPlan;
 import org.savonitar.flink.stability.runtime.api.FlinkComponentRole;
+import org.savonitar.flink.stability.runtime.api.FlinkRuntimeTarget;
 import org.savonitar.flink.stability.runtime.api.KafkaBrokerPolicy;
 import org.savonitar.flink.stability.runtime.api.KafkaProxyTarget;
 import org.savonitar.flink.stability.runtime.api.KafkaRuntimeTarget;
@@ -255,10 +256,17 @@ public final class ExecutableScenarioPlan {
             String imageReference,
             Optional<String> expectedImageId,
             int jobmanagers,
-            int taskmanagers) {
+            int taskmanagers,
+            Optional<FlinkRuntimeTarget.RuntimeJar> expectedRuntimeJar) {
+        public FlinkCluster(String imageReference, Optional<String> expectedImageId,
+                            int jobmanagers, int taskmanagers) {
+            this(imageReference, expectedImageId, jobmanagers, taskmanagers, Optional.empty());
+        }
+
         public FlinkCluster {
             imageReference = requireNonBlank(imageReference, "imageReference");
             expectedImageId = Objects.requireNonNull(expectedImageId, "expectedImageId");
+            expectedRuntimeJar = Objects.requireNonNull(expectedRuntimeJar, "expectedRuntimeJar");
             expectedImageId.ifPresent(id ->
                     org.savonitar.flink.stability.runtime.api.Checks.requireDockerImageId(
                             id, "expectedImageId"));

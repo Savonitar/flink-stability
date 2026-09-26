@@ -18,6 +18,7 @@ import org.savonitar.flink.stability.core.validation.kafka.KafkaIdSetValidationR
 import org.savonitar.flink.stability.runtime.api.FlinkProcessWriteFenceEvidence;
 import org.savonitar.flink.stability.runtime.api.FlinkComponentProvisioningEvidence;
 import org.savonitar.flink.stability.runtime.api.FlinkComponentRole;
+import org.savonitar.flink.stability.runtime.api.FlinkRuntimeTarget;
 import org.savonitar.flink.stability.runtime.api.ProvisionedConnectorArtifact;
 import picocli.CommandLine;
 
@@ -237,7 +238,50 @@ class RunScenarioCommandTest {
                 () -> assertTrue(runtime.at("/connectorArtifactSets/0").isEmpty()),
                 () -> assertEquals(0, runtime.at("/components/0/connectorArtifactsRef").intValue()),
                 () -> assertEquals(0, runtime.at("/components/1/connectorArtifactsRef").intValue()),
+                () -> assertEquals("not-requested", runtime.at("/runtimeJar/status").textValue()),
                 () -> assertFalse(runtime.has("registryDigest")));
+    }
+
+    @Test
+    void reportsRuntimeJarBytesAndClassLoadsWithTheirPhysicalContainerAssociation() throws Exception {
+        var jar = new FlinkRuntimeTarget.RuntimeJar(
+                "/opt/flink/lib/flink-dist-2.2.0.jar", "c".repeat(64));
+        SubjectClassOrigins origins = new SubjectClassOrigins(jar.containerPath(), List.of(
+                new SubjectClassOrigins.ProcessOrigin("jobmanager-1#1", Map.of(
+                        "org.apache.flink.runtime.resourcemanager.ResourceManager", List.of(jar.containerPath()))),
+                new SubjectClassOrigins.ProcessOrigin("taskmanager-1#1", Map.of(
+                        "org.apache.flink.runtime.taskexecutor.TaskExecutor", List.of(jar.containerPath())))),
+                Optional.empty());
+        V1ScenarioExecutionResult base = passResult();
+        for (boolean observed : List.of(true, false)) {
+            V1ScenarioExecutionResult result = new V1ScenarioExecutionResult(
+                    observed ? V1ScenarioExecutionResult.Status.PASS : V1ScenarioExecutionResult.Status.INCONCLUSIVE,
+                    observed ? base.reason() : "subject.flink.runtime-jar-unconfirmed", base.message(),
+                    base.inputManifest(), base.phaseEvidence(), base.writeFenceEvidence(),
+                    base.processFenceEvidence(), base.finalJobObservation(), base.terminalValidation(),
+                    base.sinkTransactions(), base.subjectClassOrigins(),
+                    base.flinkProvisioningEvidence().stream().map(component ->
+                            component.withRuntimeJarEvidence(jar, component.logicalName() + "#1")).toList(),
+                    new FlinkRuntimeIdentity.ExpectedTarget(EXPECTED_RUNTIME.imageId(),
+                            EXPECTED_RUNTIME.components(), Optional.of(jar)),
+                    observed ? Optional.of(origins) : Optional.empty(), List.of());
+            JsonNode runtime = JSON.readTree(new V1ExecutionResultRenderer().render(
+                    "bounded-eos", context("1234abcd"), expectation, result)).at("/evidence/flinkRuntime");
+            assertEquals(observed ? "confirmed" : "unconfirmed", runtime.at("/runtimeJar/status").textValue());
+            assertEquals(jar.sha256(), runtime.at("/runtimeJar/expected/sha256").textValue());
+            assertEquals(jar.containerPath(), runtime.at("/runtimeJar/expected/containerPath").textValue());
+            assertEquals("jm", runtime.at("/components/0/runtimeId").textValue());
+            assertEquals("jobmanager-1#1", runtime.at("/components/0/runtimeJar/classLoadProcess").textValue());
+            assertEquals(jar.sha256(), runtime.at("/components/0/runtimeJar/sha256").textValue());
+            assertEquals("taskmanager-1#1", runtime.at("/components/1/runtimeJar/classLoadProcess").textValue());
+            if (observed) {
+                assertEquals(2, runtime.at("/runtimeJar/classes").size());
+                assertEquals(jar.containerPath(), runtime.at("/runtimeJar/classes/1/sources")
+                        .path("org.apache.flink.runtime.taskexecutor.TaskExecutor").get(0).textValue());
+            } else {
+                assertFalse(runtime.path("runtimeJar").has("classes"));
+            }
+        }
     }
 
     @Test

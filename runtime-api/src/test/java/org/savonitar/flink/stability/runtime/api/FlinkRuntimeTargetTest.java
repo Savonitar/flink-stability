@@ -14,6 +14,58 @@ class FlinkRuntimeTargetTest {
     private static final String IMAGE_ID = "sha256:" + "a".repeat(64);
 
     @Test
+    void runtimeJarPinIsImmutableAndSurvivesImagePinningInEitherOrder() {
+        FlinkRuntimeTarget.RuntimeJar jar = new FlinkRuntimeTarget.RuntimeJar(
+                "/opt/flink/lib/flink-dist-2.2.1-SNAPSHOT.jar", "d".repeat(64));
+        FlinkRuntimeTarget original = target();
+        FlinkRuntimeTarget pinned = original.withExpectedRuntimeJar(jar).withExpectedImageId(IMAGE_ID);
+
+        assertTrue(original.expectedRuntimeJar().isEmpty());
+        assertEquals(jar, pinned.expectedRuntimeJar().orElseThrow());
+        assertEquals(IMAGE_ID, pinned.expectedImageId().orElseThrow());
+        assertSame(original.connectorBundle(), pinned.connectorBundle());
+        assertEquals(pinned, original.withExpectedImageId(IMAGE_ID).withExpectedRuntimeJar(jar));
+        assertEquals(pinned.hashCode(),
+                original.withExpectedImageId(IMAGE_ID).withExpectedRuntimeJar(jar).hashCode());
+        assertNotEquals(original.withExpectedImageId(IMAGE_ID), pinned);
+        assertThrows(NullPointerException.class, () -> original.withExpectedRuntimeJar(null));
+    }
+
+    @Test
+    void runtimeJarRejectsTraversalOtherFilesAndMalformedChecksums() {
+        for (String path : List.of("/opt/flink/lib/flink-dist-../escape.jar",
+                "/opt/flink/lib/../flink-dist-2.2.1.jar", "/opt/flink/lib/flink-runtime-2.2.1.jar",
+                "/opt/flink/lib/nested/flink-dist-2.2.1.jar", "/tmp/flink-dist-2.2.1.jar",
+                "file:/opt/flink/lib/flink-dist-2.2.1.jar", "/opt/flink/lib/flink-dist-.jar",
+                "/opt/flink/lib/flink-dist-2.2.1.jar;echo", "/opt/flink/lib/flink-dist-2.2.1 jar")) {
+            assertThrows(IllegalArgumentException.class,
+                    () -> new FlinkRuntimeTarget.RuntimeJar(path, "a".repeat(64)), path);
+        }
+        for (String checksum : List.of("", "A".repeat(64), "a".repeat(63),
+                "sha256:" + "a".repeat(64))) {
+            assertThrows(IllegalArgumentException.class, () -> new FlinkRuntimeTarget.RuntimeJar(
+                    "/opt/flink/lib/flink-dist-2.2.1.jar", checksum), checksum);
+        }
+    }
+
+    @Test
+    void runtimeJarEvidenceKeepsPhysicalContainerAndItsExplicitClassLoadProcess() {
+        FlinkComponentProvisioningEvidence original = evidence(IMAGE_ID);
+        FlinkRuntimeTarget.RuntimeJar jar = new FlinkRuntimeTarget.RuntimeJar(
+                "/opt/flink/lib/flink-dist-2.2.1.jar", "d".repeat(64));
+        FlinkComponentProvisioningEvidence copied = original.withRuntimeJarEvidence(jar, "jobmanager-1#3");
+
+        assertTrue(original.runtimeJarEvidence().isEmpty());
+        assertEquals(original.runtimeId(), copied.runtimeId());
+        assertEquals(original.imageId(), copied.imageId());
+        assertEquals(original.connectorArtifacts(), copied.connectorArtifacts());
+        assertEquals(jar, copied.runtimeJarEvidence().orElseThrow().jar());
+        assertEquals("jobmanager-1#3", copied.runtimeJarEvidence().orElseThrow().classLoadProcess());
+        assertThrows(IllegalArgumentException.class, () -> original.withRuntimeJarEvidence(jar, " "));
+        assertThrows(NullPointerException.class, () -> original.withRuntimeJarEvidence(null, "process"));
+    }
+
+    @Test
     void expectedImageIdentityIsImmutableAndParticipatesInTargetEquality() {
         FlinkRuntimeTarget original = target();
         FlinkRuntimeTarget pinned = original.withExpectedImageId(IMAGE_ID);

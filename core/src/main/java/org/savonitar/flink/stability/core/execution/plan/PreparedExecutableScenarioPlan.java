@@ -45,6 +45,9 @@ public final class PreparedExecutableScenarioPlan {
         if (!flinkRuntimeTarget.expectedImageId().equals(executablePlan.flink().expectedImageId())) {
             throw new IllegalArgumentException("Runtime image ID differs from executable plan");
         }
+        if (!flinkRuntimeTarget.expectedRuntimeJar().equals(executablePlan.flink().expectedRuntimeJar())) {
+            throw new IllegalArgumentException("Runtime JAR differs from executable plan");
+        }
     }
 
     public PreparedScenarioPlan preparedScenarioPlan() {

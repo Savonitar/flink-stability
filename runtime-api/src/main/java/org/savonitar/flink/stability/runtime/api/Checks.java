@@ -6,6 +6,7 @@ import java.util.regex.Pattern;
 /** Argument checks shared by the harness's value types. */
 public final class Checks {
     private static final Pattern DOCKER_IMAGE_ID = Pattern.compile("sha256:[0-9a-f]{64}");
+    private static final Pattern SHA_256 = Pattern.compile("[0-9a-f]{64}");
 
     private Checks() {}
 
@@ -24,6 +25,16 @@ public final class Checks {
         if (!DOCKER_IMAGE_ID.matcher(value).matches()) {
             throw new IllegalArgumentException(
                     name + " must be sha256: followed by 64 lowercase hexadecimal characters");
+        }
+        return value;
+    }
+
+    /** A raw SHA-256 checksum, without a scheme prefix. */
+    public static String requireSha256(String value, String name) {
+        requireNonBlank(value, name);
+        if (!SHA_256.matcher(value).matches()) {
+            throw new IllegalArgumentException(
+                    name + " must contain 64 lowercase hexadecimal characters");
         }
         return value;
     }

@@ -681,6 +681,21 @@ Connector pull-request gating is the same mechanism with one axis:
   evidence is inconclusive; preserve any separately observed terminal data
   failure. Image identity does not replace the connector class-load check and
   does not prove that a particular Flink runtime class or PR code path executed.
+- **R4.13f** The first runner accepts optional `setup.flink.runtime_jar` with
+  `container_path` and `sha256` strings, resolved after parameter interpolation.
+  The path must name a direct `/opt/flink/lib/flink-dist-<version>.jar` file; the
+  version uses only letters, digits, `.`, `_`, `+`, and `-`, beginning with a letter
+  or digit. The checksum is 64 lowercase hexadecimal characters, without a prefix.
+  This declares expected bytes already present in the image; the engine does not
+  install or replace the distribution. Reject invalid descriptors before provisioning.
+  Read and hash the file from every created container before starting Flink, and
+  recheck after its startup readiness boundary before accepting provisioning
+  evidence. A missing or mismatching file rejects that container; a pre-start
+  mismatch prevents Flink startup. For this opt-in check, TaskManager readiness
+  requires its `Starting TaskManager with ResourceID:` log message within the existing
+  startup timeout. Keep the observed path/hash and the explicitly registered
+  class-load process key with the physical container ID, including replacements.
+  The version compatibility registry and image identity requirements still apply.
 - **R4.14** A generated-input topic uses `cleanup.policy: delete`, never
   compaction, and retains data for longer than the maximum attempt duration.
   This makes the manifest's reconciliation snapshot observable.
@@ -1075,6 +1090,22 @@ Connector pull-request gating is the same mechanism with one axis:
   missing, unreadable, or no single TaskManager loaded all the classes. A failing
   oracle keeps its attempt `fail`, but cannot match an expected failure without
   confirmed origins (R8.7a). The JSON summary reports this as `evidence.subjectClasses`.
+- **R5.6e** When `setup.flink.runtime_jar` is declared, runtime JAR identity must also
+  be confirmed before either a successful attempt or an expected-failure scenario
+  can pass. Match the registered class-load logs one-to-one with the successful
+  provisioning records by their explicit process keys, never by list order. Each
+  JobManager incarnation must load `org.apache.flink.runtime.resourcemanager.ResourceManager`
+  and each TaskManager incarnation must load `org.apache.flink.runtime.taskexecutor.TaskExecutor`
+  from that incarnation's verified JAR path. Every observed load of either class
+  must use that path. Missing, unreadable, duplicate, or unassociated log evidence,
+  or missing required class loads, is `subject.flink.runtime-jar-unconfirmed`;
+  differing observed JAR bytes or class sources are `subject.flink.runtime-jar-mismatch`.
+  Preserve an observed terminal data failure even when identity is unconfirmed.
+  Without the descriptor, this optional check is `not-requested`.
+  This is binary provenance under the trusted-image and immutable-runtime-JAR
+  assumptions: it does not establish a Git commit, reproducible compilation,
+  absence of bytecode transformation, method execution, or coverage of a PR's
+  changed behavior. Concurrent JAR mutation after the startup checks is unsupported.
 - **R5.7** Each workload job has optional `start: auto | manual`, defaulting to
   `auto`. Auto-start jobs are submitted after infrastructure is ready and any
   preload input source has completed per R4.5a, before the first phase begins.
@@ -1604,7 +1635,11 @@ Connector pull-request gating is the same mechanism with one axis:
   `evidence.flinkRuntime.connectorArtifactSets`, which stores each distinct ordered
   list of observed JAR entries once. Lists are shared only when all entries match,
   not merely when their reported manifest hashes match; per-component hashes remain
-  recorded separately. It also includes the
+  recorded separately. `evidence.flinkRuntime.runtimeJar` reports the optional
+  runtime JAR check's status, expected path/hash, detail, and observed class sources
+  by process key. Each component's `runtimeJar` records its observed path/hash and
+  the `classLoadProcess` key joining those sources to its physical container ID
+  (R4.13f, R5.6e). It also includes the
   last job observation of R6.12a as `evidence.flinkJob` (`observed`,
   `unavailable` with its failure, or `not-run`) and one `evidence.taskManagerKills`
   entry per confirmed kill: step path and loop iterations, target, effect outcome,
