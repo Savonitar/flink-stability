@@ -1,7 +1,8 @@
 # Testing a Kafka connector pull request
 
 When a change to `apache/flink-connector-kafka` looks risky, build it and run it as the
-subject connector. `tools/pr_gate.py` runs each chosen scenario twice:
+subject connector. `tools/pr_gate.py` runs each chosen scenario on both sides:
+
 - the baseline runs with the released connector 5.0.0-2.2;
 - the candidate runs with the build under test.
 
@@ -27,9 +28,9 @@ these faults did not break exactly-once in these runs.
 
 ## Procedure
 
-Work from the repository root with JDK 21 and Docker, after `mvn clean install`. Keep
-the build under `jobs/pr/<number>/`, which git ignores, because the harness reads local
-artifacts only from inside its artifact root.
+Work from the repository root with Python 3.9 or newer, JDK 21, and Docker, after
+`mvn clean install`. Keep the build under `jobs/pr/<number>/`, which git ignores,
+because the harness reads local artifacts only from inside its artifact root.
 
 1. Fetch the pull request. This downloads the connector repository from GitHub.
 
@@ -61,32 +62,59 @@ artifacts only from inside its artifact root.
      --output jobs/pr/$N/gate-$(date +%Y%m%d-%H%M) --runs 3
    ```
 
-   Add `--scenario` to choose scenarios; it may repeat.
+   Add `--scenario` to choose scenarios; repeat the option for different names.
+   Repeated names are deduplicated. `--runs` must be positive and specifies the
+   number of runs per scenario on each side; its default is 1.
 
 ## Reading the result
 
-`summary.md` in the output directory lists every run. The raw results are next to it:
-`stdout.json`, `stderr.log`, and the exit code. First check two things:
+`summary.md` in the output directory lists every run. Each run's directory retains
+`stdout.json`, `stderr.log`, and `exit-code.txt`. First check two things:
 
-1. Every row's "Subject JAR" column says `ok`. The hash comes from the Flink processes'
-   class-load evidence: candidate runs must have loaded the build under test, and baseline
-   runs the release.
-2. The baseline passes. If it does not, the environment is unhealthy and the comparison
-   is void.
+1. Every row's "Subject JAR" column says `ok`. This requires confirmed class-load
+   evidence and observed class sources matching the expected artifact hash. The
+   configured `expectedSource` alone does not prove which JAR ran. Candidate runs
+   must have loaded the build under test, and baseline runs the release.
+2. Inspect every baseline failure. It may expose a release bug, a harness defect,
+   or an environment problem. Preserve its evidence and investigate the cause;
+   a failing baseline does not establish an unhealthy environment or let us
+   attribute the finding to the pull request.
 
 Then compare the verdicts:
 
 - **Candidate fails, baseline passes.** A `fail` with `missing-ids` or `duplicate-ids` is a
   lead. Re-run it, and read that run's evidence before you report it.
-- **`inconclusive`.** The experiment was invalid, for example because a fault missed its
-  window. It says nothing about the connector.
+- **`inconclusive`.** The experiment lacks evidence needed for a conclusive verdict,
+  for example because a fault missed its window. Inspect the raw attempt and its
+  diagnostics: a recorded data failure remains a finding to investigate even when
+  missing evidence prevents attribution.
+
+The summary compares the counts of each `(verdict, reason)` pair between baseline
+and candidate, and reports variability within each side separately. Matching
+distributions do not establish correctness; differing distributions are leads,
+not proof of a regression, because fault and checkpoint timing varies.
+
+The gate exits `0` only when every requested run has a passing scenario verdict,
+confirmed subject evidence, and subprocess exit code `0`. It exits `1` for any
+failing, inconclusive, or error result, inconsistent subprocess exit, or unconfirmed
+subject. Invalid command-line arguments, including a non-positive `--runs`, exit
+`2`. Preserve both the summary and raw evidence when the gate fails.
 
 The candidate's classpath is the connector JAR plus exactly the JARs in `--runtime-dir`.
 A pull request that changes dependencies is therefore tested with its own dependencies.
 
+## Testing the gate
+
+Run the Python checks without Docker:
+
+```bash
+python3 -m unittest discover -s tools/tests -v
+```
+
 ## Reporting
 
 A summary for the pull request names:
+
 - the scenarios and the number of runs;
 - the verdicts on both sides;
 - the candidate's SHA-256.

@@ -6,8 +6,10 @@ its runtime directory. The baseline is the unchanged catalog in scenarios/. Run 
 the repository root after `mvn install`; docs/PR-TESTING.md describes the procedure.
 """
 import argparse
+from collections import Counter
 import json
 import re
+import shlex
 import shutil
 import subprocess
 from pathlib import Path
@@ -28,8 +30,10 @@ def main():
     parser.add_argument("--scenario", action="append", help="Canonical scenario name; repeatable")
     parser.add_argument("--runs", type=int, default=1, help="Runs per scenario and side")
     args = parser.parse_args()
+    if args.runs < 1:
+        parser.error("--runs must be a positive integer")
     root = Path.cwd().resolve()
-    names = args.scenario or DEFAULT_SCENARIOS
+    names = list(dict.fromkeys(args.scenario or DEFAULT_SCENARIOS))
     connector = args.connector_jar.resolve()
     dependencies = sorted(args.runtime_dir.resolve().glob("*.jar"))
     if not dependencies:
@@ -55,11 +59,13 @@ def main():
         for side, catalog_root, subject in (("baseline", root / "scenarios", RELEASED_SHA256),
                                             ("candidate", catalog, manifest["connectorSha256"])):
             for run in range(1, args.runs + 1):
-                result = run_scenario(root, catalog_root, name, output / side / name / f"run-{run}")
-                rows.append(summarize(name, side, run, result, subject))
+                result, exit_code = run_scenario(
+                    root, catalog_root, name, output / side / name / f"run-{run}")
+                rows.append(summarize(name, side, run, result, subject, exit_code))
     summary = render(manifest, rows)
     (output / "summary.md").write_text(summary)
     print(summary)
+    return gate_exit_code(rows)
 
 
 def canonical(root, name):
@@ -71,37 +77,47 @@ def canonical(root, name):
 
 def run_scenario(root, catalog_root, name, directory):
     directory.mkdir(parents=True)
-    arguments = f"run --catalog-root {catalog_root} --scenario {name} --artifact-root . --offline"
+    arguments = shlex.join(["run", "--catalog-root", str(catalog_root), "--scenario", name,
+                            "--artifact-root", ".", "--offline"])
     with (directory / "stdout.json").open("w") as stdout, (directory / "stderr.log").open("w") as stderr:
-        code = subprocess.run(["mvn", "-q", "-o", "exec:java", "-pl", "cli", "-Dexec.args=" + arguments],
-                              cwd=root, stdout=stdout, stderr=stderr, check=False).returncode
-    (directory / "exit-code.txt").write_text(f"{code}\n")
+        try:
+            code = subprocess.run(
+                ["mvn", "-q", "-o", "exec:java", "-pl", "cli", "-Dexec.args=" + arguments],
+                cwd=root, stdout=stdout, stderr=stderr, check=False).returncode
+        except OSError as failure:
+            stderr.write(str(failure) + "\n")
+            code = None
+    (directory / "exit-code.txt").write_text(f"{code if code is not None else 'not-started'}\n")
     try:
-        return json.loads((directory / "stdout.json").read_text())
+        result = json.loads((directory / "stdout.json").read_text())
     except ValueError:
-        return {"status": "error", "reason": f"no JSON result (exit {code})"}
+        return {"status": "error", "reason": f"no JSON result (exit {code})"}, code
+    if not isinstance(result, dict) or result.get("status") not in ("pass", "fail", "inconclusive"):
+        return {"status": "error", "reason": f"invalid scenario result (exit {code})"}, code
+    return result, code
 
 
-def find(node, key):
-    """Every value stored under key anywhere in a JSON result."""
-    if isinstance(node, dict):
-        for name, value in node.items():
-            if name == key:
-                yield value
-            yield from find(value, key)
-    elif isinstance(node, list):
-        for value in node:
-            yield from find(value, key)
-
-
-def summarize(name, side, run, result, expected_subject):
-    staged = [STAGED_JAR.search(source) for source in find(result, "expectedSource") if isinstance(source, str)]
-    subject = next((match.group(1) for match in staged if match), None)
-    counts = {key: next((value for value in find(result, key) if isinstance(value, int)), None)
-              for key in ("missing", "duplicates")}
+def summarize(name, side, run, result, expected_subject, exit_code):
+    evidence = result.get("evidence") or {}
+    origins = evidence.get("subjectClasses") or {}
+    observed = [source for process in origins.get("processes", [])
+                for sources in process.get("sources", {}).values() for source in sources]
+    staged = [STAGED_JAR.search(source) if isinstance(source, str) else None for source in observed]
+    hashes = {match.group(1) for match in staged if match}
+    subject_ok = (origins.get("status") == "confirmed" and bool(staged)
+                  and all(match and match.group(1) == expected_subject for match in staged))
+    terminal = evidence.get("terminalValidation") or {}
+    counts = {key: terminal.get(key) for key in ("missing", "duplicates")}
     return {"scenario": name, "side": side, "run": run, "verdict": result.get("status"),
-            "reason": result.get("reason"), **counts, "subject": subject,
-            "subjectOk": subject == expected_subject}
+            "reason": result.get("reason"), **counts, "subjects": sorted(hashes),
+            "subjectStatus": origins.get("status", "unavailable"),
+            "subjectOk": subject_ok, "exitCode": exit_code}
+
+
+def gate_exit_code(rows):
+    """A report is successful only when every run passed with confirmed provenance."""
+    return 0 if rows and all(row["verdict"] == "pass" and row["subjectOk"]
+                             and row["exitCode"] == 0 for row in rows) else 1
 
 
 def render(manifest, rows):
@@ -109,20 +125,31 @@ def render(manifest, rows):
              f"Candidate `{manifest['connector']}` (SHA-256 `{manifest['connectorSha256'][:12]}`) with "
              f"{len(manifest['runtimeDependencySha256'])} runtime dependency JARs; baseline: released "
              "flink-connector-kafka 5.0.0-2.2.", "",
-             "| Scenario | Side | Run | Verdict | Reason | Missing | Duplicates | Subject JAR |",
-             "| --- | --- | --- | --- | --- | --- | --- | --- |"]
+             "Gate result: " + ("PASS" if gate_exit_code(rows) == 0 else "NOT PASSED") + ".", "",
+             "| Scenario | Side | Run | Verdict | Reason | Missing | Duplicates | Subject JAR | Exit |",
+             "| --- | --- | --- | --- | --- | --- | --- | --- | --- |"]
     for row in rows:
-        subject = (row["subject"] or "unknown")[:12] + (" ok" if row["subjectOk"] else " WRONG")
+        subject = ", ".join(value[:12] for value in row["subjects"]) or "unknown"
+        subject += " ok" if row["subjectOk"] else " NOT VERIFIED (" + row["subjectStatus"] + ")"
         lines.append(f"| {row['scenario']} | {row['side']} | {row['run']} | {row['verdict']} | "
-                     f"{row['reason']} | {row['missing']} | {row['duplicates']} | {subject} |")
-    verdicts = {}
+                     f"{row['reason']} | {row['missing']} | {row['duplicates']} | {subject} | "
+                     f"{row['exitCode']} |")
+    outcomes = {}
     for row in rows:
-        verdicts.setdefault(row["scenario"], set()).add(row["verdict"])
-    differing = sorted(name for name, seen in verdicts.items() if len(seen) > 1)
-    lines += ["", "Verdicts differ for: " + (", ".join(differing) if differing else "none") + ".",
-              "A single differing run is a lead, not proof: faults and checkpoints are timing-based.", ""]
+        sides = outcomes.setdefault(row["scenario"], {"baseline": Counter(), "candidate": Counter()})
+        sides[row["side"]][(row["verdict"], row["reason"])] += 1
+    differing = sorted(name for name, sides in outcomes.items()
+                       if sides["baseline"] != sides["candidate"])
+    variable = sorted(name + "/" + side for name, sides in outcomes.items()
+                      for side, counts in sides.items() if len(counts) > 1)
+    lines += ["", "Outcome distributions differ for: "
+              + (", ".join(differing) if differing else "none") + ".",
+              "Outcomes varied within: " + (", ".join(variable) if variable else "none") + ".",
+              "Equal distributions do not establish correctness. Preserve and investigate failures on either side.",
+              "A baseline failure does not establish an environment fault or attribute a regression to the candidate.",
+              "A difference is a lead, not proof: faults and checkpoints are timing-based.", ""]
     return "\n".join(lines)
 
 
 if __name__ == "__main__":
-    main()
+    raise SystemExit(main())
