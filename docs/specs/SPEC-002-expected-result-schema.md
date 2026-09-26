@@ -153,6 +153,20 @@ cases:
   equally specific reason is a weakening change.
 - **E5.5** Adding a case that is equivalent to `default` is invalid; it adds no
   behavior and can drift silently.
+- **E5.6** A change to the pinned scenario that can decide whether a defect shows is a
+  contract change too. This covers fault steps and their placement, triggers,
+  deadlines, and occurrences; wait durations; checkpoint settings; transaction
+  timeouts; and workload volume or rate. Such a change keeps the same `outcome`, yet it
+  can remove the window that a defect needs.
+  - When a calibration covers the scenario, re-run the applicable matrix and preserve
+    its expected outcomes. Each designated failing mutant cell must retain its pinned
+    data failure (oracle and reason), complete phase/fence/oracle evidence, confirmed
+    subject origins, and confirmed fault effects. Healthy controls and mutant cells
+    where the injected decision is harmless must still pass. Keep the run evidence
+    with the change; an arbitrary failure or an inconclusive run does not establish
+    that sensitivity was preserved.
+  - Without a calibration, the change must state why the scenario still reaches its
+    fault window.
 
 ## 6. Minimal examples
 
