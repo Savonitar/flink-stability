@@ -2,6 +2,7 @@ package org.savonitar.flink.stability.core.execution.plan;
 
 import org.savonitar.flink.stability.core.spec.resolution.ResolvedScenarioPlan;
 import org.savonitar.flink.stability.runtime.api.KafkaBrokerPolicy;
+import org.savonitar.flink.stability.runtime.api.KafkaProxyTarget;
 import org.savonitar.flink.stability.runtime.api.KafkaRuntimeTarget;
 
 import java.time.Duration;
@@ -100,6 +101,31 @@ public final class ExecutableScenarioPlan {
         if (!job.sink().topic().equals(terminalValidation.output())) {
             throw new IllegalArgumentException("Terminal validation must inspect the job sink");
         }
+        if (job.sink().proxy().isPresent() && !job.sink().proxy().equals(kafka.proxy())) {
+            throw new IllegalArgumentException("A routed sink must use the cluster's proxy");
+        }
+        for (EndTxnFault fault : endTxnFaults(this.phases.stream()
+                .flatMap(phase -> phase.steps().stream())
+                .toList())) {
+            // A fault on traffic that never passes the proxy could never trigger.
+            if (job.sink().proxy().map(KafkaProxy::alias).filter(fault.proxy()::equals).isEmpty()
+                    || job.sink().deliveryGuarantee() != DeliveryGuarantee.EXACTLY_ONCE) {
+                throw new IllegalArgumentException(
+                        "An EndTxn fault needs an exactly-once sink routed through its proxy");
+            }
+        }
+    }
+
+    private static List<EndTxnFault> endTxnFaults(List<Step> steps) {
+        List<EndTxnFault> faults = new ArrayList<>();
+        for (Step step : steps) {
+            if (step instanceof EndTxnFault fault) {
+                faults.add(fault);
+            } else if (step instanceof Loop loop) {
+                faults.addAll(endTxnFaults(loop.steps()));
+            }
+        }
+        return faults;
     }
 
     public ResolvedScenarioPlan sourcePlan() {
@@ -161,12 +187,14 @@ public final class ExecutableScenarioPlan {
             KafkaMode mode,
             int brokers,
             KafkaBrokerPolicy brokerPolicy,
-            List<KafkaTopic> topics) {
+            List<KafkaTopic> topics,
+            Optional<KafkaProxy> proxy) {
         public KafkaCluster {
             alias = requireNonBlank(alias, "alias");
             imageReference = requireNonBlank(imageReference, "imageReference");
             Objects.requireNonNull(mode, "mode");
             Objects.requireNonNull(brokerPolicy, "brokerPolicy");
+            Objects.requireNonNull(proxy, "proxy");
             if (brokers != 1) {
                 throw new IllegalArgumentException("The first executable boundary requires one broker");
             }
@@ -182,6 +210,26 @@ public final class ExecutableScenarioPlan {
         /** What the runtime needs to start this cluster; the broker policy is passed as is. */
         public KafkaRuntimeTarget runtimeTarget() {
             return new KafkaRuntimeTarget(alias, imageReference, brokerPolicy);
+        }
+    }
+
+    /** The cluster's one Kroxylicious proxy (SPEC-004 K2); routed clients bootstrap from it. */
+    public record KafkaProxy(String alias, String listenHost, int listenPort) {
+        public KafkaProxy {
+            alias = requireNonBlank(alias, "alias");
+            listenHost = requireNonBlank(listenHost, "listenHost");
+            if (listenPort < 1 || listenPort > 65_535) {
+                throw new IllegalArgumentException("listenPort must be a TCP port");
+            }
+        }
+
+        public String bootstrapServers() {
+            return listenHost + ":" + listenPort;
+        }
+
+        /** What the runtime needs to start this proxy in front of the started cluster. */
+        public KafkaProxyTarget runtimeTarget(String upstreamBootstrapServers) {
+            return new KafkaProxyTarget(alias, listenHost, listenPort, upstreamBootstrapServers);
         }
     }
 
@@ -326,12 +374,14 @@ public final class ExecutableScenarioPlan {
             TopicReference topic,
             DeliveryGuarantee deliveryGuarantee,
             Optional<String> transactionalIdPrefix,
-            Optional<TransactionIdNamingStrategy> transactionIdNamingStrategy) {
+            Optional<TransactionIdNamingStrategy> transactionIdNamingStrategy,
+            Optional<KafkaProxy> proxy) {
         public Sink {
             Objects.requireNonNull(topic, "topic");
             Objects.requireNonNull(deliveryGuarantee, "deliveryGuarantee");
             Objects.requireNonNull(transactionalIdPrefix, "transactionalIdPrefix");
             Objects.requireNonNull(transactionIdNamingStrategy, "transactionIdNamingStrategy");
+            Objects.requireNonNull(proxy, "proxy");
             transactionalIdPrefix.ifPresent(prefix ->
                     requireNonBlank(prefix, "transactionalIdPrefix"));
             boolean transactional = deliveryGuarantee == DeliveryGuarantee.EXACTLY_ONCE;
@@ -347,12 +397,24 @@ public final class ExecutableScenarioPlan {
                 String transactionalIdPrefix,
                 TransactionIdNamingStrategy transactionIdNamingStrategy) {
             return new Sink(topic, DeliveryGuarantee.EXACTLY_ONCE,
-                    Optional.of(transactionalIdPrefix), Optional.of(transactionIdNamingStrategy));
+                    Optional.of(transactionalIdPrefix), Optional.of(transactionIdNamingStrategy),
+                    Optional.empty());
         }
 
         public static Sink atLeastOnce(TopicReference topic) {
             return new Sink(topic, DeliveryGuarantee.AT_LEAST_ONCE,
-                    Optional.empty(), Optional.empty());
+                    Optional.empty(), Optional.empty(), Optional.empty());
+        }
+
+        /** The same sink, connecting through the proxy (SPEC-004 K2.7). */
+        public Sink routedVia(KafkaProxy route) {
+            return new Sink(topic, deliveryGuarantee, transactionalIdPrefix,
+                    transactionIdNamingStrategy, Optional.of(route));
+        }
+
+        /** Where the sink bootstraps: through its proxy, or straight to the cluster. */
+        public String bootstrapServers(String clusterBootstrapServers) {
+            return proxy.map(KafkaProxy::bootstrapServers).orElse(clusterBootstrapServers);
         }
     }
 
@@ -626,7 +688,8 @@ public final class ExecutableScenarioPlan {
             values.put(PREFIX + "source.starting-offsets", "committed-or-earliest");
             values.put(PREFIX + "source.isolation-level", "read_uncommitted");
             values.put(PREFIX + "source.stopping-offsets", canonicalOffsets);
-            values.put(PREFIX + "sink.bootstrap-servers", kafkaBootstrapServers);
+            values.put(PREFIX + "sink.bootstrap-servers",
+                    sink.bootstrapServers(kafkaBootstrapServers));
             values.put(PREFIX + "sink.topic", sink.topic().topic());
             values.put(PREFIX + "sink.delivery-guarantee", sink.deliveryGuarantee().name());
             // The workload protocol rejects transaction settings for non-transactional sinks.
@@ -693,7 +756,7 @@ public final class ExecutableScenarioPlan {
     }
 
     public sealed interface Step permits AwaitJobState, AwaitCheckpoints, Wait,
-            KillTaskManager, RestartTaskManager, Loop {}
+            KillTaskManager, RestartTaskManager, Loop, EndTxnFault {}
 
     public record AwaitJobState(
             String jobAlias,
@@ -760,6 +823,45 @@ public final class ExecutableScenarioPlan {
                 throw new IllegalArgumentException("steps must not be empty");
             }
         }
+    }
+
+    /**
+     * Drops the first {@code occurrences} matching EndTxn requests or responses at the proxy, or
+     * stops waiting at {@code triggerDeadline} (SPEC-004 K3.11). Only EndTxn is executable in v1.
+     */
+    public record EndTxnFault(
+            String proxy,
+            Optional<TransactionResult> result,
+            Optional<String> transactionalIdPrefix,
+            NetworkFaultAction action,
+            int occurrences,
+            Duration triggerDeadline) implements Step {
+        public EndTxnFault {
+            proxy = requireNonBlank(proxy, "proxy");
+            Objects.requireNonNull(result, "result");
+            Objects.requireNonNull(transactionalIdPrefix, "transactionalIdPrefix");
+            transactionalIdPrefix.ifPresent(prefix ->
+                    requireNonBlank(prefix, "transactionalIdPrefix"));
+            Objects.requireNonNull(action, "action");
+            if (occurrences < 1) {
+                throw new IllegalArgumentException("occurrences must be positive");
+            }
+            triggerDeadline = requirePositive(triggerDeadline, "triggerDeadline");
+        }
+    }
+
+    /** The EndTxn outcome a fault selects; empty means either. */
+    public enum TransactionResult {
+        COMMIT,
+        ABORT
+    }
+
+    /** What the proxy does to a matching message. */
+    public enum NetworkFaultAction {
+        /** The request never reaches the broker; the client times out and may retry. */
+        DROP_REQUEST,
+        /** The broker acts on the request; the client never sees the response. */
+        DROP_RESPONSE
     }
 
     public record KafkaIdSetValidation(

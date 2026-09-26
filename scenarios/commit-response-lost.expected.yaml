@@ -1,0 +1,9 @@
+format: v1
+kind: expected-result
+
+meta:
+  name: commit-response-lost.expected
+  scenario: commit-response-lost
+
+default:
+  outcome: pass

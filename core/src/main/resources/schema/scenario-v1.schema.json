@@ -1621,7 +1621,6 @@
             "target",
             "match",
             "fault",
-            "duration",
             "heal"
           ],
           "properties": {
@@ -1640,10 +1639,70 @@
             "duration": {
               "$ref": "#/$defs/durationOrTemplate"
             },
+            "occurrences": {
+              "$ref": "#/$defs/positiveIntegerOrTemplate"
+            },
+            "trigger_deadline": {
+              "$ref": "#/$defs/durationOrTemplate"
+            },
             "heal": {
               "const": "restore-proxy-rule"
             }
-          }
+          },
+          "allOf": [
+            {
+              "if": {
+                "properties": {
+                  "fault": {
+                    "properties": {
+                      "type": {
+                        "enum": [
+                          "drop-request",
+                          "drop-response"
+                        ]
+                      }
+                    },
+                    "required": [
+                      "type"
+                    ]
+                  }
+                },
+                "required": [
+                  "fault"
+                ]
+              },
+              "then": {
+                "required": [
+                  "occurrences",
+                  "trigger_deadline"
+                ],
+                "not": {
+                  "required": [
+                    "duration"
+                  ]
+                }
+              },
+              "else": {
+                "required": [
+                  "duration"
+                ],
+                "not": {
+                  "anyOf": [
+                    {
+                      "required": [
+                        "occurrences"
+                      ]
+                    },
+                    {
+                      "required": [
+                        "trigger_deadline"
+                      ]
+                    }
+                  ]
+                }
+              }
+            }
+          ]
         }
       }
     },
@@ -1935,8 +1994,34 @@
         },
         "transactional_id_prefix": {
           "$ref": "#/$defs/nonEmptyString"
+        },
+        "result": {
+          "enum": [
+            "commit",
+            "abort"
+          ]
         }
-      }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "api": {
+                "not": {
+                  "const": "end-txn"
+                }
+              }
+            }
+          },
+          "then": {
+            "not": {
+              "required": [
+                "result"
+              ]
+            }
+          }
+        }
+      ]
     },
     "networkFault": {
       "oneOf": [
@@ -1981,6 +2066,21 @@
             },
             "error": {
               "$ref": "#/$defs/kebabName"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "type"
+          ],
+          "properties": {
+            "type": {
+              "enum": [
+                "drop-request",
+                "drop-response"
+              ]
             }
           }
         }

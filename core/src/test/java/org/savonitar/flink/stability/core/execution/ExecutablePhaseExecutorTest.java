@@ -64,6 +64,7 @@ class ExecutablePhaseExecutorTest {
         ExecutablePhaseExecutor executor = new ExecutablePhaseExecutor(
                 flink,
                 taskManagers,
+                ExecutablePhaseExecutor.NetworkFaults.NONE,
                 duration -> events.add("sleep:" + duration));
 
         PhaseExecutionEvidence evidence = executor.execute(plan, JOB);
@@ -111,6 +112,7 @@ class ExecutablePhaseExecutorTest {
         ExecutablePhaseExecutor executor = new ExecutablePhaseExecutor(
                 new FakeFlink(new ArrayList<>()),
                 new FakeTaskManagers(new ArrayList<>()),
+                ExecutablePhaseExecutor.NetworkFaults.NONE,
                 waits::add);
 
         PhaseExecutionEvidence evidence = executor.execute(plan, JOB);
@@ -223,7 +225,8 @@ class ExecutablePhaseExecutorTest {
         List<String> events = new ArrayList<>();
         FakeTaskManagers taskManagers = new FakeTaskManagers(events);
         ExecutablePhaseExecutor executor = new ExecutablePhaseExecutor(
-                new FakeFlink(events), taskManagers, duration -> {});
+                new FakeFlink(events), taskManagers,
+                ExecutablePhaseExecutor.NetworkFaults.NONE, duration -> {});
 
         PhaseExecutionEvidence evidence = executor.execute(plan, JOB);
 
@@ -323,7 +326,8 @@ class ExecutablePhaseExecutorTest {
         FakeFlink flink = new FakeFlink(events);
         flink.observeFailure = new IOException("REST unavailable");
         ExecutablePhaseExecutor executor = new ExecutablePhaseExecutor(
-                flink, new FakeTaskManagers(events), duration -> {});
+                flink, new FakeTaskManagers(events),
+                ExecutablePhaseExecutor.NetworkFaults.NONE, duration -> {});
 
         PhaseExecutionEvidence evidence = executor.execute(plan, JOB);
 
@@ -348,21 +352,90 @@ class ExecutablePhaseExecutorTest {
         });
         List<String> events = new ArrayList<>();
         FakeFlink flink = new FakeFlink(events);
-        flink.clockFailure = new IOException("REST unavailable after exit");
-        ExecutablePhaseExecutor executor = new ExecutablePhaseExecutor(
-                flink, new FakeTaskManagers(events), duration -> {});
+        flink.clockFailure = new IOException("JobManager clock unavailable");
 
-        PhaseExecutionEvidence evidence = executor.execute(plan, JOB);
+        PhaseExecutionEvidence evidence = new ExecutablePhaseExecutor(
+                flink, new FakeTaskManagers(events),
+                ExecutablePhaseExecutor.NetworkFaults.NONE, duration -> {}).execute(plan, JOB);
 
         assertEquals(List.of("observe-job", "kill:taskmanager-1", "sample-jobmanager-time",
                 "restart:taskmanager"), events);
-        assertTrue(evidence.taskManagerKills().getFirst().jobManagerTimeAfterKill().isEmpty());
+        assertEquals(OptionalLong.empty(), evidence.taskManagerKills().getFirst()
+                .jobManagerTimeAfterKill());
+        assertEquals(PhaseExecutionEvidence.StepStatus.SUCCEEDED,
+                evidence.steps().getLast().status());
+    }
+
+    @Test
+    void injectsEachEndTxnFaultAndKeepsWhatItDid() throws Exception {
+        ExecutableScenarioPlan plan = plan(ExecutablePhaseExecutorTest::addEndTxnFault);
+        List<String> injected = new ArrayList<>();
+        ExecutablePhaseExecutor executor = new ExecutablePhaseExecutor(
+                new FakeFlink(new ArrayList<>()),
+                new FakeTaskManagers(new ArrayList<>()),
+                (path, fault) -> {
+                    injected.add(path + " " + fault.action());
+                    return new PhaseExecutionEvidence.NetworkFault(
+                            path, "phases-0-steps-0", fault.proxy(), "test/proxy",
+                            fault.action(),
+                            fault.occurrences(), fault.triggerDeadline(), 1, 2, List.of(),
+                            List.of());
+                },
+                duration -> {});
+
+        PhaseExecutionEvidence evidence = executor.execute(plan, JOB);
+
+        assertEquals(List.of("$/phases/0/steps/0 DROP_REQUEST"), injected);
+        assertEquals("phases-0-steps-0", evidence.networkFaults().getFirst().faultId());
+        PhaseExecutionEvidence.StepEvidence step = evidence.steps().getFirst();
+        assertEquals(PhaseExecutionEvidence.StepKind.NETWORK_FAULT, step.kind());
+        assertEquals(PhaseExecutionEvidence.StepStatus.SUCCEEDED, step.status());
+        assertEquals("fault=phases-0-steps-0 dropped=0/1", step.detail());
+    }
+
+    @Test
+    void aProxyThatCannotInjectMakesTheAttemptInconclusive() {
+        ExecutableScenarioPlan plan = plan(ExecutablePhaseExecutorTest::addEndTxnFault);
+        ExecutablePhaseExecutor executor = new ExecutablePhaseExecutor(
+                new FakeFlink(new ArrayList<>()),
+                new FakeTaskManagers(new ArrayList<>()),
+                (path, fault) -> {
+                    throw new IOException("The proxy did not arm fault phases-0-steps-0");
+                },
+                duration -> {});
+
+        PhaseExecutionException failure = assertThrows(
+                PhaseExecutionException.class, () -> executor.execute(plan, JOB));
+
+        assertEquals(PhaseExecutionException.Outcome.INCONCLUSIVE, failure.outcome());
+        assertEquals(ExecutablePhaseExecutor.NETWORK_FAULT_INFRASTRUCTURE, failure.reason());
+    }
+
+    /** Routes the sink through kafka-proxy; the only step drops a commit request there. */
+    private static void addEndTxnFault(ObjectNode document) {
+        ObjectNode proxy = ((ObjectNode) document.at("/setup")).putObject("proxies")
+                .putObject("kafka-proxy");
+        proxy.put("type", "kroxylicious");
+        proxy.put("cluster", "main");
+        proxy.put("listen", "kafka-proxy:9092");
+        proxy.putObject("bootstrap").put("cluster", "main");
+        ((ObjectNode) document.at("/workload/jobs/0/sink"))
+                .put("connect_via_proxy", "kafka-proxy");
+        ObjectNode fault = replaceSteps(document).addObject().putObject("network_fault");
+        fault.put("proxy", "kafka-proxy");
+        fault.putObject("target").put("cluster", "main");
+        fault.putObject("match").put("api", "end-txn").put("result", "commit");
+        fault.putObject("fault").put("type", "drop-request");
+        fault.put("occurrences", 1);
+        fault.put("trigger_deadline", "1m");
+        fault.put("heal", "restore-proxy-rule");
     }
 
     private ExecutablePhaseExecutor executor(FakeFlink flink) {
         return new ExecutablePhaseExecutor(
                 flink,
                 new FakeTaskManagers(new ArrayList<>()),
+                ExecutablePhaseExecutor.NetworkFaults.NONE,
                 duration -> {});
     }
 

@@ -2,13 +2,14 @@ package org.savonitar.flink.stability.core.execution.plan;
 
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import org.savonitar.flink.stability.core.spec.document.Diagnostic;
-import org.savonitar.flink.stability.core.spec.document.ResolutionScope;
 import org.savonitar.flink.stability.runtime.api.KafkaBrokerPolicy;
 
 import java.nio.file.Path;
 import java.time.Duration;
 import java.util.List;
 import java.util.Set;
+
+import static org.savonitar.flink.stability.core.execution.plan.ExecutableScenarioPlanCompiler.issue;
 
 /** Checks and maps the job's Kafka sink for the first runner (SPEC-001 R5.4, R5.6c). */
 final class SinkCompiler {
@@ -71,10 +72,5 @@ final class SinkCompiler {
                 ? ExecutableScenarioPlanCompiler.parseDuration(
                         sink.path("transaction_timeout").textValue())
                 : ExecutableScenarioPlan.KAFKA_TRANSACTION_TIMEOUT;
-    }
-
-    private static Diagnostic issue(
-            Path source, String code, String path, String message) {
-        return new Diagnostic(source, ResolutionScope.SINGLE, code, path, message);
     }
 }

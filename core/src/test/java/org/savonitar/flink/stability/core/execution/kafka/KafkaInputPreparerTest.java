@@ -23,6 +23,7 @@ import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.Properties;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CountDownLatch;
@@ -707,7 +708,8 @@ class KafkaInputPreparerTest {
                 KafkaBrokerPolicy.v1SingleBroker(),
                 List.of(
                         new ExecutableScenarioPlan.KafkaTopic("input", 2, 1),
-                        new ExecutableScenarioPlan.KafkaTopic("output", 2, 1)));
+                        new ExecutableScenarioPlan.KafkaTopic("output", 2, 1)),
+                Optional.empty());
     }
 
     private static ExecutableScenarioPlan.GeneratedIntegerSequenceInput input(long records) {

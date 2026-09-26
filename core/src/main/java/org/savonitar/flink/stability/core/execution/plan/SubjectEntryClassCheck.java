@@ -4,7 +4,6 @@ import org.savonitar.flink.stability.core.artifact.ConnectorBundleContribution;
 import org.savonitar.flink.stability.core.artifact.PreparedConnectorBundle;
 import org.savonitar.flink.stability.core.artifact.PreparedConnectorBundleEntry;
 import org.savonitar.flink.stability.core.spec.document.Diagnostic;
-import org.savonitar.flink.stability.core.spec.document.ResolutionScope;
 import org.savonitar.flink.stability.core.spec.document.SpecificationException;
 import org.savonitar.flink.stability.core.spec.document.SpecificationException.Stage;
 
@@ -16,6 +15,8 @@ import java.util.jar.JarFile;
 import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 
+import static org.savonitar.flink.stability.core.execution.plan.ExecutableScenarioPlanCompiler.issue;
+
 /**
  * Checks before provisioning that the subject connector supplies the classes the protocol-v1
  * workload runs (SPEC-001 R5.6d, review finding F3). Installed bytes alone prove nothing: an
@@ -24,7 +25,6 @@ import java.util.stream.Collectors;
 final class SubjectEntryClassCheck {
     private static final List<String> PROTOCOL_V1_ENTRY_CLASSES =
             ExecutableScenarioPlan.PROTOCOL_V1_SUBJECT_ENTRY_CLASSES;
-
     private static final Pattern VERSIONED_CLASS = Pattern.compile(
             "META-INF/versions/(?:9|[1-9][0-9]+)/(.+\\.class)");
 
@@ -120,10 +120,5 @@ final class SubjectEntryClassCheck {
                             + unreadable.getMessage()));
             return List.of();
         }
-    }
-
-    private static Diagnostic issue(
-            Path source, String code, String path, String message) {
-        return new Diagnostic(source, ResolutionScope.SINGLE, code, path, message);
     }
 }

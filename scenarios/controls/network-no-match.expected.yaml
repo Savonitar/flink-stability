@@ -1,0 +1,11 @@
+format: v1
+kind: expected-result
+
+meta:
+  name: network-no-match.expected
+  scenario: network-no-match
+
+# Intentionally cannot match when the fault misses. The control is checked by
+# inspecting the inconclusive verdict and complete, matching terminal oracle.
+default:
+  outcome: pass

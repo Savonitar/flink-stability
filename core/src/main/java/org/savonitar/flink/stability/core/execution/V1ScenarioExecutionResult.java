@@ -67,6 +67,13 @@ public record V1ScenarioExecutionResult(
             throw new IllegalArgumentException(
                     "PASS requires every TaskManager kill to have a confirmed effect");
         }
+        if (status == Status.PASS && phaseEvidence
+                .map(phases -> phases.networkFaults().stream()
+                        .anyMatch(fault -> !fault.triggered()))
+                .orElse(false)) {
+            throw new IllegalArgumentException(
+                    "PASS requires every network fault to have dropped all its occurrences");
+        }
         if (status == Status.PASS && subjectClassOrigins
                 .map(origins -> origins.outcome(
                         ExecutableScenarioPlan.PROTOCOL_V1_SUBJECT_ENTRY_CLASSES))

@@ -4,6 +4,8 @@ import org.savonitar.flink.stability.runtime.api.FlinkClassLoadLog;
 import org.savonitar.flink.stability.runtime.api.FlinkComponentProvisioningEvidence;
 import org.savonitar.flink.stability.runtime.api.FlinkProcessWriteFenceEvidence;
 import org.savonitar.flink.stability.runtime.api.FlinkRuntimeTarget;
+import org.savonitar.flink.stability.runtime.api.KafkaProxyEndpoint;
+import org.savonitar.flink.stability.runtime.api.KafkaProxyTarget;
 import org.savonitar.flink.stability.runtime.api.KafkaRuntimeEndpoints;
 import org.savonitar.flink.stability.runtime.api.KafkaRuntimeTarget;
 import org.savonitar.flink.stability.runtime.api.TaskManagerActionTimeoutException;
@@ -32,6 +34,11 @@ public final class DockerV1AttemptRuntime implements V1AttemptRuntime {
     @Override
     public KafkaRuntimeEndpoints startKafka(KafkaRuntimeTarget target) {
         return clusters.startKafka(target);
+    }
+
+    @Override
+    public KafkaProxyEndpoint startKafkaProxy(KafkaProxyTarget target) {
+        return clusters.startKafkaProxy(target);
     }
 
     @Override

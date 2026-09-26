@@ -43,10 +43,15 @@ later work can cite them.
 
 | System | Relevant idea | What we take / reject |
 | --- | --- | --- |
-| [Jepsen](https://github.com/jepsen-io/jepsen) | Generator + nemesis + **history** + checker. The checker analyses a recorded history offline; correctness is separate from execution. | Take the separation of fault injection from oracle. Reject full history-checking for v1 — exactly-once is a set-equality property over final output, so a terminal-state oracle is adequate. Revisit if ordering properties are ever tested. |
 | [Kafka Trogdor](https://github.com/apache/kafka/blob/trunk/trogdor/README.md) | Faults and workloads are *uniform tasks* with `class`, `startMs`, `durationMs`; JSON specs over a coordinator/agent REST split. | Take uniform treatment of faults and workloads as schedulable things. **Reject `startMs` wall-clock scheduling** — the plan requires observable triggers, not timers. Trogdor's time-based model is exactly what produces flaky race-window tests. |
 | [Chaos Mesh](https://chaos-mesh.org/docs/next/create-chaos-mesh-workflow/) / [LitmusChaos](https://docs.litmuschaos.io/docs/user-guides/construct-experiment) | Kubernetes CRD shape (`apiVersion`/`kind`/`metadata`/`spec`); workflows nest serial and parallel steps; Litmus splits `ChaosExperiment` (definition) / `ChaosEngine` (binding) / `ChaosResult` (outcome). | Take the `format`/`kind`/`meta` envelope and the definition/binding/result split. Reject nested parallel orchestration in v1 — sequential phases are enough and parallel steps make triggers ambiguous. |
 | [Antithesis / FoundationDB DST](https://antithesis.com/docs/resources/deterministic_simulation_testing/) | Full determinism (clock, scheduling, randomness) so any bug replays exactly from a seed. | Cannot be reached with Docker containers and real Kafka. Take the *goal*: record everything needed to replay a run — seed, images by digest, parameters, artifact checksums. Accept that replay is best-effort, and say so rather than implying determinism we do not have. |
+
+Fault injection and correctness checking remain separate. For the bounded v1
+workload, the terminal-state oracle checks that each expected record ID appears
+exactly once, with no unexpected or malformed IDs, after further writes are
+prevented. Full operation-history checking is outside v1 scope; revisit it if
+ordering properties are tested.
 
 ---
 
@@ -1140,10 +1145,12 @@ Connector pull-request gating is the same mechanism with one axis:
 - **R6.9** v1 distinguishes **instantaneous faults** from **held faults**.
   `kill` is instantaneous: the fault window closes when the targeted process exit
   is confirmed, and recovery is the behavior under test rather than an explicit
-  heal step. Held faults (`stop`, network faults, Kafka broker isolation, and any
-  future fault that leaves the system in an intentionally degraded state) declare
-  a bounded `duration` and a reliable `heal` action. All faults still get a fault
-  ID and lifecycle evidence per R6.12 and §12.6.
+  heal step. Held faults (`stop`, held network faults, Kafka broker isolation, and
+  any future fault that leaves the system in an intentionally degraded state)
+  declare a bounded `duration` and a reliable `heal` action. Counted network faults
+  (SPEC-004 K3.11) instead affect a fixed number of matching messages, bounded by a
+  trigger deadline, and then heal. All faults still get a fault ID and lifecycle
+  evidence per R6.12 and §12.6.
 - **R6.9a** Each first-runner named TaskManager `kill` or `restart` phase action
   has its own fixed, internal `2m` monotonic deadline. The deadline starts when
   that action begins, is independent of every other action and cleanup, and is
@@ -1261,7 +1268,8 @@ Connector pull-request gating is the same mechanism with one axis:
   `fail` result. A passing oracle with any unconfirmed kill makes the attempt
   `inconclusive` with `taskmanager.kill.effect-unconfirmed`, because that pass does
   not show recovery. A scenario whose bounded input finishes before its kill, or
-  whose TaskManager hosts no active subtask, therefore cannot pass.
+  whose TaskManager hosts no active subtask, therefore cannot pass, including as
+  an expected-failure control (R8.7a).
 - **R6.13** A suite entry is `{ scenario, as?, parameters?, runs? }`. `as`
   defaults to the scenario name and is **required** when the same scenario
   appears more than once in a suite. `runs`, when present, is a positive integer
@@ -1707,20 +1715,17 @@ Connector pull-request gating is the same mechanism with one axis:
   expectation (SPEC-002 E4.2, R7.1a). Otherwise the verdict is `pass` exactly when
   the attempt matches the selected expectation (SPEC-002 E4.3–E4.4): an expected
   `pass` needs a passing attempt, and an expected failure needs a failing attempt
-  with the pinned reason and complete experiment evidence: successful phase execution,
-  both write fences, a complete terminal snapshot whose failing oracle reason matches
-  the attempt, and confirmed effect for every TaskManager kill (R6.12a). Missing phase,
-  fence, or oracle evidence makes a matching failure's verdict `inconclusive` with
-  `expectation.evidence-unconfirmed`; an ineffective kill uses
-  `taskmanager.kill.effect-unconfirmed`. The raw failing attempt and its reason remain
-  unchanged. A mismatch is a `fail` verdict. A failing attempt that
+  with the pinned reason. Before a matching failure becomes a passing verdict,
+  it must carry successful phase, write/process-fence, and complete matching terminal-oracle
+  evidence, confirmed subject origins, and confirmed effects for every recorded
+  fault. Missing phase/fence/oracle evidence gives an `inconclusive` verdict with
+  `expectation.evidence-unconfirmed`; unconfirmed subject or fault evidence uses
+  its existing `subject.connector.origin-*`, `taskmanager.kill.effect-unconfirmed`,
+  or `network-fault.trigger-missed` reason. The attempt's observed data failure is
+  retained unchanged. A mismatch is a `fail` verdict. A failing attempt that
   was expected to pass keeps its own reason; an expected failure that did not
   occur, or occurred with another reason, reports `expectation.mismatch`. A
-  negative control is therefore green only when it fails exactly as pinned with valid
-  experiment evidence. An expected failure also requires confirmed runtime subject
-  origins (R5.6d). Missing or foreign origins retain the data failure but make the
-  scenario verdict `inconclusive` with `subject.connector.origin-unconfirmed` or
-  `subject.connector.origin-mismatch`; the expectation remains unmatched.
+  negative control is therefore green only when it fails exactly as pinned.
 - **R8.8** N-of-K is reported as evidence strength, never used as a threshold to
   dismiss a clean expectation mismatch. `inconclusive` is reserved for invalid
   evidence, including dirty health, retry exhaustion, an invalid baseline, or an
