@@ -252,10 +252,15 @@ public final class ExecutableScenarioPlan {
 
     public record FlinkCluster(
             String imageReference,
+            Optional<String> expectedImageId,
             int jobmanagers,
             int taskmanagers) {
         public FlinkCluster {
             imageReference = requireNonBlank(imageReference, "imageReference");
+            expectedImageId = Objects.requireNonNull(expectedImageId, "expectedImageId");
+            expectedImageId.ifPresent(id ->
+                    org.savonitar.flink.stability.runtime.api.Checks.requireDockerImageId(
+                            id, "expectedImageId"));
             if (jobmanagers != 1 || taskmanagers != 1) {
                 throw new IllegalArgumentException(
                         "The first executable boundary requires one JobManager and one TaskManager");

@@ -569,6 +569,10 @@
         "image": {
           "$ref": "#/$defs/nonEmptyString"
         },
+        "image_id": {
+          "$ref": "#/$defs/nonEmptyString",
+          "description": "Optional expected local Docker image ID (sha256 plus 64 lowercase hexadecimal characters), checked before every Flink process starts. This is not a registry manifest digest."
+        },
         "jobmanagers": {
           "$ref": "#/$defs/positiveIntegerOrTemplate",
           "default": 1

@@ -93,6 +93,7 @@ final class TestcontainersContainerHandle implements ContainerHandle {
                 role,
                 runtimeId,
                 runtimeTarget.imageReference(),
+                verifiedContainer.verifiedImageId(),
                 installation.targetBindingSha256(),
                 verification.classpathManifestSha256(),
                 verification.connectorArtifacts());

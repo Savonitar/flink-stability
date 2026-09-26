@@ -1,5 +1,8 @@
 # Testing a Kafka connector pull request
 
+For changes to Flink itself, see [testing a Flink runtime build](FLINK-RUNTIME-TESTING.md).
+The connector gate below changes connector artifacts only.
+
 When a change to `apache/flink-connector-kafka` looks risky, build it and run it as the
 subject connector. `tools/pr_gate.py` runs each chosen scenario on both sides:
 

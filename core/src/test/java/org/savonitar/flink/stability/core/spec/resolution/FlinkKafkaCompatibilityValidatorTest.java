@@ -28,6 +28,42 @@ class FlinkKafkaCompatibilityValidatorTest {
     private final ScenarioParameterResolver resolver = new ScenarioParameterResolver(loader);
 
     @Test
+    void validatesExpectedDockerImageIdAfterInterpolation() {
+        String expected = "sha256:" + "a".repeat(64);
+        ScenarioSpecification scenario = scenario(document -> {
+            parameter(document, "runtime_id", "string", TextNode.valueOf(expected));
+            flink(document).put("image_id", "${runtime_id}");
+        });
+        assertEquals(expected, resolver.resolve(scenario, ResolutionRequest.none())
+                .side(ScenarioSide.SINGLE).document().at("/setup/flink/image_id").textValue());
+
+        for (String invalid : java.util.List.of("sha256:abc", "a".repeat(64),
+                "sha256:" + "A".repeat(64), "flink@sha256:" + "a".repeat(64))) {
+            ScenarioSpecification bad = scenario(document -> {
+                parameter(document, "runtime_id", "string", TextNode.valueOf(invalid));
+                flink(document).put("image_id", "${runtime_id}");
+            });
+            SpecificationException failure = assertFailsAt(Stage.RESOLUTION,
+                    () -> resolver.resolve(bad, ResolutionRequest.none()));
+            assertTrue(failure.diagnostics().stream().anyMatch(issue ->
+                    issue.code().equals("capability.flink-image-id.invalid")
+                            && issue.path().equals("$/setup/flink/image_id")), invalid);
+        }
+    }
+
+    @Test
+    void imagePinDoesNotBypassFlinkVersionCompatibility() {
+        ScenarioSpecification scenario = scenario(document -> {
+            flink(document).put("image", "local/flink:2.4-SNAPSHOT");
+            flink(document).put("image_id", "sha256:" + "a".repeat(64));
+        });
+        SpecificationException failure = assertFailsAt(Stage.RESOLUTION,
+                () -> resolver.resolve(scenario, ResolutionRequest.none()));
+        assertTrue(failure.diagnostics().stream().anyMatch(issue ->
+                issue.code().equals(FlinkKafkaCompatibilityValidator.FLINK_LINE_UNSUPPORTED)));
+    }
+
+    @Test
     void acceptsRegisteredFlinkAndKafkaConnectorPatchesAndImageVariants() {
         ScenarioSpecification scenario = scenario(document -> {
             flink(document).put(

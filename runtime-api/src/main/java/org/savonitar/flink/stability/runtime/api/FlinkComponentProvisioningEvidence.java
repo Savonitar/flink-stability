@@ -4,6 +4,7 @@ import java.util.List;
 import java.util.Objects;
 import java.util.regex.Pattern;
 
+import static org.savonitar.flink.stability.runtime.api.Checks.requireDockerImageId;
 import static org.savonitar.flink.stability.runtime.api.Checks.requireNonBlank;
 
 /** Immutable evidence for one successfully started physical Flink container. */
@@ -13,6 +14,7 @@ public final class FlinkComponentProvisioningEvidence {
     private final FlinkComponentRole role;
     private final String runtimeId;
     private final String imageReference;
+    private final String imageId;
     private final String targetBindingSha256;
     private final String classpathManifestSha256;
     private final List<ProvisionedConnectorArtifact> connectorArtifacts;
@@ -22,6 +24,7 @@ public final class FlinkComponentProvisioningEvidence {
             FlinkComponentRole role,
             String runtimeId,
             String imageReference,
+            String imageId,
             String targetBindingSha256,
             String classpathManifestSha256,
             List<ProvisionedConnectorArtifact> connectorArtifacts) {
@@ -29,6 +32,7 @@ public final class FlinkComponentProvisioningEvidence {
         this.role = Objects.requireNonNull(role, "role");
         this.runtimeId = requireNonBlank(runtimeId, "runtimeId");
         this.imageReference = requireNonBlank(imageReference, "imageReference");
+        this.imageId = requireDockerImageId(imageId, "imageId");
         this.targetBindingSha256 = Objects.requireNonNull(
                 targetBindingSha256, "targetBindingSha256");
         this.classpathManifestSha256 = Objects.requireNonNull(
@@ -47,11 +51,12 @@ public final class FlinkComponentProvisioningEvidence {
             FlinkComponentRole role,
             String runtimeId,
             String imageReference,
+            String imageId,
             String targetBindingSha256,
             String classpathManifestSha256,
             List<ProvisionedConnectorArtifact> connectorArtifacts) {
         return new FlinkComponentProvisioningEvidence(
-                logicalName, role, runtimeId, imageReference,
+                logicalName, role, runtimeId, imageReference, imageId,
                 requireNonBlank(targetBindingSha256, "targetBindingSha256"),
                 requireNonBlank(classpathManifestSha256, "classpathManifestSha256"),
                 connectorArtifacts);
@@ -71,6 +76,10 @@ public final class FlinkComponentProvisioningEvidence {
 
     public String imageReference() {
         return imageReference;
+    }
+
+    public String imageId() {
+        return imageId;
     }
 
     public String targetBindingSha256() {

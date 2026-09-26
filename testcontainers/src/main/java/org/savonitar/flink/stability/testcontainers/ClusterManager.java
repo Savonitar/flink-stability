@@ -26,6 +26,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
+import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.LongSupplier;
 import java.util.function.Supplier;
 
@@ -73,10 +74,15 @@ public final class ClusterManager implements AutoCloseable {
         this(
                 Network.newNetwork(),
                 true,
-                (target, network, storage) -> new FlinkContainer(
-                        target, network, storage, classLoadLogs),
+                createFlinkFactoryProvider(classLoadLogs),
                 ApacheKafkaRuntime::new,
                 checkpointStorageRoot);
+    }
+
+    private static FlinkFactoryProvider createFlinkFactoryProvider(ClassLoadLogs classLoadLogs) {
+        AtomicReference<String> imageId = new AtomicReference<>();
+        return (target, network, storage) -> new FlinkContainer(
+                target, network, storage, classLoadLogs, imageId);
     }
 
     ClusterManager(
@@ -381,8 +387,20 @@ public final class ClusterManager implements AutoCloseable {
     private FlinkComponentFactory createFlinkFactory(FlinkRuntimeTarget runtimeTarget) {
         Objects.requireNonNull(runtimeTarget, "runtimeTarget");
         runtimeTarget.connectorBundle().classpathManifest().verifyHostFiles();
+        FlinkRuntimeTarget effectiveTarget = runtimeTarget;
+        if (!provisioningHistory.isEmpty()) {
+            String imageId = provisioningHistory.getFirst().imageId();
+            runtimeTarget.expectedImageId().ifPresent(expected -> {
+                if (!expected.equals(imageId)) {
+                    throw new IllegalStateException(
+                            "Flink image identity changed within the attempt: expected "
+                                    + expected + ", actual " + imageId);
+                }
+            });
+            effectiveTarget = runtimeTarget.withExpectedImageId(imageId);
+        }
         FlinkComponentFactory factory = Objects.requireNonNull(
-                flinkFactoryProvider.create(runtimeTarget, network, checkpointStorageRoot),
+                flinkFactoryProvider.create(effectiveTarget, network, checkpointStorageRoot),
                 "Flink component factory returned null");
         flinkFactories.add(factory);
         return factory;
@@ -570,7 +588,7 @@ public final class ClusterManager implements AutoCloseable {
         KafkaRuntimeCluster create(Network network, KafkaRuntimeTarget runtimeTarget);
     }
 
-    private static final class ComponentSlot {
+    private final class ComponentSlot {
         private final String name;
         private final FlinkComponentRole role;
         private final FlinkRuntimeTarget runtimeTarget;
@@ -780,6 +798,21 @@ public final class ClusterManager implements AutoCloseable {
                     || !evidence.connectorArtifacts().equals(expectedArtifacts)) {
                 throw new ConnectorBundleProvisioningException(
                         "Connector bundle provisioning evidence does not match target for " + name);
+            }
+            runtimeTarget.expectedImageId().ifPresent(expected -> {
+                if (!expected.equals(evidence.imageId())) {
+                    throw new IllegalStateException(
+                            "Flink image ID mismatch for " + name + ": expected "
+                                    + expected + ", actual " + evidence.imageId());
+                }
+            });
+            if (!provisioningHistory.isEmpty()) {
+                String expected = provisioningHistory.getFirst().imageId();
+                if (!expected.equals(evidence.imageId())) {
+                    throw new IllegalStateException(
+                            "Flink image changed for " + name + ": expected "
+                                    + expected + ", actual " + evidence.imageId());
+                }
             }
         }
 

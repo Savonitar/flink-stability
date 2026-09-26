@@ -270,6 +270,7 @@ public final class V1ScenarioExecutor {
                     sinkTransactions,
                     subjectOrigins,
                     runtime,
+                    prepared.flinkRuntimeTarget().expectedImageId(),
                     evidenceDiagnostics);
         } catch (KafkaInputPreparationException failure) {
             inputEvidence = failure.evidence().orElse(inputEvidence);
@@ -286,6 +287,7 @@ public final class V1ScenarioExecutor {
                     sinkTransactions,
                     subjectOrigins,
                     runtime,
+                    prepared.flinkRuntimeTarget().expectedImageId(),
                     diagnostics(failure));
         } catch (PhaseExecutionException failure) {
             phases = failure.evidence();
@@ -306,6 +308,7 @@ public final class V1ScenarioExecutor {
                     sinkTransactions,
                     subjectOrigins,
                     runtime,
+                    prepared.flinkRuntimeTarget().expectedImageId(),
                     diagnostics(failure));
         } catch (TerminalWriteFenceException failure) {
             processFence = failure.processFenceEvidence().orElse(null);
@@ -323,6 +326,7 @@ public final class V1ScenarioExecutor {
                     sinkTransactions,
                     subjectOrigins,
                     runtime,
+                    prepared.flinkRuntimeTarget().expectedImageId(),
                     diagnostics(failure));
         } catch (InterruptedException failure) {
             Thread.currentThread().interrupt();
@@ -339,6 +343,7 @@ public final class V1ScenarioExecutor {
                     sinkTransactions,
                     subjectOrigins,
                     runtime,
+                    prepared.flinkRuntimeTarget().expectedImageId(),
                     diagnostics(failure));
         } catch (Exception failure) {
             result = result(
@@ -354,6 +359,7 @@ public final class V1ScenarioExecutor {
                     sinkTransactions,
                     subjectOrigins,
                     runtime,
+                    prepared.flinkRuntimeTarget().expectedImageId(),
                     diagnostics(failure));
         }
 
@@ -411,10 +417,26 @@ public final class V1ScenarioExecutor {
             KafkaTransactionListing sinkTransactions,
             SubjectClassOrigins subjectOrigins,
             V1AttemptRuntime runtime,
+            Optional<String> expectedImageId,
             List<String> diagnostics) {
-        List<FlinkComponentProvisioningEvidence> provisioning = runtime == null
-                ? List.of()
-                : runtime.flinkProvisioningEvidence();
+        List<String> retainedDiagnostics = new ArrayList<>(diagnostics);
+        List<FlinkComponentProvisioningEvidence> provisioning = List.of();
+        try {
+            if (runtime != null) {
+                provisioning = List.copyOf(runtime.flinkProvisioningEvidence());
+            }
+        } catch (RuntimeException unavailable) {
+            retainedDiagnostics.add("flink.provisioning-evidence-unavailable: " + unavailable);
+        }
+        FlinkRuntimeIdentity identity = FlinkRuntimeIdentity.evaluate(expectedImageId,
+                provisioning, Optional.ofNullable(processFence), Optional.ofNullable(phases));
+        if (status == V1ScenarioExecutionResult.Status.PASS
+                && identity.outcome() != FlinkRuntimeIdentity.Outcome.CONFIRMED) {
+            status = V1ScenarioExecutionResult.Status.INCONCLUSIVE;
+            reason = identity.reason();
+            message = "The terminal oracle passed, but Flink runtime identity is unconfirmed: "
+                    + identity.detail();
+        }
         return new V1ScenarioExecutionResult(
                 status,
                 reason,
@@ -428,7 +450,8 @@ public final class V1ScenarioExecutor {
                 Optional.ofNullable(sinkTransactions),
                 Optional.ofNullable(subjectOrigins),
                 provisioning,
-                diagnostics);
+                expectedImageId,
+                retainedDiagnostics);
     }
 
     private static List<String> diagnostics(Throwable failure) {

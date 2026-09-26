@@ -19,6 +19,7 @@ import java.nio.file.attribute.PosixFilePermissions;
 import java.time.Duration;
 import java.util.List;
 import java.util.Objects;
+import java.util.concurrent.atomic.AtomicReference;
 
 final class FlinkContainer implements FlinkComponentFactory {
     private static final String CHECKPOINT_PATH = "/flink/checkpoints";
@@ -32,6 +33,7 @@ final class FlinkContainer implements FlinkComponentFactory {
     private final Network network;
     private final Path checkpointStorageRoot;
     private final ClassLoadLogs classLoadLogs;
+    private final AtomicReference<String> pinnedImageId;
 
     /** Creates a factory for one exact image/bundle binding. */
     FlinkContainer(
@@ -47,16 +49,27 @@ final class FlinkContainer implements FlinkComponentFactory {
             Network network,
             Path checkpointStorageRoot,
             ClassLoadLogs classLoadLogs) {
+        this(runtimeTarget, network, checkpointStorageRoot, classLoadLogs, new AtomicReference<>());
+    }
+
+    /** The attempt shares this pin even when a created container never completes startup. */
+    FlinkContainer(
+            FlinkRuntimeTarget runtimeTarget,
+            Network network,
+            Path checkpointStorageRoot,
+            ClassLoadLogs classLoadLogs,
+            AtomicReference<String> pinnedImageId) {
         this.runtimeTarget = Objects.requireNonNull(runtimeTarget, "runtimeTarget");
         this.flinkImage = DockerImageName.parse(runtimeTarget.imageReference())
                 .asCompatibleSubstituteFor("flink");
         this.network = Objects.requireNonNull(network, "network");
         this.checkpointStorageRoot = prepareCheckpointStorage(checkpointStorageRoot);
         this.classLoadLogs = Objects.requireNonNull(classLoadLogs, "classLoadLogs");
+        this.pinnedImageId = Objects.requireNonNull(pinnedImageId, "pinnedImageId");
     }
 
     GenericContainer<?> createJobManager(String logicalName) {
-        return new VerifiedFlinkContainer(flinkImage, runtimeTarget)
+        return new VerifiedFlinkContainer(flinkImage, runtimeTarget, this::verifyImageId)
                 .withNetwork(network)
                 .withNetworkAliases(logicalName)
                 .withLabel(COMPONENT_LABEL, logicalName)
@@ -74,7 +87,7 @@ final class FlinkContainer implements FlinkComponentFactory {
     }
 
     GenericContainer<?> createTaskManager(String logicalName) {
-        return new VerifiedFlinkContainer(flinkImage, runtimeTarget)
+        return new VerifiedFlinkContainer(flinkImage, runtimeTarget, this::verifyImageId)
                 .withNetwork(network)
                 .withNetworkAliases(logicalName)
                 .withLabel(COMPONENT_LABEL, logicalName)
@@ -98,6 +111,16 @@ final class FlinkContainer implements FlinkComponentFactory {
         VerifiedFlinkContainer container = (VerifiedFlinkContainer) createTaskManager(logicalName);
         return new TestcontainersContainerHandle(
                 container, logicalName, FlinkComponentRole.TASK_MANAGER, runtimeTarget);
+    }
+
+    private void verifyImageId(String actual) {
+        pinnedImageId.compareAndSet(null, actual);
+        String expected = pinnedImageId.get();
+        if (!expected.equals(actual)) {
+            throw new IllegalStateException(
+                    "Flink image changed for " + runtimeTarget.imageReference()
+                            + ": expected " + expected + ", actual " + actual);
+        }
     }
 
     /**

@@ -28,6 +28,7 @@ public record V1ScenarioExecutionResult(
         Optional<KafkaTransactionListing> sinkTransactions,
         Optional<SubjectClassOrigins> subjectClassOrigins,
         List<FlinkComponentProvisioningEvidence> flinkProvisioningEvidence,
+        Optional<String> expectedFlinkImageId,
         List<String> diagnostics) {
 
     public V1ScenarioExecutionResult {
@@ -49,6 +50,7 @@ public record V1ScenarioExecutionResult(
                 subjectClassOrigins, "subjectClassOrigins");
         flinkProvisioningEvidence = List.copyOf(Objects.requireNonNull(
                 flinkProvisioningEvidence, "flinkProvisioningEvidence"));
+        expectedFlinkImageId = Objects.requireNonNull(expectedFlinkImageId, "expectedFlinkImageId");
         diagnostics = List.copyOf(Objects.requireNonNull(diagnostics, "diagnostics"));
         if (status == Status.PASS
                 && (writeFenceEvidence.isEmpty()
@@ -86,6 +88,11 @@ public record V1ScenarioExecutionResult(
             throw new IllegalArgumentException(
                     "Every verification.* outcome is an authoritative FAIL");
         }
+        if (status == Status.PASS && FlinkRuntimeIdentity.evaluate(expectedFlinkImageId,
+                flinkProvisioningEvidence, processFenceEvidence, phaseEvidence).outcome()
+                != FlinkRuntimeIdentity.Outcome.CONFIRMED) {
+            throw new IllegalArgumentException("PASS requires confirmed Flink runtime image identities");
+        }
         if (writeFenceEvidence.isPresent()
                 && !processFenceEvidence.equals(Optional.of(
                         writeFenceEvidence.orElseThrow().processFenceEvidence()))) {
@@ -115,6 +122,11 @@ public record V1ScenarioExecutionResult(
         return TaskManagerKillEffect.evaluate(
                 phaseEvidence.map(PhaseExecutionEvidence::taskManagerKills).orElse(List.of()),
                 finalJobObservation);
+    }
+
+    public FlinkRuntimeIdentity flinkRuntimeIdentity() {
+        return FlinkRuntimeIdentity.evaluate(expectedFlinkImageId,
+                flinkProvisioningEvidence, processFenceEvidence, phaseEvidence);
     }
 
     public V1ScenarioExecutionResult withCleanupFailure(Throwable failure) {
@@ -159,6 +171,7 @@ public record V1ScenarioExecutionResult(
                     sinkTransactions,
                     subjectClassOrigins,
                     flinkProvisioningEvidence,
+                    expectedFlinkImageId,
                     updated);
         }
         return new V1ScenarioExecutionResult(
@@ -174,6 +187,7 @@ public record V1ScenarioExecutionResult(
                 sinkTransactions,
                 subjectClassOrigins,
                 flinkProvisioningEvidence,
+                expectedFlinkImageId,
                 updated);
     }
 }

@@ -253,6 +253,29 @@ final class V1ExecutionResultRenderer {
             });
         });
         evidence.put("flinkComponents", result.flinkProvisioningEvidence().size());
+        ObjectNode runtime = evidence.putObject("flinkRuntime");
+        runtime.put("identityKind", "docker-image-id");
+        runtime.put("status", result.flinkRuntimeIdentity().outcome().name().toLowerCase(Locale.ROOT));
+        runtime.put("detail", result.flinkRuntimeIdentity().detail());
+        result.expectedFlinkImageId().ifPresent(id -> runtime.put("expectedImageId", id));
+        ArrayNode components = runtime.putArray("components");
+        result.flinkProvisioningEvidence().forEach(component -> {
+            ObjectNode rendered = components.addObject();
+            rendered.put("logicalName", component.logicalName());
+            rendered.put("role", component.role().name().toLowerCase(Locale.ROOT));
+            rendered.put("runtimeId", component.runtimeId());
+            rendered.put("imageReference", component.imageReference());
+            rendered.put("imageId", component.imageId());
+            rendered.put("targetBindingSha256", component.targetBindingSha256());
+            rendered.put("classpathManifestSha256", component.classpathManifestSha256());
+            ArrayNode artifacts = rendered.putArray("connectorArtifacts");
+            component.connectorArtifacts().forEach(artifact -> {
+                ObjectNode copied = artifacts.addObject();
+                copied.put("index", artifact.index());
+                copied.put("containerPath", artifact.containerPath());
+                copied.put("sha256", artifact.sha256());
+            });
+        });
 
         ArrayNode diagnostics = root.putArray("diagnostics");
         result.diagnostics().forEach(diagnostics::add);

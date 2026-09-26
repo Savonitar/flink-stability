@@ -40,6 +40,13 @@ final class FlinkKafkaCompatibilityValidator {
             ".*-\\d{8}\\.\\d{6}-\\d+$");
     List<Diagnostic> validate(Path source, ResolutionScope scope, ObjectNode document) {
         List<Diagnostic> issues = new ArrayList<>();
+        JsonNode imageId = document.at("/setup/flink/image_id");
+        if (imageId.isTextual() && !imageId.textValue().matches("sha256:[0-9a-f]{64}")) {
+            issues.add(issue(source, scope, "capability.flink-image-id.invalid",
+                    "$/setup/flink/image_id",
+                    "Flink image_id must be a full local Docker image ID: sha256: followed "
+                            + "by 64 lowercase hexadecimal characters"));
+        }
         List<ImageReference> images = flinkImages(document);
         boolean flinkLineSupported = true;
         for (ImageReference image : images) {

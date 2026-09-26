@@ -372,6 +372,13 @@ expected validation code.
 | SV-161 | Suite overrides runs. | Report records declared and effective runs. |
 | SV-162 | Scenario uses local JAR or file-input path. | Report records declared reference, canonical selected source path, prepared execution path, and SHA-256. |
 | SV-163 | Scenario uses image tag. | Report records tag and resolved digest when resolution succeeds. |
+| SV-163a | `setup.flink.image_id` resolves to a full lowercase `sha256:<64-hex>` Docker image ID. | Bind the ID into the runtime target without changing the connector bundle; report the expected value separately from observed IDs. |
+| SV-163b | A literal or interpolated `image_id` is shortened, uppercase, lacks `sha256:`, or contains a repository reference. | Reject before provisioning with `capability.flink-image-id.invalid`. |
+| SV-163c | A created JobManager or TaskManager has a missing ID or a different ID from the declared pin. | Fail verification before its Flink process starts; retain expected/observed values in the failure. |
+| SV-163d | No explicit pin is supplied, and the same tag resolves to a different image for another initial or replacement process. | Reject the changed image before start; the first observed image remains pinned for the attempt. |
+| SV-163e | A matching runtime is used by JobManager, TaskManager, and replacement TaskManagers. | Retain each physical incarnation and its observed image ID in the JSON evidence. |
+| SV-163f | Provisioning evidence is missing, mixed, mismatches the pin, or does not cover the process fence and successful replacements. | No passing verdict, including expected-failure controls; preserve an observed data failure in the attempt. |
+| SV-163g | A Flink 2.4 image has a valid `image_id`. | Keep rejecting the unsupported version line; a pin does not assert connector/workload compatibility. |
 | SV-164 | Expected-result case selected. | Report records selected case or default. |
 | SV-165 | Network fault executes. | Report records full proxy/fault evidence. |
 | SV-166 | Scenario uses a subject connector. | For every effective side and distinct target Flink reference, report the full lock: auto/explicit mode, primary identity/reference, ordered runtime entries with origin-root kind/index, source/staged paths, Maven paths, SHA-256 and classpath indexes, consulted POM identities/source paths/SHA-256, mediation decisions, exact target reference, runtime-resolved digest when deployed, and stable `closure_sha256`. |
