@@ -8,6 +8,7 @@ import sys
 
 RECIPE = Path(__file__).resolve().parent
 sys.path.insert(0, str(RECIPE.parents[1] / "tools"))
+import subject_catalog  # noqa: E402
 from subject_catalog import (artifact_reference, check_released_subject,  # noqa: E402
                              replace_subject, sha256 as sha, subject_snippet)
 
@@ -68,6 +69,11 @@ def main():
         if path.is_file() and path.suffix in {".py", ".java", ".patch", ".md", ".xml"}:
             shutil.copyfile(path, archive / path.name)
             recipe_hashes[path.name] = sha(path)
+    helper_name = "tools/subject_catalog.py"
+    helper_archive = archive / helper_name
+    helper_archive.parent.mkdir()
+    shutil.copyfile(Path(subject_catalog.__file__), helper_archive)
+    recipe_hashes[helper_name] = sha(helper_archive)
     rows = []
     for side, (name, scenario, expected, shared) in sources.items():
         shutil.copyfile(scenario, archive / (name + ".canonical.yaml"))

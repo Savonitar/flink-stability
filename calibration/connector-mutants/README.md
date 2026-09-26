@@ -46,7 +46,9 @@ python3 calibration/connector-mutants/catalogs.py \
 The script preserves each canonical name and expected PASS contract, makes the
 sink `transaction_timeout: 60s` explicit in every cell, and substitutes only the
 primary connector between variants. It verifies artifacts, refuses an existing
-output directory, and captures source/patch/build/template hashes. Artifact paths
+output directory, and captures source/patch/build/template hashes. The evidence
+archive includes the imported `tools/subject_catalog.py` helper and its hash in
+each catalog's `sourceHashes`. Artifact paths
 resolve against `--artifact-root`, which must equal `--harness-root` and contain
 all selected JARs, so the canonical workload path also resolves correctly.
 

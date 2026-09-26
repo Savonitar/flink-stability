@@ -27,5 +27,7 @@ jobs:
           cache: maven
       # Unit and contract tests only; they do not start Docker. The real-container
       # scenario run is the manual bounded-eos workflow.
+      - name: Test Python tooling
+        run: python3 -m unittest discover -s tools/tests -v
       - name: Build and test
         run: mvn -B -ntp verify
