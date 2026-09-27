@@ -11,6 +11,7 @@ import org.savonitar.flink.stability.runtime.api.FlinkConnectorBundleInstallatio
 import org.savonitar.flink.stability.runtime.api.FlinkProcessWriteFenceEvidence;
 import org.savonitar.flink.stability.runtime.api.FlinkRuntimeTarget;
 import org.savonitar.flink.stability.runtime.api.ProvisionedConnectorArtifact;
+import org.savonitar.flink.stability.runtime.api.TaskManagerControl;
 import org.testcontainers.containers.Network;
 
 import java.nio.file.Files;
@@ -20,10 +21,12 @@ import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.concurrent.atomic.AtomicLong;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -34,6 +37,77 @@ class ClusterManagerTest {
 
     @TempDir
     Path temporaryDirectory;
+
+    @Test
+    void namedRestartReplacesOnlyItsTaskManagerAndFenceCoversEverySlot() throws Exception {
+        RecordingFactory factory = new RecordingFactory();
+        try (ClusterManager manager = manager(factory)) {
+            DockerV1AttemptRuntime runtime = new DockerV1AttemptRuntime(manager);
+            runtime.startFlink(target().withTaskManagers(2));
+            assertEquals(List.of("taskmanager-1", "taskmanager-2"), manager.taskManagerNames());
+            TaskManagerControl.Identity first = runtime.taskManagerIdentity("taskmanager-1").orElseThrow();
+            TaskManagerControl.Identity second = runtime.taskManagerIdentity("taskmanager-2").orElseThrow();
+            assertNotEquals(first.resourceId(), second.resourceId());
+            assertTrue(runtime.taskManagerIdentity("taskmanager-3").isEmpty());
+
+            runtime.killTaskManager("taskmanager-2", ACTION_TIMEOUT);
+            assertTrue(runtime.taskManagerIdentity("taskmanager-2").isEmpty());
+            assertEquals(first, runtime.taskManagerIdentity("taskmanager-1").orElseThrow());
+            runtime.restartTaskManager("taskmanager-2", ACTION_TIMEOUT);
+            TaskManagerControl.Identity replacement = runtime.taskManagerIdentity("taskmanager-2").orElseThrow();
+            assertEquals(second.logicalName(), replacement.logicalName());
+            assertNotEquals(second.runtimeId(), replacement.runtimeId());
+            assertNotEquals(second.resourceId(), replacement.resourceId());
+            assertEquals(first, runtime.taskManagerIdentity("taskmanager-1").orElseThrow());
+            assertEquals(List.of("jobmanager-1", "taskmanager-1", "taskmanager-2", "taskmanager-2"),
+                    manager.provisioningHistory().stream()
+                            .map(FlinkComponentProvisioningEvidence::logicalName).toList());
+
+            FlinkProcessWriteFenceEvidence fence = runtime.stopAllFlinkProcesses(ACTION_TIMEOUT);
+            assertEquals(List.of("taskmanager-2", "taskmanager-1", "jobmanager-1"),
+                    fence.components().stream()
+                            .map(FlinkProcessWriteFenceEvidence.Component::logicalName).toList());
+            assertTrue(runtime.taskManagerIdentity("taskmanager-1").isEmpty());
+            assertTrue(runtime.taskManagerIdentity("taskmanager-2").isEmpty());
+            assertThrows(IllegalStateException.class,
+                    () -> runtime.restartTaskManager("taskmanager-2", ACTION_TIMEOUT));
+        }
+    }
+
+    @Test
+    void secondTaskManagerStartupFailureCleansEveryCreatedProcessBeforeRetry() {
+        RecordingFactory factory = new RecordingFactory();
+        factory.failedTaskManagerName = "taskmanager-2";
+        try (ClusterManager manager = manager(factory)) {
+            assertThrows(IllegalStateException.class,
+                    () -> manager.startFlink(target().withTaskManagers(3)));
+            assertEquals(List.of("stop:taskmanager-2", "stop:taskmanager-1", "stop:jobmanager-1"),
+                    factory.events.stream().filter(event -> event.startsWith("stop:")).toList());
+            assertFalse(factory.events.contains("start:taskmanager-3"));
+            assertTrue(manager.taskManagerNames().isEmpty());
+            assertTrue(manager.taskManagerIdentity("taskmanager-1").isEmpty());
+            assertEquals(2, manager.provisioningHistory().size());
+
+            factory.failedTaskManagerName = null;
+            manager.startFlink(target().withTaskManagers(3));
+            assertEquals(List.of("taskmanager-1", "taskmanager-2", "taskmanager-3"),
+                    manager.taskManagerNames());
+        }
+    }
+
+    @Test
+    void identityInspectionHonorsItsDeadline() {
+        AtomicLong clock = new AtomicLong();
+        try (ClusterManager manager = manager(new RecordingFactory(),
+                () -> clock.getAndAdd(Duration.ofSeconds(31).toNanos()))) {
+            manager.startFlink(target());
+            ContainerOperationTimeoutException failure = assertThrows(
+                    ContainerOperationTimeoutException.class,
+                    () -> manager.taskManagerIdentity("taskmanager-1"));
+            assertEquals("reading TaskManager identity for taskmanager-1", failure.scope());
+            assertTrue(manager.isTaskManagerRunning("taskmanager-1"));
+        }
+    }
 
     @Test
     void startsTheFixedV1TopologyAndReturnsItsRestEndpoint() {
@@ -305,6 +379,7 @@ class ClusterManagerTest {
         private FlinkRuntimeTarget target;
         private ClassLoadLogs logs;
         private boolean failTaskManagerStart;
+        private String failedTaskManagerName;
         private boolean badEvidence;
         private String imageId = IMAGE_ID;
         private String taskManagerImageId;
@@ -343,7 +418,8 @@ class ClusterManagerTest {
                     role == FlinkComponentRole.TASK_MANAGER && taskManagerImageId != null
                             ? taskManagerImageId : imageId,
                     events,
-                    failTaskManagerStart && role == FlinkComponentRole.TASK_MANAGER,
+                    (failTaskManagerStart && role == FlinkComponentRole.TASK_MANAGER)
+                            || name.equals(failedTaskManagerName),
                     badEvidence);
         }
     }
@@ -443,6 +519,13 @@ class ClusterManagerTest {
                         "Removed container has no runtime ID: " + name);
             }
             return runtimeId;
+        }
+
+        @Override
+        public Optional<TaskManagerControl.Identity> taskManagerIdentity() {
+            return role == FlinkComponentRole.TASK_MANAGER && running
+                    ? Optional.of(new TaskManagerControl.Identity(name, runtimeId, "resource-" + runtimeId))
+                    : Optional.empty();
         }
 
         @Override

@@ -14,6 +14,7 @@ import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
+import java.util.Optional;
 import java.util.OptionalLong;
 
 /** Executes the compiler-approved v1 phase subset in exact document order. */
@@ -126,9 +127,9 @@ public final class ExecutablePhaseExecutor {
             } else if (step instanceof ExecutableScenarioPlan.KillTaskManager kill) {
                 killTaskManager(
                         phaseIndex, phaseName, path, loopIterations, job, kill, evidence);
-            } else if (step instanceof ExecutableScenarioPlan.RestartTaskManager) {
+            } else if (step instanceof ExecutableScenarioPlan.RestartTaskManager restart) {
                 restartTaskManager(
-                        phaseIndex, phaseName, path, loopIterations, evidence);
+                        phaseIndex, phaseName, path, loopIterations, restart, evidence);
             } else if (step instanceof ExecutableScenarioPlan.EndTxnFault fault) {
                 injectNetworkFault(
                         phaseIndex, phaseName, path, loopIterations, fault, evidence);
@@ -300,11 +301,12 @@ public final class ExecutablePhaseExecutor {
             throws PhaseExecutionException {
         // Observe first: whether the kill affected the job is judged against this baseline.
         FlinkJobObservation.Attempt jobBeforeKill = FlinkJobObservation.Attempt.of(flink, job);
+        IdentityObservation identity = taskManagerIdentity(kill.targetName());
         try {
             taskManagers.killTaskManager(kill.targetName(), TASKMANAGER_ACTION_TIMEOUT);
             evidence.kills.add(new PhaseExecutionEvidence.TaskManagerKill(
                     path, loopIterations, kill.targetName(), jobBeforeKill,
-                    jobManagerTimeAfterKill(job)));
+                    jobManagerTimeAfterKill(job), identity.identity(), identity.failure()));
             succeeded(
                     evidence,
                     phaseIndex,
@@ -338,6 +340,20 @@ public final class ExecutablePhaseExecutor {
         }
     }
 
+    private IdentityObservation taskManagerIdentity(String target) {
+        try {
+            return new IdentityObservation(Objects.requireNonNull(
+                    taskManagers.taskManagerIdentity(target), "identity"), Optional.empty());
+        } catch (RuntimeException unavailable) {
+            // Missing identity cannot prove the fault, but must not prevent healing or fencing.
+            return new IdentityObservation(Optional.empty(), Optional.of(
+                    String.join("; caused by ", V1ScenarioExecutor.diagnostics(unavailable))));
+        }
+    }
+
+    private record IdentityObservation(
+            Optional<TaskManagerControl.Identity> identity, Optional<String> failure) {}
+
     private OptionalLong jobManagerTimeAfterKill(FlinkJobHandle job) {
         try {
             return OptionalLong.of(flink.jobManagerTimeMillis(job));
@@ -353,10 +369,21 @@ public final class ExecutablePhaseExecutor {
             String phaseName,
             String path,
             List<PhaseExecutionEvidence.LoopIteration> loopIterations,
+            ExecutableScenarioPlan.RestartTaskManager restart,
             Recorder evidence)
             throws PhaseExecutionException {
         try {
-            taskManagers.restartTaskManager(TASKMANAGER_ACTION_TIMEOUT);
+            Optional<PhaseExecutionEvidence.TaskManagerKill> previous = evidence.kills.reversed().stream()
+                    .filter(kill -> kill.target().equals(restart.targetName()))
+                    .findFirst();
+            taskManagers.restartTaskManager(restart.targetName(), TASKMANAGER_ACTION_TIMEOUT);
+            IdentityObservation replacement = taskManagerIdentity(restart.targetName());
+            evidence.restarts.add(new PhaseExecutionEvidence.TaskManagerRestart(
+                    path, loopIterations, restart.targetName(),
+                    previous.flatMap(PhaseExecutionEvidence.TaskManagerKill::identity),
+                    replacement.identity(),
+                    previous.flatMap(PhaseExecutionEvidence.TaskManagerKill::identityFailure),
+                    replacement.failure()));
             succeeded(
                     evidence,
                     phaseIndex,
@@ -364,7 +391,7 @@ public final class ExecutablePhaseExecutor {
                     path,
                     loopIterations,
                     PhaseExecutionEvidence.StepKind.RESTART_TASKMANAGER,
-                    "component=taskmanager");
+                    "target=" + restart.targetName());
         } catch (TaskManagerActionTimeoutException timeout) {
             throw failed(
                     evidence,
@@ -523,9 +550,10 @@ public final class ExecutablePhaseExecutor {
         private final List<PhaseExecutionEvidence.StepEvidence> steps = new ArrayList<>();
         private final List<PhaseExecutionEvidence.TaskManagerKill> kills = new ArrayList<>();
         private final List<PhaseExecutionEvidence.NetworkFault> networkFaults = new ArrayList<>();
+        private final List<PhaseExecutionEvidence.TaskManagerRestart> restarts = new ArrayList<>();
 
         private PhaseExecutionEvidence snapshot() {
-            return new PhaseExecutionEvidence(steps, kills, networkFaults);
+            return new PhaseExecutionEvidence(steps, kills, networkFaults, restarts);
         }
     }
 }

@@ -2,14 +2,18 @@ package org.savonitar.flink.stability.core.execution;
 
 import org.junit.jupiter.api.Test;
 import org.savonitar.flink.stability.core.execution.plan.ExecutableScenarioPlan;
+import org.savonitar.flink.stability.core.flink.FlinkJobObservation;
 import org.savonitar.flink.stability.runtime.api.FlinkComponentProvisioningEvidence;
 import org.savonitar.flink.stability.runtime.api.FlinkComponentRole;
 import org.savonitar.flink.stability.runtime.api.FlinkProcessWriteFenceEvidence;
+import org.savonitar.flink.stability.runtime.api.TaskManagerControl;
 
 import java.time.Instant;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.OptionalLong;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 
@@ -32,17 +36,16 @@ class FlinkRuntimeIdentityTest {
         assertEquals(FlinkRuntimeIdentity.Outcome.CONFIRMED,
                 FlinkRuntimeIdentity.evaluate(expected, List.of(coordinator, first, replacement),
                         Optional.of(fenceFor(List.of(coordinator, replacement))),
-                        Optional.of(restarted())).outcome());
+                        Optional.of(restarted("worker-blue", "tm-old", "tm-new"))).outcome());
         assertEquals(FlinkRuntimeIdentity.Outcome.UNCONFIRMED,
                 FlinkRuntimeIdentity.evaluate(expected, List.of(coordinator, replacement),
                         Optional.of(fenceFor(List.of(coordinator, replacement))),
-                        Optional.of(restarted())).outcome());
+                        Optional.of(restarted("worker-blue", "tm-old", "tm-new"))).outcome());
     }
 
     @Test
     void omissionFromBothObservationsCannotHideAnExpectedSlot() {
         FlinkRuntimeIdentity.ExpectedTarget expected = twoTaskManagerSlots();
-        // Only the evaluator accepts this expectation; the executable plan still permits one TM.
         assertEquals(FlinkRuntimeIdentity.Outcome.UNCONFIRMED,
                 FlinkRuntimeIdentity.evaluate(expected, provisioning(1), Optional.of(fence(1)),
                         Optional.of(noPhases())).outcome());
@@ -85,10 +88,154 @@ class FlinkRuntimeIdentityTest {
     void untargetedRestartEvidenceCannotBeSpreadAcrossMultipleExpectedSlots() {
         java.util.ArrayList<FlinkComponentProvisioningEvidence> components =
                 new java.util.ArrayList<>(provisioning(2));
-        components.add(component("taskmanager-2", "tm-other", IMAGE_ID));
+        FlinkComponentProvisioningEvidence other = component("taskmanager-2", "tm-other", IMAGE_ID);
+        components.add(other);
+        PhaseExecutionEvidence untargeted = new PhaseExecutionEvidence(restarted().steps());
         assertEquals(FlinkRuntimeIdentity.Outcome.UNCONFIRMED,
                 FlinkRuntimeIdentity.evaluate(twoTaskManagerSlots(), components,
-                        Optional.of(fenceFor(components)), Optional.of(restarted())).outcome());
+                        Optional.of(fenceFor(List.of(components.getFirst(), components.get(2), other))),
+                        Optional.of(untargeted)).outcome());
+    }
+
+    @Test
+    void independentReplacementsCoverEachTaskManagerSlotAndItsLatestFence() {
+        assertEquals(FlinkRuntimeIdentity.Outcome.CONFIRMED,
+                evaluateDistributed(distributedProvisioning(), distributedFence(),
+                        distributedRestarts()).outcome());
+    }
+
+    @Test
+    void aReplacementCannotBorrowAnotherLogicalTargetsObservedContainer() {
+        List<PhaseExecutionEvidence.TaskManagerRestart> restarts = distributedRestarts();
+        PhaseExecutionEvidence.TaskManagerRestart first = restarts.getFirst();
+        var wrongTarget = new PhaseExecutionEvidence.TaskManagerRestart(
+                first.path(), first.loopIterations(), "taskmanager-1",
+                first.previousIdentity(), first.replacementIdentity());
+        var borrowedContainer = new PhaseExecutionEvidence.TaskManagerRestart(
+                first.path(), first.loopIterations(), first.target(), first.previousIdentity(),
+                Optional.of(identity("taskmanager-2", "tm-a-new")));
+        for (var invalid : List.of(wrongTarget, borrowedContainer)) {
+            assertEquals(FlinkRuntimeIdentity.Outcome.UNCONFIRMED,
+                    evaluateDistributed(distributedProvisioning(), distributedFence(),
+                            List.of(invalid, restarts.get(1))).outcome());
+        }
+    }
+
+    @Test
+    void aNamedRestartCannotConfirmAnUnobservedReplacement() {
+        List<FlinkComponentProvisioningEvidence> missingReplacement = distributedProvisioning().stream()
+                .filter(component -> !component.runtimeId().equals("tm-b-new"))
+                .toList();
+        assertEquals(FlinkRuntimeIdentity.Outcome.UNCONFIRMED,
+                evaluateDistributed(missingReplacement, distributedFence(),
+                        distributedRestarts()).outcome());
+    }
+
+    @Test
+    void replacementsCannotReusePhysicalOrResourceIdentities() {
+        List<PhaseExecutionEvidence.TaskManagerRestart> restarts = distributedRestarts();
+        PhaseExecutionEvidence.TaskManagerRestart first = restarts.getFirst();
+        for (TaskManagerControl.Identity reused : List.of(
+                new TaskManagerControl.Identity("taskmanager-2", "tm-b-old", "resource-tm-b-new"),
+                new TaskManagerControl.Identity("taskmanager-2", "tm-b-new", "resource-tm-b-old"),
+                new TaskManagerControl.Identity("taskmanager-2", "tm-b-new", "resource-tm-a-old"))) {
+            var invalid = new PhaseExecutionEvidence.TaskManagerRestart(
+                    first.path(), first.loopIterations(), first.target(), first.previousIdentity(),
+                    Optional.of(reused));
+            assertEquals(FlinkRuntimeIdentity.Outcome.UNCONFIRMED,
+                    evaluateDistributed(distributedProvisioning(), distributedFence(),
+                            List.of(invalid, restarts.get(1))).outcome());
+        }
+    }
+
+    @Test
+    void aFenceForAnOldIncarnationCannotStandInForItsReplacement() {
+        List<FlinkComponentProvisioningEvidence> components = distributedProvisioning();
+        FlinkProcessWriteFenceEvidence oldFence = fenceFor(
+                List.of(components.getFirst(), components.get(4), components.get(2)));
+        assertEquals(FlinkRuntimeIdentity.Outcome.UNCONFIRMED,
+                evaluateDistributed(components, oldFence, distributedRestarts()).outcome());
+    }
+
+    @Test
+    void repeatedRestartsMustContinueTheSameIncarnationChain() {
+        var first = restart(0, "taskmanager-1", "tm-1", "tm-2");
+        var second = restart(1, "taskmanager-1", "tm-2", "tm-3");
+        assertEquals(FlinkRuntimeIdentity.Outcome.CONFIRMED,
+                evaluate(provisioning(3), Optional.of(IMAGE_ID), fence(3),
+                        phasesWithRestarts(List.of(first, second))).outcome());
+        for (var previous : List.of(
+                identity("taskmanager-1", "tm-1"),
+                new TaskManagerControl.Identity("taskmanager-1", "tm-2", "unrelated-resource"))) {
+            var brokenChain = new PhaseExecutionEvidence.TaskManagerRestart(
+                    second.path(), second.loopIterations(), second.target(), Optional.of(previous),
+                    second.replacementIdentity());
+            assertEquals(FlinkRuntimeIdentity.Outcome.UNCONFIRMED,
+                    evaluate(provisioning(3), Optional.of(IMAGE_ID), fence(3),
+                            phasesWithRestarts(List.of(first, brokenChain))).outcome());
+        }
+    }
+
+    @Test
+    void restartRecordsMustMatchSuccessfulStepLocationsIncludingLoopIterations() {
+        PhaseExecutionEvidence original = restarted();
+        PhaseExecutionEvidence.TaskManagerRestart restart = original.taskManagerRestarts().getFirst();
+        for (var mismatched : List.of(
+                new PhaseExecutionEvidence.TaskManagerRestart(
+                        "$/phases/0/steps/99", restart.loopIterations(), restart.target(),
+                        restart.previousIdentity(), restart.replacementIdentity()),
+                new PhaseExecutionEvidence.TaskManagerRestart(
+                        restart.path(), List.of(new PhaseExecutionEvidence.LoopIteration(
+                                "$/phases/0/steps/0", 2, 2)), restart.target(),
+                        restart.previousIdentity(), restart.replacementIdentity()))) {
+            PhaseExecutionEvidence phases = new PhaseExecutionEvidence(
+                    original.steps(), original.taskManagerKills(), List.of(), List.of(mismatched));
+            assertEquals(FlinkRuntimeIdentity.Outcome.UNCONFIRMED,
+                    evaluate(provisioning(2), Optional.of(IMAGE_ID), fence(2), phases).outcome());
+        }
+    }
+
+    @Test
+    void restartPredecessorMustEqualTheActualKillIncludingItsResourceIdentity() {
+        PhaseExecutionEvidence original = phasesWithRestarts(List.of(
+                restart(0, "taskmanager-1", "tm-1", "tm-2"),
+                restart(1, "taskmanager-1", "tm-2", "tm-3")));
+        var secondKill = original.taskManagerKills().get(1);
+        for (var contradictory : List.of(
+                identity("taskmanager-1", "tm-1"),
+                new TaskManagerControl.Identity("taskmanager-1", "tm-2", "unrelated-resource"))) {
+            var mutatedKill = new PhaseExecutionEvidence.TaskManagerKill(
+                    secondKill.path(), secondKill.loopIterations(), secondKill.target(),
+                    secondKill.jobBeforeKill(), secondKill.jobManagerTimeAfterKill(),
+                    Optional.of(contradictory));
+            PhaseExecutionEvidence phases = new PhaseExecutionEvidence(original.steps(),
+                    List.of(original.taskManagerKills().getFirst(), mutatedKill),
+                    List.of(), original.taskManagerRestarts());
+            FlinkRuntimeIdentity result = evaluate(provisioning(3), Optional.of(IMAGE_ID), fence(3), phases);
+            assertEquals(FlinkRuntimeIdentity.Outcome.UNCONFIRMED, result.outcome());
+            assertEquals("TaskManager restart predecessor does not match its preceding unhealed kill",
+                    result.detail());
+        }
+    }
+
+    @Test
+    void killAndRestartPairingRequiresMatchingSuccessfulStepOrderAndLoopLocation() {
+        PhaseExecutionEvidence original = restarted();
+        var kill = original.taskManagerKills().getFirst();
+        var wrongLoopKill = new PhaseExecutionEvidence.TaskManagerKill(
+                kill.path(), List.of(new PhaseExecutionEvidence.LoopIteration(
+                        "$/phases/0/steps/0", 2, 2)), kill.target(),
+                kill.jobBeforeKill(), kill.jobManagerTimeAfterKill(), kill.identity());
+        for (var phases : List.of(
+                new PhaseExecutionEvidence(original.steps().reversed(), original.taskManagerKills(),
+                        List.of(), original.taskManagerRestarts()),
+                new PhaseExecutionEvidence(original.steps(), List.of(wrongLoopKill),
+                        List.of(), original.taskManagerRestarts()),
+                new PhaseExecutionEvidence(List.of(original.steps().getLast()), List.of(),
+                        List.of(), original.taskManagerRestarts()))) {
+            assertEquals(FlinkRuntimeIdentity.Outcome.UNCONFIRMED,
+                    evaluate(provisioning(2), Optional.of(IMAGE_ID), fence(2), phases).outcome());
+        }
     }
 
     @Test
@@ -216,10 +363,71 @@ class FlinkRuntimeIdentityTest {
     }
 
     private static PhaseExecutionEvidence restarted() {
-        return new PhaseExecutionEvidence(List.of(new PhaseExecutionEvidence.StepEvidence(0,
-                "restore", "$/phases/0/steps/0", List.of(),
-                PhaseExecutionEvidence.StepKind.RESTART_TASKMANAGER,
-                PhaseExecutionEvidence.StepStatus.SUCCEEDED, "restarted")));
+        return restarted("taskmanager-1", "tm-1", "tm-2");
+    }
+
+    private static PhaseExecutionEvidence restarted(String target, String previous, String replacement) {
+        return phasesWithRestarts(List.of(restart(0, target, previous, replacement)));
+    }
+
+    private static TaskManagerControl.Identity identity(String target, String runtimeId) {
+        return new TaskManagerControl.Identity(target, runtimeId, "resource-" + runtimeId);
+    }
+
+    private static PhaseExecutionEvidence.TaskManagerRestart restart(
+            int ordinal, String target, String previous, String replacement) {
+        return new PhaseExecutionEvidence.TaskManagerRestart(
+                "$/phases/0/steps/" + (ordinal * 2 + 1), List.of(), target,
+                Optional.of(identity(target, previous)), Optional.of(identity(target, replacement)));
+    }
+
+    private static PhaseExecutionEvidence phasesWithRestarts(
+            List<PhaseExecutionEvidence.TaskManagerRestart> restarts) {
+        List<PhaseExecutionEvidence.StepEvidence> steps = new ArrayList<>();
+        List<PhaseExecutionEvidence.TaskManagerKill> kills = new ArrayList<>();
+        for (int index = 0; index < restarts.size(); index++) {
+            PhaseExecutionEvidence.TaskManagerRestart restart = restarts.get(index);
+            String killPath = "$/phases/0/steps/" + (index * 2);
+            kills.add(new PhaseExecutionEvidence.TaskManagerKill(
+                    killPath, restart.loopIterations(), restart.target(),
+                    new FlinkJobObservation.Attempt(Optional.empty(), Optional.of("not sampled")),
+                    OptionalLong.empty(), restart.previousIdentity()));
+            steps.add(new PhaseExecutionEvidence.StepEvidence(0, "restore", killPath,
+                    restart.loopIterations(), PhaseExecutionEvidence.StepKind.KILL_TASKMANAGER,
+                    PhaseExecutionEvidence.StepStatus.SUCCEEDED, "killed"));
+            steps.add(new PhaseExecutionEvidence.StepEvidence(0, "restore", restart.path(),
+                    restart.loopIterations(), PhaseExecutionEvidence.StepKind.RESTART_TASKMANAGER,
+                    PhaseExecutionEvidence.StepStatus.SUCCEEDED, "restarted"));
+        }
+        return new PhaseExecutionEvidence(steps, kills, List.of(), restarts);
+    }
+
+    private static List<FlinkComponentProvisioningEvidence> distributedProvisioning() {
+        return List.of(
+                component("jobmanager-1", "jm", IMAGE_ID),
+                component("taskmanager-1", "tm-a-old", IMAGE_ID),
+                component("taskmanager-2", "tm-b-old", IMAGE_ID),
+                component("taskmanager-2", "tm-b-new", IMAGE_ID),
+                component("taskmanager-1", "tm-a-new", IMAGE_ID));
+    }
+
+    private static FlinkProcessWriteFenceEvidence distributedFence() {
+        List<FlinkComponentProvisioningEvidence> components = distributedProvisioning();
+        return fenceFor(List.of(components.getFirst(), components.get(4), components.get(3)));
+    }
+
+    private static List<PhaseExecutionEvidence.TaskManagerRestart> distributedRestarts() {
+        // Reverse target order proves that replacements are attributed by identity, not position.
+        return List.of(restart(0, "taskmanager-2", "tm-b-old", "tm-b-new"),
+                restart(1, "taskmanager-1", "tm-a-old", "tm-a-new"));
+    }
+
+    private static FlinkRuntimeIdentity evaluateDistributed(
+            List<FlinkComponentProvisioningEvidence> components,
+            FlinkProcessWriteFenceEvidence fence,
+            List<PhaseExecutionEvidence.TaskManagerRestart> restarts) {
+        return FlinkRuntimeIdentity.evaluate(twoTaskManagerSlots(), components,
+                Optional.of(fence), Optional.of(phasesWithRestarts(restarts)));
     }
 
     private static PhaseExecutionEvidence noPhases() {

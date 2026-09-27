@@ -1,0 +1,9 @@
+format: v1
+kind: expected-result
+
+meta:
+  name: distributed-eos.expected
+  scenario: distributed-eos
+
+default:
+  outcome: pass

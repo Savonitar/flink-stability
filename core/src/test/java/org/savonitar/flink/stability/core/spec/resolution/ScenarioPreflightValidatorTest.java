@@ -17,6 +17,7 @@ import java.net.URISyntaxException;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.Comparator;
+import java.util.List;
 import java.util.function.Consumer;
 
 import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
@@ -174,6 +175,40 @@ class ScenarioPreflightValidatorTest {
                 ResolutionScope.SINGLE,
                 "preflight.reference.connector-unreferenced",
                 "$/subject/connectors/unused-beta");
+    }
+
+    @Test
+    void acceptsDeclaredNamedTaskManagerRestartsIncludingNestedLoops() {
+        ResolvedScenarioPlan plan = plan(scenario(document -> {
+            document.withObject("setup").withObject("flink").put("taskmanagers", 2);
+            ArrayNode steps = ((ObjectNode) document.at("/phases/0")).putArray("steps");
+            steps.addObject().putObject("restart")
+                    .put("component", "taskmanager").put("name", "taskmanager-2");
+            ObjectNode loop = steps.addObject().putObject("loop");
+            loop.put("times", 2).putArray("steps").addObject().putObject("restart")
+                    .put("component", "taskmanager").put("name", "taskmanager-1");
+        }), expected(document -> {}));
+
+        assertSame(plan, validator.validate(plan));
+    }
+
+    @Test
+    void rejectsNamedTaskManagerRestartsOutsideTheDeclaredStaticTargets() {
+        for (String name : List.of("taskmanager-3", "taskmanager-0", "taskmanager-01",
+                "jobmanager-1", "missing", "taskmanager-999999999999999999999999")) {
+            SpecificationException exception = reject(document -> {
+                document.withObject("setup").withObject("flink").put("taskmanagers", 2);
+                ArrayNode steps = ((ObjectNode) document.at("/phases/0")).putArray("steps");
+                ObjectNode loop = steps.addObject().putObject("loop");
+                loop.put("times", 2).putArray("steps").addObject().putObject("restart")
+                        .put("component", "taskmanager").put("name", name);
+            });
+
+            Diagnostic issue = assertHasIssue(exception, ResolutionScope.SINGLE,
+                    "preflight.target.named-not-found",
+                    "$/phases/0/steps/0/loop/steps/0/restart/name");
+            assertTrue(issue.message().contains(name));
+        }
     }
 
     @Test

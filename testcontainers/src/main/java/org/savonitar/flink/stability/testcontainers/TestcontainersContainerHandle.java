@@ -7,10 +7,12 @@ import org.savonitar.flink.stability.runtime.api.FlinkComponentProvisioningEvide
 import org.savonitar.flink.stability.runtime.api.FlinkComponentRole;
 import org.savonitar.flink.stability.runtime.api.FlinkConnectorBundleInstallation;
 import org.savonitar.flink.stability.runtime.api.FlinkRuntimeTarget;
+import org.savonitar.flink.stability.runtime.api.TaskManagerControl;
 import org.testcontainers.containers.GenericContainer;
 
 import java.time.Duration;
 import java.util.Objects;
+import java.util.Optional;
 
 final class TestcontainersContainerHandle implements ContainerHandle {
     private final ContainerLifecycle lifecycle;
@@ -74,6 +76,15 @@ final class TestcontainersContainerHandle implements ContainerHandle {
     @Override
     public String runtimeId() {
         return lifecycle.runtimeId();
+    }
+
+    @Override
+    public Optional<TaskManagerControl.Identity> taskManagerIdentity() {
+        if (role != FlinkComponentRole.TASK_MANAGER || !isRunning()) {
+            return Optional.empty();
+        }
+        return Optional.of(new TaskManagerControl.Identity(
+                logicalName, runtimeId(), verifiedContainer.resourceId()));
     }
 
     @Override

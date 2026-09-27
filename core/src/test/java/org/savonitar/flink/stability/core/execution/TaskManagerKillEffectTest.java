@@ -3,6 +3,7 @@ package org.savonitar.flink.stability.core.execution;
 import org.junit.jupiter.api.Test;
 import org.savonitar.flink.stability.core.flink.FlinkJobObservation;
 import org.savonitar.flink.stability.core.flink.FlinkJobState;
+import org.savonitar.flink.stability.runtime.api.TaskManagerControl;
 
 import java.util.List;
 import java.util.Optional;
@@ -19,6 +20,56 @@ class TaskManagerKillEffectTest {
                     "org.apache.flink.runtime.resourcemanager.exceptions.ResourceManagerException",
                     "TaskManager with id tm-1 is no longer reachable.",
                     Optional.of("tm-1"));
+
+    @Test
+    void anotherActiveTaskManagersFailureCannotConfirmTheTargetedKill() {
+        FlinkJobObservation before = new FlinkJobObservation(
+                1_000, FlinkJobState.RUNNING, 2, 0, Optional.empty(), List.of(), List.of(
+                        new FlinkJobObservation.Subtask("Kafka Source", 0, 0,
+                                "RUNNING", Optional.of("tm-1")),
+                        new FlinkJobObservation.Subtask("Kafka Source", 1, 0,
+                                "RUNNING", Optional.of("tm-2"))));
+        FlinkJobObservation.Failure otherFailure = new FlinkJobObservation.Failure(
+                4_000, "TaskManagerException", "other host failed", Optional.of("tm-2"));
+        TaskManagerKillEffect effect = only(kill(observed(before)), observed(finished(
+                9_000, 1, Optional.of(new FlinkJobObservation.Restore(2, 5_000)),
+                List.of(otherFailure))));
+
+        assertEquals(TaskManagerKillEffect.Outcome.NO_RECOVERY_OBSERVED, effect.outcome());
+        assertFalse(effect.outcome().confirmed());
+    }
+
+    @Test
+    void idleOrNotYetRunningTargetsCannotBorrowAnotherHostsPlacement() {
+        for (String targetState : List.of("DEPLOYING", "INITIALIZING", "CANCELED")) {
+            FlinkJobObservation before = new FlinkJobObservation(
+                    1_000, FlinkJobState.RUNNING, 2, 0, Optional.empty(), List.of(), List.of(
+                            new FlinkJobObservation.Subtask("Kafka Source", 0, 0,
+                                    targetState, Optional.of("tm-1")),
+                            new FlinkJobObservation.Subtask("Kafka Source", 1, 0,
+                                    "RUNNING", Optional.of("tm-2"))));
+            TaskManagerKillEffect effect = only(kill(observed(before)), observed(finished(
+                    9_000, 1, Optional.of(new FlinkJobObservation.Restore(2, 5_000)),
+                    List.of(LOST_TASK_MANAGER))));
+
+            assertEquals(TaskManagerKillEffect.Outcome.NO_ACTIVE_SUBTASK_BEFORE_KILL,
+                    effect.outcome(), targetState);
+        }
+    }
+
+    @Test
+    void missingOrWrongLogicalIdentityCannotConfirmRecovery() {
+        for (Optional<TaskManagerControl.Identity> identity : List.of(
+                Optional.<TaskManagerControl.Identity>empty(),
+                Optional.of(new TaskManagerControl.Identity("taskmanager-2", "container-1", "tm-1")))) {
+            TaskManagerKillEffect effect = only(kill(observed(runningOn("tm-1", 1_000, 2, 0)),
+                    OptionalLong.of(1_500), identity), observed(finished(
+                    9_000, 1, Optional.of(new FlinkJobObservation.Restore(2, 5_000)),
+                    List.of(LOST_TASK_MANAGER))));
+
+            assertEquals(TaskManagerKillEffect.Outcome.EVIDENCE_UNAVAILABLE, effect.outcome());
+        }
+    }
 
     @Test
     void aHostFailureAndACheckpointRestoreAfterTheKillConfirmIt() {
@@ -69,7 +120,7 @@ class TaskManagerKillEffectTest {
                         List.of(elsewhere))));
 
         assertEquals(TaskManagerKillEffect.Outcome.NO_RECOVERY_OBSERVED, effect.outcome());
-        assertTrue(effect.detail().contains("none on a TaskManager that hosted"),
+        assertTrue(effect.detail().contains("none on targeted TaskManager tm-1"),
                 effect.detail());
     }
 
@@ -283,7 +334,9 @@ class TaskManagerKillEffectTest {
         List<TaskManagerKillEffect> effects = TaskManagerKillEffect.evaluate(
                 List.of(
                         kill(observed(runningOn("tm-1", 1_000, 2, 0))),
-                        kill(observed(beforeSecond))),
+                        kill(observed(beforeSecond), OptionalLong.of(6_500),
+                                Optional.of(new TaskManagerControl.Identity(
+                                        "taskmanager-1", "container-2", "tm-2")))),
                 Optional.of(observed(finished(9_000, 1, Optional.of(firstRestore),
                         List.of(LOST_TASK_MANAGER)))));
 
@@ -311,8 +364,15 @@ class TaskManagerKillEffectTest {
 
     private static PhaseExecutionEvidence.TaskManagerKill kill(
             FlinkJobObservation.Attempt before, OptionalLong afterKill) {
+        return kill(before, afterKill, Optional.of(new TaskManagerControl.Identity(
+                "taskmanager-1", "container-1", "tm-1")));
+    }
+
+    private static PhaseExecutionEvidence.TaskManagerKill kill(
+            FlinkJobObservation.Attempt before, OptionalLong afterKill,
+            Optional<TaskManagerControl.Identity> identity) {
         return new PhaseExecutionEvidence.TaskManagerKill(
-                "$/phases/1/steps/0", List.of(), "taskmanager-1", before, afterKill);
+                "$/phases/1/steps/0", List.of(), "taskmanager-1", before, afterKill, identity);
     }
 
     private static FlinkJobObservation.Attempt observed(FlinkJobObservation observation) {

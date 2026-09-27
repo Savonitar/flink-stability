@@ -637,6 +637,60 @@ class V1ScenarioExecutorTest {
     }
 
     @Test
+    void missingTargetIdentityKeepsTheKillUnconfirmedWithoutPreventingRecoveryOrFence()
+            throws Exception {
+        missingTargetIdentityKeepsTheKillUnconfirmed(null);
+    }
+
+    @Test
+    void identityLookupTimeoutRetainsItsCauseWithoutPreventingRecoveryOrFence() throws Exception {
+        missingTargetIdentityKeepsTheKillUnconfirmed(new IllegalStateException(
+                "identity lookup failed", new java.util.concurrent.TimeoutException("Docker inspect deadline")));
+    }
+
+    private void missingTargetIdentityKeepsTheKillUnconfirmed(RuntimeException identityFailure)
+            throws Exception {
+        List<String> events = new ArrayList<>();
+        try (Fixture fixture = fixture(V1ScenarioExecutorTest::killAndRestart)) {
+            FakeRuntime runtime = new FakeRuntime(events);
+            runtime.identityUnavailable = true;
+            runtime.identityFailure = identityFailure;
+            FakeFlink flink = new FakeFlink(events);
+            flink.observations.add(new FlinkJobObservation(
+                    1_000, FlinkJobState.RUNNING, 2, 0, Optional.empty(), List.of(),
+                    List.of(new FlinkJobObservation.Subtask("Kafka Source", 0, 0,
+                            "RUNNING", Optional.of("tm-1")))));
+            flink.observations.add(new FlinkJobObservation(
+                    9_000, FlinkJobState.FINISHED, 6, 1,
+                    Optional.of(new FlinkJobObservation.Restore(2, 5_000)),
+                    List.of(new FlinkJobObservation.Failure(4_000,
+                            "ResourceManagerException", "lost tm-1", Optional.of("tm-1"))), List.of()));
+            V1ScenarioExecutionResult result = executor(events, runtime, flink,
+                    (bootstrap, topic, ids, timeout) -> passResult()).execute(fixture.bound(), attemptContext());
+
+            assertEquals(V1ScenarioExecutionResult.Status.INCONCLUSIVE, result.status());
+            assertEquals(ExecutablePhaseExecutor.TASKMANAGER_KILL_EFFECT_UNCONFIRMED, result.reason());
+            assertEquals(TaskManagerKillEffect.Outcome.EVIDENCE_UNAVAILABLE,
+                    result.taskManagerKillEffects().getFirst().outcome());
+            assertTrue(events.contains("taskmanager-restart"));
+            assertTrue(events.contains("process-fence"));
+            assertTrue(result.terminalValidation().isPresent());
+            var phases = result.phaseEvidence().orElseThrow();
+            assertTrue(phases.taskManagerKills().getFirst().identity().isEmpty());
+            assertTrue(phases.taskManagerRestarts().getFirst().previousIdentity().isEmpty());
+            assertTrue(phases.taskManagerRestarts().getFirst().replacementIdentity().isEmpty());
+            Optional<String> expectedFailure = identityFailure == null ? Optional.empty()
+                    : Optional.of("IllegalStateException: identity lookup failed; caused by "
+                            + "TimeoutException: Docker inspect deadline");
+            assertEquals(expectedFailure, phases.taskManagerKills().getFirst().identityFailure());
+            assertEquals(expectedFailure,
+                    phases.taskManagerRestarts().getFirst().previousIdentityFailure());
+            assertEquals(expectedFailure,
+                    phases.taskManagerRestarts().getFirst().replacementIdentityFailure());
+        }
+    }
+
+    @Test
     void aPassResultCannotCarryAnUnconfirmedKill() {
         PhaseExecutionEvidence phases = new PhaseExecutionEvidence(
                 List.of(),
@@ -1690,6 +1744,9 @@ class V1ScenarioExecutorTest {
         private RuntimeException classLoadLogsFailure;
         private boolean fenced;
         private int taskManagerIncarnations;
+        private boolean taskManagerRunning;
+        private boolean identityUnavailable;
+        private RuntimeException identityFailure;
         private List<FlinkComponentProvisioningEvidence> provisioningOverride;
         private RuntimeException provisioningFailure;
         private Exception startFlinkFailure;
@@ -1729,10 +1786,24 @@ class V1ScenarioExecutorTest {
                     target.imageReference(),
                     target.connectorBundle().targetFlinkImageReference());
             taskManagerIncarnations = 1;
+            taskManagerRunning = true;
             primarySource = target.connectorBundle().classpathManifest().entries()
                     .getFirst().containerPath();
             expectedRuntimeJar = target.expectedRuntimeJar();
             return "http://localhost:8081";
+        }
+
+        @Override
+        public Optional<org.savonitar.flink.stability.runtime.api.TaskManagerControl.Identity>
+                taskManagerIdentity(String targetName) {
+            if (identityFailure != null) {
+                throw identityFailure;
+            }
+            if (identityUnavailable || !taskManagerRunning) {
+                return Optional.empty();
+            }
+            return Optional.of(new org.savonitar.flink.stability.runtime.api.TaskManagerControl.Identity(
+                    targetName, "tm-" + taskManagerIncarnations, "tm-" + taskManagerIncarnations));
         }
 
         @Override
@@ -1742,6 +1813,7 @@ class V1ScenarioExecutorTest {
             if (killFailure != null) {
                 throw killFailure;
             }
+            taskManagerRunning = false;
         }
 
         @Override
@@ -1749,6 +1821,7 @@ class V1ScenarioExecutorTest {
             assertEquals(ExecutablePhaseExecutor.TASKMANAGER_ACTION_TIMEOUT, timeout);
             events.add("taskmanager-restart");
             taskManagerIncarnations++;
+            taskManagerRunning = true;
         }
 
         @Override

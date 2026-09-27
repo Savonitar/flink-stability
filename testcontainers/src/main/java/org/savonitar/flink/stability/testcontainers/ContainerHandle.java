@@ -1,6 +1,9 @@
 package org.savonitar.flink.stability.testcontainers;
 
 import org.savonitar.flink.stability.runtime.api.FlinkComponentProvisioningEvidence;
+import org.savonitar.flink.stability.runtime.api.TaskManagerControl;
+
+import java.util.Optional;
 
 /** Minimal lifecycle surface used by the cluster registry. */
 interface ContainerHandle {
@@ -30,4 +33,8 @@ interface ContainerHandle {
     String runtimeId();
 
     FlinkComponentProvisioningEvidence provisioningEvidence();
+
+    default Optional<TaskManagerControl.Identity> taskManagerIdentity() {
+        return Optional.empty();
+    }
 }

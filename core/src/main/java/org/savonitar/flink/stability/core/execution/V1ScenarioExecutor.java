@@ -538,7 +538,7 @@ public final class V1ScenarioExecutor {
                 retainedDiagnostics);
     }
 
-    private static List<String> diagnostics(Throwable failure) {
+    static List<String> diagnostics(Throwable failure) {
         List<String> diagnostics = new ArrayList<>();
         Throwable current = failure;
         while (current != null) {
@@ -645,7 +645,8 @@ public final class V1ScenarioExecutor {
                 completed.add(fault);
             }
         }
-        return new PhaseExecutionEvidence(phases.steps(), phases.taskManagerKills(), completed);
+        return new PhaseExecutionEvidence(phases.steps(), phases.taskManagerKills(), completed,
+                phases.taskManagerRestarts());
     }
 
     /** Starts the plan's Kafka proxy, if it has one, and returns how to fault through it. */

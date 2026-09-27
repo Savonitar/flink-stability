@@ -213,6 +213,41 @@ class ExecutablePhaseExecutorTest {
     }
 
     @Test
+    void namedRestartsKeepIndependentPredecessorsAcrossRepeatedTwoTaskManagerLoops() throws Exception {
+        ExecutableScenarioPlan plan = plan(document -> {
+            ((ObjectNode) document.at("/setup/flink")).put("taskmanagers", 2);
+            ObjectNode loop = replaceSteps(document).addObject().putObject("loop");
+            loop.put("times", 2);
+            ArrayNode steps = loop.putArray("steps");
+            for (String name : List.of("taskmanager-2", "taskmanager-1")) {
+                steps.addObject().putObject("kill").putObject("target")
+                        .put("kind", "named").put("role", "taskmanager").put("name", name);
+                steps.addObject().putObject("restart").put("component", "taskmanager").put("name", name);
+            }
+        });
+        List<String> events = new ArrayList<>();
+        FakeTaskManagers taskManagers = new FakeTaskManagers(events);
+        PhaseExecutionEvidence evidence = new ExecutablePhaseExecutor(
+                new FakeFlink(events), taskManagers, ExecutablePhaseExecutor.NetworkFaults.NONE,
+                duration -> {}).execute(plan, JOB);
+
+        assertEquals(List.of("taskmanager-2", "taskmanager-1", "taskmanager-2", "taskmanager-1"),
+                evidence.taskManagerRestarts().stream()
+                        .map(PhaseExecutionEvidence.TaskManagerRestart::target).toList());
+        for (int index = 0; index < evidence.taskManagerRestarts().size(); index++) {
+            var restart = evidence.taskManagerRestarts().get(index);
+            int iteration = index / 2 + 1;
+            assertEquals(List.of(frame("$/phases/0/steps/0", iteration, 2)), restart.loopIterations());
+            assertEquals(evidence.taskManagerKills().get(index).identity(), restart.previousIdentity());
+            assertEquals(restart.target() + "-container-" + iteration,
+                    restart.previousIdentity().orElseThrow().runtimeId());
+            assertEquals(restart.target() + "-container-" + (iteration + 1),
+                    restart.replacementIdentity().orElseThrow().runtimeId());
+        }
+        assertThrows(UnsupportedOperationException.class, evidence.taskManagerRestarts()::clear);
+    }
+
+    @Test
     void killsAndRestartsTheNamedTaskmanagerAndClassifiesComponentFailure() throws Exception {
         ExecutableScenarioPlan plan = plan(document -> {
             ArrayNode steps = replaceSteps(document);
@@ -239,6 +274,16 @@ class ExecutablePhaseExecutorTest {
         assertEquals("taskmanager-1", kill.target());
         assertEquals(Optional.of(RUNNING_JOB), kill.jobBeforeKill().observation());
         assertEquals(OptionalLong.of(1_500), kill.jobManagerTimeAfterKill());
+        assertEquals(Optional.of(new TaskManagerControl.Identity(
+                "taskmanager-1", "taskmanager-1-container-1", "taskmanager-1-resource-1")),
+                kill.identity());
+        assertEquals(1, evidence.taskManagerRestarts().size());
+        var restart = evidence.taskManagerRestarts().getFirst();
+        assertEquals("taskmanager-1", restart.target());
+        assertEquals(kill.identity(), restart.previousIdentity());
+        assertEquals(Optional.of(new TaskManagerControl.Identity(
+                "taskmanager-1", "taskmanager-1-container-2", "taskmanager-1-resource-2")),
+                restart.replacementIdentity());
         assertEquals(
                 ExecutablePhaseExecutor.TASKMANAGER_ACTION_TIMEOUT,
                 taskManagers.killTimeout);
@@ -511,9 +556,21 @@ class ExecutablePhaseExecutorTest {
         private IOException restartFailure;
         private Duration killTimeout;
         private Duration restartTimeout;
+        private final java.util.Map<String, Integer> incarnations = new java.util.HashMap<>();
+        private final java.util.Set<String> stopped = new java.util.HashSet<>();
 
         private FakeTaskManagers(List<String> events) {
             this.events = events;
+        }
+
+        @Override
+        public Optional<TaskManagerControl.Identity> taskManagerIdentity(String targetName) {
+            if (stopped.contains(targetName)) {
+                return Optional.empty();
+            }
+            int incarnation = incarnations.getOrDefault(targetName, 1);
+            return Optional.of(new TaskManagerControl.Identity(targetName,
+                    targetName + "-container-" + incarnation, targetName + "-resource-" + incarnation));
         }
 
         @Override
@@ -523,15 +580,23 @@ class ExecutablePhaseExecutorTest {
             if (killFailure != null) {
                 throw killFailure;
             }
+            stopped.add(targetName);
         }
 
         @Override
         public void restartTaskManager(Duration timeout) throws IOException {
+            restartTaskManager("taskmanager-1", timeout);
+        }
+
+        @Override
+        public void restartTaskManager(String targetName, Duration timeout) throws IOException {
             events.add("restart:taskmanager");
             restartTimeout = timeout;
             if (restartFailure != null) {
                 throw restartFailure;
             }
+            incarnations.put(targetName, incarnations.getOrDefault(targetName, 1) + 1);
+            stopped.remove(targetName);
         }
     }
 

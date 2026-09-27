@@ -19,6 +19,7 @@ import java.util.Arrays;
 import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
+import java.util.UUID;
 import java.util.function.Consumer;
 import java.util.function.Function;
 
@@ -31,6 +32,7 @@ final class VerifiedFlinkContainer extends GenericContainer<VerifiedFlinkContain
     private final FlinkRuntimeTarget runtimeTarget;
     private final Consumer<String> imageIdVerifier;
     private final FlinkClassLoadLog classLoadLog;
+    private final String resourceId;
     private final List<String> configuredBundleTargets = new ArrayList<>();
     private ConnectorBundleVerification verification;
     private String verifiedImageId;
@@ -45,6 +47,8 @@ final class VerifiedFlinkContainer extends GenericContainer<VerifiedFlinkContain
         this.runtimeTarget = Objects.requireNonNull(runtimeTarget, "runtimeTarget");
         this.imageIdVerifier = Objects.requireNonNull(imageIdVerifier, "imageIdVerifier");
         this.classLoadLog = Objects.requireNonNull(classLoadLog, "classLoadLog");
+        this.resourceId = "flink-stability-" + classLoadLog.process().replaceAll("[^A-Za-z0-9-]", "-")
+                + "-" + UUID.randomUUID();
         ConnectorClasspathManifest manifest = runtimeTarget.connectorBundle().classpathManifest();
         manifest.verifyHostFiles();
         for (ConnectorClasspathManifest.Entry entry : manifest.entries()) {
@@ -57,6 +61,11 @@ final class VerifiedFlinkContainer extends GenericContainer<VerifiedFlinkContain
                 Transferable.of(manifest.canonicalBytes(), READ_ONLY_FILE_MODE),
                 ConnectorClasspathManifest.CONTAINER_MANIFEST_PATH);
         configuredBundleTargets.add(ConnectorClasspathManifest.CONTAINER_MANIFEST_PATH);
+    }
+
+    /** Unique for this handle, including replacements and separate run attempts. */
+    String resourceId() {
+        return resourceId;
     }
 
     @Override

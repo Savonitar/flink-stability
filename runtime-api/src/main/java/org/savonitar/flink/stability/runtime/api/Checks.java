@@ -7,6 +7,7 @@ import java.util.regex.Pattern;
 public final class Checks {
     private static final Pattern DOCKER_IMAGE_ID = Pattern.compile("sha256:[0-9a-f]{64}");
     private static final Pattern SHA_256 = Pattern.compile("[0-9a-f]{64}");
+    private static final Pattern TASK_MANAGER_NAME = Pattern.compile("taskmanager-[1-9][0-9]*");
 
     private Checks() {}
 
@@ -17,6 +18,15 @@ public final class Checks {
             throw new IllegalArgumentException(name + " must not be blank");
         }
         return value;
+    }
+
+    /** Parses a canonical logical TaskManager name without accepting aliases or leading zeros. */
+    public static int taskManagerOrdinal(String value) {
+        requireNonBlank(value, "TaskManager name");
+        if (!TASK_MANAGER_NAME.matcher(value).matches()) {
+            throw new IllegalArgumentException("Expected taskmanager-<positive integer>: " + value);
+        }
+        return Integer.parseInt(value.substring("taskmanager-".length()));
     }
 
     /** A Docker image configuration identity, distinct from a registry manifest digest. */

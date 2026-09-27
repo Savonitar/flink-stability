@@ -77,6 +77,10 @@ public final class ExecutableScenarioPlan {
         this.expectedOutcome = Objects.requireNonNull(expectedOutcome, "expectedOutcome");
         this.jobCompletionTimeout = requirePositive(
                 jobCompletionTimeout, "jobCompletionTimeout");
+        if (job.parallelism() > (long) flink.taskmanagers()
+                * FlinkRuntimeTarget.TASK_SLOTS_PER_TASK_MANAGER) {
+            throw new IllegalArgumentException("Job parallelism exceeds the provisioned task slots");
+        }
         if (!kafka.alias().equals(input.cluster())
                 || !job.source().equals(new TopicReference(input.cluster(), input.topic()))) {
             throw new IllegalArgumentException("Input manifest must describe the job source");
@@ -277,9 +281,11 @@ public final class ExecutableScenarioPlan {
             expectedImageId.ifPresent(id ->
                     org.savonitar.flink.stability.runtime.api.Checks.requireDockerImageId(
                             id, "expectedImageId"));
-            if (jobmanagers != 1 || taskmanagers != 1) {
+            if (jobmanagers != 1 || taskmanagers < 1
+                    || taskmanagers > FlinkRuntimeTarget.MAX_TASK_MANAGERS) {
                 throw new IllegalArgumentException(
-                        "The first executable boundary requires one JobManager and one TaskManager");
+                        "The executable boundary requires one JobManager and 1.."
+                                + FlinkRuntimeTarget.MAX_TASK_MANAGERS + " TaskManagers");
             }
         }
 
@@ -332,9 +338,9 @@ public final class ExecutableScenarioPlan {
             jarReference = requireNonBlank(jarReference, "jarReference");
             connectorAlias = requireNonBlank(connectorAlias, "connectorAlias");
             Objects.requireNonNull(startMode, "startMode");
-            if (parallelism != 1) {
+            if (parallelism < 1) {
                 throw new IllegalArgumentException(
-                        "The first executable boundary requires job parallelism=1");
+                        "Job parallelism must be positive");
             }
             Objects.requireNonNull(source, "source");
             Objects.requireNonNull(sink, "sink");
@@ -836,15 +842,19 @@ public final class ExecutableScenarioPlan {
 
     public record KillTaskManager(String targetName) implements Step {
         public KillTaskManager {
-            targetName = requireNonBlank(targetName, "targetName");
-            if (!"taskmanager-1".equals(targetName)) {
-                throw new IllegalArgumentException(
-                        "The first executable boundary has only taskmanager-1");
-            }
+            org.savonitar.flink.stability.runtime.api.Checks.taskManagerOrdinal(targetName);
         }
     }
 
-    public record RestartTaskManager() implements Step {}
+    public record RestartTaskManager(String targetName) implements Step {
+        public RestartTaskManager {
+            org.savonitar.flink.stability.runtime.api.Checks.taskManagerOrdinal(targetName);
+        }
+
+        public RestartTaskManager() {
+            this("taskmanager-1");
+        }
+    }
 
     public record Loop(int times, List<Step> steps) implements Step {
         public Loop {

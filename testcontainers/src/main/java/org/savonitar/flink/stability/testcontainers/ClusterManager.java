@@ -12,6 +12,7 @@ import org.savonitar.flink.stability.runtime.api.KafkaProxyTarget;
 import org.savonitar.flink.stability.runtime.api.KafkaRuntimeEndpoints;
 import org.savonitar.flink.stability.runtime.api.KafkaRuntimeTarget;
 import org.savonitar.flink.stability.runtime.api.ProvisionedConnectorArtifact;
+import org.savonitar.flink.stability.runtime.api.TaskManagerControl;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.testcontainers.containers.Network;
@@ -38,7 +39,7 @@ import java.util.function.Supplier;
 public final class ClusterManager implements AutoCloseable {
     private static final Logger LOG = LoggerFactory.getLogger(ClusterManager.class);
     private static final String PRIMARY_JOB_MANAGER = "jobmanager-1";
-    private static final String PRIMARY_TASK_MANAGER = "taskmanager-1";
+    private static final Duration IDENTITY_TIMEOUT = Duration.ofSeconds(30);
 
     private final Network network;
     private final boolean ownsNetwork;
@@ -154,7 +155,7 @@ public final class ClusterManager implements AutoCloseable {
         }
     }
 
-    /** Starts the fixed first runtime shape: one JobManager and one TaskManager. */
+    /** Starts one JobManager and every declared named TaskManager. */
     public synchronized String startFlink(FlinkRuntimeTarget runtimeTarget) {
         validateFlinkStart(runtimeTarget);
         FlinkComponentFactory candidateFactory = createFlinkFactory(runtimeTarget);
@@ -171,13 +172,16 @@ public final class ClusterManager implements AutoCloseable {
             candidateJobManagers.put(PRIMARY_JOB_MANAGER, jobManager);
             record(jobManager.start());
 
-            ComponentSlot taskManager = new ComponentSlot(
-                    PRIMARY_TASK_MANAGER,
-                    FlinkComponentRole.TASK_MANAGER,
-                    runtimeTarget,
-                    () -> candidateFactory.newTaskManager(PRIMARY_TASK_MANAGER));
-            candidateTaskManagers.put(PRIMARY_TASK_MANAGER, taskManager);
-            record(taskManager.start());
+            for (int index = 0; index < runtimeTarget.taskManagers(); index++) {
+                String name = "taskmanager-" + (index + 1);
+                ComponentSlot taskManager = new ComponentSlot(
+                        name,
+                        FlinkComponentRole.TASK_MANAGER,
+                        runtimeTarget,
+                        () -> candidateFactory.newTaskManager(name));
+                candidateTaskManagers.put(name, taskManager);
+                record(taskManager.start());
+            }
 
             int restPort = jobManager.mappedPort(FlinkContainer.JOB_MANAGER_PORT);
             candidateRestUrl = "http://localhost:" + restPort;
@@ -230,6 +234,31 @@ public final class ClusterManager implements AutoCloseable {
         String runtimeId = slot.runtimeIdWithin(deadline);
         LOG.info("Restarted {} as {}", name, runtimeId);
         return runtimeId;
+    }
+
+    /** Does not reuse an earlier incarnation's identity after kill or failed replacement. */
+    public synchronized Optional<TaskManagerControl.Identity> taskManagerIdentity(String name) {
+        ComponentSlot slot = taskManagers.get(name);
+        if (slot == null || !slot.hasHandle()) {
+            return Optional.empty();
+        }
+        ContainerHandle handle = slot.handle;
+        ContainerOperationDeadline deadline = ContainerOperationDeadline.start(
+                "reading TaskManager identity for " + name, IDENTITY_TIMEOUT, monotonicNanos);
+        return ContainerDriverCallBoundary.call(deadline, "observing TaskManager " + name, () -> {
+            if (!handle.isRunning()) {
+                return Optional.empty();
+            }
+            Optional<TaskManagerControl.Identity> identity = handle.taskManagerIdentity();
+            identity.ifPresent(value -> {
+                if (!name.equals(value.logicalName())
+                        || !handle.runtimeId().equals(value.runtimeId())) {
+                    throw new IllegalStateException(
+                            "TaskManager identity does not match its handle: " + name);
+                }
+            });
+            return identity;
+        });
     }
 
     /**

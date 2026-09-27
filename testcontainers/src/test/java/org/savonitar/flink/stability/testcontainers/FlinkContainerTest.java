@@ -26,6 +26,7 @@ import java.util.concurrent.atomic.AtomicReference;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
+import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -39,6 +40,35 @@ class FlinkContainerTest {
 
     @TempDir
     Path temporaryDirectory;
+
+    @Test
+    void taskManagerResourceIdsBindEachLogIncarnationAndStayUniqueAcrossAttempts() {
+        FlinkContainer factory = new FlinkContainer(
+                emptyTarget().withTaskManagers(2), Network.SHARED, temporaryDirectory.resolve("first"));
+        VerifiedFlinkContainer first = (VerifiedFlinkContainer) factory.createTaskManager("taskmanager-1");
+        VerifiedFlinkContainer second = (VerifiedFlinkContainer) factory.createTaskManager("taskmanager-2");
+        VerifiedFlinkContainer replacement = (VerifiedFlinkContainer) factory.createTaskManager("taskmanager-1");
+        VerifiedFlinkContainer anotherAttempt = (VerifiedFlinkContainer) new FlinkContainer(
+                emptyTarget(), Network.SHARED, temporaryDirectory.resolve("second"))
+                .createTaskManager("taskmanager-1");
+
+        assertTrue(first.resourceId().startsWith("flink-stability-taskmanager-1-1-"));
+        assertTrue(second.resourceId().startsWith("flink-stability-taskmanager-2-1-"));
+        assertTrue(replacement.resourceId().startsWith("flink-stability-taskmanager-1-2-"));
+        assertNotEquals(first.resourceId(), anotherAttempt.resourceId());
+        List<VerifiedFlinkContainer> containers = List.of(first, second, replacement, anotherAttempt);
+        assertEquals(4, containers.stream().map(VerifiedFlinkContainer::resourceId).distinct().count());
+        for (VerifiedFlinkContainer container : containers) {
+            assertTrue(container.resourceId().matches("[A-Za-z0-9-]+"));
+            List<String> properties = container.getEnvMap().get("FLINK_PROPERTIES").lines().toList();
+            assertEquals(List.of("taskmanager.resource-id: " + container.resourceId()),
+                    properties.stream().filter(line -> line.startsWith("taskmanager.resource-id:")).toList());
+            assertTrue(properties.contains("taskmanager.numberOfTaskSlots: "
+                    + FlinkRuntimeTarget.TASK_SLOTS_PER_TASK_MANAGER));
+        }
+        assertTrue(factory.createJobManager("jobmanager-1").getEnvMap().get("FLINK_PROPERTIES")
+                .lines().noneMatch(line -> line.startsWith("taskmanager.resource-id:")));
+    }
 
     @Test
     void runtimeJarReadsBothBeforeAndAfterStartupAndBindsTheRegisteredLog() {

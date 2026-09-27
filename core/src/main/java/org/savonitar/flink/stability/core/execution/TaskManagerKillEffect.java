@@ -7,14 +7,12 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
-import java.util.Set;
-import java.util.stream.Collectors;
 
 /**
  * Whether one confirmed TaskManager kill observably disrupted the job and Flink recovered it
  * (SPEC-001 R6.12a). A process that died proves only the injection; this adds the effect.
  *
- * <p>The kill counts only if a TaskManager that hosted active subtasks just before it later
+ * <p>The kill counts only if the exact targeted incarnation hosted RUNNING subtasks and later
  * shows a failure, and, when a checkpoint had completed, Flink restored one afterwards. Each kill
  * is judged against the next observation of the same job: the one taken before the next kill,
  * or the one taken before the process fence. Failure and restore timestamps must follow a
@@ -47,7 +45,7 @@ public record TaskManagerKillEffect(
         RESTARTED_WITHOUT_CHECKPOINT(true),
         /** The job had already reached a terminal state, so the kill could not affect it. */
         JOB_TERMINAL_BEFORE_KILL(false),
-        /** No subtask was deployed or running on any TaskManager when the kill happened. */
+        /** No RUNNING subtask was observed on the exact targeted TaskManager. */
         NO_ACTIVE_SUBTASK_BEFORE_KILL(false),
         /** No failure on a TaskManager that hosted subtasks, or no restore of a checkpoint. */
         NO_RECOVERY_OBSERVED(false),
@@ -98,13 +96,19 @@ public record TaskManagerKillEffect(
             return unconfirmed(kill, Outcome.JOB_TERMINAL_BEFORE_KILL,
                     "the job was already " + before.state() + " before the kill");
         }
-        Set<String> hosts = before.activeSubtasks().stream()
-                .map(FlinkJobObservation.Subtask::taskManagerId)
-                .flatMap(Optional::stream)
-                .collect(Collectors.toSet());
-        if (hosts.isEmpty()) {
+        if (kill.identity().isEmpty()
+                || !kill.target().equals(kill.identity().orElseThrow().logicalName())) {
+            return unconfirmed(kill, Outcome.EVIDENCE_UNAVAILABLE,
+                    "the killed target has no matching physical and Flink resource identity");
+        }
+        String resourceId = kill.identity().orElseThrow().resourceId();
+        List<FlinkJobObservation.Subtask> targetedSubtasks = before.subtasks().stream()
+                .filter(subtask -> "RUNNING".equals(subtask.status()))
+                .filter(subtask -> subtask.taskManagerId().filter(resourceId::equals).isPresent())
+                .toList();
+        if (targetedSubtasks.isEmpty()) {
             return unconfirmed(kill, Outcome.NO_ACTIVE_SUBTASK_BEFORE_KILL,
-                    "no subtask was deployed or running on any TaskManager before the kill"
+                    "no RUNNING subtask was observed on targeted TaskManager " + resourceId
                             + " (job state " + before.state() + ")");
         }
         Optional<FlinkJobObservation> observedAfter =
@@ -131,7 +135,7 @@ public record TaskManagerKillEffect(
                 .filter(failure -> !before.failures().contains(failure))
                 .toList();
         List<FlinkJobObservation.Failure> hostFailures = failures.stream()
-                .filter(failure -> failure.taskManagerId().filter(hosts::contains).isPresent())
+                .filter(failure -> failure.taskManagerId().filter(resourceId::equals).isPresent())
                 .toList();
         Optional<FlinkJobObservation.Restore> restore = after.restoredCheckpoints()
                 > before.restoredCheckpoints()
@@ -145,8 +149,7 @@ public record TaskManagerKillEffect(
         if (hostFailures.isEmpty()) {
             return new TaskManagerKillEffect(kill, Outcome.NO_RECOVERY_OBSERVED, restore, failures,
                     "Flink recorded " + failures.size() + " new failure(s) after the post-exit"
-                            + " clock sample, none on a"
-                            + " TaskManager that hosted active subtasks before it");
+                            + " clock sample, none on targeted TaskManager " + resourceId);
         }
         if (restore.isPresent()) {
             FlinkJobObservation.Restore restored = restore.orElseThrow();
@@ -162,7 +165,7 @@ public record TaskManagerKillEffect(
         }
         boolean restarted = after.state() == FlinkJobState.FINISHED
                 || after.activeSubtasks().stream().anyMatch(current ->
-                        before.subtasks().stream().anyMatch(previous ->
+                        targetedSubtasks.stream().anyMatch(previous ->
                                 current.vertexName().equals(previous.vertexName())
                                         && current.index() == previous.index()
                                         && current.attempt() > previous.attempt()));
@@ -173,8 +176,8 @@ public record TaskManagerKillEffect(
         }
         return new TaskManagerKillEffect(
                 kill, Outcome.RESTARTED_WITHOUT_CHECKPOINT, restore, failures,
-                "no checkpoint had completed before the kill; a TaskManager that hosted"
-                        + " subtasks failed afterwards and Flink restarted the job");
+                "no checkpoint had completed before the kill; targeted TaskManager "
+                        + resourceId + " failed afterwards and Flink restarted the job");
     }
 
     private static TaskManagerKillEffect unconfirmed(

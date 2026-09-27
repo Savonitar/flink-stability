@@ -350,6 +350,19 @@ expected validation code.
 | SV-139aj | A named TaskManager kill or restart exhausts its action deadline. | Report `inconclusive` with `taskmanager.kill.timeout` or `taskmanager.restart.timeout` respectively, stop phase execution, and skip terminal process fencing and Kafka validation. Do not set the irreversible terminal-fence latch; cleanup remains separately bounded. |
 | SV-139ak | A TaskManager restart times out, then its Docker start/inspect call completes late while bounded attempt cleanup is running or has begun. | Keep the already-decided `inconclusive` restart-timeout result and never reinterpret the late completion as a successful phase. Cleanup may remove resources under its separate deadline, but neither it nor the late restart may set the terminal-fence latch or permit terminal validation. |
 
+| SV-139al | Two TaskManagers, job parallelism four, and four input/output partitions. | Provision both named TMs with two slots each; submit and configure parallelism four without rewriting it to one; reconcile and validate all partitions. |
+| SV-139am | Job parallelism exceeds twice the declared TaskManager count. | Reject before artifacts/Docker with `runner.workload.insufficient-task-slots`. |
+| SV-139an | Multiple TaskManagers and a restart without `name`. | Reject executable capability with `runner.phase.restart-target-required`; preserve the single-TM shorthand. |
+| SV-139ao | `restart.name` names an undeclared/noncanonical target, names a non-TM component, or is combined with `image`. | Reject structural/semantic validation before provisioning. |
+| SV-139ap | Kill TM2 then restart TM1, or a repeated loop exchanges which TM is stopped. | Reject per-target lifecycle; total running count alone does not establish balance. |
+| SV-139aq | Kill a target without a RUNNING subtask, or observe only a post-kill failure on another TM. | Keep kill effect unconfirmed even if another host restores a checkpoint and the final exact-ID oracle passes. |
+| SV-139ar | Correct named kill/restore evidence, but restart identities are missing, reused or associated with a different logical slot. | Runtime identity remains unconfirmed; neither healthy nor expected-failure controls can pass. |
+| SV-139as | TM2 is restarted while TM1 remains live. | Preserve TM1's identity, retain old/new TM2 incarnations and unique ResourceIDs, and require the final fence to cover the current process in both slots. |
+| SV-139at | Startup of a later TM fails after an earlier TM started. | Retain provisioning evidence and clean up every created slot, including partial startup; never report a successful topology. |
+| SV-139au | A Kafka proxy uses the Docker network alias of any declared TaskManager. | Reject `runner.kafka.proxy-listen-unsupported`, including aliases beyond TM1. |
+| SV-139aw | A kill targets another TM while an earlier killed TM has not been restarted. | Reject `runner.phase.taskmanager-kill-overlap-unsupported`; sequential fault evidence does not model grouped recovery. |
+| SV-139av | More than 16 TaskManagers, including a very large resolved integer count. | Reject `runner.flink.taskmanager-count-unsupported` before allocating component maps or starting Docker; this local resource bound does not narrow the broad schema. |
+
 ## 8. Repetition, health, and verdicts
 
 | ID | Case | Expected result |

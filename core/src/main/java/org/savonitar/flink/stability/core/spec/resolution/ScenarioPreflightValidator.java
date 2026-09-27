@@ -806,7 +806,9 @@ final class ScenarioPreflightValidator {
                         source, index, restore, stepPath + "/restore",
                         ledger, priorArtifacts, issues);
             } else if (step.get("restart") instanceof ObjectNode restart) {
-                validateRestart(source, index, restart, stepPath + "/restart", issues);
+                RestartPreflightValidator.validate(source, restart, stepPath + "/restart",
+                        index.clusters().keySet(), target -> validateProcessTarget(
+                                source, scope, index, target, stepPath + "/restart", issues), issues);
             } else if (step.get("validate") instanceof ObjectNode inlineValidator) {
                 Set<String> customReasons = new LinkedHashSet<>();
                 if (inlineValidator.get("failure_reasons") instanceof ArrayNode reasons) {
@@ -1238,22 +1240,6 @@ final class ScenarioPreflightValidator {
                 namePath,
                 "No named " + type + " artifact '" + name
                         + "' is declared for job '" + job + "'"));
-    }
-
-    private static void validateRestart(
-            Path source,
-            SideIndex index,
-            ObjectNode restart,
-            String path,
-            List<Diagnostic> issues) {
-        if ("kafka".equals(restart.path("component").textValue())
-                && index.clusters().size() != 1) {
-            issues.add(issue(source, ResolutionScope.COMMON,
-                    "preflight.restart.kafka-cluster-ambiguous",
-                    path + "/component",
-                    "Kafka restart is ambiguous because the scenario declares clusters "
-                            + index.clusters().keySet().stream().sorted().toList()));
-        }
     }
 
     private static boolean validateJobReference(

@@ -1243,6 +1243,19 @@ Connector pull-request gating is the same mechanism with one axis:
   terminal-fence latch. Later resource cleanup remains a separate bounded
   operation under R8.2c; a late Docker completion cannot turn the timed-out
   action into a successful phase or authorize terminal validation.
+- **R6.9b** The executable runner assigns logical names `taskmanager-1` through
+  `taskmanager-N` from `setup.flink.taskmanagers`. `kill.target` names exactly one
+  declared TaskManager. `restart: { component: taskmanager, name: taskmanager-2 }`
+  recreates that same logical slot with the same verified image and connector closure.
+  The `name` field is supported only for `component: taskmanager` and cannot be
+  combined with `image`. The unnamed restart shorthand is executable only with one
+  TaskManager; otherwise reject with `runner.phase.restart-target-required`.
+  Lifecycle checks track each target separately: reject double kills, restarts of
+  running targets, unhealed kills and repeated loops that change any target's entry
+  state. A restart must not choose an arbitrary stopped TaskManager. Only sequential
+  faults are executable: a second kill before the preceding target is restarted
+  rejects with `runner.phase.taskmanager-kill-overlap-unsupported`. Grouped recovery
+  from multiple simultaneously missing workers is outside this observation model.
 - **R6.10** **`restore` names the exact checkpoint or savepoint to restart
   from** — the latest, or a specific earlier one, to test rollback.
   `restore.from` accepts `latest-savepoint`, `latest-checkpoint`,
@@ -1306,7 +1319,9 @@ Connector pull-request gating is the same mechanism with one axis:
   process exit proves only the injection. The runner also records whether the
   kill affected the job:
 
-  1. Immediately before the kill, it takes one read-only observation of the job
+  1. Immediately before the kill, it retains the targeted running container's logical
+     name, Docker runtime ID and explicitly configured per-incarnation Flink ResourceID.
+     It takes one read-only observation of the job
      through the Flink REST API: JobManager time, job state, completed and
      restored checkpoint counts, the latest restored checkpoint, the exception
      history, and each subtask's state and TaskManager.
@@ -1330,17 +1345,20 @@ Connector pull-request gating is the same mechanism with one axis:
   `FINISHED` observation or an active execution attempt with a greater attempt
   number for a previously observed vertex/subtask; a failure alone proves no restart.
 
-  The effect is confirmed only when Flink recorded a qualifying new failure on a
-  TaskManager that hosted a deployed, initializing, or running subtask just before
-  the kill, and either Flink restored a checkpoint after that failure
+  The effect is confirmed only when Flink recorded a qualifying new failure on the
+  exact targeted ResourceID that hosted a RUNNING subtask just before the kill,
+  and either Flink restored a checkpoint after that failure
   (`checkpoint-restored`) or no checkpoint had completed before the kill and the
   later observation proves a restart (`restarted-without-checkpoint`). It is
   unconfirmed when the job was already terminal (`job-terminal-before-kill`), when
-  no subtask was active (`no-active-subtask-before-kill`), when no such failure or
+  no RUNNING subtask was observed on that target (`no-active-subtask-before-kill`), when no such failure or
   no required restore follows (`no-recovery-observed`), or when an observation
   or timing sample failed (`evidence-unavailable`). A job that is already failing
-  over for another reason therefore does not confirm a kill that found no active
-  subtask. Each observation has one fixed internal `30s` deadline; its failure is recorded as
+  over for another reason therefore does not confirm a kill that found no RUNNING
+  subtask on the target. A failure on a different TaskManager cannot confirm this
+  fault. Missing target identity is `evidence-unavailable`; retain the identity lookup
+  error, if any, without blocking healing/fencing. No inference from all
+  observed hosts or from a Docker ID masquerading as a ResourceID is allowed. Each observation has one fixed internal `30s` deadline; its failure is recorded as
   evidence and never blocks the kill or the process fence. The post-exit clock
   request has its own fixed internal `30s` deadline; its failure leaves timing
   evidence unavailable and does not skip the subsequent restart.
@@ -1681,7 +1699,9 @@ Connector pull-request gating is the same mechanism with one axis:
   `unavailable` with its failure, or `not-run`) and one `evidence.taskManagerKills`
   entry per confirmed kill: step path and loop iterations, target, effect outcome,
   whether it is confirmed, job state, checkpoint and active-subtask counts before
-  the kill, `jobManagerTimeAfterKill` when available, the restored checkpoint and
+  the kill, the exact target container and ResourceID when available, the targeted
+  RUNNING subtasks and matching host failures with their identities/timestamps,
+  `jobManagerTimeAfterKill` when available, the restored checkpoint and
   `restoredAfterKillObservationMs` measured from that post-exit time sample,
   the failures recorded after the kill, and a one-sentence detail. The R7.1c sink
   transaction listing appears as `evidence.sinkTransactions`: `listed` with the
@@ -1694,6 +1714,13 @@ Connector pull-request gating is the same mechanism with one axis:
   report. Environment-health sampling, independently resolved OCI digests, and
   the full resolved/artifact/configuration/provenance report remain roadmap work;
   the summary must not claim that those absent fields were collected.
+  Structured `evidence.taskManagerRestarts` entries retain the step path and loop
+  iterations, logical target and previous/replacement Docker and Flink ResourceIDs.
+  Every successful restart must account for a new provisioned incarnation of that
+  same slot; neither another slot's restart nor an extra unidentified process can
+  satisfy runtime identity. The terminal fence must identify the latest process of
+  every expected slot. Missing or inconsistent evidence prevents both ordinary and
+  expected-failure PASS, while a real data failure remains recorded.
 
 - **R8.2c** After the attempt result is decided, the first runner starts physical
   resource cleanup exactly once and waits under one fixed internal `2m` wall
@@ -1778,8 +1805,11 @@ Connector pull-request gating is the same mechanism with one axis:
 - **R8.6c** The first narrow executable runner's remaining topology boundary is
   exact and fail-closed: one plain scenario with `runs: 1`; one Kafka cluster
   containing exactly the distinct input and sink topics; one subject connector;
-  one auto-started job at parallelism `1` whose Kafka sink is `EXACTLY_ONCE` or
-  `AT_LEAST_ONCE`; one JobManager and one TaskManager; no free-form
+  one auto-started job with positive integer parallelism whose Kafka sink is
+  `EXACTLY_ONCE` or `AT_LEAST_ONCE`; one JobManager and 1–16 TaskManagers
+  (`runner.flink.taskmanager-count-unsupported` above that local resource bound);
+  exactly two task slots per TaskManager, with parallelism no greater than their
+  total capacity (`runner.workload.insufficient-task-slots` otherwise); no free-form
   `setup.flink.config`; the bounded input, phase, and validator subset registered
   in R4.5, R6, and R7.3c; and a selected expected outcome of `pass`, or `fail`
   pinned to the `kafka.id-set` oracle and one of its registered reasons (a

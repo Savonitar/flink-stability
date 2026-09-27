@@ -1880,6 +1880,13 @@
           "required": [
             "component"
           ],
+          "allOf": [{
+            "if": { "required": ["name"] },
+            "then": {
+              "properties": { "component": { "const": "taskmanager" } },
+              "not": { "required": ["image"] }
+            }
+          }],
           "properties": {
             "component": {
               "type": "string",
@@ -1889,6 +1896,9 @@
                 "taskmanager",
                 "jobmanager"
               ]
+            },
+            "name": {
+              "$ref": "#/$defs/kebabName"
             },
             "image": {
               "$ref": "#/$defs/nonEmptyString"

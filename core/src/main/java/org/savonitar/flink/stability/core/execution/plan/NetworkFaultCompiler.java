@@ -31,7 +31,7 @@ final class NetworkFaultCompiler {
             "^([a-z0-9]+(?:-[a-z0-9]+)*):([1-9][0-9]{0,4})$");
     private static final int BROKER_PORTS = 10;
     /** Aliases the runner already gives its own containers. */
-    private static final Set<String> RESERVED_HOSTS = Set.of("jobmanager-1", "taskmanager-1");
+    private static final String JOB_MANAGER_HOST = "jobmanager-1";
 
     private NetworkFaultCompiler() {}
 
@@ -59,7 +59,9 @@ final class NetworkFaultCompiler {
         String clusterHost = "kafka-" + proxy.path("cluster").asText();
         if (!listen.matches()
                 || Integer.parseInt(listen.group(2)) > 65_535 - BROKER_PORTS
-                || RESERVED_HOSTS.contains(listen.group(1))
+                || (JOB_MANAGER_HOST.equals(listen.group(1))
+                        || TaskManagerLifecycleCompiler.isDeclaredTaskManager(listen.group(1),
+                                document.at("/setup/flink/taskmanagers").asInt()))
                 || clusterHost.equals(listen.group(1))) {
             issues.add(issue(source, "runner.kafka.proxy-listen-unsupported", path + "/listen",
                     "The proxy must listen on <lower-kebab-host>:<port>, with a host no runner"

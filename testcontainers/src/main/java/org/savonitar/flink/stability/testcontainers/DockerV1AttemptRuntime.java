@@ -15,6 +15,7 @@ import java.nio.file.Path;
 import java.time.Duration;
 import java.util.List;
 import java.util.Objects;
+import java.util.Optional;
 
 /** Testcontainers implementation for one v1 run attempt. */
 public final class DockerV1AttemptRuntime implements V1AttemptRuntime {
@@ -60,12 +61,23 @@ public final class DockerV1AttemptRuntime implements V1AttemptRuntime {
     @Override
     public void restartTaskManager(Duration timeout)
             throws TaskManagerActionTimeoutException {
+        restartTaskManager(PRIMARY_TASK_MANAGER, timeout);
+    }
+
+    @Override
+    public void restartTaskManager(String targetName, Duration timeout)
+            throws TaskManagerActionTimeoutException {
         try {
-            clusters.restartTaskManager(PRIMARY_TASK_MANAGER, timeout);
+            clusters.restartTaskManager(targetName, timeout);
         } catch (ContainerOperationTimeoutException failure) {
             throw new TaskManagerActionTimeoutException(
                     TaskManagerActionTimeoutException.Action.RESTART, timeout, failure);
         }
+    }
+
+    @Override
+    public Optional<Identity> taskManagerIdentity(String targetName) {
+        return clusters.taskManagerIdentity(targetName);
     }
 
     @Override
