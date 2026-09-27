@@ -1,7 +1,9 @@
 # Testing a Flink runtime build
 
-The engine can run its existing Kafka scenarios on a custom Flink **2.2** image using
-the official image's entrypoint and filesystem layout. `setup.flink.image_id` pins the
+The engine can run its existing Kafka scenarios on a custom Flink **2.2** image and
+admits experimental **2.4** builds with explicit image and runtime JAR pins plus a local
+connector closure. Images use the official entrypoint and filesystem layout.
+`setup.flink.image_id` pins the
 expected local Docker image ID. The engine checks the created container before starting
 each Flink process, including replacement TaskManagers. A tag alone is not a build
 identity: rebuilding or retagging an image must not silently change the tested runtime.
@@ -101,9 +103,28 @@ expected-failure controls require confirmation when the check is requested.
 
 ## Supported scope
 
-The compatibility registry still requires Flink 2.2 and a compatible Kafka connector and
-workload. An image ID does not override this check or establish compatibility with another
-version. The executable topology and fault types remain those listed in the
+The release compatibility registry pairs Flink 2.2 with Kafka connector
+`org.apache.flink:flink-connector-kafka:5.0.<patch>-2.2`. Experimental Flink 2.4
+requires both `setup.flink.image_id` and `setup.flink.runtime_jar`, together with
+a local connector primary and its explicit runtime dependency closure. Maven connector
+primaries are not registered for this experimental line. Setup and explicit Flink
+restart images must use the same supported line. Other Flink lines remain unsupported.
+
+Build the distribution from a fixed source revision, retaining the source archive hash,
+exact build command, dependency identities and output hashes. Build the workload against
+the selected runtime APIs and connector. Use immutable local copies of these artifacts;
+the engine continues to reject mutable Maven SNAPSHOT coordinates. The existing workload
+POM exposes `flink.version` and `flink.kafka.connector.version` for this purpose. Preserve
+the resulting workload JAR outside its ordinary `target/` directory before another build.
+
+Review the full distribution and connector classpath together: do not introduce an older
+`flink-connector-base` JAR when the selected distribution already supplies those classes.
+A local closure is the author's compatibility assertion, not an engine certification.
+Run the unchanged scenario and retain failures to assess that assertion. An image/JAR pin
+establishes selected binary identity; it does not establish API compatibility or token
+behavior. A source-to-build manifest must come from the actual build, not from a tag name.
+
+The executable topology and fault types remain those listed in the
 [README](../README.md#current-executable-subset).
 
 ## Verification

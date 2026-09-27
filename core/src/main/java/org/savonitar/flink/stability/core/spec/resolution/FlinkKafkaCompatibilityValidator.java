@@ -25,8 +25,11 @@ final class FlinkKafkaCompatibilityValidator {
             "capability.connector-maven-coordinate.unregistered";
     static final String KAFKA_IMAGE_VERSION_UNSUPPORTED =
             "runner.kafka.image-version-unsupported";
+    static final String EXPERIMENTAL_PIN_REQUIRED = "capability.flink-experimental.pin-required";
+    static final String CONNECTOR_LOCAL_REQUIRED = "capability.connector-local.required";
 
     private static final String SUPPORTED_FLINK_LINE = "2.2";
+    private static final String EXPERIMENTAL_FLINK_LINE = "2.4";
     private static final String KAFKA_CONNECTOR_GROUP = "org.apache.flink";
     private static final String KAFKA_CONNECTOR_ARTIFACT = "flink-connector-kafka";
     private static final Pattern FLINK_TAG = Pattern.compile(
@@ -64,6 +67,7 @@ final class FlinkKafkaCompatibilityValidator {
         }
         List<ImageReference> images = flinkImages(document);
         boolean flinkLineSupported = true;
+        String selectedLine = null;
         for (ImageReference image : images) {
             if (!image.value().isTextual()) {
                 // Resolved JSON Schema validation owns the value's structural root cause.
@@ -79,6 +83,16 @@ final class FlinkKafkaCompatibilityValidator {
                         FLINK_LINE_UNSUPPORTED,
                         image.path(),
                         flinkLineMessage(declared, tag)));
+            } else {
+                String line = tag.group(1) + "." + tag.group(2);
+                if (selectedLine == null) {
+                    selectedLine = line;
+                } else if (!selectedLine.equals(line)) {
+                    flinkLineSupported = false;
+                    issues.add(issue(source, scope, FLINK_LINE_UNSUPPORTED, image.path(),
+                            "Flink setup and restart images must use one version line; image '"
+                                    + declared + "' identifies " + line + " instead of " + selectedLine));
+                }
             }
         }
 
@@ -105,6 +119,20 @@ final class FlinkKafkaCompatibilityValidator {
             return List.copyOf(issues);
         }
 
+        boolean experimental = EXPERIMENTAL_FLINK_LINE.equals(selectedLine);
+        if (experimental) {
+            if (imageId.isMissingNode()) {
+                issues.add(issue(source, scope, EXPERIMENTAL_PIN_REQUIRED,
+                        "$/setup/flink/image_id",
+                        "Experimental Flink 2.4 requires an explicit local Docker image_id pin"));
+            }
+            if (runtimeJar.isMissingNode()) {
+                issues.add(issue(source, scope, EXPERIMENTAL_PIN_REQUIRED,
+                        "$/setup/flink/runtime_jar",
+                        "Experimental Flink 2.4 requires an explicit runtime_jar path and SHA-256 pin"));
+            }
+        }
+
         JsonNode connectors = document.at("/subject/connectors");
         if (connectors instanceof ObjectNode connectorObject) {
             connectorObject.fields().forEachRemaining(entry -> validateConnector(
@@ -112,6 +140,7 @@ final class FlinkKafkaCompatibilityValidator {
                     scope,
                     entry.getKey(),
                     entry.getValue().get("artifact"),
+                    experimental,
                     issues));
         }
         return List.copyOf(issues);
@@ -203,18 +232,19 @@ final class FlinkKafkaCompatibilityValidator {
     }
 
     private static boolean isSupportedFlinkLine(Matcher tag) {
-        return "2".equals(tag.group(1)) && "2".equals(tag.group(2));
+        return "2".equals(tag.group(1)) && ("2".equals(tag.group(2)) || "4".equals(tag.group(2)));
     }
 
     private static String flinkLineMessage(String declared, Matcher tag) {
         if (tag == null) {
             return "Cannot establish a supported Flink line from image reference '"
                     + declared + "'; v1 currently supports tags identifying Flink "
-                    + SUPPORTED_FLINK_LINE + ".x";
+                    + SUPPORTED_FLINK_LINE + ".x or pinned experimental " + EXPERIMENTAL_FLINK_LINE;
         }
         return "Flink image reference '" + declared + "' identifies line "
                 + tag.group(1) + "." + tag.group(2)
-                + ", but v1 currently supports only Flink " + SUPPORTED_FLINK_LINE + ".x";
+                + ", but v1 supports Flink " + SUPPORTED_FLINK_LINE + ".x or pinned experimental "
+                + EXPERIMENTAL_FLINK_LINE;
     }
 
     private static void validateConnector(
@@ -222,6 +252,7 @@ final class FlinkKafkaCompatibilityValidator {
             ResolutionScope scope,
             String alias,
             JsonNode artifact,
+            boolean experimental,
             List<Diagnostic> issues) {
         if (artifact == null || !artifact.isTextual()) {
             return;
@@ -229,6 +260,15 @@ final class FlinkKafkaCompatibilityValidator {
         String reference = artifact.textValue();
         if (!reference.startsWith("maven:")) {
             // A local primary is the scenario author's compatibility assertion (R5.6b).
+            // Artifact preparation requires its explicit runtime_dependencies closure.
+            return;
+        }
+        if (experimental) {
+            issues.add(issue(source, scope, CONNECTOR_LOCAL_REQUIRED,
+                    "$/subject/connectors/" + escapePointer(alias) + "/artifact",
+                    "Experimental Flink 2.4 requires a local connector primary with explicit "
+                            + "runtime_dependencies; the Flink 2.2 Maven registry does not establish "
+                            + "compatibility with this runtime"));
             return;
         }
 
