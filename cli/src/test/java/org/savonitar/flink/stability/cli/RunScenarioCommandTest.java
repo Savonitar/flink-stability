@@ -266,7 +266,7 @@ class RunScenarioCommandTest {
                     new FlinkRuntimeIdentity.ExpectedTarget(EXPECTED_RUNTIME.imageId(),
                             EXPECTED_RUNTIME.components(), Optional.of(jar)),
                     observed ? Optional.of(origins) : Optional.empty(),
-                    KafkaTransactionVersion.Selection.notRequested(), List.of());
+                    KafkaTransactionVersion.Selection.notRequested(), List.of(), List.of());
             JsonNode runtime = JSON.readTree(new V1ExecutionResultRenderer().render(
                     "bounded-eos", context("1234abcd"), expectation, result)).at("/evidence/flinkRuntime");
             assertEquals(observed ? "confirmed" : "unconfirmed", runtime.at("/runtimeJar/status").textValue());
@@ -337,7 +337,7 @@ class RunScenarioCommandTest {
                 KafkaTransactionVersion.UNCONFIRMED, "feature selection failed",
                 Optional.empty(), Optional.empty(), Optional.empty(), Optional.empty(), Optional.empty(),
                 Optional.empty(), Optional.empty(), Optional.empty(), List.of(), EXPECTED_RUNTIME,
-                Optional.empty(), selection, List.of());
+                Optional.empty(), selection, List.of(), List.of());
         JsonNode output = JSON.readTree(new V1ExecutionResultRenderer().render(
                 "bounded-eos", context("1234abcd"), expectation, result));
         JsonNode evidence = output.at("/evidence/kafkaTransactionVersion");
@@ -347,6 +347,33 @@ class RunScenarioCommandTest {
         assertEquals(0, evidence.at("/observations/0/supported/min").intValue());
         assertEquals(5, evidence.at("/observations/0/metadataEpoch").longValue());
         assertEquals(selection.error().orElseThrow(), evidence.path("error").textValue());
+    }
+
+    @Test
+    void recoveredRestErrorsRenderInOrderWithTheirFullOriginalBodies() throws Exception {
+        String body = "{\"errors\":[\"NullArgumentException: input array\"]}" + "x".repeat(5000);
+        var errors = List.of(
+                new org.savonitar.flink.stability.core.flink.FlinkScenarioControl.RestError(
+                        1, "GET", "/jobs/job-1/checkpoints", 500, body),
+                new org.savonitar.flink.stability.core.flink.FlinkScenarioControl.RestError(
+                        2, "GET", "/jobs/job-1/checkpoints", 500, body));
+        var result = new V1ScenarioExecutionResult(V1ScenarioExecutionResult.Status.INCONCLUSIVE,
+                "infrastructure.example", "example", Optional.empty(), Optional.empty(), Optional.empty(),
+                Optional.empty(), Optional.empty(), Optional.empty(), Optional.empty(), Optional.empty(),
+                List.of(), EXPECTED_RUNTIME, Optional.empty(),
+                KafkaTransactionVersion.Selection.notRequested(), errors, List.of());
+        JsonNode output = JSON.readTree(new V1ExecutionResultRenderer().render(
+                "bounded-eos", context("1234abcd"), expectation, result));
+        assertEquals(2, output.at("/evidence/flinkRest/errorCount").intValue());
+        JsonNode observed = output.at("/evidence/flinkRest/errors");
+        assertEquals(2, observed.size());
+        assertEquals(1, observed.get(0).path("sequence").longValue());
+        assertEquals(2, observed.get(1).path("sequence").longValue());
+        assertEquals("GET", observed.get(0).path("method").textValue());
+        assertEquals("/jobs/job-1/checkpoints", observed.get(0).path("endpoint").textValue());
+        assertEquals(500, observed.get(0).path("httpStatus").intValue());
+        assertEquals(body, observed.get(0).path("body").textValue());
+        assertEquals(body, observed.get(1).path("body").textValue());
     }
 
     @Test
@@ -385,6 +412,7 @@ class RunScenarioCommandTest {
                 EXPECTED_RUNTIME,
                 Optional.empty(),
                 KafkaTransactionVersion.Selection.notRequested(),
+                List.of(),
                 List.of());
 
         JsonNode output = JSON.readTree(new V1ExecutionResultRenderer().render(
@@ -469,6 +497,7 @@ class RunScenarioCommandTest {
                 EXPECTED_RUNTIME,
                 Optional.empty(),
                 KafkaTransactionVersion.Selection.notRequested(),
+                List.of(),
                 List.of());
 
         JsonNode evidence = JSON.readTree(new V1ExecutionResultRenderer().render(
@@ -897,6 +926,7 @@ class RunScenarioCommandTest {
                 EXPECTED_RUNTIME,
                 Optional.empty(),
                 KafkaTransactionVersion.Selection.notRequested(),
+                List.of(),
                 List.of());
     }
 
@@ -933,6 +963,7 @@ class RunScenarioCommandTest {
                 EXPECTED_RUNTIME,
                 Optional.empty(),
                 KafkaTransactionVersion.Selection.notRequested(),
+                List.of(),
                 List.of());
     }
 
@@ -969,6 +1000,7 @@ class RunScenarioCommandTest {
                 EXPECTED_RUNTIME,
                 Optional.empty(),
                 KafkaTransactionVersion.Selection.notRequested(),
+                List.of(),
                 List.of());
     }
 
@@ -1043,6 +1075,7 @@ class RunScenarioCommandTest {
                 new FlinkRuntimeIdentity.ExpectedTarget(Optional.empty(), EXPECTED_RUNTIME.components()),
                 Optional.empty(),
                 KafkaTransactionVersion.Selection.notRequested(),
+                List.of(),
                 List.of("diagnostic"));
     }
 

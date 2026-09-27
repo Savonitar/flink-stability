@@ -1165,6 +1165,21 @@ Connector pull-request gating is the same mechanism with one axis:
   savepoint completed, log marker, Kafka transaction state, record threshold.
   Adding a condition requires code — which it needs anyway, to be implemented and
   tested.
+- **R6.4a** The implemented Flink REST client may retry HTTP `5xx` only for a
+  `GET` inside an existing await/observation deadline. Calls and pauses (up to
+  `250ms`, bounded by time remaining) share that original monotonic budget; a
+  successful retry grants no new timeout. Deadline exhaustion uses the existing
+  timeout path and caller's timeout policy, not a synthetic successful observation.
+  The client never retries submission/upload `POST`, HTTP `4xx`, malformed successful
+  JSON or ordinary I/O failures. Transport-level automatic retries/redirect follow-ups
+  must not bypass this rule or hide error responses.
+  Before deciding to retry or throw, retain each received non-success HTTP response
+  in order: one-based sequence, method, endpoint, status and the complete UTF-8
+  error body. Repeated identical errors remain separate. An exception message may
+  show a bounded preview, but cannot replace retained response evidence. A recovered
+  error remains evidence of a component anomaly; retry success does not classify or
+  close the finding. Failed body reads remain I/O failures, not fabricated complete
+  HTTP bodies.
 - **R6.5** A plain time `wait: { duration: <duration> }` remains available but is
   never the primary trigger for a race-window scenario.
 - **R6.6** Repetition is an explicit `loop` step containing nested steps.
@@ -1694,6 +1709,11 @@ Connector pull-request gating is the same mechanism with one axis:
   report. Environment-health sampling, independently resolved OCI digests, and
   the full resolved/artifact/configuration/provenance report remain roadmap work;
   the summary must not claim that those absent fields were collected.
+  `evidence.flinkRest` includes `errorCount` and ordered `errors` with `sequence`,
+  `method`, `endpoint`, `httpStatus` and full `body` from R6.4a. Snapshot these records
+  before client/runtime cleanup on every attempt exit, including recovered awaits,
+  observations and post-kill clock sampling. Cleanup failures and earlier data failures
+  must preserve the original HTTP evidence; a client that has not opened reports zero.
 
 - **R8.2c** After the attempt result is decided, the first runner starts physical
   resource cleanup exactly once and waits under one fixed internal `2m` wall

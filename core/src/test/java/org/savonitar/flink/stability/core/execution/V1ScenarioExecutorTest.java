@@ -201,6 +201,52 @@ class V1ScenarioExecutorTest {
     }
 
     @Test
+    void recoveredRestErrorsSurviveEveryAttemptExitAndBothCleanupCopies() throws Exception {
+        for (String failureAt : List.of("success", "phase", "fence")) {
+            List<String> events = new ArrayList<>();
+            try (Fixture fixture = fixture(document -> {
+                requestRuntimeJar(document);
+                ((ObjectNode) document.at("/setup/kafka/clusters/main")).put("transaction_version", 1);
+            })) {
+                var selected = new KafkaTransactionVersion.Selection(Optional.of(1), List.of(
+                        new KafkaTransactionVersion.Observation(
+                                Optional.of(new KafkaTransactionVersion.Range((short) 1, (short) 1)),
+                                Optional.of(new KafkaTransactionVersion.Range((short) 0, (short) 2)),
+                                OptionalLong.of(7))), Optional.empty());
+                featureSelection = (bootstrap, requested) -> selected;
+                FakeFlink flink = new FakeFlink(events);
+                String body = "{\"errors\":[\"NullArgumentException: input array\"]}" + "x".repeat(5000);
+                var error = new FlinkScenarioControl.RestError(1, "GET", "/jobs/job-1/checkpoints", 500, body);
+                flink.httpErrors.add(error);
+                flink.closeFailure = new IllegalStateException("close failed after snapshot");
+                if (failureAt.equals("phase")) {
+                    flink.awaitStateFailure = new IOException("state query failed");
+                } else if (failureAt.equals("fence")) {
+                    flink.awaitFinishedFailure = new IOException("terminal state query failed");
+                }
+                V1ScenarioExecutionResult result = executor(events, new FakeRuntime(events), flink,
+                        (bootstrap, topic, ids, timeout) -> passResult()).execute(fixture.bound(), attemptContext());
+                assertEquals(List.of(error), result.flinkRestErrors(), failureAt);
+                assertTrue(flink.httpErrors.isEmpty(), "the client was closed after evidence was copied");
+                assertEquals(body, result.flinkRestErrors().getFirst().body());
+                if (failureAt.equals("success")) {
+                    assertEquals(FlinkRuntimeIdentity.Outcome.CONFIRMED,
+                            result.runtimeJarIdentity().orElseThrow().outcome());
+                }
+                for (V1ScenarioExecutionResult copy : List.of(result,
+                        result.withCleanupFailure(new IOException("runtime close failed")),
+                        result.withPreparedArtifactCleanupFailure(new IOException("artifact close failed")))) {
+                    assertEquals(selected, copy.kafkaTransactionVersion(), failureAt);
+                    assertEquals(List.of(error), copy.flinkRestErrors(), failureAt);
+                    assertEquals(result.runtimeClassOrigins(), copy.runtimeClassOrigins(), failureAt);
+                    assertEquals(result.runtimeJarIdentity(), copy.runtimeJarIdentity(), failureAt);
+                }
+                assertThrows(UnsupportedOperationException.class, () -> result.flinkRestErrors().clear());
+            }
+        }
+    }
+
+    @Test
     void aPassResultCannotOmitRequestedRuntimeClassEvidenceThroughTheCompatibilityConstructor()
             throws Exception {
         List<String> events = new ArrayList<>();
@@ -672,6 +718,7 @@ class V1ScenarioExecutorTest {
                         FlinkRuntimeIdentityTest.expected(Optional.empty()),
                 Optional.empty(),
                 KafkaTransactionVersion.Selection.notRequested(),
+                List.of(),
                         List.of()));
 
         assertTrue(failure.getMessage().contains("confirmed effect"));
@@ -718,6 +765,7 @@ class V1ScenarioExecutorTest {
                         FlinkRuntimeIdentityTest.expected(Optional.empty()),
                 Optional.empty(),
                 KafkaTransactionVersion.Selection.notRequested(),
+                List.of(),
                         List.of()));
 
         assertTrue(failure.getMessage().contains("network fault"), failure.getMessage());
@@ -1863,6 +1911,8 @@ class V1ScenarioExecutorTest {
         private FlinkJobSubmission submission;
         private String uploadedJarSha256;
         private IOException awaitFinishedFailure;
+        private IOException awaitStateFailure;
+        private final List<FlinkScenarioControl.RestError> httpErrors = new ArrayList<>();
         private Error uploadFatal;
         private RuntimeException closeFailure;
 
@@ -1895,8 +1945,11 @@ class V1ScenarioExecutorTest {
 
         @Override
         public FlinkJobState awaitState(
-                FlinkJobHandle job, FlinkJobState expected, Duration timeout) {
+                FlinkJobHandle job, FlinkJobState expected, Duration timeout) throws IOException {
             events.add("await-running");
+            if (awaitStateFailure != null) {
+                throw awaitStateFailure;
+            }
             return FlinkJobState.RUNNING;
         }
 
@@ -1930,8 +1983,14 @@ class V1ScenarioExecutorTest {
         }
 
         @Override
+        public List<FlinkScenarioControl.RestError> restErrors() {
+            return List.copyOf(httpErrors);
+        }
+
+        @Override
         public void close() {
             events.add("flink-close");
+            httpErrors.clear();
             if (closeFailure != null) {
                 throw closeFailure;
             }

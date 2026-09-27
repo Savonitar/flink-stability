@@ -4,6 +4,7 @@ import org.savonitar.flink.stability.core.execution.kafka.KafkaInputManifest;
 import org.savonitar.flink.stability.core.execution.kafka.KafkaTransactionVersion;
 import org.savonitar.flink.stability.core.execution.plan.ExecutableScenarioPlan;
 import org.savonitar.flink.stability.core.flink.FlinkJobObservation;
+import org.savonitar.flink.stability.core.flink.FlinkScenarioControl;
 import org.savonitar.flink.stability.core.validation.kafka.KafkaIdSetValidationResult;
 import org.savonitar.flink.stability.core.validation.kafka.KafkaTransactionListing;
 import org.savonitar.flink.stability.runtime.api.FlinkComponentProvisioningEvidence;
@@ -32,6 +33,7 @@ public record V1ScenarioExecutionResult(
         FlinkRuntimeIdentity.ExpectedTarget expectedFlinkRuntime,
         Optional<SubjectClassOrigins> runtimeClassOrigins,
         KafkaTransactionVersion.Selection kafkaTransactionVersion,
+        List<FlinkScenarioControl.RestError> flinkRestErrors,
         List<String> diagnostics) {
 
     public V1ScenarioExecutionResult {
@@ -59,6 +61,7 @@ public record V1ScenarioExecutionResult(
         if (status == Status.PASS && !kafkaTransactionVersion.permitsPass()) {
             throw new IllegalArgumentException("PASS requires confirmed requested Kafka transaction.version");
         }
+        flinkRestErrors = List.copyOf(Objects.requireNonNull(flinkRestErrors, "flinkRestErrors"));
         diagnostics = List.copyOf(Objects.requireNonNull(diagnostics, "diagnostics"));
         if (status == Status.PASS
                 && (writeFenceEvidence.isEmpty()
@@ -142,7 +145,7 @@ public record V1ScenarioExecutionResult(
         this(status, reason, message, inputManifest, phaseEvidence, writeFenceEvidence,
                 processFenceEvidence, finalJobObservation, terminalValidation, sinkTransactions,
                 subjectClassOrigins, flinkProvisioningEvidence, expectedFlinkRuntime,
-                Optional.empty(), KafkaTransactionVersion.Selection.notRequested(), diagnostics);
+                Optional.empty(), KafkaTransactionVersion.Selection.notRequested(), List.of(), diagnostics);
     }
 
     public enum Status {
@@ -166,6 +169,14 @@ public record V1ScenarioExecutionResult(
     public Optional<FlinkRuntimeIdentity> runtimeJarIdentity() {
         return FlinkRuntimeIdentity.evaluateRuntimeJar(
                 expectedFlinkRuntime, flinkProvisioningEvidence, runtimeClassOrigins);
+    }
+
+    /** Snapshot recovered HTTP failures before the client and runtime are closed. */
+    public V1ScenarioExecutionResult withFlinkRestErrors(List<FlinkScenarioControl.RestError> errors) {
+        return new V1ScenarioExecutionResult(status, reason, message, inputManifest, phaseEvidence,
+                writeFenceEvidence, processFenceEvidence, finalJobObservation, terminalValidation,
+                sinkTransactions, subjectClassOrigins, flinkProvisioningEvidence, expectedFlinkRuntime,
+                runtimeClassOrigins, kafkaTransactionVersion, errors, diagnostics);
     }
 
     public V1ScenarioExecutionResult withCleanupFailure(Throwable failure) {
@@ -213,6 +224,7 @@ public record V1ScenarioExecutionResult(
                     expectedFlinkRuntime,
                     runtimeClassOrigins,
                     kafkaTransactionVersion,
+                    flinkRestErrors,
                     updated);
         }
         return new V1ScenarioExecutionResult(
@@ -231,6 +243,7 @@ public record V1ScenarioExecutionResult(
                 expectedFlinkRuntime,
                 runtimeClassOrigins,
                 kafkaTransactionVersion,
+                flinkRestErrors,
                 updated);
     }
 }
