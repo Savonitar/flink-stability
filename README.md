@@ -10,6 +10,9 @@ Kafka state for missing, duplicate, unexpected, or malformed record IDs.
 The current prototype intentionally supports one narrow but real vertical: a bounded
 Flink 2.2 exactly-once job using Kafka 4.0 and Kafka connector 5.0.0-2.2. Unsupported
 topologies and scenario features fail before Docker starts.
+Experimental Flink 2.4 builds require explicit image/JAR pins and a local connector
+closure; see [runtime build testing](docs/FLINK-RUNTIME-TESTING.md) for the compatibility
+and build-evidence requirements.
 
 ## Execution boundary
 
@@ -162,8 +165,9 @@ The executable reference pairs are:
 To run these scenarios against a locally built Kafka connector, such as a pull
 request under review, see [testing a connector pull request](docs/PR-TESTING.md).
 For a compatible custom Flink image, see
-[testing a Flink runtime build](docs/FLINK-RUNTIME-TESTING.md). The runtime image pin
-does not expand the supported Flink 2.2 line or establish coverage of other PR features.
+[testing a Flink runtime build](docs/FLINK-RUNTIME-TESTING.md). Experimental 2.4 builds
+also require a runtime JAR pin and a local connector closure; identity evidence alone
+does not establish coverage of a PR's changed behavior.
 
 ## Current executable subset
 
@@ -171,7 +175,7 @@ The first runner supports:
 
 - one plain scenario, one run, and no health retry;
 - one Apache Kafka 4.0 broker with the input and sink topics;
-- one Flink 2.2 JobManager and one TaskManager;
+- one Flink 2.2 or explicitly pinned experimental 2.4 JobManager and one TaskManager;
 - one auto-started protocol-v1 job with parallelism `1` and an `EXACTLY_ONCE` or
   `AT_LEAST_ONCE` Kafka sink;
 - one verified connector closure;

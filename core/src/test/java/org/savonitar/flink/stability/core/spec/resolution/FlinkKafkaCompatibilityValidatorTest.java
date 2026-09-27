@@ -63,9 +63,9 @@ class FlinkKafkaCompatibilityValidatorTest {
         assertFailsAt(Stage.DOCUMENT, () -> scenario(document -> flink(document)
                 .putObject("runtime_jar").put("sha256", "a".repeat(64))));
         ScenarioSpecification unsupported = scenario(document -> {
-            flink(document).put("image", "local/flink:2.4-SNAPSHOT");
+            flink(document).put("image", "local/flink:2.3-SNAPSHOT");
             flink(document).putObject("runtime_jar")
-                    .put("container_path", "/opt/flink/lib/flink-dist-2.4-SNAPSHOT.jar")
+                    .put("container_path", "/opt/flink/lib/flink-dist-2.3-SNAPSHOT.jar")
                     .put("sha256", "a".repeat(64));
         });
         SpecificationException failure = assertFailsAt(Stage.RESOLUTION,
@@ -101,13 +101,140 @@ class FlinkKafkaCompatibilityValidatorTest {
     @Test
     void imagePinDoesNotBypassFlinkVersionCompatibility() {
         ScenarioSpecification scenario = scenario(document -> {
-            flink(document).put("image", "local/flink:2.4-SNAPSHOT");
+            flink(document).put("image", "local/flink:2.3-SNAPSHOT");
             flink(document).put("image_id", "sha256:" + "a".repeat(64));
         });
         SpecificationException failure = assertFailsAt(Stage.RESOLUTION,
                 () -> resolver.resolve(scenario, ResolutionRequest.none()));
         assertTrue(failure.diagnostics().stream().anyMatch(issue ->
                 issue.code().equals(FlinkKafkaCompatibilityValidator.FLINK_LINE_UNSUPPORTED)));
+    }
+
+    @Test
+    void acceptsPinnedExperimental24WithAnExplicitLocalConnectorClosureAfterInterpolation() {
+        ScenarioSpecification scenario = scenario(document -> {
+            usePinnedExperimentalRuntime(document);
+            parameter(document, "runtime_tag", "string", TextNode.valueOf("2.4-SNAPSHOT"));
+            parameter(document, "runtime_id", "string", TextNode.valueOf("sha256:" + "a".repeat(64)));
+            parameter(document, "runtime_hash", "string", TextNode.valueOf("b".repeat(64)));
+            flink(document).put("image", "local/flink:${runtime_tag}");
+            flink(document).put("image_id", "${runtime_id}");
+            ((ObjectNode) flink(document).get("runtime_jar"))
+                    .put("container_path", "/opt/flink/lib/flink-dist-${runtime_tag}.jar")
+                    .put("sha256", "${runtime_hash}");
+            connector(document).putArray("runtime_dependencies").add("./kafka-clients.jar");
+            nestedRestart(document, "taskmanager", "local/flink:${runtime_tag}");
+        });
+
+        ResolvedSide side = resolver.resolve(scenario, ResolutionRequest.none()).side(ScenarioSide.SINGLE);
+
+        assertEquals("local/flink:2.4-SNAPSHOT", side.document().at("/setup/flink/image").textValue());
+        assertEquals("sha256:" + "a".repeat(64), side.document().at("/setup/flink/image_id").textValue());
+        assertEquals("b".repeat(64), side.document().at("/setup/flink/runtime_jar/sha256").textValue());
+        assertEquals("./connector.jar", side.document().at("/subject/connectors/kafka/artifact").textValue());
+        assertEquals("./kafka-clients.jar", side.document()
+                .at("/subject/connectors/kafka/runtime_dependencies/0").textValue());
+    }
+
+    @Test
+    void experimental24RequiresEachIdentityPinAndRejectsInvalidPins() {
+        for (String pin : new String[] {"image_id", "runtime_jar"}) {
+            ScenarioSpecification missing = scenario(document -> {
+                usePinnedExperimentalRuntime(document);
+                flink(document).remove(pin);
+            });
+            SpecificationException failure = assertFailsAt(Stage.RESOLUTION,
+                    () -> resolver.resolve(missing, ResolutionRequest.none()));
+            assertIssue(failure, FlinkKafkaCompatibilityValidator.EXPERIMENTAL_PIN_REQUIRED,
+                    ResolutionScope.SINGLE, "$/setup/flink/" + pin);
+            assertEquals(1, failure.diagnostics().size());
+        }
+        ScenarioSpecification invalid = scenario(document -> {
+            usePinnedExperimentalRuntime(document);
+            parameter(document, "bad_id", "string", TextNode.valueOf("sha256:invalid"));
+            parameter(document, "bad_hash", "string", TextNode.valueOf("b".repeat(63)));
+            flink(document).put("image_id", "${bad_id}");
+            ((ObjectNode) flink(document).get("runtime_jar")).put("sha256", "${bad_hash}");
+        });
+        SpecificationException failure = assertFailsAt(Stage.RESOLUTION,
+                () -> resolver.resolve(invalid, ResolutionRequest.none()));
+        assertIssue(failure, "capability.flink-image-id.invalid",
+                ResolutionScope.SINGLE, "$/setup/flink/image_id");
+        assertIssue(failure, "capability.flink-runtime-jar.invalid",
+                ResolutionScope.SINGLE, "$/setup/flink/runtime_jar");
+    }
+
+    @Test
+    void experimental24DoesNotBorrowThe22MavenConnectorRegistry() {
+        for (String coordinate : new String[] {
+                "maven:org.apache.flink:flink-connector-kafka:5.0.0-2.2",
+                "maven:org.apache.flink:flink-connector-kafka:5.0.0-2.4",
+                "maven:org.apache.flink:flink-connector-kafka:5.0.0-2.4-SNAPSHOT"}) {
+            ScenarioSpecification scenario = scenario(document -> {
+                usePinnedExperimentalRuntime(document);
+                connector(document).put("artifact", coordinate);
+            });
+            SpecificationException failure = assertFailsAt(Stage.RESOLUTION,
+                    () -> resolver.resolve(scenario, ResolutionRequest.none()));
+            assertIssue(failure, FlinkKafkaCompatibilityValidator.CONNECTOR_LOCAL_REQUIRED,
+                    ResolutionScope.SINGLE, CONNECTOR_PATH);
+            assertEquals(1, failure.diagnostics().size());
+        }
+    }
+
+    @Test
+    void imageAndJarPinsDoNotAdmitOtherExperimentalLines() {
+        for (String tag : new String[] {"2.3-SNAPSHOT", "2.5-SNAPSHOT", "3.0.0"}) {
+            ScenarioSpecification scenario = scenario(document -> {
+                usePinnedExperimentalRuntime(document);
+                flink(document).put("image", "local/flink:" + tag);
+            });
+            SpecificationException failure = assertFailsAt(Stage.RESOLUTION,
+                    () -> resolver.resolve(scenario, ResolutionRequest.none()));
+            assertIssue(failure, FlinkKafkaCompatibilityValidator.FLINK_LINE_UNSUPPORTED,
+                    ResolutionScope.SINGLE, "$/setup/flink/image");
+            assertEquals(1, failure.diagnostics().size());
+        }
+    }
+
+    @Test
+    void rejectsMixedSetupAndNestedRestartLinesInEitherDirectionForEveryFlinkRole() {
+        for (boolean experimentalSetup : new boolean[] {false, true}) {
+            for (String component : new String[] {"flink", "jobmanager", "taskmanager"}) {
+                ScenarioSpecification scenario = scenario(document -> {
+                    usePinnedExperimentalRuntime(document);
+                    flink(document).put("image", experimentalSetup ? "local/flink:2.4-SNAPSHOT" : "flink:2.2.0");
+                    nestedRestart(document, component, experimentalSetup ? "flink:2.2.0" : "local/flink:2.4-SNAPSHOT");
+                });
+                SpecificationException failure = assertFailsAt(Stage.RESOLUTION,
+                        () -> resolver.resolve(scenario, ResolutionRequest.none()));
+                assertIssue(failure, FlinkKafkaCompatibilityValidator.FLINK_LINE_UNSUPPORTED,
+                        ResolutionScope.SINGLE, "$/phases/0/steps/0/loop/steps/0/restart/image");
+                assertEquals(1, failure.diagnostics().size());
+                assertTrue(failure.diagnostics().getFirst().message().contains("one version line"));
+            }
+        }
+    }
+
+    @Test
+    void appliesExperimentalCompatibilityToEachResolvedComparisonSide() {
+        ScenarioSpecification scenario = scenario(document -> {
+            usePinnedExperimentalRuntime(document);
+            parameter(document, "runtime_tag", "string", TextNode.valueOf("2.2.0"));
+            flink(document).put("image", "local/flink:${runtime_tag}");
+            ((ObjectNode) flink(document).get("runtime_jar"))
+                    .put("container_path", "/opt/flink/lib/flink-dist-${runtime_tag}.jar");
+            connector(document).put("artifact", "maven:org.apache.flink:flink-connector-kafka:5.0.0-2.2");
+            experiment(document, "runtime_tag", TextNode.valueOf("2.2.0"), TextNode.valueOf("2.4-SNAPSHOT"));
+        });
+
+        SpecificationException failure = assertFailsAt(Stage.RESOLUTION,
+                () -> resolver.resolve(scenario, ResolutionRequest.none()));
+
+        assertIssue(failure, FlinkKafkaCompatibilityValidator.CONNECTOR_LOCAL_REQUIRED,
+                ResolutionScope.CANDIDATE, CONNECTOR_PATH);
+        assertFalse(failure.diagnostics().stream().anyMatch(issue -> issue.scope() == ResolutionScope.BASELINE));
+        assertEquals(1, failure.diagnostics().size());
     }
 
     @Test
@@ -181,7 +308,7 @@ class FlinkKafkaCompatibilityValidatorTest {
     }
 
     @Test
-    void treatsALocalPrimaryAsAnAuthorAssertionButStillRequiresFlink22() {
+    void treatsALocalPrimaryAsAnAuthorAssertionButStillRequiresASupportedFlinkLine() {
         ScenarioSpecification supported = scenario(document -> useLocalConnector(document));
 
         assertEquals(
@@ -482,6 +609,25 @@ class FlinkKafkaCompatibilityValidatorTest {
         ObjectNode connector = connector(document);
         connector.put("artifact", "./connector.jar");
         connector.putArray("runtime_dependencies");
+    }
+
+    private static void usePinnedExperimentalRuntime(ObjectNode document) {
+        flink(document).put("image", "local/flink:2.4-SNAPSHOT");
+        flink(document).put("image_id", "sha256:" + "a".repeat(64));
+        flink(document).putObject("runtime_jar")
+                .put("container_path", "/opt/flink/lib/flink-dist-2.4-SNAPSHOT.jar")
+                .put("sha256", "b".repeat(64));
+        useLocalConnector(document);
+    }
+
+    private static void nestedRestart(ObjectNode document, String component, String image) {
+        ObjectNode phase = document.putArray("phases").addObject();
+        phase.put("name", "runtime-restart");
+        ObjectNode loop = phase.putArray("steps").addObject().putObject("loop");
+        loop.put("times", 1);
+        ObjectNode restart = loop.putArray("steps").addObject().putObject("restart");
+        restart.put("component", component);
+        restart.put("image", image);
     }
 
     private static ObjectNode flink(ObjectNode document) {

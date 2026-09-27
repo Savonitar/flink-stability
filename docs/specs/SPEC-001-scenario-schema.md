@@ -774,7 +774,7 @@ Connector pull-request gating is the same mechanism with one axis:
   | `restart_strategy` | `{ type: flink-default }` |
 
   `flink-default` is a stable harness marker meaning that the runner supplies no
-  job-specific restart override and lets the registered Flink `2.2.x` line
+  job-specific restart override and lets the selected Flink runtime
   select its checkpointing-aware default. It does not freeze a version-independent
   copy of Flink's exponential-backoff sub-options. The report records declared
   omissions, every materialized value, the effective Flink line, and the
@@ -978,7 +978,18 @@ Connector pull-request gating is the same mechanism with one axis:
   is the scenario author's assertion that the build targets this line; its exact
   bytes and dependency lock still determine replay identity. Setup images and
   explicit `flink`, `jobmanager`, or `taskmanager` restart images must all identify
-  the registered Flink line.
+  the same registered Flink line. An experimental Flink `2.4` line, including
+  `2.4-SNAPSHOT` image tags, requires explicit `setup.flink.image_id` and
+  `setup.flink.runtime_jar` pins and local connector primaries with explicit runtime
+  dependency closures. No Maven connector primary is registered for this line.
+  Missing pins reject with `capability.flink-experimental.pin-required`; a Maven
+  connector primary rejects with `capability.connector-local.required`. Existing
+  structural and invalid-pin diagnostics remain applicable. These requirements
+  preserve exact binary selection without asserting arbitrary local connector or
+  workload compatibility; integration evidence must identify the exercised build
+  combination. Maven SNAPSHOT artifact references remain forbidden. A declaration
+  that mixes Flink lines between setup and restart rejects with
+  `capability.flink-line.unsupported`.
 - **R5.6c** **Any executable workload JAR may participate when its staged bytes
   declare and implement workload protocol v1.** The main JAR manifest contains
   exactly `Flink-Stability-Workload-Protocol: v1` (R4.13d). The harness supplies
@@ -2364,7 +2375,7 @@ inside the disposable extension container required by R7.5.5.
 | Decision | Adopted v1 contract | Consequence |
 | --- | --- | --- |
 | Workload JAR compatibility (1A) | **Any workload JAR declaring `Flink-Stability-Workload-Protocol: v1` and implementing the typed configuration contract.** | Artifact validation is byte-bound and not restricted to the bundled generator. The runtime protocol key cross-checks the declaration; legacy opaque arguments are not a fallback. See R4.13d and R5.6c. |
-| Omitted workload settings (2A) | **Materialize HashMap state, TTL disabled, no watermarks, JobManager checkpoint storage, and `{ type: flink-default }` restart behavior.** | Raw YAML stays compact while the resolved scenario and report remain explicit. The restart marker preserves Flink `2.2.x` ownership of its default; runtime-effective values are reported. See R5.1a. |
+| Omitted workload settings (2A) | **Materialize HashMap state, TTL disabled, no watermarks, JobManager checkpoint storage, and `{ type: flink-default }` restart behavior.** | Raw YAML stays compact while the resolved scenario and report remain explicit. The selected Flink runtime owns its default restart behavior; runtime-effective values are reported. See R5.1a. |
 | Filesystem checkpoint storage (3A) | **Harness-managed local `file:/flink/checkpoints/attempt-<ordinal>-<nonce>/<job-alias>` namespaces only.** | Authors select `{ type: filesystem }` but cannot supply a path or arbitrary URI. Attempt/job isolation and the effective generated URI are recorded. See R5.4a. |
 | Kafka broker compatibility (4A) | **Apache Kafka `4.0.x` only.** | Setup and Kafka restart images outside or not demonstrably on that line reject before provisioning. See R4.2a. |
 | Terminal validation boundary (5A) | **Bounded job completion followed by an irreversible physical Flink write fence.** | v1 preload input yields exclusive stopping offsets and natural `FINISHED`; then one fixed internal `2m` fence budget SIGKILLs TaskManagers before JobManagers and retains per-component/runtime/timestamp evidence before terminal checks. Future controlled-unbounded support requires a finite cutoff plus stop-with-savepoint/drain and is roadmap-only. See R4.7, R5.6c, and R7.1c–R7.1d. |
