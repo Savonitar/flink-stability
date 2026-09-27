@@ -11,6 +11,20 @@ evidence needed for comparison before cleaning. The command executes unit and
 adapter tests; it does not start Docker. The filter JAR is built at `process-classes`
 so downstream resource embedding also works in a clean reactor `test` lifecycle.
 
+The parent pins the lifecycle plugin versions. Compiler 3.13.0 is used throughout
+the reactor; other new pins preserve the previously observed Maven defaults
+(child clean 2.5, resources 2.6, jar 2.4 and install 2.4). Explicit module jar 3.4.1
+overrides and the root-only clean 3.3.2 configuration remain in effect. This fixes
+compiler selection without combining it with unrelated lifecycle upgrades.
+
+Incremental compilation was checked with two isolated minimal projects: first compile
+an empty interface and an unchanged test class implementing it, then add an abstract
+method to the interface and repeat `test-compile` without `clean`. Compiler 3.1
+accepted the stale test class; 3.13.0 recompiled it and reported the missing method.
+The test source bytes and timestamp were unchanged. This verifies that specific
+regression; it is not a guarantee that every incremental-build case is detected.
+Full clean builds remain the release check.
+
 ## Regression coverage
 
 | Contract | Tests | Failure the test must detect |
