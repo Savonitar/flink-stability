@@ -142,6 +142,95 @@ class V1ScenarioExecutorTest {
     }
 
     @Test
+    void unconfirmedLeaderOperationStillFencesAndRunsOracleRetainingRawDataFailure() throws Exception {
+        for (boolean oraclePasses : List.of(true, false)) {
+            List<String> events = new ArrayList<>();
+            try (Fixture fixture = fixture(document -> {
+                ObjectNode flink = (ObjectNode) document.at("/setup/flink");
+                flink.put("jobmanagers", 2);
+                flink.putObject("high_availability").put("zookeeper_image", "zookeeper:3.9.3")
+                        .put("session_timeout", "2s");
+                ((ObjectNode) document.at("/workload/jobs/0/checkpointing"))
+                        .putObject("storage").put("type", "filesystem");
+                var steps = (com.fasterxml.jackson.databind.node.ArrayNode) document.at("/phases/0/steps");
+                steps.removeAll();
+                steps.addObject().putObject("leader_fault").put("mode", "pause")
+                        .put("duration", "1ms").put("timeout", "2s");
+            })) {
+                FakeFlink flink = new FakeFlink(events);
+                flink.observations.add(job(1_000, FlinkJobState.RUNNING, 1, 0));
+                FakeRuntime runtime = new FakeRuntime(events);
+                V1ScenarioExecutionResult result = executor(events, runtime, flink,
+                        (bootstrap, topic, ids, timeout) -> {
+                            events.add("oracle");
+                            return oraclePasses ? passResult() : missingResult();
+                        }).execute(fixture.bound(), attemptContext());
+
+                assertTrue(events.indexOf("oracle") > events.indexOf("process-fence"));
+                assertTrue(result.writeFenceEvidence().isPresent());
+                assertTrue(result.terminalValidation().isPresent());
+                var faults = result.phaseEvidence().orElseThrow().leaderFaults();
+                assertEquals(1, faults.size());
+                assertTrue(faults.getFirst().raw().errors().getFirst().contains("UnsupportedOperationException"));
+                assertEquals(JOB.jobId(), faults.getFirst().jobId());
+                assertEquals(1, result.expectedHa().faults().size());
+                assertEquals(FlinkHaEvidence.Outcome.UNCONFIRMED, result.haEvidence().outcome());
+                assertEquals(oraclePasses ? V1ScenarioExecutionResult.Status.INCONCLUSIVE
+                        : V1ScenarioExecutionResult.Status.FAIL, result.status());
+                if (!oraclePasses) assertEquals(missingResult().reason(), result.reason());
+                assertEquals(result.phaseEvidence(), result.withCleanupFailure(
+                        new IOException("cleanup failed")).phaseEvidence());
+            }
+        }
+    }
+
+    @Test
+    void requestedTokenEvidenceIsCheckedAfterOracleAndSurvivesEveryResultCopy() throws Exception {
+        for (boolean oraclePasses : List.of(true, false)) {
+            List<String> events = new ArrayList<>();
+            try (Fixture fixture = fixture(document ->
+                    ((ObjectNode) document.at("/setup/flink")).putObject("token_provider")
+                            .put("renewal_interval", "2s"))) {
+                FakeRuntime runtime = new FakeRuntime(events);
+                V1ScenarioExecutionResult result = executor(events, runtime, new FakeFlink(events),
+                        (bootstrap, topic, ids, timeout) -> {
+                            events.add("oracle");
+                            return oraclePasses ? passResult() : missingResult();
+                        }).execute(fixture.bound(), attemptContext());
+
+                assertTrue(events.indexOf("oracle") > events.indexOf("process-fence"));
+                assertTrue(result.terminalValidation().isPresent());
+                assertTrue(result.expectedHa().tokenProviderRequired());
+                assertTrue(result.tokenEvidence().isPresent());
+                assertTrue(result.tokenEvidence().orElseThrow().snapshot().isEmpty());
+                assertEquals(FlinkHaEvidence.Outcome.UNCONFIRMED, result.haEvidence().outcome());
+                assertEquals(oraclePasses ? V1ScenarioExecutionResult.Status.INCONCLUSIVE
+                        : V1ScenarioExecutionResult.Status.FAIL, result.status());
+                assertEquals(oraclePasses ? "flink.ha.effect-unconfirmed"
+                        : missingResult().reason(), result.reason());
+                assertEquals(result.expectedHa(), result.withCleanupFailure(
+                        new IOException("cleanup failed")).expectedHa());
+                assertEquals(result.tokenEvidence(), result.withPreparedArtifactCleanupFailure(
+                        new IOException("artifact cleanup failed")).tokenEvidence());
+                if (!oraclePasses) {
+                    assertEquals(ScenarioVerdict.Status.INCONCLUSIVE, ScenarioVerdict.of(
+                            new ExecutableScenarioPlan.ExpectedOutcome(
+                                    ExecutableScenarioPlan.ExpectedOutcome.Outcome.FAIL,
+                                    Optional.of("kafka-id-set"), Optional.of(missingResult().reason())),
+                            result).status());
+                }
+                assertThrows(IllegalArgumentException.class, () -> new V1ScenarioExecutionResult(
+                        V1ScenarioExecutionResult.Status.PASS, passResult().reason(), "forged pass",
+                        result.inputManifest(), result.phaseEvidence(), result.writeFenceEvidence(),
+                        result.processFenceEvidence(), result.finalJobObservation(), Optional.of(passResult()),
+                        result.sinkTransactions(), result.subjectClassOrigins(), result.flinkProvisioningEvidence(),
+                        result.expectedFlinkRuntime(), result.runtimeClassOrigins(), result.kafkaTransactionVersion(),
+                        result.expectedHa(), result.tokenEvidence(), result.diagnostics()));
+            }
+        }
+    }
+
+    @Test
     void requestedFeatureIsVerifiedBeforeInputAndFlinkAndSurvivesCleanupFailure() throws Exception {
         List<String> events = new ArrayList<>();
         try (Fixture fixture = fixture(document ->

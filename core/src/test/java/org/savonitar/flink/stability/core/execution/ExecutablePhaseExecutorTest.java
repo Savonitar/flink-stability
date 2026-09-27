@@ -2,6 +2,7 @@ package org.savonitar.flink.stability.core.execution;
 
 import org.savonitar.flink.stability.runtime.api.TaskManagerActionTimeoutException;
 import org.savonitar.flink.stability.runtime.api.TaskManagerControl;
+import org.savonitar.flink.stability.runtime.api.FlinkHaControl;
 
 import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
@@ -36,6 +37,7 @@ import java.util.OptionalLong;
 import java.util.function.Consumer;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -456,6 +458,121 @@ class ExecutablePhaseExecutorTest {
         assertEquals(ExecutablePhaseExecutor.NETWORK_FAULT_INFRASTRUCTURE, failure.reason());
     }
 
+    @Test
+    void leaderFaultSharesOneBudgetWithBothJobObservationsAndPreservesDeclaration() throws Exception {
+        ExecutableScenarioPlan plan = plan(ExecutablePhaseExecutorTest::addLeaderFault);
+        List<String> events = new ArrayList<>();
+        java.util.concurrent.atomic.AtomicLong clock = new java.util.concurrent.atomic.AtomicLong();
+        FakeFlink flink = new FakeFlink(events);
+        flink.haObservationCompleted = () -> clock.addAndGet(Duration.ofMillis(500).toNanos());
+        FakeTaskManagers runtime = new FakeTaskManagers(events);
+        runtime.leaderEvidence = request -> {
+            clock.addAndGet(Duration.ofMillis(250).toNanos());
+            return new FlinkHaControl.LeaderFaultEvidence(request,
+                    Optional.empty(), Optional.empty(), Optional.empty(), false, false,
+                    Optional.empty(), Optional.empty(), 0, 0, 0, 0, false,
+                    Optional.empty(), Optional.empty(), Optional.empty(), List.of());
+        };
+
+        PhaseExecutionEvidence result = new ExecutablePhaseExecutor(flink, runtime,
+                ExecutablePhaseExecutor.NetworkFaults.NONE, duration -> {}, clock::get)
+                .execute(plan, JOB);
+
+        assertEquals(Duration.ofMillis(1500), runtime.leaderBudget);
+        assertEquals(List.of(Duration.ofSeconds(2), Duration.ofMillis(1250)), flink.haTimeouts);
+        assertEquals(Duration.ofSeconds(2), result.leaderFaults().getFirst().raw().request().timeout());
+        assertEquals(List.of("observe-job", "fault-leader", "observe-job"), events);
+    }
+
+    @Test
+    void leaderFaultIsNotInjectedAfterThePreFaultObservationExhaustsItsBudget() throws Exception {
+        ExecutableScenarioPlan plan = plan(ExecutablePhaseExecutorTest::addLeaderFault);
+        List<String> events = new ArrayList<>();
+        java.util.concurrent.atomic.AtomicLong clock = new java.util.concurrent.atomic.AtomicLong();
+        FakeFlink flink = new FakeFlink(events);
+        flink.haObservationCompleted = () -> clock.addAndGet(Duration.ofSeconds(2).toNanos());
+        FakeTaskManagers runtime = new FakeTaskManagers(events);
+
+        PhaseExecutionEvidence result = new ExecutablePhaseExecutor(flink, runtime,
+                ExecutablePhaseExecutor.NetworkFaults.NONE, duration -> {}, clock::get)
+                .execute(plan, JOB);
+
+        assertEquals(List.of("observe-job"), events);
+        var fault = result.leaderFaults().getFirst();
+        assertFalse(fault.raw().applied());
+        assertEquals(Duration.ofSeconds(2), fault.raw().request().timeout());
+        assertTrue(fault.raw().errors().stream()
+                .anyMatch(error -> error.contains("pre-fault job observation")));
+        assertTrue(fault.jobAfter().observation().isEmpty());
+    }
+
+    @Test
+    void leaderFaultFailureRetainsCauseAndContinuesToLaterSteps() throws Exception {
+        ExecutableScenarioPlan plan = plan(document -> {
+            addLeaderFault(document);
+            ((ArrayNode) document.at("/phases/0/steps")).addObject()
+                    .putObject("wait").put("duration", "1ms");
+        });
+        List<String> events = new ArrayList<>();
+        FakeFlink flink = new FakeFlink(events);
+        FakeTaskManagers runtime = new FakeTaskManagers(events);
+        runtime.leaderFailure = new IllegalStateException("leader operation failed",
+                new IOException("proxy could not heal"));
+        PhaseExecutionEvidence result = new ExecutablePhaseExecutor(flink, runtime,
+                ExecutablePhaseExecutor.NetworkFaults.NONE,
+                duration -> events.add("sleep:" + duration)).execute(plan, JOB);
+
+        assertEquals(List.of("observe-job", "fault-leader", "observe-job", "sleep:PT0.001S"), events);
+        assertEquals(2, result.steps().size());
+        assertEquals(PhaseExecutionEvidence.StepStatus.FAILED, result.steps().getFirst().status());
+        assertEquals(PhaseExecutionEvidence.StepStatus.SUCCEEDED, result.steps().getLast().status());
+        var retained = result.leaderFaults().getFirst();
+        assertEquals(JOB.jobId(), retained.jobId());
+        assertEquals("$/phases/0/steps/0", retained.path());
+        assertTrue(retained.raw().errors().contains("IOException: proxy could not heal"));
+        assertEquals(Optional.of(RUNNING_JOB), retained.jobBefore().observation());
+        assertTrue(retained.jobAfter().observation().isPresent());
+    }
+
+    @Test
+    void leaderRecoveryQueriesSameJobAndRetainsTransientObservationFailure() throws Exception {
+        ExecutableScenarioPlan plan = plan(ExecutablePhaseExecutorTest::addLeaderFault);
+        List<String> events = new ArrayList<>();
+        FakeFlink flink = new FakeFlink(events);
+        FlinkJobObservation restored = new FlinkJobObservation(2_000, FlinkJobState.RUNNING,
+                0, 1, Optional.of(new FlinkJobObservation.Restore(2, 1_900)), List.of(), List.of());
+        flink.haObservations.add(RUNNING_JOB);
+        flink.haObservations.add(new IOException("new leader REST not ready"));
+        flink.haObservations.add(restored);
+        FakeTaskManagers runtime = new FakeTaskManagers(events);
+        runtime.leaderEvidence = request -> new FlinkHaControl.LeaderFaultEvidence(request,
+                Optional.empty(), Optional.empty(), Optional.empty(), true, true,
+                Optional.empty(), Optional.empty(), 1, 2, 0, 0, false,
+                Optional.empty(), Optional.empty(), Optional.empty(), List.of());
+
+        PhaseExecutionEvidence result = new ExecutablePhaseExecutor(flink, runtime,
+                ExecutablePhaseExecutor.NetworkFaults.NONE, duration -> {}).execute(plan, JOB);
+
+        var fault = result.leaderFaults().getFirst();
+        assertEquals(Optional.of(restored), fault.jobAfter().observation());
+        assertEquals(List.of("IOException: new leader REST not ready"), fault.observationErrors());
+        assertEquals(List.of(JOB, JOB, JOB), flink.haJobs);
+        assertEquals(FlinkHaEvidence.Outcome.UNCONFIRMED, FlinkHaEvidence.evaluate(
+                FlinkHaEvidence.Expected.from(plan.phases(), false), Optional.of(result), Optional.empty())
+                .outcome(), "a restored job alone must not fabricate physical leadership proof");
+    }
+
+    private static void addLeaderFault(ObjectNode document) {
+        ObjectNode setup = (ObjectNode) document.at("/setup/flink");
+        setup.put("jobmanagers", 2);
+        setup.putObject("high_availability").put("zookeeper_image", "zookeeper:3.9.3")
+                .put("session_timeout", "2s");
+        ((ObjectNode) document.at("/workload/jobs/0/checkpointing"))
+                .putObject("storage").put("type", "filesystem");
+        replaceSteps(document).addObject().putObject("leader_fault")
+                .put("mode", "pause").put("duration", "1ms").put("timeout", "2s");
+    }
+
     /** Routes the sink through kafka-proxy; the only step drops a commit request there. */
     private static void addEndTxnFault(ObjectNode document) {
         ObjectNode proxy = ((ObjectNode) document.at("/setup")).putObject("proxies")
@@ -550,7 +667,7 @@ class ExecutablePhaseExecutorTest {
         }
     }
 
-    private static final class FakeTaskManagers implements TaskManagerControl {
+    private static final class FakeTaskManagers implements TaskManagerControl, FlinkHaControl {
         private final List<String> events;
         private IOException killFailure;
         private IOException restartFailure;
@@ -558,9 +675,22 @@ class ExecutablePhaseExecutorTest {
         private Duration restartTimeout;
         private final java.util.Map<String, Integer> incarnations = new java.util.HashMap<>();
         private final java.util.Set<String> stopped = new java.util.HashSet<>();
+        private RuntimeException leaderFailure;
+        private java.util.function.Function<LeaderFaultRequest, LeaderFaultEvidence> leaderEvidence;
+        private Duration leaderBudget;
 
         private FakeTaskManagers(List<String> events) {
             this.events = events;
+        }
+
+        @Override
+        public LeaderFaultEvidence faultLeader(LeaderFaultRequest request, Duration remainingBudget) {
+            events.add("fault-leader");
+            leaderBudget = remainingBudget;
+            if (leaderFailure != null) {
+                throw leaderFailure;
+            }
+            return leaderEvidence.apply(request);
         }
 
         @Override
@@ -609,6 +739,10 @@ class ExecutablePhaseExecutorTest {
         private IOException checkpointFailure;
         private IOException observeFailure;
         private IOException clockFailure;
+        private final java.util.Deque<Object> haObservations = new java.util.ArrayDeque<>();
+        private final List<FlinkJobHandle> haJobs = new ArrayList<>();
+        private final List<Duration> haTimeouts = new ArrayList<>();
+        private Runnable haObservationCompleted = () -> {};
 
         private FakeFlink(List<String> events) {
             this.events = events;
@@ -659,8 +793,24 @@ class ExecutablePhaseExecutorTest {
         }
 
         @Override
+        public FlinkJobObservation observe(FlinkJobHandle job, Duration timeout) throws IOException {
+            haTimeouts.add(timeout);
+            FlinkJobObservation result = observe(job);
+            haObservationCompleted.run();
+            return result;
+        }
+
+        @Override
         public FlinkJobObservation observe(FlinkJobHandle job) throws IOException {
             events.add("observe-job");
+            haJobs.add(job);
+            Object supplied = haObservations.poll();
+            if (supplied instanceof IOException failure) {
+                throw failure;
+            }
+            if (supplied instanceof FlinkJobObservation observation) {
+                return observation;
+            }
             if (observeFailure != null) {
                 throw observeFailure;
             }

@@ -8,6 +8,8 @@ import org.savonitar.flink.stability.core.flink.FlinkScenarioControl;
 import org.savonitar.flink.stability.core.execution.plan.ExecutableScenarioPlan;
 import org.savonitar.flink.stability.runtime.api.TaskManagerActionTimeoutException;
 import org.savonitar.flink.stability.runtime.api.TaskManagerControl;
+import org.savonitar.flink.stability.runtime.api.FlinkHaControl;
+import org.savonitar.flink.stability.runtime.api.MonotonicDeadline;
 
 import java.io.IOException;
 import java.time.Duration;
@@ -16,6 +18,7 @@ import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.OptionalLong;
+import java.util.function.LongSupplier;
 
 /** Executes the compiler-approved v1 phase subset in exact document order. */
 public final class ExecutablePhaseExecutor {
@@ -46,6 +49,7 @@ public final class ExecutablePhaseExecutor {
     private final TaskManagerControl taskManagers;
     private final NetworkFaults networkFaults;
     private final PhaseSleeper sleeper;
+    private final LongSupplier nanoTime;
 
     public ExecutablePhaseExecutor(
             FlinkScenarioControl flink,
@@ -59,10 +63,20 @@ public final class ExecutablePhaseExecutor {
             TaskManagerControl taskManagers,
             NetworkFaults networkFaults,
             PhaseSleeper sleeper) {
+        this(flink, taskManagers, networkFaults, sleeper, System::nanoTime);
+    }
+
+    ExecutablePhaseExecutor(
+            FlinkScenarioControl flink,
+            TaskManagerControl taskManagers,
+            NetworkFaults networkFaults,
+            PhaseSleeper sleeper,
+            LongSupplier nanoTime) {
         this.flink = Objects.requireNonNull(flink, "flink");
         this.taskManagers = Objects.requireNonNull(taskManagers, "taskManagers");
         this.networkFaults = Objects.requireNonNull(networkFaults, "networkFaults");
         this.sleeper = Objects.requireNonNull(sleeper, "sleeper");
+        this.nanoTime = Objects.requireNonNull(nanoTime, "nanoTime");
     }
 
     /** Injects one EndTxn fault at the proxy and reports what it did. */
@@ -133,6 +147,8 @@ public final class ExecutablePhaseExecutor {
             } else if (step instanceof ExecutableScenarioPlan.EndTxnFault fault) {
                 injectNetworkFault(
                         phaseIndex, phaseName, path, loopIterations, fault, evidence);
+            } else if (step instanceof ExecutableScenarioPlan.LeaderFault fault) {
+                faultLeader(phaseIndex, phaseName, path, loopIterations, job, fault, evidence);
             } else if (step instanceof ExecutableScenarioPlan.Loop loop) {
                 executeLoop(
                         phaseIndex,
@@ -463,6 +479,89 @@ public final class ExecutablePhaseExecutor {
         }
     }
 
+    private void faultLeader(
+            int phaseIndex, String phaseName, String path,
+            List<PhaseExecutionEvidence.LoopIteration> iterations,
+            FlinkJobHandle job, ExecutableScenarioPlan.LeaderFault fault, Recorder evidence) {
+        var request = fault.request();
+        MonotonicDeadline deadline = MonotonicDeadline.start(request.timeout(), nanoTime);
+        FlinkJobObservation.Attempt before = observe(job, deadline.remaining());
+        FlinkHaControl.LeaderFaultEvidence raw;
+        try {
+            if (before.observation().filter(observed -> observed.state() == FlinkJobState.RUNNING
+                    && observed.completedCheckpoints() > 0).isEmpty()) {
+                throw new IllegalStateException(
+                        "Leader fault requires a RUNNING job with a completed checkpoint");
+            }
+            if (!(taskManagers instanceof FlinkHaControl leaders)) {
+                throw new IllegalStateException("Runtime does not support leader faults");
+            }
+            Duration remainingBudget = deadline.remainingOrThrow(() -> new IllegalStateException(
+                    "Leader fault exhausted its deadline during the pre-fault job observation"));
+            raw = Objects.requireNonNull(leaders.faultLeader(request, remainingBudget), "leader fault evidence");
+        } catch (RuntimeException failure) {
+            raw = new FlinkHaControl.LeaderFaultEvidence(request,
+                    Optional.empty(), Optional.empty(), Optional.empty(), false, false,
+                    Optional.empty(), Optional.empty(), 0, 0, 0, 0, false,
+                    Optional.empty(), Optional.empty(), Optional.empty(),
+                    V1ScenarioExecutor.diagnostics(failure));
+        }
+        List<String> observationErrors = new ArrayList<>();
+        FlinkJobObservation.Attempt after = new FlinkJobObservation.Attempt(Optional.empty(),
+                Optional.of("Leader fault exhausted its recovery deadline"));
+        while (!deadline.remaining().isZero()) {
+            after = observe(job, deadline.remaining());
+            after.failure().ifPresent(observationErrors::add);
+            if (!raw.applied() || !raw.healed() || !raw.errors().isEmpty()
+                    || recoveredAfterLeadership(before, after)
+                    || after.observation().filter(observed -> observed.state().terminal()).isPresent()) {
+                break;
+            }
+            Duration remaining = deadline.remaining();
+            if (remaining.isZero()) {
+                break;
+            }
+            try {
+                sleeper.sleep(remaining.compareTo(Duration.ofMillis(250)) < 0
+                        ? remaining : Duration.ofMillis(250));
+            } catch (InterruptedException interrupted) {
+                Thread.currentThread().interrupt();
+                observationErrors.add("InterruptedException: leader recovery observation interrupted");
+                after = new FlinkJobObservation.Attempt(Optional.empty(),
+                        Optional.of("Leader recovery observation interrupted"));
+                break;
+            }
+        }
+        evidence.leaderFaults.add(new PhaseExecutionEvidence.LeaderFault(
+                path, iterations, job.jobId(), before, after, raw, observationErrors));
+        // Missing effect evidence is evaluated after the data oracle, never used to skip it.
+        evidence.steps.add(new PhaseExecutionEvidence.StepEvidence(
+                phaseIndex, phaseName, path, iterations, PhaseExecutionEvidence.StepKind.LEADER_FAULT,
+                raw.errors().isEmpty() ? PhaseExecutionEvidence.StepStatus.SUCCEEDED
+                        : PhaseExecutionEvidence.StepStatus.FAILED,
+                "mode=" + request.mode() + " applied=" + raw.applied() + " healed=" + raw.healed()));
+    }
+
+    private FlinkJobObservation.Attempt observe(FlinkJobHandle job, Duration timeout) {
+        try {
+            return new FlinkJobObservation.Attempt(
+                    Optional.of(flink.observe(job, timeout)), Optional.empty());
+        } catch (IOException | RuntimeException failure) {
+            return new FlinkJobObservation.Attempt(Optional.empty(), Optional.of(
+                    String.join("; caused by ", V1ScenarioExecutor.diagnostics(failure))));
+        }
+    }
+
+    private static boolean recoveredAfterLeadership(
+            FlinkJobObservation.Attempt before, FlinkJobObservation.Attempt after) {
+        return after.observation().filter(observed ->
+                (observed.state() == FlinkJobState.RUNNING || observed.state() == FlinkJobState.FINISHED)
+                        && observed.restoredCheckpoints() > 0
+                        && observed.latestRestore().isPresent()
+                        && !observed.latestRestore().equals(before.observation()
+                                .flatMap(FlinkJobObservation::latestRestore))).isPresent();
+    }
+
     private void executeLoop(
             int phaseIndex,
             String phaseName,
@@ -551,9 +650,10 @@ public final class ExecutablePhaseExecutor {
         private final List<PhaseExecutionEvidence.TaskManagerKill> kills = new ArrayList<>();
         private final List<PhaseExecutionEvidence.NetworkFault> networkFaults = new ArrayList<>();
         private final List<PhaseExecutionEvidence.TaskManagerRestart> restarts = new ArrayList<>();
+        private final List<PhaseExecutionEvidence.LeaderFault> leaderFaults = new ArrayList<>();
 
         private PhaseExecutionEvidence snapshot() {
-            return new PhaseExecutionEvidence(steps, kills, networkFaults, restarts);
+            return new PhaseExecutionEvidence(steps, kills, networkFaults, restarts, leaderFaults);
         }
     }
 }

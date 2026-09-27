@@ -1,0 +1,9 @@
+format: v1
+kind: expected-result
+
+meta:
+  name: ha-eos-control.expected
+  scenario: ha-eos-control
+
+default:
+  outcome: pass

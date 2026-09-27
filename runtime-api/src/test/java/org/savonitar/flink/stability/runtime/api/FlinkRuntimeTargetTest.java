@@ -3,6 +3,8 @@ package org.savonitar.flink.stability.runtime.api;
 import org.junit.jupiter.api.Test;
 
 import java.util.List;
+import java.util.Optional;
+import java.time.Duration;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
@@ -12,6 +14,41 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class FlinkRuntimeTargetTest {
     private static final String IMAGE_ID = "sha256:" + "a".repeat(64);
+
+    @Test
+    void haAndTokenConfigurationSurviveEveryTargetWither() {
+        var ha = new FlinkRuntimeTarget.HighAvailability("zookeeper:3.9.3", Duration.ofSeconds(6));
+        var tokens = new FlinkRuntimeTarget.TokenProvider(
+                Duration.ofSeconds(2), Optional.of(Duration.ofSeconds(3)));
+        var jar = new FlinkRuntimeTarget.RuntimeJar("/opt/flink/lib/flink-dist-2.4-SNAPSHOT.jar", "d".repeat(64));
+        FlinkRuntimeTarget configured = target().withHighAvailability(ha).withTokenProvider(tokens)
+                .withTaskManagers(2).withExpectedImageId(IMAGE_ID).withExpectedRuntimeJar(jar);
+        assertEquals(1, target().jobManagers());
+        assertEquals(2, configured.jobManagers());
+        assertEquals(ha, configured.highAvailability().orElseThrow());
+        assertEquals(tokens, configured.tokenProvider().orElseThrow());
+        assertEquals(configured, target().withExpectedRuntimeJar(jar).withExpectedImageId(IMAGE_ID)
+                .withTaskManagers(2).withTokenProvider(tokens).withHighAvailability(ha));
+        assertThrows(IllegalArgumentException.class,
+                () -> new FlinkRuntimeTarget.TokenProvider(Duration.ofMillis(49)));
+        assertThrows(IllegalArgumentException.class,
+                () -> new FlinkRuntimeTarget.TokenProvider(Duration.ofMinutes(31)));
+    }
+
+    @Test
+    void tokenRetryBackoffIsOptionalAndExplicitValuesHaveBoundedDuration() {
+        assertTrue(new FlinkRuntimeTarget.TokenProvider(Duration.ofSeconds(2)).retryBackoff().isEmpty());
+        for (Duration backoff : List.of(Duration.ofSeconds(1), Duration.ofMinutes(5))) {
+            assertEquals(Optional.of(backoff), new FlinkRuntimeTarget.TokenProvider(
+                    Duration.ofSeconds(2), Optional.of(backoff)).retryBackoff());
+        }
+        for (Duration backoff : List.of(Duration.ofMillis(999), Duration.ofMinutes(5).plusMillis(1))) {
+            assertThrows(IllegalArgumentException.class, () -> new FlinkRuntimeTarget.TokenProvider(
+                    Duration.ofSeconds(2), Optional.of(backoff)));
+        }
+        assertThrows(NullPointerException.class,
+                () -> new FlinkRuntimeTarget.TokenProvider(Duration.ofSeconds(2), null));
+    }
 
     @Test
     void taskManagerCountIsImmutableAndSurvivesBothRuntimePins() {

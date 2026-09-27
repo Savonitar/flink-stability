@@ -1,0 +1,9 @@
+format: v1
+kind: expected-result
+
+meta:
+  name: ha-token-delay.expected
+  scenario: ha-token-delay
+
+default:
+  outcome: pass

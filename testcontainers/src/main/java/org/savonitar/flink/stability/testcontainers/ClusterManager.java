@@ -7,6 +7,8 @@ import org.savonitar.flink.stability.runtime.api.FlinkComponentRole;
 import org.savonitar.flink.stability.runtime.api.FlinkConnectorBundleInstallation;
 import org.savonitar.flink.stability.runtime.api.FlinkProcessWriteFenceEvidence;
 import org.savonitar.flink.stability.runtime.api.FlinkRuntimeTarget;
+import org.savonitar.flink.stability.runtime.api.FlinkHaControl;
+import org.savonitar.flink.stability.runtime.api.TokenServiceControl;
 import org.savonitar.flink.stability.runtime.api.KafkaProxyEndpoint;
 import org.savonitar.flink.stability.runtime.api.KafkaProxyTarget;
 import org.savonitar.flink.stability.runtime.api.KafkaRuntimeEndpoints;
@@ -16,7 +18,9 @@ import org.savonitar.flink.stability.runtime.api.TaskManagerControl;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.testcontainers.containers.Network;
+import org.testcontainers.Testcontainers;
 
+import java.io.IOException;
 import java.nio.file.Path;
 import java.time.Duration;
 import java.time.Instant;
@@ -46,6 +50,7 @@ public final class ClusterManager implements AutoCloseable {
     private final Path checkpointStorageRoot;
     private final FlinkFactoryProvider flinkFactoryProvider;
     private final KafkaRuntimeFactory kafkaRuntimeFactory;
+    private final HighAvailabilityFactory highAvailabilityFactory;
     private final LongSupplier monotonicNanos;
     private final LinkedHashMap<String, ComponentSlot> jobManagers = new LinkedHashMap<>();
     private final LinkedHashMap<String, ComponentSlot> taskManagers = new LinkedHashMap<>();
@@ -56,6 +61,10 @@ public final class ClusterManager implements AutoCloseable {
 
     private KafkaRuntimeCluster kafkaRuntime;
     private KroxyliciousProxy kafkaProxy;
+    private FlinkHaRuntime highAvailability;
+    private SyntheticTokenService tokenService;
+    private SyntheticTokenPlugin tokenPlugin;
+    private String standaloneRestEndpoint;
     private boolean flinkProcessWriteFenceStarted;
     private boolean cleanupStarted;
     private boolean networkClosed;
@@ -108,6 +117,18 @@ public final class ClusterManager implements AutoCloseable {
             KafkaRuntimeFactory kafkaRuntimeFactory,
             Path checkpointStorageRoot,
             LongSupplier monotonicNanos) {
+        this(network, ownsNetwork, flinkFactoryProvider, kafkaRuntimeFactory,
+                checkpointStorageRoot, monotonicNanos, FlinkHaRuntime::new);
+    }
+
+    ClusterManager(
+            Network network,
+            boolean ownsNetwork,
+            FlinkFactoryProvider flinkFactoryProvider,
+            KafkaRuntimeFactory kafkaRuntimeFactory,
+            Path checkpointStorageRoot,
+            LongSupplier monotonicNanos,
+            HighAvailabilityFactory highAvailabilityFactory) {
         this.network = Objects.requireNonNull(network, "network");
         this.ownsNetwork = ownsNetwork;
         this.checkpointStorageRoot = Objects.requireNonNull(
@@ -119,6 +140,7 @@ public final class ClusterManager implements AutoCloseable {
         this.kafkaRuntimeFactory = Objects.requireNonNull(
                 kafkaRuntimeFactory, "kafkaRuntimeFactory");
         this.monotonicNanos = Objects.requireNonNull(monotonicNanos, "monotonicNanos");
+        this.highAvailabilityFactory = Objects.requireNonNull(highAvailabilityFactory, "highAvailabilityFactory");
     }
 
     /** Starts Kafka without creating topics or producing input. */
@@ -155,22 +177,46 @@ public final class ClusterManager implements AutoCloseable {
         }
     }
 
-    /** Starts one JobManager and every declared named TaskManager. */
+    /** Starts the declared JobManagers and TaskManagers with one shared attempt namespace. */
     public synchronized String startFlink(FlinkRuntimeTarget runtimeTarget) {
         validateFlinkStart(runtimeTarget);
-        FlinkComponentFactory candidateFactory = createFlinkFactory(runtimeTarget);
         LinkedHashMap<String, ComponentSlot> candidateJobManagers = new LinkedHashMap<>();
         LinkedHashMap<String, ComponentSlot> candidateTaskManagers = new LinkedHashMap<>();
         String candidateRestUrl;
 
         try {
-            ComponentSlot jobManager = new ComponentSlot(
-                    PRIMARY_JOB_MANAGER,
-                    FlinkComponentRole.JOB_MANAGER,
-                    runtimeTarget,
-                    () -> candidateFactory.newJobManager(PRIMARY_JOB_MANAGER));
-            candidateJobManagers.put(PRIMARY_JOB_MANAGER, jobManager);
-            record(jobManager.start());
+            if (runtimeTarget.tokenProvider().isPresent()) {
+                tokenPlugin = new SyntheticTokenPlugin();
+                try {
+                    tokenService = SyntheticTokenService.start(runtimeTarget.tokenProvider()
+                            .orElseThrow().renewalInterval().multipliedBy(2));
+                } catch (IOException failure) {
+                    throw new IllegalStateException("Could not start synthetic token fixture", failure);
+                }
+                Testcontainers.exposeHostPorts(tokenService.port());
+            }
+            if (runtimeTarget.highAvailability().isPresent()) {
+                highAvailability = highAvailabilityFactory.create(network,
+                        runtimeTarget.highAvailability().orElseThrow(), monotonicNanos);
+                highAvailability.start();
+            }
+            FlinkComponentFactory candidateFactory = createFlinkFactory(runtimeTarget);
+            if (highAvailability != null) {
+                candidateFactory.configureHighAvailability(highAvailability);
+            }
+            if (tokenService != null) {
+                candidateFactory.configureTokenProvider(tokenPlugin, tokenService.port());
+            }
+            for (int index = 1; index <= runtimeTarget.jobManagers(); index++) {
+                String name = "jobmanager-" + index;
+                ComponentSlot jobManager = new ComponentSlot(name, FlinkComponentRole.JOB_MANAGER,
+                        runtimeTarget, () -> candidateFactory.newJobManager(name));
+                candidateJobManagers.put(name, jobManager);
+                record(jobManager.start());
+                if (highAvailability != null) {
+                    highAvailability.register(name, jobManager.handle);
+                }
+            }
 
             for (int index = 0; index < runtimeTarget.taskManagers(); index++) {
                 String name = "taskmanager-" + (index + 1);
@@ -183,8 +229,10 @@ public final class ClusterManager implements AutoCloseable {
                 record(taskManager.start());
             }
 
-            int restPort = jobManager.mappedPort(FlinkContainer.JOB_MANAGER_PORT);
-            candidateRestUrl = "http://localhost:" + restPort;
+            int restPort = candidateJobManagers.get(PRIMARY_JOB_MANAGER)
+                    .mappedPort(FlinkContainer.JOB_MANAGER_PORT);
+            candidateRestUrl = highAvailability == null ? "http://localhost:" + restPort
+                    : highAvailability.restEndpoint(Duration.ofMinutes(2));
         } catch (RuntimeException failure) {
             cleanupSlots(candidateTaskManagers, failure);
             cleanupSlots(candidateJobManagers, failure);
@@ -195,12 +243,54 @@ public final class ClusterManager implements AutoCloseable {
 
         jobManagers.putAll(candidateJobManagers);
         taskManagers.putAll(candidateTaskManagers);
+        standaloneRestEndpoint = candidateRestUrl;
         LOG.info("Flink JobManager started at: {}", candidateRestUrl);
         LOG.info(
                 "Flink components: JobManagers={}, TaskManagers={}",
                 jobManagers.keySet(),
                 taskManagers.keySet());
         return candidateRestUrl;
+    }
+
+    public synchronized String currentFlinkRestEndpoint(Duration timeout) {
+        ensureOpen();
+        ensureFlinkStarted();
+        return highAvailability == null ? standaloneRestEndpoint : highAvailability.restEndpoint(timeout);
+    }
+
+    public synchronized FlinkHaControl.LeaderFaultEvidence faultLeader(
+            FlinkHaControl.LeaderFaultRequest request) {
+        return faultLeader(request, request.timeout());
+    }
+
+    public synchronized FlinkHaControl.LeaderFaultEvidence faultLeader(
+            FlinkHaControl.LeaderFaultRequest request, Duration remainingBudget) {
+        ensureOpen();
+        ensureFlinkProcessStartAllowed();
+        if (highAvailability == null) {
+            throw new IllegalStateException("JobManager leadership faults require ZooKeeper HA");
+        }
+        return highAvailability.fault(request, remainingBudget, new FlinkHaRuntime.JobManagerActions() {
+            @Override
+            public void kill(String name, ContainerOperationDeadline deadline) {
+                requireSlot(jobManagers, name).kill(deadline);
+            }
+
+            @Override
+            public ContainerHandle restart(String name, ContainerOperationDeadline deadline) {
+                ComponentSlot slot = requireSlot(jobManagers, name);
+                record(slot.startWithin(deadline));
+                return slot.handle;
+            }
+        }, Optional.ofNullable(tokenService));
+    }
+
+    public synchronized Optional<String> tokenPluginSha256() {
+        return Optional.ofNullable(tokenPlugin).map(SyntheticTokenPlugin::sha256);
+    }
+
+    public synchronized Optional<TokenServiceControl.Snapshot> tokenServiceEvidence() {
+        return Optional.ofNullable(tokenService).map(SyntheticTokenService::snapshot);
     }
 
     /** Kills only the named TaskManager; restart remains an explicit later operation. */
@@ -363,6 +453,21 @@ public final class ClusterManager implements AutoCloseable {
 
         RuntimeException failure = null;
         failure = stopFlink(failure);
+        if (tokenService != null) {
+            try {
+                tokenService.close();
+            } catch (RuntimeException tokenFailure) {
+                failure = appendFailure(failure, tokenFailure);
+            }
+        }
+        if (highAvailability != null) {
+            try {
+                highAvailability.close();
+                highAvailability = null;
+            } catch (RuntimeException haFailure) {
+                failure = appendFailure(failure, haFailure);
+            }
+        }
 
         if (kafkaProxy != null) {
             try {
@@ -438,7 +543,8 @@ public final class ClusterManager implements AutoCloseable {
     private void validateFlinkStart(FlinkRuntimeTarget runtimeTarget) {
         ensureFlinkProcessStartAllowed();
         Objects.requireNonNull(runtimeTarget, "runtimeTarget");
-        if (!jobManagers.isEmpty() || !taskManagers.isEmpty() || !pendingCleanup.isEmpty()) {
+        if (!jobManagers.isEmpty() || !taskManagers.isEmpty() || !pendingCleanup.isEmpty()
+                || highAvailability != null || tokenService != null) {
             throw new IllegalStateException("Flink has already been started");
         }
     }
@@ -617,6 +723,11 @@ public final class ClusterManager implements AutoCloseable {
         KafkaRuntimeCluster create(Network network, KafkaRuntimeTarget runtimeTarget);
     }
 
+    interface HighAvailabilityFactory {
+        FlinkHaRuntime create(Network network, FlinkRuntimeTarget.HighAvailability configuration,
+                              LongSupplier nanoTime);
+    }
+
     private final class ComponentSlot {
         private final String name;
         private final FlinkComponentRole role;
@@ -690,6 +801,7 @@ public final class ClusterManager implements AutoCloseable {
                     throw new IllegalStateException("Component did not remain running: " + name);
                 }
                 FlinkComponentProvisioningEvidence evidence = runtimeTarget.expectedRuntimeJar().isPresent()
+                        || runtimeTarget.tokenProvider().isPresent()
                         ? ContainerDriverCallBoundary.call(deadline, "verifying provisioning for " + name,
                                 candidate::provisioningEvidence)
                         : candidate.provisioningEvidence();

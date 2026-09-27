@@ -32,6 +32,8 @@ public record V1ScenarioExecutionResult(
         FlinkRuntimeIdentity.ExpectedTarget expectedFlinkRuntime,
         Optional<SubjectClassOrigins> runtimeClassOrigins,
         KafkaTransactionVersion.Selection kafkaTransactionVersion,
+        FlinkHaEvidence.Expected expectedHa,
+        Optional<FlinkHaEvidence.TokenEvidence> tokenEvidence,
         List<String> diagnostics) {
 
     public V1ScenarioExecutionResult {
@@ -56,6 +58,12 @@ public record V1ScenarioExecutionResult(
         expectedFlinkRuntime = Objects.requireNonNull(expectedFlinkRuntime, "expectedFlinkRuntime");
         runtimeClassOrigins = Objects.requireNonNull(runtimeClassOrigins, "runtimeClassOrigins");
         Objects.requireNonNull(kafkaTransactionVersion, "kafkaTransactionVersion");
+        Objects.requireNonNull(expectedHa, "expectedHa");
+        Objects.requireNonNull(tokenEvidence, "tokenEvidence");
+        if (status == Status.PASS && FlinkHaEvidence.evaluate(expectedHa, phaseEvidence, tokenEvidence, flinkProvisioningEvidence)
+                .outcome() != FlinkHaEvidence.Outcome.CONFIRMED) {
+            throw new IllegalArgumentException("PASS requires every requested leadership and token fault to be confirmed");
+        }
         if (status == Status.PASS && !kafkaTransactionVersion.permitsPass()) {
             throw new IllegalArgumentException("PASS requires confirmed requested Kafka transaction.version");
         }
@@ -125,6 +133,29 @@ public record V1ScenarioExecutionResult(
         }
     }
 
+    /** Existing non-HA callers still undergo all requested runtime identity checks. */
+    public V1ScenarioExecutionResult(
+            Status status, String reason, String message,
+            Optional<KafkaInputManifest> inputManifest,
+            Optional<PhaseExecutionEvidence> phaseEvidence,
+            Optional<FlinkTerminalWriteFence.Evidence> writeFenceEvidence,
+            Optional<FlinkProcessWriteFenceEvidence> processFenceEvidence,
+            Optional<FlinkJobObservation.Attempt> finalJobObservation,
+            Optional<KafkaIdSetValidationResult> terminalValidation,
+            Optional<KafkaTransactionListing> sinkTransactions,
+            Optional<SubjectClassOrigins> subjectClassOrigins,
+            List<FlinkComponentProvisioningEvidence> flinkProvisioningEvidence,
+            FlinkRuntimeIdentity.ExpectedTarget expectedFlinkRuntime,
+            Optional<SubjectClassOrigins> runtimeClassOrigins,
+            KafkaTransactionVersion.Selection kafkaTransactionVersion,
+            List<String> diagnostics) {
+        this(status, reason, message, inputManifest, phaseEvidence, writeFenceEvidence,
+                processFenceEvidence, finalJobObservation, terminalValidation, sinkTransactions,
+                subjectClassOrigins, flinkProvisioningEvidence, expectedFlinkRuntime,
+                runtimeClassOrigins, kafkaTransactionVersion,
+                new FlinkHaEvidence.Expected(List.of(), false), Optional.empty(), diagnostics);
+    }
+
     /** Existing callers do not supply runtime class evidence; requested checks still fail closed. */
     public V1ScenarioExecutionResult(
             Status status, String reason, String message,
@@ -166,6 +197,10 @@ public record V1ScenarioExecutionResult(
     public Optional<FlinkRuntimeIdentity> runtimeJarIdentity() {
         return FlinkRuntimeIdentity.evaluateRuntimeJar(
                 expectedFlinkRuntime, flinkProvisioningEvidence, runtimeClassOrigins);
+    }
+
+    public FlinkHaEvidence haEvidence() {
+        return FlinkHaEvidence.evaluate(expectedHa, phaseEvidence, tokenEvidence, flinkProvisioningEvidence);
     }
 
     public V1ScenarioExecutionResult withCleanupFailure(Throwable failure) {
@@ -213,6 +248,8 @@ public record V1ScenarioExecutionResult(
                     expectedFlinkRuntime,
                     runtimeClassOrigins,
                     kafkaTransactionVersion,
+                    expectedHa,
+                    tokenEvidence,
                     updated);
         }
         return new V1ScenarioExecutionResult(
@@ -231,6 +268,8 @@ public record V1ScenarioExecutionResult(
                 expectedFlinkRuntime,
                 runtimeClassOrigins,
                 kafkaTransactionVersion,
+                expectedHa,
+                tokenEvidence,
                 updated);
     }
 }

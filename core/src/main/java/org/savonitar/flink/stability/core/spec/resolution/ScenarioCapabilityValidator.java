@@ -40,10 +40,12 @@ final class ScenarioCapabilityValidator {
 
         JsonNode jobmanagers = document.at("/setup/flink/jobmanagers");
         if (jobmanagers.isIntegralNumber()
-                && jobmanagers.bigIntegerValue().compareTo(BigInteger.ONE) > 0) {
+                && jobmanagers.bigIntegerValue().compareTo(BigInteger.ONE) > 0
+                && !(document.at("/setup/flink").has("high_availability")
+                    && jobmanagers.bigIntegerValue().equals(BigInteger.TWO))) {
             issues.add(issue(source, scope, "capability.multiple-jobmanagers.unsupported",
                     "$/setup/flink/jobmanagers",
-                    "v1 supports exactly one JobManager, not " + jobmanagers));
+                    "Require one JobManager, or two with high_availability, not " + jobmanagers));
         }
 
         JsonNode jobs = document.at("/workload/jobs");

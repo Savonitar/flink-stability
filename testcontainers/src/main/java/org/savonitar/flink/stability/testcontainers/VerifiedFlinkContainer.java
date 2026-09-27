@@ -37,6 +37,8 @@ final class VerifiedFlinkContainer extends GenericContainer<VerifiedFlinkContain
     private ConnectorBundleVerification verification;
     private String verifiedImageId;
     private String runtimeJarContainerId;
+    private SyntheticTokenPlugin tokenPlugin;
+    private String tokenPluginContainerId;
 
     VerifiedFlinkContainer(
             DockerImageName image,
@@ -68,6 +70,25 @@ final class VerifiedFlinkContainer extends GenericContainer<VerifiedFlinkContain
         return resourceId;
     }
 
+    String advertisedAlias() {
+        return classLoadLog.process().replace('#', '-');
+    }
+
+    void installTokenPlugin(SyntheticTokenPlugin plugin) {
+        tokenPlugin = Objects.requireNonNull(plugin, "plugin");
+        withCopyToContainer(Transferable.of(plugin.bytes(), READ_ONLY_FILE_MODE),
+                SyntheticTokenPlugin.CONTAINER_PATH);
+    }
+
+    void verifyTokenPluginAfterStart(String containerId) {
+        if (tokenPlugin != null) {
+            if (!containerId.equals(tokenPluginContainerId)) {
+                throw new IllegalStateException("Token plugin has no stopped-container verification");
+            }
+            tokenPlugin.verify(this::readJarSha256);
+        }
+    }
+
     @Override
     protected void containerIsCreated(String containerId) {
         super.containerIsCreated(containerId);
@@ -77,6 +98,11 @@ final class VerifiedFlinkContainer extends GenericContainer<VerifiedFlinkContain
                 .inspectContainerCmd(id).exec().getImageId());
         verifyRuntimeJarBeforeStart(containerId, this::readJarSha256);
         verifyCopiedBundle(runtimeTarget.connectorBundle());
+        tokenPluginContainerId = null;
+        if (tokenPlugin != null) {
+            tokenPlugin.verify(this::readJarSha256);
+            tokenPluginContainerId = containerId;
+        }
     }
 
     /** Every create/retry must establish its own stopped-container observation. */

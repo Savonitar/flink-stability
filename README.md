@@ -53,6 +53,11 @@ Important properties of this boundary:
 - timeouts, partial evidence, cleanup failures, and validation failures have stable reason codes;
 - operational logs use stderr and the command result is emitted as one JSON document on stdout.
 
+The [HA and token fault guide](docs/HA-TOKEN-TESTING.md) describes the optional
+ZooKeeper-backed JobManager pair, current-leader kill/pause/isolation and the bundled
+synthetic delegation-token plugin. These have separate catalogs and evidence gates;
+they do not change the canonical recovery scenarios.
+
 Transaction feature selection is covered by Docker-free policy tests. Acceptance of
 the `1`/`2` transitions on a real Kafka 4.0 broker still requires container validation;
 declaring the setting is not proof that a transition is supported by that broker.

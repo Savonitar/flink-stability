@@ -1,0 +1,9 @@
+format: v1
+kind: expected-result
+
+meta:
+  name: ha-eos-kill.expected
+  scenario: ha-eos-kill
+
+default:
+  outcome: pass

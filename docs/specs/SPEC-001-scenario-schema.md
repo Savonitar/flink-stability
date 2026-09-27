@@ -519,8 +519,8 @@ Connector pull-request gating is the same mechanism with one axis:
   declare the intended count explicitly.
 - **R4.12** JobManager count greater than 1 requires Flink HA services
   (ZooKeeper or Kubernetes HA backend, HA storage, leader election). v1 permits
-  only 1, so an omitted `jobmanagers` resolves to 1 and a higher declared value
-  is rejected with `unsupported-capability: multiple-jobmanagers` before
+  1, or exactly 2 when `high_availability` is declared. An omitted `jobmanagers`
+  resolves to 1; unsupported counts are rejected before
   provisioning rather than silently starting a broken cluster.
 - **R4.13** Every v1 artifact has a **declared reference** (image reference,
   Maven coordinate where permitted, or local path) *and* a **resolved identity**
@@ -768,6 +768,38 @@ Connector pull-request gating is the same mechanism with one axis:
   R7.1c and R7.3b.
 
 ---
+
+### Executable HA and synthetic token service
+
+- **R4.13g** Optional `setup.flink.high_availability` declares `zookeeper_image`
+  (official `zookeeper:3.9.x`) and `session_timeout` (2–60 seconds). This mode requires
+  exactly two JobManagers and filesystem checkpoint storage. Both JobManagers and
+  all TaskManagers share the attempt's checkpoint and HA metadata storage. The
+  ZooKeeper namespace and every advertised JobManager incarnation are attempt-owned;
+  replacing a process must not reuse its physical endpoint identity.
+  Each JobManager reaches ZooKeeper through its own controllable TCP gate. Closing
+  a gate terminates existing connections and rejects new ones; token-service traffic
+  uses a separate path. Leader observations read ZooKeeper's published RM, dispatcher
+  and REST session/address records and bind them to the provisioned physical process.
+  A successful REST response alone is not leader evidence. REST leader resolution
+  consumes the request deadline and cannot redirect or automatically replay a POST.
+- **R4.13h** Optional `setup.flink.token_provider.renewal_interval` (1 second–5 minutes)
+  enables the bundled synthetic delegation-token provider/receiver plugin. Its JAR
+  lives only under `plugins/flink-stability-token/`, with verified bytes in each
+  process and observed plugin class sources. Tokens contain fixture identifiers,
+  not real credentials. Token lifetime is twice the interval and Flink's renewal
+  ratio is 0.5; this controls scheduled renewal, not an exact request-rate guarantee.
+  Optional `token_provider.retry_backoff` (1 second–5 minutes) sets the legacy
+  `security.delegation.tokens.renewal.retry.backoff` and newer
+  `security.delegation.tokens.renewal.retry.initial.backoff` / `retry.max.backoff`
+  keys to the same duration, making a fixed retry schedule explicit. Omission
+  preserves the runtime defaults. Controlled-backoff catalogs make no claim about
+  default or exponential-backoff behavior.
+  The local service records ordered initialization, request, issue, failure and
+  receipt events with process incarnation, mode/revision, token identity and clocks.
+  Event overflow or request saturation makes evidence incomplete. This fixture
+  exercises acquisition/distribution; it does not authenticate Kafka or implement
+  version-specific callback extensions to Flink's token SPI.
 
 ## 5. Workload / job configuration
 
@@ -1369,6 +1401,40 @@ Connector pull-request gating is the same mechanism with one axis:
   not show recovery. A scenario whose bounded input finishes before its kill, or
   whose TaskManager hosts no active subtask, therefore cannot pass, including as
   an expected-failure control (R8.7a).
+- **R6.12b** `leader_fault: { mode, duration, timeout, token_fault? }` is an atomic,
+  automatically healed HA operation. `mode` is `kill`, `pause`, or
+  `isolate-zookeeper`; the target is the observed current leader, never a guessed
+  logical slot. `duration` is positive and at most 2 minutes; `timeout` is longer
+  than the hold duration and at most 5 minutes. An optional `token_fault` has mode
+  `delay`, `fail`, or `linkage-error`; only `delay` requires a delay of 1 ms–30 s.
+  The token fault is armed before disrupting the leader and healed after the hold
+  interval, including failure paths. A token fault requires the declared fixture.
+  A kill recreates its logical slot, a pause resumes it, and isolation reopens its
+  ZooKeeper gate. All physical incarnations remain covered by runtime identity and
+  the final process fence.
+  The action timeout is shared by the initial job observation, fault work,
+  leadership discovery and the recovered-job observation. Safety healing
+  has independent budgets of 5 seconds for the token service and 30 seconds for
+  the process or gate. Both are attempted even after action timeout or failure of
+  the other heal. These budgets do not renew the leadership-observation deadline;
+  an expired observation cannot become a confirmed transfer through cleanup.
+  An invocation supports at most 100 leader faults after expanding loops. A pending
+  TaskManager kill must be healed before a leader fault; overlapping RM/TM loss is
+  not yet an executable combined operation.
+
+  Confirmation requires the same submitted job running after a completed checkpoint
+  before injection, observed target/process fault state, changed leadership sessions
+  on another physical JobManager, healing and subsequent recovery of that job.
+  The engine retains the fault's path/loop coordinates, physical identities,
+  leadership records, gate counts, timing, errors and before/after job observations.
+  Requested token faults additionally require a correlated request/outcome from the
+  new RM incarnation while the fault was active, followed by healthy issuance and
+  receipt. A delay's actual elapsed time must establish the requested delay; setting
+  a mode alone is insufficient. A failure response additionally requires the plugin
+  to acknowledge receiving the matching status/request/revision; a server-side
+  response attempt is not enough. Repeated faults require ordered, distinct transfer
+  and restore observations and append-only token traces. Missing proof prevents PASS and cannot hide a data
+  FAIL. Internal job restart count is evidence, not a maximum-one-restore guarantee.
 - **R6.13** A suite entry is `{ scenario, as?, parameters?, runs? }`. `as`
   defaults to the scenario name and is **required** when the same scenario
   appears more than once in a suite. `runs`, when present, is a positive integer
@@ -1806,7 +1872,7 @@ Connector pull-request gating is the same mechanism with one axis:
   exact and fail-closed: one plain scenario with `runs: 1`; one Kafka cluster
   containing exactly the distinct input and sink topics; one subject connector;
   one auto-started job with positive integer parallelism whose Kafka sink is
-  `EXACTLY_ONCE` or `AT_LEAST_ONCE`; one JobManager and 1–16 TaskManagers
+  `EXACTLY_ONCE` or `AT_LEAST_ONCE`; one JobManager (two with R4.13g HA) and 1–16 TaskManagers
   (`runner.flink.taskmanager-count-unsupported` above that local resource bound);
   exactly two task slots per TaskManager, with parallelism no greater than their
   total capacity (`runner.workload.insufficient-task-slots` otherwise); no free-form
@@ -2290,7 +2356,7 @@ Use this catalogue as the checklist for optional v1 fields and patterns:
 | `completion_timeout` | `completion_timeout: 5m` | Bounded jobs legitimately need longer than the default `2m` to reach `FINISHED` before the Flink write fence. |
 | Kafka cluster `mode` | `mode: kraft` | Usually omit in v1; declared only when the author wants topology to be explicit. |
 | Kafka cluster `transaction_version` | `transaction_version: 1` | A controlled comparison requires an exact finalized Kafka transaction feature level before the workload starts. Only integer `1` or `2` is accepted; omission keeps the existing broker behavior. |
-| `setup.flink.jobmanagers` | `jobmanagers: 1` | Usually omit; declaring a value above 1 is rejected in v1. |
+| `setup.flink.jobmanagers` | `jobmanagers: 1` | Use exactly 2 with `high_availability`; other counts remain unsupported. |
 | `setup.flink.taskmanagers` | `taskmanagers: 3` | The scenario targets or requires a specific TaskManager pool size. |
 | Connector `runtime_dependencies` | `runtime_dependencies: []` | Required for a local primary and optional for a Maven primary. Presence selects explicit dependency mode; empty explicitly asserts a shaded/self-contained JAR. Omission selects Maven auto-POM mode and is invalid for local. |
 | Job `start` | `start: manual` | A phase intentionally starts the job later with a `start` step. |

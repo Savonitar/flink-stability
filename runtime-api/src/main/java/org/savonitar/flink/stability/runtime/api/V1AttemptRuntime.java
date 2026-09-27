@@ -2,9 +2,10 @@ package org.savonitar.flink.stability.runtime.api;
 
 import java.time.Duration;
 import java.util.List;
+import java.util.Optional;
 
 /** Infrastructure boundary owned by one isolated v1 attempt. */
-public interface V1AttemptRuntime extends TaskManagerControl, AutoCloseable {
+public interface V1AttemptRuntime extends TaskManagerControl, FlinkHaControl, AutoCloseable {
     KafkaRuntimeEndpoints startKafka(KafkaRuntimeTarget target);
 
     /**
@@ -24,6 +25,14 @@ public interface V1AttemptRuntime extends TaskManagerControl, AutoCloseable {
      * and replaced ones. Complete only after the process fence.
      */
     List<FlinkClassLoadLog> flinkClassLoadLogs();
+
+    default Optional<String> tokenPluginSha256() {
+        return Optional.empty();
+    }
+
+    default Optional<TokenServiceControl.Snapshot> tokenServiceEvidence() {
+        return Optional.empty();
+    }
 
     /**
      * Releases physical attempt infrastructure only. Implementations may read prepared artifact

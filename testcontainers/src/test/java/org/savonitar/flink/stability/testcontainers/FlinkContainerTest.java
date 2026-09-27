@@ -18,9 +18,11 @@ import org.testcontainers.containers.wait.strategy.LogMessageWaitStrategy;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.attribute.PosixFilePermission;
+import java.time.Duration;
 import java.util.List;
 import java.util.HashMap;
 import java.util.Map;
+import java.util.Optional;
 import java.util.function.Function;
 import java.util.concurrent.atomic.AtomicReference;
 
@@ -40,6 +42,40 @@ class FlinkContainerTest {
 
     @TempDir
     Path temporaryDirectory;
+
+    @Test
+    void explicitTokenRetryBackoffReachesEveryProcessAndOmissionPreservesRuntimeDefaults() {
+        for (Optional<Duration> backoff : List.of(Optional.<Duration>empty(), Optional.of(Duration.ofSeconds(3)))) {
+            FlinkRuntimeTarget target = emptyTarget().withTokenProvider(
+                    new FlinkRuntimeTarget.TokenProvider(Duration.ofSeconds(2), backoff));
+            FlinkContainer factory = new FlinkContainer(target, Network.SHARED,
+                    temporaryDirectory.resolve(backoff.isPresent() ? "fixed-backoff" : "default-backoff"));
+            factory.configureTokenProvider(new SyntheticTokenPlugin(), 1234);
+            List<GenericContainer<?>> processes = List.of(factory.createJobManager("jobmanager-1"),
+                    factory.createJobManager("jobmanager-2"), factory.createTaskManager("taskmanager-1"),
+                    factory.createJobManager("jobmanager-1"));
+            for (GenericContainer<?> process : processes) {
+                List<String> retries = process.getEnvMap().get("FLINK_PROPERTIES").lines()
+                        .filter(line -> line.startsWith("security.delegation.tokens.renewal.retry."))
+                        .toList();
+                assertEquals(backoff.isPresent() ? List.of(
+                        "security.delegation.tokens.renewal.retry.backoff: 3000 ms",
+                        "security.delegation.tokens.renewal.retry.initial.backoff: 3000 ms",
+                        "security.delegation.tokens.renewal.retry.max.backoff: 3000 ms") : List.of(), retries);
+            }
+        }
+    }
+
+    @Test
+    void tokenPluginVerificationWaitsForTaskManagerEntrypointWithoutRuntimeJarPin() {
+        FlinkRuntimeTarget target = emptyTarget()
+                .withTokenProvider(new FlinkRuntimeTarget.TokenProvider(Duration.ofSeconds(2)));
+        FlinkContainer factory = new FlinkContainer(target, Network.SHARED,
+                temporaryDirectory.resolve("token-readiness"));
+        VerifiedFlinkContainer taskManager = (VerifiedFlinkContainer) factory.createTaskManager("taskmanager-1");
+        assertTrue(target.expectedRuntimeJar().isEmpty());
+        assertInstanceOf(LogMessageWaitStrategy.class, taskManager.configuredWaitStrategy());
+    }
 
     @Test
     void taskManagerResourceIdsBindEachLogIncarnationAndStayUniqueAcrossAttempts() {
@@ -382,6 +418,9 @@ class FlinkContainerTest {
 
         // Testcontainers prepends its own generated alias; the harness aliases remain stable.
         assertTrue(jobManager.getNetworkAliases().contains("jobmanager-1"));
+        assertTrue(jobManager.getNetworkAliases().stream()
+                .noneMatch(alias -> alias.matches("jobmanager-1-[1-9][0-9]*")),
+                "Standalone execution must not reserve HA incarnation aliases");
         assertTrue(taskManager.getNetworkAliases().contains("taskmanager-2"));
         assertEquals(
                 "jobmanager-1", jobManager.getEnvMap().get("JOB_MANAGER_RPC_ADDRESS"));

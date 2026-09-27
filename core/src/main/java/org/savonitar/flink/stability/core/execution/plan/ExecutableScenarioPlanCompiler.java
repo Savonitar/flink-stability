@@ -58,7 +58,7 @@ public final class ExecutableScenarioPlanCompiler {
     /** The only terminal oracle the first runner executes. */
     static final String KAFKA_ID_SET = "kafka.id-set";
     private static final Set<String> SUPPORTED_STEP_KEYS = Set.of(
-            "await", "wait", "loop", "kill", "restart", "network_fault");
+            "await", "wait", "loop", "kill", "restart", "network_fault", "leader_fault");
     private static final BigInteger LONG_MAX = BigInteger.valueOf(Long.MAX_VALUE);
     private static final BigInteger INT_MAX = BigInteger.valueOf(Integer.MAX_VALUE);
 
@@ -142,6 +142,10 @@ public final class ExecutableScenarioPlanCompiler {
                 .map(runtimeTarget::withExpectedImageId).orElse(runtimeTarget);
         runtimeTarget = executablePlan.flink().expectedRuntimeJar()
                 .map(runtimeTarget::withExpectedRuntimeJar).orElse(runtimeTarget);
+        runtimeTarget = executablePlan.flink().highAvailability()
+                .map(runtimeTarget::withHighAvailability).orElse(runtimeTarget);
+        runtimeTarget = executablePlan.flink().tokenProvider()
+                .map(runtimeTarget::withTokenProvider).orElse(runtimeTarget);
         return new PreparedExecutableScenarioPlan(
                 preparedPlan,
                 executablePlan,
@@ -268,14 +272,7 @@ public final class ExecutableScenarioPlanCompiler {
         }
 
         ObjectNode flink = (ObjectNode) document.at("/setup/flink");
-        requireEqualInteger(
-                source,
-                flink.path("jobmanagers"),
-                1,
-                "$/setup/flink/jobmanagers",
-                "runner.flink.jobmanager-count-unsupported",
-                "The first runner requires exactly one JobManager",
-                issues);
+        HighAvailabilityPlanCompiler.validate(source, document, issues);
         requirePositiveInt(source, flink.path("taskmanagers"),
                 "$/setup/flink/taskmanagers", issues);
         if (flink.path("taskmanagers").bigIntegerValue().compareTo(
@@ -564,7 +561,7 @@ public final class ExecutableScenarioPlanCompiler {
                             true,
                             issues);
                 }
-                case "kill", "restart" -> { /* Validated together with per-target lifecycle. */ }
+                case "kill", "restart", "leader_fault" -> { /* Validated with their topology/lifecycle. */ }
                 case "network_fault" -> NetworkFaultCompiler.validateStep(
                         source, (ObjectNode) step.get(key), stepPath + "/network_fault",
                         inLoop, issues);
@@ -698,10 +695,12 @@ public final class ExecutableScenarioPlanCompiler {
         ExecutableScenarioPlan.FlinkCluster flink = new ExecutableScenarioPlan.FlinkCluster(
                 flinkNode.path("image").textValue(),
                 Optional.ofNullable(flinkNode.path("image_id").textValue()),
-                1, flinkNode.path("taskmanagers").intValue(),
+                flinkNode.path("jobmanagers").intValue(), flinkNode.path("taskmanagers").intValue(),
                 Optional.ofNullable(flinkNode.get("runtime_jar")).map(jar ->
                         new FlinkRuntimeTarget.RuntimeJar(jar.path("container_path").textValue(),
-                                jar.path("sha256").textValue())));
+                                jar.path("sha256").textValue())),
+                HighAvailabilityPlanCompiler.highAvailability(flinkNode),
+                HighAvailabilityPlanCompiler.tokenProvider(flinkNode));
         ExecutableScenarioPlan.GeneratedIntegerSequenceInput input =
                 new ExecutableScenarioPlan.GeneratedIntegerSequenceInput(
                         clusterAlias,
@@ -889,6 +888,8 @@ public final class ExecutableScenarioPlanCompiler {
                         step.path("restart").path("name").asText("taskmanager-1")));
             } else if (step.get("network_fault") instanceof ObjectNode networkFault) {
                 steps.add(NetworkFaultCompiler.step(networkFault));
+            } else if (step.has("leader_fault")) {
+                steps.add(HighAvailabilityPlanCompiler.fault(step.path("leader_fault")));
             } else if (step.get("loop") instanceof ObjectNode loop) {
                 steps.add(new ExecutableScenarioPlan.Loop(
                         loop.path("times").intValue(),

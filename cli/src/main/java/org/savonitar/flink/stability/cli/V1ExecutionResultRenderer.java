@@ -59,6 +59,8 @@ final class V1ExecutionResultRenderer {
         expectation.put("matched", verdict.matched());
 
         ObjectNode evidence = root.putObject("evidence");
+        FlinkHaEvidenceRenderer.render(evidence.putObject("flinkHa"), result.haEvidence(),
+                result.phaseEvidence().map(PhaseExecutionEvidence::leaderFaults).orElse(List.of()));
         var selection = result.kafkaTransactionVersion();
         ObjectNode transactionVersion = evidence.putObject("kafkaTransactionVersion");
         transactionVersion.put("status", selection.requested().isEmpty() ? "not-requested"

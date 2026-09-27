@@ -60,6 +60,9 @@ final class NetworkFaultCompiler {
         if (!listen.matches()
                 || Integer.parseInt(listen.group(2)) > 65_535 - BROKER_PORTS
                 || (JOB_MANAGER_HOST.equals(listen.group(1))
+                        || (document.at("/setup/flink").has("high_availability")
+                            && (listen.group(1).matches("jobmanager-[12](?:-[1-9][0-9]*)?")
+                                || listen.group(1).equals("flink-zookeeper")))
                         || TaskManagerLifecycleCompiler.isDeclaredTaskManager(listen.group(1),
                                 document.at("/setup/flink/taskmanagers").asInt()))
                 || clusterHost.equals(listen.group(1))) {

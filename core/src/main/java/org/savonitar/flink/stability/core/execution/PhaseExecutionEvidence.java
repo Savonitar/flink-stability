@@ -3,6 +3,7 @@ package org.savonitar.flink.stability.core.execution;
 import org.savonitar.flink.stability.core.execution.plan.ExecutableScenarioPlan;
 import org.savonitar.flink.stability.core.flink.FlinkJobObservation;
 import org.savonitar.flink.stability.runtime.api.TaskManagerControl;
+import org.savonitar.flink.stability.runtime.api.FlinkHaControl;
 
 import java.time.Duration;
 import java.util.List;
@@ -20,7 +21,8 @@ public record PhaseExecutionEvidence(
         List<StepEvidence> steps,
         List<TaskManagerKill> taskManagerKills,
         List<NetworkFault> networkFaults,
-        List<TaskManagerRestart> taskManagerRestarts) {
+        List<TaskManagerRestart> taskManagerRestarts,
+        List<LeaderFault> leaderFaults) {
     public PhaseExecutionEvidence {
         steps = List.copyOf(Objects.requireNonNull(steps, "steps"));
         taskManagerKills = List.copyOf(Objects.requireNonNull(
@@ -28,6 +30,14 @@ public record PhaseExecutionEvidence(
         networkFaults = List.copyOf(Objects.requireNonNull(networkFaults, "networkFaults"));
         taskManagerRestarts = List.copyOf(Objects.requireNonNull(
                 taskManagerRestarts, "taskManagerRestarts"));
+        leaderFaults = List.copyOf(Objects.requireNonNull(leaderFaults, "leaderFaults"));
+    }
+
+    public PhaseExecutionEvidence(List<StepEvidence> steps,
+                                  List<TaskManagerKill> taskManagerKills,
+                                  List<NetworkFault> networkFaults,
+                                  List<TaskManagerRestart> taskManagerRestarts) {
+        this(steps, taskManagerKills, networkFaults, taskManagerRestarts, List.of());
     }
 
     public PhaseExecutionEvidence(List<StepEvidence> steps,
@@ -38,6 +48,32 @@ public record PhaseExecutionEvidence(
 
     public PhaseExecutionEvidence(List<StepEvidence> steps) {
         this(steps, List.of(), List.of());
+    }
+
+    /** Both observations query this same submitted job ID through the current REST leader. */
+    public record LeaderFault(
+            String path,
+            List<LoopIteration> loopIterations,
+            String jobId,
+            FlinkJobObservation.Attempt jobBefore,
+            FlinkJobObservation.Attempt jobAfter,
+            FlinkHaControl.LeaderFaultEvidence raw,
+            List<String> observationErrors) {
+        public LeaderFault {
+            path = requireNonBlank(path, "path");
+            loopIterations = List.copyOf(Objects.requireNonNull(loopIterations, "loopIterations"));
+            jobId = requireNonBlank(jobId, "jobId");
+            Objects.requireNonNull(jobBefore, "jobBefore");
+            Objects.requireNonNull(jobAfter, "jobAfter");
+            Objects.requireNonNull(raw, "raw");
+            observationErrors = List.copyOf(Objects.requireNonNull(observationErrors, "observationErrors"));
+        }
+
+        public LeaderFault(String path, List<LoopIteration> loopIterations, String jobId,
+                           FlinkJobObservation.Attempt jobBefore, FlinkJobObservation.Attempt jobAfter,
+                           FlinkHaControl.LeaderFaultEvidence raw) {
+            this(path, loopIterations, jobId, jobBefore, jobAfter, raw, List.of());
+        }
     }
 
     /**
@@ -254,7 +290,8 @@ public record PhaseExecutionEvidence(
         WAIT,
         KILL_TASKMANAGER,
         RESTART_TASKMANAGER,
-        NETWORK_FAULT
+        NETWORK_FAULT,
+        LEADER_FAULT
     }
 
     public enum StepStatus {

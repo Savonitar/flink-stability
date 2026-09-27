@@ -83,6 +83,11 @@ public record ScenarioVerdict(Status status, String reason, String message, bool
             return unconfirmed(org.savonitar.flink.stability.core.execution.kafka.KafkaTransactionVersion.UNCONFIRMED,
                     "The expected failure lacks confirmed Kafka transaction.version selection");
         }
+        if (attempt.haEvidence().outcome() != FlinkHaEvidence.Outcome.CONFIRMED) {
+            return unconfirmed("flink.ha.effect-unconfirmed",
+                    "The expected failure lacks confirmed leadership or token evidence: "
+                            + attempt.haEvidence().detail());
+        }
         SubjectClassOrigins.Outcome origins = attempt.subjectClassOrigins()
                 .map(evidence -> evidence.outcome(
                         ExecutableScenarioPlan.PROTOCOL_V1_SUBJECT_ENTRY_CLASSES))

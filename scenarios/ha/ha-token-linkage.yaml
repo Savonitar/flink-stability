@@ -1,0 +1,89 @@
+format: v1
+kind: scenario
+
+meta:
+  name: ha-token-linkage
+  description: Bounded exactly-once workload with observed HA leadership and optional synthetic token faults.
+
+runs: 1
+health_retry_limit: 0
+
+setup:
+  kafka:
+    clusters:
+      main:
+        image: apache/kafka:4.0.0
+        brokers: 1
+        topics:
+          - name: input
+            partitions: 4
+            replication_factor: 1
+            input_source:
+              mode: generated
+              format: integer-sequence
+              # Four source subtasks at 100 ms per record keep 3000 records in flight
+              # for about 75 s. Fault effectiveness is verified from observed placement.
+              total: 3000
+          - name: output
+            partitions: 4
+            replication_factor: 1
+  flink:
+    image: flink:2.2.0
+    jobmanagers: 2
+    high_availability:
+      zookeeper_image: zookeeper:3.9.3
+      session_timeout: 6s
+    token_provider:
+      renewal_interval: 2s
+      retry_backoff: 2s
+    taskmanagers: 2
+
+subject:
+  connectors:
+    kafka:
+      artifact: maven:org.apache.flink:flink-connector-kafka:5.0.0-2.2
+
+workload:
+  jobs:
+    - alias: eos-job
+      jar: ./flink-job-generator/target/flink-job-generator.jar
+      connectors: [kafka]
+      parallelism: 4
+      source: { cluster: main, topic: input }
+      sink:
+        cluster: main
+        topic: output
+        delivery_guarantee: EXACTLY_ONCE
+        transactional_id_prefix: ha-token-linkage
+        transaction_id_naming_strategy: INCREMENTING
+      checkpointing:
+        interval: 1s
+        storage: { type: filesystem }
+        mode: EXACTLY_ONCE
+      program_args: [--processingDelayMs, "100"]
+
+phases:
+  - name: warmup
+    steps:
+      - await:
+          condition: { type: job-state, job: eos-job, state: RUNNING }
+          timeout: 2m
+          on_timeout: inconclusive
+      - await:
+          condition: { type: checkpoint-completed, job: eos-job, count: 1 }
+          timeout: 2m
+          on_timeout: fail
+  - name: leadership-recovery
+    steps:
+      - leader_fault:
+          mode: isolate-zookeeper
+          duration: 15s
+          timeout: 2m
+          token_fault:
+            mode: linkage-error
+
+terminal_validations:
+  - type: kafka.id-set
+    cluster: main
+    topic: output
+    expected: input-manifest

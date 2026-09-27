@@ -16,6 +16,8 @@ import org.testcontainers.containers.Network;
 
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.net.InetAddress;
+import java.net.ServerSocket;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
@@ -23,6 +25,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.concurrent.atomic.AtomicLong;
+import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -37,6 +40,39 @@ class ClusterManagerTest {
 
     @TempDir
     Path temporaryDirectory;
+
+    @Test
+    void failedStartupRetainsOwnedHaServicesAndRejectsRetryUntilAttemptCleanup() throws Exception {
+        AtomicInteger creations = new AtomicInteger();
+        var configuration = new FlinkRuntimeTarget.HighAvailability("zookeeper:3.9.3", Duration.ofSeconds(6));
+        try (var gate = new FlinkHaRuntime.TcpGate("127.0.0.1", 1)) {
+            int ownedPort = gate.port();
+            ClusterManager manager = new ClusterManager(Network.SHARED, false,
+                    (target, network, storage) -> { throw new IllegalStateException("flink-factory-failed"); },
+                    (network, target) -> { throw new AssertionError("Kafka is not needed"); },
+                    temporaryDirectory, System::nanoTime,
+                    (network, target, clock) -> {
+                        creations.incrementAndGet();
+                        return new FlinkHaRuntime(target, clock, unused -> Optional.empty(),
+                                Map.of("jobmanager-1", gate));
+                    });
+            try {
+                assertEquals("flink-factory-failed", assertThrows(IllegalStateException.class,
+                        () -> manager.startFlink(target().withHighAvailability(configuration))).getMessage());
+                assertThrows(IllegalStateException.class,
+                        () -> manager.startFlink(target().withHighAvailability(configuration)));
+                assertThrows(IllegalStateException.class, () -> manager.startFlink(target()));
+                assertEquals(1, creations.get());
+                assertFalse(gate.blocked());
+            } finally {
+                manager.close();
+            }
+            assertTrue(gate.blocked());
+            try (ServerSocket reclaimed = new ServerSocket(ownedPort, 1, InetAddress.getLoopbackAddress())) {
+                assertEquals(ownedPort, reclaimed.getLocalPort());
+            }
+        }
+    }
 
     @Test
     void namedRestartReplacesOnlyItsTaskManagerAndFenceCoversEverySlot() throws Exception {
