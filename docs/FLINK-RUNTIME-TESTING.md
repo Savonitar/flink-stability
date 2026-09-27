@@ -148,3 +148,22 @@ class sources in all three retained JVM logs. The wrong-hash control stopped bef
 Flink startup with `inconclusive / infrastructure.flink-start-failed`, no accepted Flink
 components, and both expected and actual hashes retained. The canonical scenario's faults,
 timing, load, and expected outcome were unchanged. This still does not exercise a Flink PR.
+
+The experimental 2.4 change passed the full JDK 21 suite with 708 Java tests and
+16 Python tests. On engine commit `f26d54d`, the unchanged `bounded-eos` scenario
+also passed on release 2.2.0 and a locally built, pinned 2.4-SNAPSHOT distribution.
+Both runs produced exactly 3,000 IDs, confirmed checkpoint recovery after an active
+TaskManager kill, and verified image, runtime JAR and class origins for the JobManager
+and both TaskManager incarnations. The candidate connector and workload were rebuilt
+against that distribution. The distribution build used unchanged production sources;
+its upstream tests were skipped. Source/build manifests and raw run evidence were
+retained locally.
+
+Both runs also logged `ProducerFencedException` from `KafkaCommitter` while recovering
+a transaction. The final data oracle found no missing or duplicate IDs. This component
+error remains unclassified; a passing data result does not explain it away.
+
+This pair demonstrates the exercised runtime compatibility and recovery path. A 2.2
+release control does not isolate regressions in a particular 2.4 change. No delegation
+tokens were obtained, so these runs provide no token renewal, burst, isolation or
+leadership-transition coverage.
