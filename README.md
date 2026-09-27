@@ -280,3 +280,8 @@ Licensed under the [Apache License 2.0](LICENSE).
 
 This is an independent personal project. It is not affiliated with or endorsed by the
 Apache Software Foundation; Apache Flink and Apache Kafka are trademarks of the ASF.
+
+The Flink REST client retains non-success HTTP response status and full error bodies
+in `evidence.flinkRest`, including errors recovered by deadline-bound GET retries.
+Retries share the existing deadline; submission/upload POSTs are never replayed.
+A successful retry does not close an unexplained component finding.
