@@ -206,7 +206,8 @@ class FlinkRuntimeIdentityTest {
                 new TaskManagerControl.Identity("taskmanager-1", "tm-2", "unrelated-resource"))) {
             var mutatedKill = new PhaseExecutionEvidence.TaskManagerKill(
                     secondKill.path(), secondKill.loopIterations(), secondKill.target(),
-                    secondKill.jobBeforeKill(), secondKill.jobManagerTimeAfterKill(),
+                    secondKill.jobBeforeKill(), secondKill.jobManagerTimeBeforeKill(),
+                    secondKill.jobManagerTimeAfterKill(),
                     Optional.of(contradictory));
             PhaseExecutionEvidence phases = new PhaseExecutionEvidence(original.steps(),
                     List.of(original.taskManagerKills().getFirst(), mutatedKill),
@@ -225,7 +226,8 @@ class FlinkRuntimeIdentityTest {
         var wrongLoopKill = new PhaseExecutionEvidence.TaskManagerKill(
                 kill.path(), List.of(new PhaseExecutionEvidence.LoopIteration(
                         "$/phases/0/steps/0", 2, 2)), kill.target(),
-                kill.jobBeforeKill(), kill.jobManagerTimeAfterKill(), kill.identity());
+                kill.jobBeforeKill(), kill.jobManagerTimeBeforeKill(),
+                kill.jobManagerTimeAfterKill(), kill.identity());
         for (var phases : List.of(
                 new PhaseExecutionEvidence(original.steps().reversed(), original.taskManagerKills(),
                         List.of(), original.taskManagerRestarts()),
@@ -391,7 +393,7 @@ class FlinkRuntimeIdentityTest {
             kills.add(new PhaseExecutionEvidence.TaskManagerKill(
                     killPath, restart.loopIterations(), restart.target(),
                     new FlinkJobObservation.Attempt(Optional.empty(), Optional.of("not sampled")),
-                    OptionalLong.empty(), restart.previousIdentity()));
+                    OptionalLong.empty(), OptionalLong.empty(), restart.previousIdentity()));
             steps.add(new PhaseExecutionEvidence.StepEvidence(0, "restore", killPath,
                     restart.loopIterations(), PhaseExecutionEvidence.StepKind.KILL_TASKMANAGER,
                     PhaseExecutionEvidence.StepStatus.SUCCEEDED, "killed"));

@@ -41,14 +41,15 @@ public record PhaseExecutionEvidence(
     }
 
     /**
-     * A confirmed process exit, its pre-kill job observation, and a JobManager clock sample
-     * requested after exit. Recovery events must follow that sample to prove post-kill timing.
+     * A confirmed process exit, its baseline job observation, and fresh JobManager clock samples
+     * requested after baseline/identity collection immediately before injection and after exit.
      */
     public record TaskManagerKill(
             String path,
             List<LoopIteration> loopIterations,
             String target,
             FlinkJobObservation.Attempt jobBeforeKill,
+            OptionalLong jobManagerTimeBeforeKill,
             OptionalLong jobManagerTimeAfterKill,
             Optional<TaskManagerControl.Identity> identity,
             Optional<String> identityFailure) {
@@ -58,6 +59,7 @@ public record PhaseExecutionEvidence(
                     loopIterations, "loopIterations"));
             target = requireNonBlank(target, "target");
             Objects.requireNonNull(jobBeforeKill, "jobBeforeKill");
+            Objects.requireNonNull(jobManagerTimeBeforeKill, "jobManagerTimeBeforeKill");
             Objects.requireNonNull(jobManagerTimeAfterKill, "jobManagerTimeAfterKill");
             Objects.requireNonNull(identity, "identity");
             Objects.requireNonNull(identityFailure, "identityFailure");
@@ -68,16 +70,20 @@ public record PhaseExecutionEvidence(
 
         public TaskManagerKill(String path, List<LoopIteration> loopIterations, String target,
                                FlinkJobObservation.Attempt jobBeforeKill,
+                               OptionalLong jobManagerTimeBeforeKill,
                                OptionalLong jobManagerTimeAfterKill,
                                Optional<TaskManagerControl.Identity> identity) {
-            this(path, loopIterations, target, jobBeforeKill, jobManagerTimeAfterKill,
+            this(path, loopIterations, target, jobBeforeKill,
+                    jobManagerTimeBeforeKill, jobManagerTimeAfterKill,
                     identity, Optional.empty());
         }
 
         public TaskManagerKill(String path, List<LoopIteration> loopIterations, String target,
                                FlinkJobObservation.Attempt jobBeforeKill,
+                               OptionalLong jobManagerTimeBeforeKill,
                                OptionalLong jobManagerTimeAfterKill) {
-            this(path, loopIterations, target, jobBeforeKill, jobManagerTimeAfterKill,
+            this(path, loopIterations, target, jobBeforeKill,
+                    jobManagerTimeBeforeKill, jobManagerTimeAfterKill,
                     Optional.empty());
         }
     }

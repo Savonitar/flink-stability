@@ -163,12 +163,14 @@ final class V1ExecutionResultRenderer {
                                         .filter(subtask -> subtask.taskManagerId()
                                                 .filter(identity.resourceId()::equals).isPresent())
                                         .forEach(subtask -> putSubtask(targetedSubtasks, subtask)));
-                        effect.failuresAfterKill().stream()
-                                .filter(failure -> failure.taskManagerId()
-                                        .filter(identity.resourceId()::equals).isPresent())
+                        effect.qualifyingTargetFailures().stream()
                                 .forEach(failure -> {
                                     ObjectNode matching = qualifyingFailures.addObject();
-                                    matching.put("taskManagerId", identity.resourceId());
+                                    matching.put("taskManagerId", failure.taskManagerId().orElse(null));
+                                    matching.put("targetResourceId", identity.resourceId());
+                                    matching.put("attribution", failure.taskManagerId()
+                                            .filter(identity.resourceId()::equals).isPresent()
+                                            ? "reporter" : "remote-transport");
                                     matching.put("timestampMillis", failure.timestampMillis());
                                     matching.put("exceptionName", failure.exceptionName());
                                     matching.put("rootCause", failure.rootCause());
@@ -181,11 +183,17 @@ final class V1ExecutionResultRenderer {
                 kill.put("activeSubtasksBeforeKill", before.activeSubtasks().size());
                 effect.restore().ifPresent(restore -> {
                     kill.put("restoredCheckpoint", restore.checkpointId());
+                    kill.put("restoredAtMillis", restore.restoredAtMillis());
+                    effect.kill().jobManagerTimeBeforeKill().ifPresent(sample ->
+                            kill.put("restoredAfterPreInjectionMs",
+                                    restore.restoredAtMillis() - sample));
                     effect.kill().jobManagerTimeAfterKill().ifPresent(sample ->
                             kill.put("restoredAfterKillObservationMs",
                                     restore.restoredAtMillis() - sample));
                 });
             });
+            effect.kill().jobManagerTimeBeforeKill().ifPresent(sample ->
+                    kill.put("jobManagerTimeBeforeKill", sample));
             effect.kill().jobManagerTimeAfterKill().ifPresent(sample ->
                     kill.put("jobManagerTimeAfterKill", sample));
             kill.put("failuresAfterKill", effect.failuresAfterKill().size());

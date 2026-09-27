@@ -163,7 +163,7 @@ class ScenarioVerdictTest {
                         Optional.empty(), List.of(), List.of())), Optional.empty());
         PhaseExecutionEvidence phases = new PhaseExecutionEvidence(List.of(), List.of(
                 new PhaseExecutionEvidence.TaskManagerKill("$/phases/0/steps/0", List.of(),
-                        "taskmanager-1", finished, OptionalLong.of(600),
+                        "taskmanager-1", finished, OptionalLong.of(550), OptionalLong.of(600),
                         Optional.of(new org.savonitar.flink.stability.runtime.api.TaskManagerControl.Identity(
                                 "taskmanager-1", "tm-1", "resource-1")))), List.of());
         V1ScenarioExecutionResult attempt = terminalAttempt(

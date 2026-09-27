@@ -1333,20 +1333,26 @@ Connector pull-request gating is the same mechanism with one axis:
      kill, or the final observation of item 2 for the last kill. Only values
      from the JobManager clock are compared with each other.
 
-  Immediately after confirmed process exit, the runner requests a fresh JobManager
-  time using a separate job-details call. This post-exit sample is a conservative
-  lower bound for accepted recovery evidence, not the timestamp of the kill.
-  Failures and restores must occur strictly after that sample; failures already
-  present in the pre-kill observation are excluded. Missing or reversed timing
-  evidence is unconfirmed. A failure detected between exit and sampling can
-  therefore be unconfirmed rather than attributed using an ambiguous time window.
-  A restore must also follow a matching host failure (equal millisecond timestamps
-  are accepted). Without a completed checkpoint, recovery requires a later
+  After the complete baseline observation and target-identity lookup, immediately
+  before injection, the runner requests fresh JobManager time using a separate
+  job-details call. It requests another sample after confirmed process exit. The
+  initial timestamp of the multi-call baseline is not an injection boundary. Both
+  samples must be available and ordered between the baseline and final observation
+  timestamps. Failures and restores must occur strictly after the fresh pre-injection
+  sample; failures and restore records already present in the baseline are excluded.
+  Effects detected during the kill, before the post-exit sample, remain eligible.
+  The post-exit sample retains proof of the completed injection's observation order;
+  neither sample is the precise instant of process death. Missing or reversed timing
+  evidence is unconfirmed. Events later than the final observation's initial clock
+  sample require a subsequent observation before they can confirm recovery.
+  A restore must also follow a matching target failure (equal millisecond timestamps
+  are accepted), and the observed restore count must increase. Without a completed
+  checkpoint, recovery requires a later
   `FINISHED` observation or an active execution attempt with a greater attempt
   number for a previously observed vertex/subtask; a failure alone proves no restart.
 
-  The effect is confirmed only when Flink recorded a qualifying new failure on the
-  exact targeted ResourceID that hosted a RUNNING subtask just before the kill,
+  The effect is confirmed only when Flink recorded a qualifying new failure attributed
+  to the exact targeted ResourceID that hosted a RUNNING subtask just before the kill,
   and either Flink restored a checkpoint after that failure
   (`checkpoint-restored`) or no checkpoint had completed before the kill and the
   later observation proves a restart (`restarted-without-checkpoint`). It is
@@ -1355,11 +1361,17 @@ Connector pull-request gating is the same mechanism with one axis:
   no required restore follows (`no-recovery-observed`), or when an observation
   or timing sample failed (`evidence-unavailable`). A job that is already failing
   over for another reason therefore does not confirm a kill that found no RUNNING
-  subtask on the target. A failure on a different TaskManager cannot confirm this
-  fault. Missing target identity is `evidence-unavailable`; retain the identity lookup
+  subtask on the target. Attribution requires either that exact reporting TaskManager
+  ID, or a `RemoteTransportException` cause matching Flink's complete `Connection
+  unexpectedly closed by remote task manager '... [ ResourceID ] '. This might indicate
+  that the remote task manager was lost.` diagnostic. Its bracketed ResourceID must
+  equal the complete targeted incarnation, and the reporting peer must also have
+  hosted a RUNNING subtask in the baseline. Generic peer failures, partial ID matches,
+  truncated causes and arbitrary mentions of the target do not qualify. Missing target
+  identity is `evidence-unavailable`; retain the identity lookup
   error, if any, without blocking healing/fencing. No inference from all
   observed hosts or from a Docker ID masquerading as a ResourceID is allowed. Each observation has one fixed internal `30s` deadline; its failure is recorded as
-  evidence and never blocks the kill or the process fence. The post-exit clock
+  evidence and never blocks the kill or the process fence. Each clock
   request has its own fixed internal `30s` deadline; its failure leaves timing
   evidence unavailable and does not skip the subsequent restart.
 
@@ -1700,10 +1712,16 @@ Connector pull-request gating is the same mechanism with one axis:
   entry per confirmed kill: step path and loop iterations, target, effect outcome,
   whether it is confirmed, job state, checkpoint and active-subtask counts before
   the kill, the exact target container and ResourceID when available, the targeted
-  RUNNING subtasks and matching host failures with their identities/timestamps,
-  `jobManagerTimeAfterKill` when available, the restored checkpoint and
-  `restoredAfterKillObservationMs` measured from that post-exit time sample,
-  the failures recorded after the kill, and a one-sentence detail. The R7.1c sink
+  RUNNING subtasks and qualifying target failures with their actual reporting
+  `taskManagerId`, separate `targetResourceId`, timestamps and `attribution`
+  (`reporter` or `remote-transport`). It retains `jobManagerTimeBeforeKill` and
+  `jobManagerTimeAfterKill` when available, the restored checkpoint,
+  `restoredAtMillis`, and `restoredAfterPreInjectionMs` measured from the fresh
+  pre-injection sample. The retained `restoredAfterKillObservationMs` is a signed
+  delta from the post-exit sample and can be negative for recovery during injection.
+  `failuresAfterKill` counts new failures in the accepted observation interval after
+  the pre-injection sample, not only those after confirmed exit. A one-sentence
+  detail explains the effect. The R7.1c sink
   transaction listing appears as `evidence.sinkTransactions`: `listed` with the
   prefix, the total, and each unresolved transaction, or `not-listed`. Input
   evidence names `complete` or `partial` status and reconciliation completion

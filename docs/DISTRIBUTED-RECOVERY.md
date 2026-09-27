@@ -67,12 +67,21 @@ The single-TM restart shorthand remains supported. Named image upgrades are not 
 Every container incarnation receives its own Flink ResourceID. Kill evidence binds
 the logical target to that ResourceID and its actual Docker runtime ID. A successful
 kill alone is insufficient: before injection, REST must show a RUNNING subtask on
-that exact ResourceID; afterward it must show a new failure on that ResourceID and
-the required checkpoint restore or restart. An unrelated failure on another TM,
-or a kill of an idle TM, cannot satisfy this check.
+that exact ResourceID. After the complete baseline and identity lookup, a fresh
+JobManager clock sample bounds injection; a second sample follows confirmed exit.
+A new failure and the required checkpoint restore or restart must follow the fresh
+pre-injection sample. A peer's complete Flink remote-connection-closed diagnostic
+can identify the killed ResourceID even when detected before the post-exit sample.
+The reporting peer must have hosted RUNNING work. Generic failures, partial/stale
+IDs, earlier events and a kill of an idle TM cannot satisfy this check.
 
 `evidence.taskManagerKills` records the target identity, matching subtask/failure
-observations and any identity lookup error.
+observations, both timing boundaries and any identity lookup error. Matching failures
+retain the actual reporter separately from the target ResourceID and attribution
+method. Restore evidence includes its timestamp and delta from the pre-injection
+sample; the retained delta from the post-exit sample can be negative. This revised
+attribution does not reclassify the original component findings or retroactively
+add a pre-injection sample to the recorded Docker runs.
 `evidence.taskManagerRestarts` records the old and replacement identities. Image,
 runtime-JAR and connector evidence still cover the provisioned processes, and the
 terminal fence must cover the latest incarnation in every logical slot. Missing

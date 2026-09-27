@@ -4,7 +4,10 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.savonitar.flink.stability.core.execution.PhaseExecutionEvidence;
+import org.savonitar.flink.stability.core.execution.TaskManagerKillEffect;
 import org.savonitar.flink.stability.runtime.api.Digests;
+import org.savonitar.flink.stability.runtime.api.TaskManagerControl;
 
 import java.io.IOException;
 import java.net.SocketTimeoutException;
@@ -17,6 +20,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.OptionalLong;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
@@ -313,6 +317,48 @@ class FlinkRestApiClientTest {
         assertEquals(Optional.empty(), observed.failures().getFirst().taskManagerId());
         assertEquals(Optional.empty(), observed.subtasks().getFirst().taskManagerId());
         assertTrue(observed.activeSubtasks().isEmpty());
+    }
+
+    @Test
+    void parsedPeerTransportCauseCanConfirmFirstRecoveryWithoutDeploymentRetries() throws Exception {
+        // Exact message from the retained distributed run's JM log, line4001. The original
+        // exception REST response was not retained; this reconstructs its documented entry shape.
+        String target = "flink-stability-taskmanager-2-1-6fc0d9a9-9fda-4d54-8c99-352bb2f1318b";
+        String peer = "flink-stability-taskmanager-1-1-acd3214c-9d1f-4b07-8d34-7f50ea24f7a0";
+        String type = "org.apache.flink.runtime.io.network.netty.exception.RemoteTransportException";
+        String cause = type + ": Connection unexpectedly closed by remote task manager "
+                + "'172.20.0.5/172.20.0.5:36917 [ " + target
+                + " ] '. This might indicate that the remote task manager was lost.";
+        assertEquals(295, cause.length());
+
+        for (boolean truncated : List.of(false, true)) {
+            String message = truncated ? cause.replace("172.20.0.5/", "x".repeat(300) + "/") : cause;
+            String exceptions = mapper.writeValueAsString(Map.of("exceptionHistory", Map.of("entries", List.of(
+                    Map.of("timestamp", 1_300, "exceptionName", type, "taskManagerId", peer,
+                            "stacktrace", message + "\n\tat org.apache.flink.X.y(X.java:1)\n")))));
+            Map<String, String> responses = Map.of(
+                    "/jobs/" + JOB_ID, "{\"state\":\"FINISHED\",\"now\":9000,\"vertices\":[]}",
+                    "/jobs/" + JOB_ID + "/checkpoints",
+                    "{\"counts\":{\"restored\":1,\"completed\":3},\"latest\":{\"restored\":{\"id\":2,\"restore_timestamp\":1400}}}",
+                    "/jobs/" + JOB_ID + "/exceptions?maxExceptions=20", exceptions);
+            var after = new FlinkRestApiClient(cannedTransport(responses), mapper)
+                    .observe(new FlinkJobHandle(JOB_ID));
+            assertEquals(truncated ? message.substring(0, 300) + "…" : cause,
+                    after.failures().getFirst().rootCause());
+            assertEquals(Optional.of(peer), after.failures().getFirst().taskManagerId());
+            var before = new FlinkJobObservation(1_000, FlinkJobState.RUNNING, 2, 0,
+                    Optional.empty(), List.of(), List.of(
+                            new FlinkJobObservation.Subtask("Source", 0, 0, "RUNNING", Optional.of(target)),
+                            new FlinkJobObservation.Subtask("Sink", 1, 0, "RUNNING", Optional.of(peer))));
+            var kill = new PhaseExecutionEvidence.TaskManagerKill(
+                    "$/phases/1/steps/0", List.of(), "taskmanager-2",
+                    new FlinkJobObservation.Attempt(Optional.of(before), Optional.empty()),
+                    OptionalLong.of(1_200), OptionalLong.of(1_500),
+                    Optional.of(new TaskManagerControl.Identity("taskmanager-2", "container-2", target)));
+            var effect = TaskManagerKillEffect.evaluate(List.of(kill), Optional.of(
+                    new FlinkJobObservation.Attempt(Optional.of(after), Optional.empty()))).getFirst();
+            assertEquals(!truncated, effect.outcome().confirmed());
+        }
     }
 
     @Test

@@ -700,7 +700,7 @@ class V1ScenarioExecutorTest {
                         "taskmanager-1",
                         new FlinkJobObservation.Attempt(
                                 Optional.of(job(1_000, FlinkJobState.FINISHED, 1, 0)),
-                                Optional.empty()), OptionalLong.of(1_500))),
+                                Optional.empty()), OptionalLong.of(1_250), OptionalLong.of(1_500))),
                 List.of());
         FlinkJobObservation.Attempt atFence = new FlinkJobObservation.Attempt(
                 Optional.of(job(2_000, FlinkJobState.FINISHED, 1, 0)), Optional.empty());
@@ -1998,7 +1998,7 @@ class V1ScenarioExecutorTest {
 
         @Override
         public long jobManagerTimeMillis(FlinkJobHandle job) {
-            events.add("post-kill-clock");
+            events.add("sample-jobmanager-time");
             return 1_500;
         }
 
