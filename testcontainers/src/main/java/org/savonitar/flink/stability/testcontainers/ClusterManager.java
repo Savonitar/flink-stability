@@ -44,6 +44,8 @@ public final class ClusterManager implements AutoCloseable {
     private static final Logger LOG = LoggerFactory.getLogger(ClusterManager.class);
     private static final String PRIMARY_JOB_MANAGER = "jobmanager-1";
     private static final Duration IDENTITY_TIMEOUT = Duration.ofSeconds(30);
+    private static final Duration PRE_FENCE_TELEMETRY_LIMIT = Duration.ofSeconds(10);
+    private static final Duration PRE_FENCE_LEADERSHIP_LIMIT = Duration.ofSeconds(5);
 
     private final Network network;
     private final boolean ownsNetwork;
@@ -57,6 +59,9 @@ public final class ClusterManager implements AutoCloseable {
     private final List<ComponentSlot> pendingCleanup = new ArrayList<>();
     private final List<FlinkComponentProvisioningEvidence> provisioningHistory =
             new ArrayList<>();
+    private final List<FlinkProcessWriteFenceEvidence.Observation> processObservations = new ArrayList<>();
+    private final List<FlinkProcessWriteFenceEvidence.Component> fencedProcesses = new ArrayList<>();
+    private boolean processObservationOverflow;
     private final List<FlinkComponentFactory> flinkFactories = new ArrayList<>();
 
     private KafkaRuntimeCluster kafkaRuntime;
@@ -232,7 +237,7 @@ public final class ClusterManager implements AutoCloseable {
             int restPort = candidateJobManagers.get(PRIMARY_JOB_MANAGER)
                     .mappedPort(FlinkContainer.JOB_MANAGER_PORT);
             candidateRestUrl = highAvailability == null ? "http://localhost:" + restPort
-                    : highAvailability.restEndpoint(Duration.ofMinutes(2));
+                    : highAvailability.initialRestEndpoint(Duration.ofMinutes(2));
         } catch (RuntimeException failure) {
             cleanupSlots(candidateTaskManagers, failure);
             cleanupSlots(candidateJobManagers, failure);
@@ -272,8 +277,8 @@ public final class ClusterManager implements AutoCloseable {
         }
         return highAvailability.fault(request, remainingBudget, new FlinkHaRuntime.JobManagerActions() {
             @Override
-            public void kill(String name, ContainerOperationDeadline deadline) {
-                requireSlot(jobManagers, name).kill(deadline);
+            public FlinkHaControl.ProcessState kill(String name, ContainerOperationDeadline deadline) {
+                return killDeclared(requireSlot(jobManagers, name), deadline);
             }
 
             @Override
@@ -302,7 +307,7 @@ public final class ClusterManager implements AutoCloseable {
         ensureOpen();
         ensureFlinkStarted();
         ComponentSlot slot = requireSlot(taskManagers, name);
-        String runtimeId = slot.kill(deadline);
+        String runtimeId = killDeclared(slot, deadline).runtimeId();
         LOG.info("Killed {} ({})", name, runtimeId);
         return runtimeId;
     }
@@ -359,6 +364,57 @@ public final class ClusterManager implements AutoCloseable {
         return List.copyOf(provisioningHistory);
     }
 
+    public synchronized Optional<FlinkHaControl.Observations> haObservations() {
+        return highAvailability == null ? Optional.empty() : Optional.of(highAvailability.observations(
+                flinkFactories.stream().flatMap(factory -> factory.haSessions().stream()).toList()));
+    }
+
+    public synchronized FlinkProcessWriteFenceEvidence.Observations processObservations() {
+        return new FlinkProcessWriteFenceEvidence.Observations(
+                processObservations, fencedProcesses, processObservationOverflow);
+    }
+
+    private FlinkHaControl.ProcessState killDeclared(ComponentSlot slot, ContainerOperationDeadline deadline) {
+        return slot.kill(deadline, stopped -> recordProcessState(slot,
+                FlinkProcessWriteFenceEvidence.Moment.AFTER_DECLARED_KILL, stopped));
+    }
+
+    private void recordProcessState(ComponentSlot slot, FlinkProcessWriteFenceEvidence.Moment moment,
+                                   FlinkHaControl.ProcessState state) {
+        recordProcessObservation(new FlinkProcessWriteFenceEvidence.Observation(slot.name(), slot.role(),
+                Optional.of(state.runtimeId()), moment, Instant.now(), Optional.of(state), false, Optional.empty()));
+    }
+
+    private void recordProcessObservation(FlinkProcessWriteFenceEvidence.Observation observation) {
+        if (processObservations.size() < FlinkProcessWriteFenceEvidence.Observations.LIMIT) {
+            processObservations.add(observation);
+        } else {
+            processObservationOverflow = true;
+        }
+    }
+
+    private void observeBeforeFence(ComponentSlot slot, ContainerOperationDeadline deadline) {
+        Optional<String> id = slot.physicalRuntimeId();
+        try {
+            if (slot.handle == null && id.isPresent()) {
+                recordProcessObservation(new FlinkProcessWriteFenceEvidence.Observation(slot.name(), slot.role(),
+                        id, FlinkProcessWriteFenceEvidence.Moment.BEFORE_FENCE, Instant.now(), Optional.empty(),
+                        true, Optional.of("Physical container was removed after its declared kill")));
+                return;
+            }
+            if (slot.handle == null) {
+                throw new IllegalStateException("No physical handle remains for " + slot.name());
+            }
+            recordProcessState(slot, FlinkProcessWriteFenceEvidence.Moment.BEFORE_FENCE,
+                    slot.handle.processState(deadline));
+        } catch (RuntimeException failure) {
+            recordProcessObservation(new FlinkProcessWriteFenceEvidence.Observation(slot.name(), slot.role(),
+                    id, FlinkProcessWriteFenceEvidence.Moment.BEFORE_FENCE, Instant.now(), Optional.empty(),
+                    failure instanceof com.github.dockerjava.api.exception.NotFoundException,
+                    Optional.of(failure.toString())));
+        }
+    }
+
     synchronized List<FlinkClassLoadLog> classLoadLogs() {
         return flinkFactories.stream().flatMap(factory -> factory.classLoadLogs().stream())
                 .distinct()
@@ -406,6 +462,28 @@ public final class ClusterManager implements AutoCloseable {
         List<ComponentSlot> jobManagerFenceSlots = fenceSlots(
                 jobManagers, FlinkComponentRole.JOB_MANAGER);
         List<FlinkProcessWriteFenceEvidence.Component> evidence = new ArrayList<>();
+        // Telemetry shares at most a quarter of the remaining physical fence budget, capped
+        // at ten seconds. Inspect processes first; leadership receives at most five seconds.
+        // An unavailable observer must not consume the deadline needed to stop writers.
+        Duration remaining = deadline.remaining("reserving pre-fence telemetry");
+        Duration telemetryBudget = remaining.dividedBy(4);
+        if (telemetryBudget.isZero()) telemetryBudget = Duration.ofNanos(1);
+        if (telemetryBudget.compareTo(PRE_FENCE_TELEMETRY_LIMIT) > 0) {
+            telemetryBudget = PRE_FENCE_TELEMETRY_LIMIT;
+        }
+        ContainerOperationDeadline telemetry = ContainerOperationDeadline.start(
+                "observing pre-fence process and leadership state", telemetryBudget, monotonicNanos);
+        taskManagerFenceSlots.forEach(slot -> observeBeforeFence(slot, telemetry));
+        jobManagerFenceSlots.forEach(slot -> observeBeforeFence(slot, telemetry));
+        if (highAvailability != null) {
+            try {
+                Duration leadershipBudget = telemetry.remaining("observing pre-fence leadership");
+                highAvailability.observeBeforeFence(leadershipBudget.compareTo(PRE_FENCE_LEADERSHIP_LIMIT) > 0
+                        ? PRE_FENCE_LEADERSHIP_LIMIT : leadershipBudget);
+            } catch (RuntimeException unavailable) {
+                highAvailability.preFenceObservationFailed(unavailable);
+            }
+        }
         RuntimeException failure = null;
         failure = killRunningSlotsForWriteFence(
                 taskManagerFenceSlots, deadline, evidence, failure);
@@ -647,7 +725,7 @@ public final class ClusterManager implements AutoCloseable {
         return result;
     }
 
-    private static RuntimeException killRunningSlotsForWriteFence(
+    private RuntimeException killRunningSlotsForWriteFence(
             List<ComponentSlot> slots,
             ContainerOperationDeadline deadline,
             List<FlinkProcessWriteFenceEvidence.Component> evidence,
@@ -655,7 +733,15 @@ public final class ClusterManager implements AutoCloseable {
         RuntimeException result = failure;
         for (ComponentSlot slot : slots) {
             try {
-                evidence.add(slot.killProcessForWriteFence(deadline));
+                FlinkProcessWriteFenceEvidence.Component component = slot.killProcessForWriteFence(deadline,
+                        stopped -> recordProcessState(slot,
+                                FlinkProcessWriteFenceEvidence.Moment.AFTER_FENCE_KILL, stopped));
+                evidence.add(component);
+                if (fencedProcesses.size() < FlinkProcessWriteFenceEvidence.Observations.LIMIT) {
+                    fencedProcesses.add(component);
+                } else {
+                    processObservationOverflow = true;
+                }
             } catch (RuntimeException componentFailure) {
                 result = appendFailure(result, componentFailure);
             }
@@ -817,20 +903,33 @@ public final class ClusterManager implements AutoCloseable {
             }
         }
 
-        String kill(ContainerOperationDeadline deadline) {
+        FlinkHaControl.ProcessState kill(ContainerOperationDeadline deadline,
+                java.util.function.Consumer<FlinkHaControl.ProcessState> observed) {
             ContainerHandle running = requireRunningWithin(deadline);
             String runtimeId = running.runtimeId();
-            running.killAndRemoveWithin(deadline);
+            FlinkHaControl.ProcessState stopped = running.killAndRemoveWithin(deadline, state -> {
+                if (!runtimeId.equals(state.runtimeId()) || state.running()) {
+                    throw new IllegalStateException("Kill returned no stopped state for " + runtimeId);
+                }
+                lastStoppedState = state;
+                observed.accept(state);
+            });
+            if (!runtimeId.equals(stopped.runtimeId()) || stopped.running()) {
+                throw new IllegalStateException("Kill returned no stopped state for " + runtimeId);
+            }
             // killAndRemoveWithin returns only after SIGKILL termination is confirmed and the
             // physical container is removed. Testcontainers clears its runtime ID during that
             // removal, so querying liveness on the removed handle is both redundant and invalid.
             handle = null;
             deadline.remaining("completing TaskManager removal for " + name);
-            return runtimeId;
+            return stopped;
         }
 
+        private FlinkHaControl.ProcessState lastStoppedState;
+
         FlinkProcessWriteFenceEvidence.Component killProcessForWriteFence(
-                ContainerOperationDeadline deadline) {
+                ContainerOperationDeadline deadline,
+                java.util.function.Consumer<FlinkHaControl.ProcessState> observed) {
             deadline.remaining("checking liveness for " + name);
             Optional<String> runtimeId = physicalRuntimeId();
             if (handle == null || !handle.isRunningWithin(deadline)) {
@@ -840,7 +939,11 @@ public final class ClusterManager implements AutoCloseable {
                         runtimeId,
                         FlinkProcessWriteFenceEvidence.Outcome.ALREADY_STOPPED);
             }
-            handle.killProcessForWriteFence(deadline);
+            lastStoppedState = handle.killProcessForWriteFence(deadline);
+            if (lastStoppedState.running() || !runtimeId.equals(Optional.of(lastStoppedState.runtimeId()))) {
+                throw new IllegalStateException("Fence kill returned no matching stopped state for " + name);
+            }
+            observed.accept(lastStoppedState);
             deadline.remaining("confirming process termination for " + name);
             if (handle.isRunningWithin(deadline)) {
                 throw new IllegalStateException(
@@ -855,7 +958,7 @@ public final class ClusterManager implements AutoCloseable {
 
         private Optional<String> physicalRuntimeId() {
             if (handle == null) {
-                return Optional.empty();
+                return Optional.ofNullable(lastStoppedState).map(FlinkHaControl.ProcessState::runtimeId);
             }
             try {
                 String runtimeId = handle.runtimeId();

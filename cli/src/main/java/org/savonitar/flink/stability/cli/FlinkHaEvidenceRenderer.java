@@ -10,6 +10,8 @@ import org.savonitar.flink.stability.runtime.api.TokenServiceControl;
 
 import java.util.List;
 import java.util.Locale;
+import java.util.LinkedHashMap;
+import java.util.Map;
 
 /** Retains the raw observations used to judge a leadership or synthetic token fault. */
 final class FlinkHaEvidenceRenderer {
@@ -17,11 +19,14 @@ final class FlinkHaEvidenceRenderer {
 
     static void render(ObjectNode node, FlinkHaEvidence evidence,
                        List<PhaseExecutionEvidence.LeaderFault> faults) {
-        node.put("status", evidence.expected().faults().isEmpty()
+        TokenTrace trace = new TokenTrace(node.putArray("tokenEvents"));
+        node.put("status", !evidence.expected().haRequired() && evidence.expected().faults().isEmpty()
                 && !evidence.expected().tokenProviderRequired() ? "not-requested"
                 : evidence.outcome().name().toLowerCase(Locale.ROOT));
         node.put("detail", evidence.detail());
+        node.put("haRequired", evidence.expected().haRequired());
         node.put("tokenProviderRequired", evidence.expected().tokenProviderRequired());
+        evidence.observations().ifPresent(value -> observations(node.putObject("observations"), value));
         ArrayNode requests = node.putArray("requestedFaults");
         evidence.expected().faults().forEach(fault -> {
             ObjectNode requested = requests.addObject();
@@ -51,9 +56,9 @@ final class FlinkHaEvidenceRenderer {
             observed.put("closedConnections", raw.closedConnections());
             observed.put("rejectedConnections", raw.rejectedConnections());
             observed.put("isolationActiveAfterHeal", raw.isolationActiveAfterHeal());
-            raw.tokensBefore().ifPresent(value -> snapshot(observed.putObject("tokensBefore"), value));
-            raw.tokensDuring().ifPresent(value -> snapshot(observed.putObject("tokensDuring"), value));
-            raw.tokensAfter().ifPresent(value -> snapshot(observed.putObject("tokensAfter"), value));
+            raw.tokensBefore().ifPresent(value -> trace.snapshot(observed.putObject("tokensBefore"), value));
+            raw.tokensDuring().ifPresent(value -> trace.snapshot(observed.putObject("tokensDuring"), value));
+            raw.tokensAfter().ifPresent(value -> trace.snapshot(observed.putObject("tokensAfter"), value));
             ArrayNode errors = observed.putArray("errors");
             raw.errors().forEach(errors::add);
         });
@@ -61,7 +66,7 @@ final class FlinkHaEvidenceRenderer {
             ObjectNode rendered = node.putObject("tokens");
             tokens.pluginSha256().ifPresent(value -> rendered.put("pluginSha256", value));
             rendered.put("containerPath", FlinkHaEvidence.TOKEN_CONTAINER_PATH);
-            tokens.snapshot().ifPresent(value -> snapshot(rendered.putObject("snapshot"), value));
+            tokens.snapshot().ifPresent(value -> trace.snapshot(rendered.putObject("snapshot"), value));
             tokens.origins().ifPresent(origins -> {
                 rendered.put("expectedSource", origins.expectedSource());
                 origins.failure().ifPresent(value -> rendered.put("classLoadFailure", value));
@@ -112,10 +117,44 @@ final class FlinkHaEvidenceRenderer {
         node.put("sessionId", identity.sessionId());
     }
 
-    private static void state(ObjectNode node, FlinkHaControl.ProcessState state) {
+    static void state(ObjectNode node, FlinkHaControl.ProcessState state) {
         node.put("runtimeId", state.runtimeId());
         node.put("running", state.running());
         node.put("paused", state.paused());
+        state.exitCode().ifPresent(value -> node.put("exitCode", value));
+        state.oomKilled().ifPresent(value -> node.put("oomKilled", value));
+        state.finishedAt().ifPresent(value -> node.put("finishedAt", value));
+    }
+
+    private static void observations(ObjectNode node, FlinkHaControl.Observations observations) {
+        node.put("coverage", "sampled");
+        node.put("overflow", observations.overflow());
+        ArrayNode history = node.putArray("leadership");
+        observations.leadership().forEach(sample -> {
+            ObjectNode item = history.addObject();
+            item.put("sequence", sample.sequence());
+            item.put("sampleCount", sample.sampleCount());
+            item.put("firstObservedAtMillis", sample.firstObservedAtMillis());
+            item.put("lastObservedAtMillis", sample.lastObservedAtMillis());
+            item.put("moment", sample.moment().name().toLowerCase(Locale.ROOT).replace('_', '-'));
+            sample.leadership().ifPresent(value -> leadership(item.putObject("leadership"), value));
+            sample.error().ifPresent(value -> item.put("error", value));
+        });
+        ArrayNode sessions = node.putArray("sessions");
+        observations.sessions().forEach(process -> {
+            ObjectNode item = sessions.addObject();
+            item.put("logicalName", process.logicalName());
+            item.put("role", process.role().name().toLowerCase(Locale.ROOT));
+            item.put("runtimeId", process.runtimeId());
+            item.put("classLoadProcess", process.classLoadProcess());
+            item.put("requestedTimeoutMillis", process.requestedTimeoutMillis());
+            item.put("overflow", process.overflow());
+            ArrayNode negotiated = item.putArray("negotiated");
+            process.negotiated().forEach(session -> negotiated.addObject()
+                    .put("sessionId", session.sessionId())
+                    .put("timeoutMillis", session.timeoutMillis())
+                    .put("logLine", session.logLine()));
+        });
     }
 
     private static void job(ObjectNode node, FlinkJobObservation.Attempt attempt) {
@@ -140,14 +179,40 @@ final class FlinkHaEvidenceRenderer {
         });
     }
 
-    private static void snapshot(ObjectNode node, TokenServiceControl.Snapshot snapshot) {
-        node.put("overflow", snapshot.overflow());
-        node.put("saturated", snapshot.saturated());
-        node.put("activeRequests", snapshot.activeRequests());
-        node.put("maxConcurrentRequests", snapshot.maxConcurrentRequests());
-        ArrayNode events = node.putArray("events");
-        snapshot.events().forEach(event -> {
-            ObjectNode item = events.addObject();
+    /** Full-value interning preserves conflicting events with the same sequence number. */
+    private static final class TokenTrace {
+        private final ArrayNode events;
+        private final Map<TokenServiceControl.Event, Integer> indices = new LinkedHashMap<>();
+
+        private TokenTrace(ArrayNode events) {
+            this.events = events;
+        }
+
+        private void snapshot(ObjectNode node, TokenServiceControl.Snapshot snapshot) {
+            node.put("overflow", snapshot.overflow());
+            node.put("saturated", snapshot.saturated());
+            node.put("activeRequests", snapshot.activeRequests());
+            node.put("maxConcurrentRequests", snapshot.maxConcurrentRequests());
+            node.put("eventCount", snapshot.events().size());
+            ArrayNode ranges = node.putArray("eventRanges");
+            ArrayNode range = null;
+            int previous = -2;
+            for (TokenServiceControl.Event event : snapshot.events()) {
+                int index = indices.computeIfAbsent(event, value -> {
+                    int next = events.size();
+                    event(events.addObject(), value);
+                    return next;
+                });
+                if (range == null || index != previous + 1) {
+                    range = ranges.addArray().add(index).add(index + 1);
+                } else {
+                    range.set(1, node.numberNode(index + 1));
+                }
+                previous = index;
+            }
+        }
+
+        private static void event(ObjectNode item, TokenServiceControl.Event event) {
             item.put("sequence", event.sequence());
             item.put("kind", event.kind().name().toLowerCase(Locale.ROOT));
             item.put("process", event.process());
@@ -159,6 +224,6 @@ final class FlinkHaEvidenceRenderer {
             item.put("mode", event.mode().name().toLowerCase(Locale.ROOT));
             event.tokenSequence().ifPresent(value -> item.put("tokenSequence", value));
             item.put("detail", event.detail());
-        });
+        }
     }
 }

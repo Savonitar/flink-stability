@@ -50,13 +50,19 @@ final class TestcontainersContainerHandle implements ContainerHandle {
     }
 
     @Override
-    public void killAndRemoveWithin(ContainerOperationDeadline deadline) {
-        lifecycle.killAndRemoveWithin(deadline);
+    public FlinkHaControl.ProcessState killAndRemoveWithin(ContainerOperationDeadline deadline) {
+        return lifecycle.killAndRemoveWithin(deadline);
     }
 
     @Override
-    public void killProcessForWriteFence(ContainerOperationDeadline deadline) {
-        lifecycle.killProcessForWriteFence(deadline);
+    public FlinkHaControl.ProcessState killAndRemoveWithin(ContainerOperationDeadline deadline,
+            java.util.function.Consumer<FlinkHaControl.ProcessState> observed) {
+        return lifecycle.killAndRemoveWithin(deadline, observed);
+    }
+
+    @Override
+    public FlinkHaControl.ProcessState killProcessForWriteFence(ContainerOperationDeadline deadline) {
+        return lifecycle.killProcessForWriteFence(deadline);
     }
 
     @Override
@@ -182,9 +188,15 @@ final class TestcontainersContainerHandle implements ContainerHandle {
             }
         }
 
-        void killAndRemoveWithin(ContainerOperationDeadline deadline) {
+        FlinkHaControl.ProcessState killAndRemoveWithin(ContainerOperationDeadline deadline) {
+            return killAndRemoveWithin(deadline, ignored -> {});
+        }
+
+        FlinkHaControl.ProcessState killAndRemoveWithin(ContainerOperationDeadline deadline,
+                java.util.function.Consumer<FlinkHaControl.ProcessState> observed) {
             ContainerOperationDeadline required = Objects.requireNonNull(deadline, "deadline");
-            killAndConfirmProcessTerminationWithin(required);
+            FlinkHaControl.ProcessState stopped = killAndConfirmProcessTerminationWithin(required);
+            observed.accept(stopped);
             ContainerDriverCallBoundary.run(
                     required,
                     "removing killed container " + runtimeId(),
@@ -193,10 +205,11 @@ final class TestcontainersContainerHandle implements ContainerHandle {
                             container.stop();
                         }
                     });
+            return stopped;
         }
 
-        void killProcessForWriteFence(ContainerOperationDeadline deadline) {
-            killAndConfirmProcessTerminationWithin(
+        FlinkHaControl.ProcessState killProcessForWriteFence(ContainerOperationDeadline deadline) {
+            return killAndConfirmProcessTerminationWithin(
                     Objects.requireNonNull(deadline, "deadline"));
         }
 
@@ -246,8 +259,13 @@ final class TestcontainersContainerHandle implements ContainerHandle {
                     || inspection.getState().getPaused() == null) {
                 throw new IllegalStateException("Docker returned incomplete process state for " + id);
             }
-            return new FlinkHaControl.ProcessState(id, inspection.getState().getRunning(),
-                    inspection.getState().getPaused());
+            var state = inspection.getState();
+            boolean running = state.getRunning();
+            return new FlinkHaControl.ProcessState(id, running, state.getPaused(),
+                    running ? Optional.empty() : Optional.ofNullable(state.getExitCodeLong()),
+                    Optional.ofNullable(state.getOOMKilled()),
+                    running ? Optional.empty() : Optional.ofNullable(state.getFinishedAt())
+                            .filter(value -> !value.isBlank()));
         }
 
         void pauseWithin(ContainerOperationDeadline deadline) {
@@ -294,7 +312,7 @@ final class TestcontainersContainerHandle implements ContainerHandle {
             return id;
         }
 
-        private void killAndConfirmProcessTerminationWithin(
+        private FlinkHaControl.ProcessState killAndConfirmProcessTerminationWithin(
                 ContainerOperationDeadline deadline) {
             if (pauseAttempted) {
                 resumeWithin(deadline);
@@ -309,7 +327,11 @@ final class TestcontainersContainerHandle implements ContainerHandle {
                         }
                     });
 
-            while (isRunningWithin(deadline)) {
+            while (true) {
+                FlinkHaControl.ProcessState observed = processState(deadline);
+                if (!observed.running()) {
+                    return observed;
+                }
                 Duration remaining = deadline.remaining(
                         "confirming process termination for " + containerId);
                 long sleepNanos = Math.min(

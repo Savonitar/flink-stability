@@ -13,6 +13,7 @@ import org.testcontainers.containers.GenericContainer;
 import org.testcontainers.containers.Network;
 import org.testcontainers.containers.wait.strategy.Wait;
 import org.testcontainers.utility.DockerImageName;
+import org.testcontainers.images.builder.Transferable;
 
 import java.io.ByteArrayInputStream;
 import java.io.IOException;
@@ -44,6 +45,18 @@ import java.util.function.Predicate;
 /** Attempt-owned HA infrastructure. Flink's own ZooKeeper records identify the elected process. */
 final class FlinkHaRuntime implements AutoCloseable {
     private static final Duration POLL_INTERVAL = Duration.ofMillis(100);
+    static final int MAX_LEADERSHIP_OBSERVATIONS = 4096;
+    static final String ZOOKEEPER_CONFIGURATION = """
+            tickTime=2000
+            dataDir=/data
+            dataLogDir=/datalog
+            clientPort=2181
+            initLimit=5
+            syncLimit=2
+            admin.enableServer=false
+            minSessionTimeout=2000
+            maxSessionTimeout=60000
+            """;
     private final FlinkRuntimeTarget.HighAvailability configuration;
     private final GenericContainer<?> zookeeper;
     private final String clusterId = "flink-stability-" + UUID.randomUUID();
@@ -52,6 +65,9 @@ final class FlinkHaRuntime implements AutoCloseable {
     private final LongSupplier nanoTime;
     private final Function<ContainerOperationDeadline, Optional<FlinkHaControl.Leadership>> leadershipReader;
     private ZooKeeper observer;
+    private final List<FlinkHaControl.LeadershipObservation> observations = new ArrayList<>();
+    private long observationSequence;
+    private boolean observationOverflow;
 
     FlinkHaRuntime(Network network, FlinkRuntimeTarget.HighAvailability configuration,
                    LongSupplier nanoTime) {
@@ -60,6 +76,7 @@ final class FlinkHaRuntime implements AutoCloseable {
         leadershipReader = this::observeZooKeeper;
         zookeeper = new GenericContainer<>(DockerImageName.parse(configuration.zookeeperImage()))
                 .withNetwork(network).withNetworkAliases("flink-zookeeper")
+                .withCopyToContainer(Transferable.of(ZOOKEEPER_CONFIGURATION, 0444), "/conf/zoo.cfg")
                 .withExposedPorts(2181).waitingFor(Wait.forListeningPort()
                         .withStartupTimeout(Duration.ofMinutes(2)));
     }
@@ -136,9 +153,33 @@ final class FlinkHaRuntime implements AutoCloseable {
     }
 
     String restEndpoint(Duration timeout) {
+        return restEndpoint(timeout, FlinkHaControl.ObservationMoment.ROUTING);
+    }
+
+    String initialRestEndpoint(Duration timeout) {
+        return restEndpoint(timeout, FlinkHaControl.ObservationMoment.INITIAL);
+    }
+
+    private String restEndpoint(Duration timeout, FlinkHaControl.ObservationMoment moment) {
         ContainerOperationDeadline deadline = deadline(timeout);
-        FlinkHaControl.Leadership leadership = awaitLeadership(deadline, ignored -> true);
+        FlinkHaControl.Leadership leadership = awaitLeadership(deadline, ignored -> true, moment);
         return process(leadership.restServer()).restEndpoint();
+    }
+
+    void observeBeforeFence(Duration timeout) {
+        try {
+            awaitLeadership(deadline(timeout), ignored -> true, FlinkHaControl.ObservationMoment.PRE_FENCE);
+        } catch (RuntimeException failure) {
+            record(FlinkHaControl.ObservationMoment.PRE_FENCE, Optional.empty(), Optional.of(diagnostic(failure)));
+        }
+    }
+
+    void preFenceObservationFailed(RuntimeException failure) {
+        record(FlinkHaControl.ObservationMoment.PRE_FENCE, Optional.empty(), Optional.of(diagnostic(failure)));
+    }
+
+    synchronized FlinkHaControl.Observations observations(List<FlinkHaControl.SessionEvidence> sessions) {
+        return new FlinkHaControl.Observations(observations, sessions, observationOverflow);
     }
 
     private ContainerOperationDeadline deadline(Duration timeout) {
@@ -151,10 +192,11 @@ final class FlinkHaRuntime implements AutoCloseable {
     }
 
     private FlinkHaControl.Leadership awaitLeadership(
-            ContainerOperationDeadline deadline, Predicate<FlinkHaControl.Leadership> accept) {
+            ContainerOperationDeadline deadline, Predicate<FlinkHaControl.Leadership> accept,
+            FlinkHaControl.ObservationMoment moment) {
         while (true) {
             deadline.remaining("observing elected leadership");
-            Optional<FlinkHaControl.Leadership> observed = observe(deadline);
+            Optional<FlinkHaControl.Leadership> observed = observe(deadline, moment);
             if (observed.isPresent() && accept.test(observed.orElseThrow())) {
                 return observed.orElseThrow();
             }
@@ -162,8 +204,38 @@ final class FlinkHaRuntime implements AutoCloseable {
         }
     }
 
-    private Optional<FlinkHaControl.Leadership> observe(ContainerOperationDeadline deadline) {
-        return leadershipReader.apply(deadline);
+    private Optional<FlinkHaControl.Leadership> observe(
+            ContainerOperationDeadline deadline, FlinkHaControl.ObservationMoment moment) {
+        try {
+            var observed = leadershipReader.apply(deadline);
+            record(moment, observed, Optional.empty());
+            return observed;
+        } catch (RuntimeException failure) {
+            record(moment, Optional.empty(), Optional.of(diagnostic(failure)));
+            throw failure;
+        }
+    }
+
+    private synchronized void record(FlinkHaControl.ObservationMoment moment,
+                                     Optional<FlinkHaControl.Leadership> leadership, Optional<String> error) {
+        long sequence = ++observationSequence;
+        long now = System.currentTimeMillis();
+        if (!observations.isEmpty() && moment == FlinkHaControl.ObservationMoment.ROUTING
+                && leadership.isPresent() && error.isEmpty()) {
+            var previous = observations.getLast();
+            if (previous.moment() == moment && previous.leadership().equals(leadership)
+                    && previous.error().isEmpty()) {
+                observations.set(observations.size() - 1, new FlinkHaControl.LeadershipObservation(
+                        previous.sequence(), previous.sampleCount() + 1, previous.firstObservedAtMillis(),
+                        now, moment, leadership, error));
+                return;
+            }
+        }
+        if (observations.size() == MAX_LEADERSHIP_OBSERVATIONS) {
+            observationOverflow = true;
+            return;
+        }
+        observations.add(new FlinkHaControl.LeadershipObservation(sequence, 1, now, now, moment, leadership, error));
     }
 
     private Optional<FlinkHaControl.Leadership> observeZooKeeper(ContainerOperationDeadline deadline) {
@@ -251,7 +323,7 @@ final class FlinkHaRuntime implements AutoCloseable {
         Process original = null;
         TcpGate gate = null;
         try {
-            before = Optional.of(awaitLeadership(deadline, ignored -> true));
+            before = Optional.of(awaitLeadership(deadline, ignored -> true, FlinkHaControl.ObservationMoment.FAULT));
             target = Optional.of(before.orElseThrow().resourceManager());
             original = process(target.orElseThrow());
             gate = gates.get(original.logicalName());
@@ -268,8 +340,7 @@ final class FlinkHaRuntime implements AutoCloseable {
             armedAt = System.currentTimeMillis();
             switch (request.mode()) {
                 case KILL -> {
-                    actions.kill(original.logicalName(), deadline);
-                    faultState = Optional.of(new FlinkHaControl.ProcessState(original.runtimeId(), false, false));
+                    faultState = Optional.of(actions.kill(original.logicalName(), deadline));
                 }
                 case PAUSE -> {
                     original.handle().pauseWithin(deadline);
@@ -343,7 +414,8 @@ final class FlinkHaRuntime implements AutoCloseable {
                 after = Optional.of(awaitLeadership(deadline, current ->
                         !current.resourceManager().logicalName().equals(previous.logicalName())
                                 && !current.resourceManager().runtimeId().equals(previous.runtimeId())
-                                && !current.resourceManager().sessionId().equals(previous.sessionId())));
+                                && !current.resourceManager().sessionId().equals(previous.sessionId()),
+                        FlinkHaControl.ObservationMoment.FAULT));
             } catch (RuntimeException failure) {
                 errors.add("Leadership transfer unconfirmed: " + diagnostic(failure));
             }
@@ -416,7 +488,7 @@ final class FlinkHaRuntime implements AutoCloseable {
     }
 
     interface JobManagerActions {
-        void kill(String logicalName, ContainerOperationDeadline deadline);
+        FlinkHaControl.ProcessState kill(String logicalName, ContainerOperationDeadline deadline);
         ContainerHandle restart(String logicalName, ContainerOperationDeadline deadline);
     }
 

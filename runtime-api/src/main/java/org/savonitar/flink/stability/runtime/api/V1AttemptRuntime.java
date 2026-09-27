@@ -20,6 +20,11 @@ public interface V1AttemptRuntime extends TaskManagerControl, FlinkHaControl, Au
 
     List<FlinkComponentProvisioningEvidence> flinkProvisioningEvidence();
 
+    /** Process observations captured before cleanup, including an incomplete process fence. */
+    default Optional<FlinkProcessWriteFenceEvidence.Observations> flinkProcessObservations() {
+        return Optional.empty();
+    }
+
     /**
      * Class-load logs written so far by every Flink process of this attempt, including killed
      * and replaced ones. Complete only after the process fence.

@@ -318,11 +318,13 @@ public final class ExecutablePhaseExecutor {
         // Observe first: whether the kill affected the job is judged against this baseline.
         FlinkJobObservation.Attempt jobBeforeKill = FlinkJobObservation.Attempt.of(flink, job);
         IdentityObservation identity = taskManagerIdentity(kill.targetName());
+        // The baseline spans multiple REST calls; its initial timestamp is not the kill boundary.
+        OptionalLong beforeInjection = jobManagerTimeForKill(job);
         try {
             taskManagers.killTaskManager(kill.targetName(), TASKMANAGER_ACTION_TIMEOUT);
             evidence.kills.add(new PhaseExecutionEvidence.TaskManagerKill(
                     path, loopIterations, kill.targetName(), jobBeforeKill,
-                    jobManagerTimeAfterKill(job), identity.identity(), identity.failure()));
+                    beforeInjection, jobManagerTimeForKill(job), identity.identity(), identity.failure()));
             succeeded(
                     evidence,
                     phaseIndex,
@@ -370,12 +372,12 @@ public final class ExecutablePhaseExecutor {
     private record IdentityObservation(
             Optional<TaskManagerControl.Identity> identity, Optional<String> failure) {}
 
-    private OptionalLong jobManagerTimeAfterKill(FlinkJobHandle job) {
+    private OptionalLong jobManagerTimeForKill(FlinkJobHandle job) {
         try {
             return OptionalLong.of(flink.jobManagerTimeMillis(job));
         } catch (IOException | RuntimeException unavailable) {
-            // The injection succeeded. Missing timing evidence must not skip a later restart,
-            // but it cannot confirm that a failure or restore followed the injection.
+            // Missing timing evidence must not prevent injection or skip a later restart,
+            // but it cannot confirm that a failure or restore belongs to this injection.
             return OptionalLong.empty();
         }
     }

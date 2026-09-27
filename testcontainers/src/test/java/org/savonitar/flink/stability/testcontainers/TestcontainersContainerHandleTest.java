@@ -33,10 +33,28 @@ class TestcontainersContainerHandleTest {
         RecordingGenericContainer container = new RecordingGenericContainer();
         TestcontainersContainerHandle.ContainerLifecycle handle = lifecycle(container);
 
-        handle.killAndRemoveWithin(actionDeadline(Duration.ofSeconds(1)));
+        var observed = handle.killAndRemoveWithin(actionDeadline(Duration.ofSeconds(1)), state -> {
+            assertEquals(List.of("kill:physical-1"), container.events);
+            assertEquals(java.util.Optional.of(137L), state.exitCode());
+            assertEquals(java.util.Optional.of(false), state.oomKilled());
+            assertEquals(java.util.Optional.of("2026-09-27T12:00:00Z"), state.finishedAt());
+        });
 
+        assertEquals("physical-1", observed.runtimeId());
+        assertFalse(observed.running());
         assertEquals(List.of("kill:physical-1", "stop"), container.events);
         assertFalse(container.running);
+    }
+
+    @Test
+    void completedTerminationMetadataSurvivesSubsequentRemovalFailure() {
+        RecordingGenericContainer container = new RecordingGenericContainer();
+        container.stopFailure = new IllegalStateException("remove failed");
+        var observed = new AtomicReference<org.savonitar.flink.stability.runtime.api.FlinkHaControl.ProcessState>();
+        assertThrows(IllegalStateException.class, () -> lifecycle(container).killAndRemoveWithin(
+                actionDeadline(Duration.ofSeconds(1)), observed::set));
+        assertEquals(java.util.Optional.of(137L), observed.get().exitCode());
+        assertFalse(observed.get().running());
     }
 
     @Test
@@ -282,6 +300,8 @@ class TestcontainersContainerHandleTest {
         private RuntimeException inspectFailure;
         private boolean running = true;
 
+        private RuntimeException stopFailure;
+
         private RecordingGenericContainer() {
             this(false, false, false);
         }
@@ -369,6 +389,9 @@ class TestcontainersContainerHandleTest {
             stopEntered.countDown();
             events.add("stop");
             running = false;
+            if (stopFailure != null) {
+                throw stopFailure;
+            }
         }
 
         @Override
@@ -409,6 +432,10 @@ class TestcontainersContainerHandleTest {
                         public Boolean getRunning() {
                             return running;
                         }
+                        @Override public Boolean getPaused() { return false; }
+                        @Override public Long getExitCodeLong() { return running ? 0L : 137L; }
+                        @Override public Boolean getOOMKilled() { return false; }
+                        @Override public String getFinishedAt() { return "2026-09-27T12:00:00Z"; }
                     };
             return new InspectContainerResponse() {
                 @Override

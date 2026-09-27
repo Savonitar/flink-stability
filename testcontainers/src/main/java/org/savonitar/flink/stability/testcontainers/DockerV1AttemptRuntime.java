@@ -55,6 +55,11 @@ public final class DockerV1AttemptRuntime implements V1AttemptRuntime {
     }
 
     @Override
+    public Optional<FlinkHaControl.Observations> haObservations() {
+        return clusters.haObservations();
+    }
+
+    @Override
     public FlinkHaControl.LeaderFaultEvidence faultLeader(
             FlinkHaControl.LeaderFaultRequest request, Duration remainingBudget) {
         return clusters.faultLeader(request, remainingBudget);
@@ -106,6 +111,11 @@ public final class DockerV1AttemptRuntime implements V1AttemptRuntime {
     @Override
     public FlinkProcessWriteFenceEvidence stopAllFlinkProcesses(Duration timeout) {
         return clusters.establishFlinkProcessWriteFence(timeout);
+    }
+
+    @Override
+    public Optional<FlinkProcessWriteFenceEvidence.Observations> flinkProcessObservations() {
+        return Optional.of(clusters.processObservations());
     }
 
     @Override

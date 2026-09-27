@@ -40,7 +40,7 @@ class FlinkHaEvidenceTest {
     @Test
     void absenceOfUnrequestedHaEvidenceDoesNotAddAFinding() {
         assertEquals(FlinkHaEvidence.Outcome.CONFIRMED, FlinkHaEvidence.evaluate(
-                new FlinkHaEvidence.Expected(List.of(), false), Optional.empty(), Optional.empty()).outcome());
+                new FlinkHaEvidence.Expected(List.of(), false, false), Optional.empty(), Optional.empty()).outcome());
     }
 
     @Test
@@ -101,7 +101,7 @@ class FlinkHaEvidenceTest {
         assertEquals(FlinkHaEvidence.Outcome.UNCONFIRMED,
                 FlinkHaEvidence.evaluate(fixture.expected(), Optional.empty(), Optional.empty()).outcome());
         assertEquals(FlinkHaEvidence.Outcome.UNCONFIRMED,
-                FlinkHaEvidence.evaluate(new FlinkHaEvidence.Expected(List.of(), false),
+                FlinkHaEvidence.evaluate(new FlinkHaEvidence.Expected(List.of(), false, false),
                         Optional.of(fixture.phase()), Optional.empty()).outcome());
     }
 
@@ -134,8 +134,9 @@ class FlinkHaEvidenceTest {
                 new FlinkHaEvidence.DeclaredFault(PATH, List.of(loop), declaration.request()),
                 new FlinkHaEvidence.DeclaredFault(PATH, List.of(), request(FlinkHaControl.Mode.KILL)))) {
             assertEquals(FlinkHaEvidence.Outcome.UNCONFIRMED,
-                    FlinkHaEvidence.evaluate(new FlinkHaEvidence.Expected(List.of(wrong), false),
-                            Optional.of(fixture.phase()), Optional.empty()).outcome());
+                    FlinkHaEvidence.evaluate(new FlinkHaEvidence.Expected(List.of(wrong), true, false),
+                            Optional.of(fixture.phase()), Optional.empty(), provisioning(),
+                            Optional.of(haHistory(fixture.before.orElseThrow(), fixture.after.orElseThrow()))).outcome());
         }
         fixture.status = PhaseExecutionEvidence.StepStatus.FAILED;
         assertEquals(FlinkHaEvidence.Outcome.UNCONFIRMED, fixture.evaluate().outcome());
@@ -149,7 +150,7 @@ class FlinkHaEvidenceTest {
                         new ExecutableScenarioPlan.LeaderFault(request),
                         new ExecutableScenarioPlan.Loop(2, List.of(
                                 new ExecutableScenarioPlan.LeaderFault(request))))))));
-        var expected = FlinkHaEvidence.Expected.from(phases, true);
+        var expected = FlinkHaEvidence.Expected.from(phases, true, true);
         assertEquals(6, expected.faults().size());
         assertEquals(true, expected.tokenProviderRequired());
         assertEquals("$/phases/0/steps/0/loop/steps/1/loop/steps/0", expected.faults().get(2).path());
@@ -165,10 +166,10 @@ class FlinkHaEvidenceTest {
         assertEquals(List.of(), FlinkHaEvidence.Expected.from(List.of(
                 new ExecutableScenarioPlan.Phase("ordinary", List.of(new ExecutableScenarioPlan.Loop(
                         Integer.MAX_VALUE, List.of(new ExecutableScenarioPlan.Wait(Duration.ofMillis(1))))))),
-                false).faults());
+                false, false).faults());
         assertThrows(IllegalArgumentException.class, () -> FlinkHaEvidence.Expected.from(List.of(
                 new ExecutableScenarioPlan.Phase("too-many", List.of(new ExecutableScenarioPlan.Loop(
-                101, List.of(new ExecutableScenarioPlan.LeaderFault(request(FlinkHaControl.Mode.KILL))))))), false));
+                101, List.of(new ExecutableScenarioPlan.LeaderFault(request(FlinkHaControl.Mode.KILL))))))), true, false));
     }
 
     @Test
@@ -267,9 +268,10 @@ class FlinkHaEvidenceTest {
         }
         var expected = FlinkHaEvidence.Expected.from(List.of(new ExecutableScenarioPlan.Phase("ha",
                 List.of(new ExecutableScenarioPlan.Loop(2,
-                        List.of(new ExecutableScenarioPlan.LeaderFault(first.request)))))), first.tokens.isPresent());
+                        List.of(new ExecutableScenarioPlan.LeaderFault(first.request)))))), true, first.tokens.isPresent());
         return FlinkHaEvidence.evaluate(expected, Optional.of(new PhaseExecutionEvidence(
-                steps, List.of(), List.of(), List.of(), observed)), second.tokens, provisioning());
+                steps, List.of(), List.of(), List.of(), observed)), second.tokens, provisioning(),
+                Optional.of(haHistory(first.before.orElseThrow(), second.after.orElseThrow())));
     }
 
     @Test
@@ -508,7 +510,7 @@ class FlinkHaEvidenceTest {
     }
 
     private static FlinkHaEvidence evaluateTokens(FlinkHaEvidence.TokenEvidence tokens) {
-        return FlinkHaEvidence.evaluate(new FlinkHaEvidence.Expected(List.of(), true),
+        return FlinkHaEvidence.evaluate(new FlinkHaEvidence.Expected(List.of(), false, true),
                 Optional.of(new PhaseExecutionEvidence(List.of())), Optional.of(tokens), provisioning());
     }
 
@@ -517,6 +519,18 @@ class FlinkHaEvidenceTest {
                 FlinkRuntimeIdentityTest.component("jobmanager-1", "jm-1", FlinkRuntimeIdentityTest.IMAGE_ID),
                 FlinkRuntimeIdentityTest.component("jobmanager-2", "jm-2", FlinkRuntimeIdentityTest.IMAGE_ID),
                 FlinkRuntimeIdentityTest.component("taskmanager-1", "tm-1", FlinkRuntimeIdentityTest.IMAGE_ID));
+    }
+
+    private static FlinkHaControl.Observations haHistory(FlinkHaControl.Leadership initial,
+                                                         FlinkHaControl.Leadership last) {
+        var sessions = provisioning().stream().map(component -> new FlinkHaControl.SessionEvidence(
+                component.logicalName(), component.role(), component.runtimeId(), component.logicalName() + "#1",
+                6_000, List.of(new FlinkHaControl.NegotiatedSession("0x123", 6_000, "own Flink log")), false)).toList();
+        return new FlinkHaControl.Observations(List.of(
+                new FlinkHaControl.LeadershipObservation(1, 1, 100, 100,
+                        FlinkHaControl.ObservationMoment.INITIAL, Optional.of(initial), Optional.empty()),
+                new FlinkHaControl.LeadershipObservation(2, 1, 5_000, 5_000,
+                        FlinkHaControl.ObservationMoment.PRE_FENCE, Optional.of(last), Optional.empty())), sessions, false);
     }
 
     private static FlinkHaEvidence.TokenEvidence tokens(TokenServiceControl.Snapshot snapshot) {
@@ -608,7 +622,7 @@ class FlinkHaEvidenceTest {
 
         FlinkHaEvidence.Expected expected() {
             return new FlinkHaEvidence.Expected(List.of(new FlinkHaEvidence.DeclaredFault(PATH, List.of(), request)),
-                    tokens.isPresent());
+                    true, tokens.isPresent());
         }
 
         PhaseExecutionEvidence phase() {
@@ -622,7 +636,9 @@ class FlinkHaEvidenceTest {
         }
 
         FlinkHaEvidence evaluate() {
-            return FlinkHaEvidence.evaluate(expected(), Optional.of(phase()), tokens, provisioning());
+            return FlinkHaEvidence.evaluate(expected(), Optional.of(phase()), tokens, provisioning(), Optional.of(haHistory(
+                    before.orElseGet(() -> leadership("jobmanager-1", "jm-1", "old")),
+                    after.orElseGet(() -> leadership("jobmanager-2", "jm-2", "new")))));
         }
     }
 }

@@ -154,7 +154,7 @@ public final class V1ScenarioExecutor {
                 plan.flink().expectedImageId(), plan.flink().expectedComponents(),
                 plan.flink().expectedRuntimeJar());
         FlinkHaEvidence.Expected expectedHa = FlinkHaEvidence.Expected.from(
-                plan.phases(), plan.flink().tokenProvider().isPresent());
+                plan.phases(), plan.flink().highAvailability().isPresent(), plan.flink().tokenProvider().isPresent());
 
         V1AttemptRuntime runtime = null;
         FlinkScenarioControl flink = null;
@@ -513,6 +513,31 @@ public final class V1ScenarioExecutor {
         } catch (RuntimeException unavailable) {
             retainedDiagnostics.add("flink.provisioning-evidence-unavailable: " + unavailable);
         }
+        Optional<FlinkProcessWriteFenceEvidence.Observations> processObservations = Optional.empty();
+        Optional<org.savonitar.flink.stability.runtime.api.FlinkHaControl.Observations> haObservations = Optional.empty();
+        if (runtime != null) {
+            try {
+                processObservations = runtime.flinkProcessObservations();
+            } catch (RuntimeException unavailable) {
+                retainedDiagnostics.add("flink.process-observations-unavailable: " + unavailable);
+            }
+            try {
+                haObservations = runtime.haObservations();
+            } catch (RuntimeException unavailable) {
+                retainedDiagnostics.add("flink.ha-observations-unavailable: " + unavailable);
+            }
+        }
+        FlinkProcessHealth health = FlinkProcessHealth.evaluate(expectedRuntime,
+                Optional.ofNullable(processFence), processObservations);
+        if (health.outcome() != FlinkProcessHealth.Outcome.HEALTHY) {
+            retainedDiagnostics.add(health.reason() + ": " + health.detail());
+            if (status == V1ScenarioExecutionResult.Status.PASS) {
+                status = health.outcome() == FlinkProcessHealth.Outcome.UNEXPECTED_EXIT
+                        ? V1ScenarioExecutionResult.Status.FAIL : V1ScenarioExecutionResult.Status.INCONCLUSIVE;
+                reason = health.reason();
+                message = "The terminal data oracle passed, but " + health.detail();
+            }
+        }
         FlinkRuntimeIdentity identity = FlinkRuntimeIdentity.evaluate(expectedRuntime,
                 provisioning, Optional.ofNullable(processFence), Optional.ofNullable(phases));
         if (status == V1ScenarioExecutionResult.Status.PASS
@@ -534,7 +559,7 @@ public final class V1ScenarioExecutor {
         }
         Optional<FlinkHaEvidence.TokenEvidence> tokens = expectedHa.tokenProviderRequired()
                 ? Optional.of(tokenEvidence(runtime, processFence != null)) : Optional.empty();
-        FlinkHaEvidence ha = FlinkHaEvidence.evaluate(expectedHa, Optional.ofNullable(phases), tokens, provisioning);
+        FlinkHaEvidence ha = FlinkHaEvidence.evaluate(expectedHa, Optional.ofNullable(phases), tokens, provisioning, haObservations);
         if (status == V1ScenarioExecutionResult.Status.PASS
                 && ha.outcome() != FlinkHaEvidence.Outcome.CONFIRMED) {
             status = V1ScenarioExecutionResult.Status.INCONCLUSIVE;
@@ -560,6 +585,8 @@ public final class V1ScenarioExecutor {
                 transactionVersion,
                 expectedHa,
                 tokens,
+                haObservations,
+                processObservations,
                 retainedDiagnostics);
     }
 

@@ -780,12 +780,30 @@ Connector pull-request gating is the same mechanism with one axis:
   This is an anonymous ZooKeeper fixture: every HA Flink process, including
   replacements, explicitly uses `zookeeper.sasl.disable: true`. Standalone execution
   receives no such override. Authenticated ZooKeeper is outside this fixture.
+  The fixture configures ZooKeeper's supported session range explicitly as 2–60
+  seconds. Each provisioned Flink incarnation retains its own negotiated session
+  messages, bound to the Docker ID and class-log process name. Missing, ambiguous,
+  overflowed or mismatched negotiated timeouts prevent confirmed HA evidence.
+  Initial, routing, fault and pre-fence leadership samples are retained in order.
+  Consecutive identical successful routing samples may be coalesced with their
+  count and first/last observation times; changes, failures and boundaries remain
+  distinct. This is sampled history, not proof that no election occurred between
+  observations. A no-fault HA control requires coherent initial and pre-fence
+  boundaries and rejects any observed intervening leadership change or gap.
+  Retention is bounded to 4,096 leadership entries after coalescing, 128 negotiated
+  session messages per incarnation and 8,192 characters per collected log line.
+  Exceeding a bound prevents confirmed HA evidence; truncation cannot imply success.
   Each JobManager reaches ZooKeeper through its own controllable TCP gate. Closing
   a gate terminates existing connections and rejects new ones; token-service traffic
   uses a separate path. Leader observations read ZooKeeper's published RM, dispatcher
   and REST session/address records and bind them to the provisioned physical process.
   A successful REST response alone is not leader evidence. REST leader resolution
-  consumes the request deadline and cannot redirect or automatically replay a POST.
+  consumes the request deadline. In both standalone and HA execution, the REST
+  transport never follows redirects, retries a failed connection, or automatically
+  replays an unsuccessful HTTP response (including 408/503 with `Retry-After: 0`).
+  This policy covers reads and mutations. Explicit bounded polling operations may
+  issue their next documented observation, but an unsuccessful request is surfaced
+  with its original HTTP status/body and is never silently retried by the transport.
 - **R4.13h** Optional `setup.flink.token_provider.renewal_interval` (1 second–5 minutes)
   enables the bundled synthetic delegation-token provider/receiver plugin. Its JAR
   lives only under `plugins/flink-stability-token/`, with verified bytes in each
@@ -803,6 +821,12 @@ Connector pull-request gating is the same mechanism with one axis:
   Event overflow or request saturation makes evidence incomplete. This fixture
   exercises acquisition/distribution; it does not authenticate Kafka or implement
   version-specific callback extensions to Flink's token SPI.
+  JSON stores full token events once in `evidence.flinkHa.tokenEvents`. Each token
+  snapshot retains its counters/overflow/saturation flags, `eventCount`, and ordered
+  `eventRanges`: zero-based `[startInclusive, endExclusive]` pairs into that table.
+  Concatenating the ranges reconstructs the exact snapshot, including its order and
+  repeated entries. Interning compares the entire event, so contradictory events
+  with the same sequence number remain distinct and available for diagnosis.
 
 ## 5. Workload / job configuration
 
@@ -1368,20 +1392,26 @@ Connector pull-request gating is the same mechanism with one axis:
      kill, or the final observation of item 2 for the last kill. Only values
      from the JobManager clock are compared with each other.
 
-  Immediately after confirmed process exit, the runner requests a fresh JobManager
-  time using a separate job-details call. This post-exit sample is a conservative
-  lower bound for accepted recovery evidence, not the timestamp of the kill.
-  Failures and restores must occur strictly after that sample; failures already
-  present in the pre-kill observation are excluded. Missing or reversed timing
-  evidence is unconfirmed. A failure detected between exit and sampling can
-  therefore be unconfirmed rather than attributed using an ambiguous time window.
-  A restore must also follow a matching host failure (equal millisecond timestamps
-  are accepted). Without a completed checkpoint, recovery requires a later
+  After the complete baseline observation and target-identity lookup, immediately
+  before injection, the runner requests fresh JobManager time using a separate
+  job-details call. It requests another sample after confirmed process exit. The
+  initial timestamp of the multi-call baseline is not an injection boundary. Both
+  samples must be available and ordered between the baseline and final observation
+  timestamps. Failures and restores must occur strictly after the fresh pre-injection
+  sample; failures and restore records already present in the baseline are excluded.
+  Effects detected during the kill, before the post-exit sample, remain eligible.
+  The post-exit sample retains proof of the completed injection's observation order;
+  neither sample is the precise instant of process death. Missing or reversed timing
+  evidence is unconfirmed. Events later than the final observation's initial clock
+  sample require a subsequent observation before they can confirm recovery.
+  A restore must also follow a matching target failure (equal millisecond timestamps
+  are accepted), and the observed restore count must increase. Without a completed
+  checkpoint, recovery requires a later
   `FINISHED` observation or an active execution attempt with a greater attempt
   number for a previously observed vertex/subtask; a failure alone proves no restart.
 
-  The effect is confirmed only when Flink recorded a qualifying new failure on the
-  exact targeted ResourceID that hosted a RUNNING subtask just before the kill,
+  The effect is confirmed only when Flink recorded a qualifying new failure attributed
+  to the exact targeted ResourceID that hosted a RUNNING subtask just before the kill,
   and either Flink restored a checkpoint after that failure
   (`checkpoint-restored`) or no checkpoint had completed before the kill and the
   later observation proves a restart (`restarted-without-checkpoint`). It is
@@ -1390,11 +1420,17 @@ Connector pull-request gating is the same mechanism with one axis:
   no required restore follows (`no-recovery-observed`), or when an observation
   or timing sample failed (`evidence-unavailable`). A job that is already failing
   over for another reason therefore does not confirm a kill that found no RUNNING
-  subtask on the target. A failure on a different TaskManager cannot confirm this
-  fault. Missing target identity is `evidence-unavailable`; retain the identity lookup
+  subtask on the target. Attribution requires either that exact reporting TaskManager
+  ID, or a `RemoteTransportException` cause matching Flink's complete `Connection
+  unexpectedly closed by remote task manager '... [ ResourceID ] '. This might indicate
+  that the remote task manager was lost.` diagnostic. Its bracketed ResourceID must
+  equal the complete targeted incarnation, and the reporting peer must also have
+  hosted a RUNNING subtask in the baseline. Generic peer failures, partial ID matches,
+  truncated causes and arbitrary mentions of the target do not qualify. Missing target
+  identity is `evidence-unavailable`; retain the identity lookup
   error, if any, without blocking healing/fencing. No inference from all
   observed hosts or from a Docker ID masquerading as a ResourceID is allowed. Each observation has one fixed internal `30s` deadline; its failure is recorded as
-  evidence and never blocks the kill or the process fence. The post-exit clock
+  evidence and never blocks the kill or the process fence. Each clock
   request has its own fixed internal `30s` deadline; its failure leaves timing
   evidence unavailable and does not skip the subsequent restart.
 
@@ -1543,6 +1579,33 @@ Connector pull-request gating is the same mechanism with one axis:
   `SIGKILLED` or `ALREADY_STOPPED` outcome, plus the fence-completion timestamp.
   The same evidence is retained when a forced fence succeeds after job-completion
   timeout or another terminalization failure.
+
+  Before sending the first terminal kill, the runner inspects every known Flink
+  process within a shared telemetry budget of at most `10s` and one quarter of
+  the remaining physical-fence budget. Process samples run before a pre-fence
+  leadership sample, which can use at most `5s` of the telemetry remainder.
+  Expired or failed telemetry is retained and does not prevent physical kill
+  attempts under the original absolute fence deadline. Evidence retains each logical name, role,
+  exact container ID, observation timestamp, running/paused state and available
+  Docker exit code, OOM flag and finished-at value. A missing container and a
+  failed inspection remain distinct from an observed exit. Declared kills retain
+  their actual inspected termination state before removal, including when removal
+  subsequently fails. No stopped state is synthesized from a requested action.
+  Successful component outcomes and observations survive a later fence failure;
+  JSON reports `partial`, not `complete`, for an incomplete fence. Retention is
+  bounded to 1,024 observations and 1,024 component outcomes; overflow prevents
+  a clean PASS.
+
+  A stopped or missing pre-fence process without a preceding exact-ID declared
+  kill is `flink.process.unexpected-exit`. An observed OOM kill remains an
+  unexpected finding even when SIGKILL was requested. A passing data oracle then
+  yields FAIL; missing, contradictory, paused or incomplete process evidence
+  yields `flink.process.state-unconfirmed`. `ALREADY_STOPPED` alone does not prove
+  an expected termination. These findings cannot overwrite an existing data FAIL
+  or `verification.*` reason, and they prevent an expected-failure match. Physical
+  runtime/image identity is evaluated separately from HA fault/recovery effect:
+  known provisioning and exact replacement/fence identities do not become an
+  image-identity failure merely because leadership or token recovery is unconfirmed.
 
   Starting the process fence is irreversible for that attempt: no Flink process
   may subsequently be created or restarted. Later attempt cleanup may remove the
@@ -1769,10 +1832,16 @@ Connector pull-request gating is the same mechanism with one axis:
   entry per confirmed kill: step path and loop iterations, target, effect outcome,
   whether it is confirmed, job state, checkpoint and active-subtask counts before
   the kill, the exact target container and ResourceID when available, the targeted
-  RUNNING subtasks and matching host failures with their identities/timestamps,
-  `jobManagerTimeAfterKill` when available, the restored checkpoint and
-  `restoredAfterKillObservationMs` measured from that post-exit time sample,
-  the failures recorded after the kill, and a one-sentence detail. The R7.1c sink
+  RUNNING subtasks and qualifying target failures with their actual reporting
+  `taskManagerId`, separate `targetResourceId`, timestamps and `attribution`
+  (`reporter` or `remote-transport`). It retains `jobManagerTimeBeforeKill` and
+  `jobManagerTimeAfterKill` when available, the restored checkpoint,
+  `restoredAtMillis`, and `restoredAfterPreInjectionMs` measured from the fresh
+  pre-injection sample. The retained `restoredAfterKillObservationMs` is a signed
+  delta from the post-exit sample and can be negative for recovery during injection.
+  `failuresAfterKill` counts new failures in the accepted observation interval after
+  the pre-injection sample, not only those after confirmed exit. A one-sentence
+  detail explains the effect. The R7.1c sink
   transaction listing appears as `evidence.sinkTransactions`: `listed` with the
   prefix, the total, and each unresolved transaction, or `not-listed`. Input
   evidence names `complete` or `partial` status and reconciliation completion

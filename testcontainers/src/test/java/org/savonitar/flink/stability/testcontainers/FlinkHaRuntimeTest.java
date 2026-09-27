@@ -37,6 +37,73 @@ class FlinkHaRuntimeTest {
             new FlinkRuntimeTarget.HighAvailability("zookeeper:3.9.3", Duration.ofSeconds(6));
 
     @Test
+    void healthyRoutingCoalescesOnlyIdenticalSamplesAndKeepsBoundariesAndChanges() throws Exception {
+        FakeHandle first = new FakeHandle("jobmanager-1-1", "first");
+        FakeHandle second = new FakeHandle("jobmanager-2-1", "second");
+        var current = new java.util.concurrent.atomic.AtomicReference<>(leadership(first));
+        try (FlinkHaRuntime runtime = new FlinkHaRuntime(CONFIGURATION, System::nanoTime,
+                ignored -> Optional.of(current.get()), Map.of())) {
+            runtime.register("jobmanager-1", first);
+            runtime.register("jobmanager-2", second);
+            runtime.initialRestEndpoint(Duration.ofSeconds(1));
+            for (int index = 0; index < 5_000; index++) runtime.restEndpoint(Duration.ofSeconds(1));
+            current.set(leadership(second));
+            runtime.restEndpoint(Duration.ofSeconds(1));
+            runtime.observeBeforeFence(Duration.ofSeconds(1));
+            var history = runtime.observations(List.of());
+            assertFalse(history.overflow());
+            assertEquals(4, history.leadership().size());
+            assertEquals(FlinkHaControl.ObservationMoment.INITIAL, history.leadership().getFirst().moment());
+            assertEquals(5_000, history.leadership().get(1).sampleCount());
+            assertEquals(5_002, history.leadership().get(2).sequence());
+            assertEquals("second", history.leadership().get(2).leadership().orElseThrow().resourceManager().runtimeId());
+            assertEquals(FlinkHaControl.ObservationMoment.PRE_FENCE, history.leadership().getLast().moment());
+        }
+    }
+
+    @Test
+    void historyKeepsObservationFailuresAndReportsOverflow() throws Exception {
+        FakeHandle first = new FakeHandle("jobmanager-1-1", "first");
+        FakeHandle second = new FakeHandle("jobmanager-2-1", "second");
+        AtomicInteger reads = new AtomicInteger();
+        try (FlinkHaRuntime runtime = new FlinkHaRuntime(CONFIGURATION, System::nanoTime, ignored -> {
+            int read = reads.getAndIncrement();
+            if (read == 1) throw new IllegalStateException("observer-disconnected");
+            return Optional.of(leadership(read % 2 == 0 ? first : second));
+        }, Map.of())) {
+            runtime.register("jobmanager-1", first);
+            runtime.register("jobmanager-2", second);
+            runtime.initialRestEndpoint(Duration.ofSeconds(1));
+            assertThrows(IllegalStateException.class, () -> runtime.restEndpoint(Duration.ofSeconds(1)));
+            assertTrue(runtime.observations(List.of()).leadership().getLast().error().orElseThrow()
+                    .contains("observer-disconnected"));
+            for (int index = 0; index < FlinkHaRuntime.MAX_LEADERSHIP_OBSERVATIONS; index++) {
+                runtime.restEndpoint(Duration.ofSeconds(1));
+            }
+            assertEquals(FlinkHaRuntime.MAX_LEADERSHIP_OBSERVATIONS, runtime.observations(List.of()).leadership().size());
+            assertTrue(runtime.observations(List.of()).overflow());
+        }
+    }
+
+    @Test
+    void unsuccessfulPreFenceObservationIsRetainedWithoutThrowing() throws Exception {
+        try (FlinkHaRuntime runtime = new FlinkHaRuntime(CONFIGURATION, System::nanoTime,
+                ignored -> { throw new IllegalStateException("no-pre-fence-leader"); }, Map.of())) {
+            runtime.observeBeforeFence(Duration.ofSeconds(1));
+            var last = runtime.observations(List.of()).leadership().getLast();
+            assertEquals(FlinkHaControl.ObservationMoment.PRE_FENCE, last.moment());
+            assertTrue(last.leadership().isEmpty());
+            assertTrue(last.error().orElseThrow().contains("no-pre-fence-leader"));
+        }
+    }
+
+    @Test
+    void ensembleConfigurationExplicitlyPermitsTheSupportedFlinkSessionRange() {
+        assertTrue(FlinkHaRuntime.ZOOKEEPER_CONFIGURATION.contains("minSessionTimeout=2000\n"));
+        assertTrue(FlinkHaRuntime.ZOOKEEPER_CONFIGURATION.contains("maxSessionTimeout=60000\n"));
+    }
+
+    @Test
     void decodesFlinksActualLeaderFormatAndRejectsOtherSerializedTypes() throws Exception {
         UUID session = UUID.randomUUID();
         String address = "pekko.tcp://flink@jobmanager-2-3:6123/user/rpc/resourcemanager_0";
@@ -99,9 +166,10 @@ class FlinkHaRuntimeTest {
         try (FlinkHaRuntime runtime = recordedRuntime(original, standby)) {
             var evidence = runtime.fault(request(FlinkHaControl.Mode.KILL), new FlinkHaRuntime.JobManagerActions() {
                 @Override
-                public void kill(String name, ContainerOperationDeadline deadline) {
+                public FlinkHaControl.ProcessState kill(String name, ContainerOperationDeadline deadline) {
                     assertEquals("jobmanager-1", name);
                     original.running = false;
+                    return original.processState(deadline);
                 }
 
                 @Override
@@ -226,7 +294,7 @@ class FlinkHaRuntimeTest {
 
     private static FlinkHaRuntime.JobManagerActions unusedActions() {
         return new FlinkHaRuntime.JobManagerActions() {
-            public void kill(String name, ContainerOperationDeadline deadline) { throw new AssertionError("Unexpected kill"); }
+            public FlinkHaControl.ProcessState kill(String name, ContainerOperationDeadline deadline) { throw new AssertionError("Unexpected kill"); }
             public ContainerHandle restart(String name, ContainerOperationDeadline deadline) { throw new AssertionError("Unexpected restart"); }
         };
     }
@@ -263,8 +331,12 @@ class FlinkHaRuntimeTest {
         public void start() { running = true; }
         public void startWithin(ContainerOperationDeadline deadline) { start(); }
         public void stop() { running = false; }
-        public void killAndRemoveWithin(ContainerOperationDeadline deadline) { stop(); }
-        public void killProcessForWriteFence(ContainerOperationDeadline deadline) { stop(); }
+        public FlinkHaControl.ProcessState killAndRemoveWithin(ContainerOperationDeadline deadline) {
+            stop(); return processState(deadline);
+        }
+        public FlinkHaControl.ProcessState killProcessForWriteFence(ContainerOperationDeadline deadline) {
+            stop(); return processState(deadline);
+        }
         public boolean isRunningWithin(ContainerOperationDeadline deadline) { return running; }
         public boolean isRunning() { return running; }
         public int mappedPort(int port) { return port; }

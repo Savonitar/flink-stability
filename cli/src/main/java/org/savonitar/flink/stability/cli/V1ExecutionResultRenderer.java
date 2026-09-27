@@ -165,12 +165,14 @@ final class V1ExecutionResultRenderer {
                                         .filter(subtask -> subtask.taskManagerId()
                                                 .filter(identity.resourceId()::equals).isPresent())
                                         .forEach(subtask -> putSubtask(targetedSubtasks, subtask)));
-                        effect.failuresAfterKill().stream()
-                                .filter(failure -> failure.taskManagerId()
-                                        .filter(identity.resourceId()::equals).isPresent())
+                        effect.qualifyingTargetFailures().stream()
                                 .forEach(failure -> {
                                     ObjectNode matching = qualifyingFailures.addObject();
-                                    matching.put("taskManagerId", identity.resourceId());
+                                    matching.put("taskManagerId", failure.taskManagerId().orElse(null));
+                                    matching.put("targetResourceId", identity.resourceId());
+                                    matching.put("attribution", failure.taskManagerId()
+                                            .filter(identity.resourceId()::equals).isPresent()
+                                            ? "reporter" : "remote-transport");
                                     matching.put("timestampMillis", failure.timestampMillis());
                                     matching.put("exceptionName", failure.exceptionName());
                                     matching.put("rootCause", failure.rootCause());
@@ -183,11 +185,17 @@ final class V1ExecutionResultRenderer {
                 kill.put("activeSubtasksBeforeKill", before.activeSubtasks().size());
                 effect.restore().ifPresent(restore -> {
                     kill.put("restoredCheckpoint", restore.checkpointId());
+                    kill.put("restoredAtMillis", restore.restoredAtMillis());
+                    effect.kill().jobManagerTimeBeforeKill().ifPresent(sample ->
+                            kill.put("restoredAfterPreInjectionMs",
+                                    restore.restoredAtMillis() - sample));
                     effect.kill().jobManagerTimeAfterKill().ifPresent(sample ->
                             kill.put("restoredAfterKillObservationMs",
                                     restore.restoredAtMillis() - sample));
                 });
             });
+            effect.kill().jobManagerTimeBeforeKill().ifPresent(sample ->
+                    kill.put("jobManagerTimeBeforeKill", sample));
             effect.kill().jobManagerTimeAfterKill().ifPresent(sample ->
                     kill.put("jobManagerTimeAfterKill", sample));
             kill.put("failuresAfterKill", effect.failuresAfterKill().size());
@@ -253,6 +261,43 @@ final class V1ExecutionResultRenderer {
         processFence.put("status", "not-run");
         processFence.put("completed", false);
         processFence.put("processes", 0);
+        ArrayNode fencedComponents = processFence.putArray("components");
+        ArrayNode processObservations = processFence.putArray("observations");
+        processFence.put("observationOverflow", false);
+        ObjectNode health = processFence.putObject("health");
+        health.put("outcome", result.processHealth().outcome().name().toLowerCase(Locale.ROOT).replace('_', '-'));
+        health.put("reason", result.processHealth().reason());
+        health.put("detail", result.processHealth().detail());
+        result.processObservations().ifPresent(snapshot -> {
+            if (!snapshot.fenced().isEmpty() || snapshot.observations().stream().anyMatch(observation ->
+                    observation.moment() != org.savonitar.flink.stability.runtime.api
+                            .FlinkProcessWriteFenceEvidence.Moment.AFTER_DECLARED_KILL)) {
+                processFence.put("status", "partial");
+            }
+            processFence.put("observationOverflow", snapshot.overflow());
+            snapshot.observations().forEach(observation -> {
+                ObjectNode node = processObservations.addObject();
+                node.put("logicalName", observation.logicalName());
+                node.put("role", observation.role().name().toLowerCase(Locale.ROOT).replace('_', '-'));
+                node.put("runtimeId", observation.runtimeId().orElse(null));
+                node.put("moment", observation.moment().name().toLowerCase(Locale.ROOT).replace('_', '-'));
+                node.put("observedAt", observation.observedAt().toString());
+                node.put("missing", observation.missing());
+                node.put("diagnostic", observation.diagnostic().orElse(null));
+                node.putNull("state");
+                observation.state().ifPresent(state ->
+                        FlinkHaEvidenceRenderer.state(node.putObject("state"), state));
+            });
+        });
+        result.processFenceEvidence().map(fence -> fence.components())
+                .orElseGet(() -> result.processObservations().map(snapshot -> snapshot.fenced()).orElse(List.of()))
+                .forEach(component -> {
+                    ObjectNode node = fencedComponents.addObject();
+                    node.put("logicalName", component.logicalName());
+                    node.put("role", component.role().name().toLowerCase(Locale.ROOT).replace('_', '-'));
+                    node.put("runtimeId", component.runtimeId().orElse(null));
+                    node.put("outcome", component.outcome().name().toLowerCase(Locale.ROOT).replace('_', '-'));
+                });
         result.processFenceEvidence().ifPresent(fence -> {
             processFence.put("status", "complete");
             processFence.put("completed", true);

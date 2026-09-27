@@ -1,6 +1,7 @@
 package org.savonitar.flink.stability.testcontainers;
 
 import org.savonitar.flink.stability.runtime.api.FlinkClassLoadLog;
+import org.savonitar.flink.stability.runtime.api.FlinkHaControl;
 
 import java.util.List;
 
@@ -19,6 +20,10 @@ interface FlinkComponentFactory {
 
     /** Every configured incarnation's expected log, including missing files. */
     default List<FlinkClassLoadLog> classLoadLogs() {
+        return List.of();
+    }
+
+    default List<FlinkHaControl.SessionEvidence> haSessions() {
         return List.of();
     }
 }

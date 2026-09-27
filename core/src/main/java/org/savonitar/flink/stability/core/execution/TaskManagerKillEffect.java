@@ -7,18 +7,22 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 /**
  * Whether one confirmed TaskManager kill observably disrupted the job and Flink recovered it
  * (SPEC-001 R6.12a). A process that died proves only the injection; this adds the effect.
  *
- * <p>The kill counts only if the exact targeted incarnation hosted RUNNING subtasks and later
- * shows a failure, and, when a checkpoint had completed, Flink restored one afterwards. Each kill
+ * <p>The kill counts only if the exact targeted incarnation hosted RUNNING subtasks and a new
+ * failure identifies that incarnation, and, when a checkpoint had completed, Flink restored one
+ * afterwards. A peer's narrowly recognized remote-transport failure may identify the target. Each kill
  * is judged against the next observation of the same job: the one taken before the next kill,
  * or the one taken before the process fence. Failure and restore timestamps must follow a
- * JobManager clock sample requested after the process exit was confirmed, and a restore must
- * not precede the matching host failure. Events in the ambiguous interval before that sample
- * cannot confirm the kill. Without a checkpoint, a later active execution attempt or a finished
+ * fresh JobManager clock sample requested after baseline/identity collection, just before injection.
+ * A second sample after confirmed process exit must establish the other boundary, but failures
+ * detected during the kill must not be discarded. A restore must not precede the matching failure.
+ * Without a checkpoint, a later active execution attempt or a finished
  * job must show that execution resumed. Counters and JobManager-clock timestamps are compared
  * only with each other.</p>
  */
@@ -28,6 +32,13 @@ public record TaskManagerKillEffect(
         Optional<FlinkJobObservation.Restore> restore,
         List<FlinkJobObservation.Failure> failuresAfterKill,
         String detail) {
+
+    // Deliberately recognize one concrete Flink transport diagnostic, not arbitrary mentions of
+    // a ResourceID in application exceptions. The bracketed value must equal the full incarnation.
+    private static final Pattern CLOSED_REMOTE_TASK_MANAGER = Pattern.compile(
+            "^org\\.apache\\.flink\\.runtime\\.io\\.network\\.netty\\.exception\\.RemoteTransportException: "
+                    + "Connection unexpectedly closed by remote task manager '[^'\\s]+ \\[ ([^\\]\\s]+) \\] '\\. "
+                    + "This might indicate that the remote task manager was lost\\.$");
 
     public TaskManagerKillEffect {
         Objects.requireNonNull(kill, "kill");
@@ -61,6 +72,33 @@ public record TaskManagerKillEffect(
         public boolean confirmed() {
             return confirmed;
         }
+    }
+
+    /** Exact-incarnation matches among the new failures retained for this injection. */
+    public List<FlinkJobObservation.Failure> qualifyingTargetFailures() {
+        return targetFailures(kill, failuresAfterKill);
+    }
+
+    private static List<FlinkJobObservation.Failure> targetFailures(
+            PhaseExecutionEvidence.TaskManagerKill kill,
+            List<FlinkJobObservation.Failure> failures) {
+        if (kill.identity().isEmpty()
+                || !kill.target().equals(kill.identity().orElseThrow().logicalName())) {
+            return List.of();
+        }
+        String resourceId = kill.identity().orElseThrow().resourceId();
+        return failures.stream().filter(failure -> {
+            if (failure.taskManagerId().filter(resourceId::equals).isPresent()) {
+                return true;
+            }
+            boolean runningPeer = kill.jobBeforeKill().observation().stream()
+                    .flatMap(before -> before.subtasks().stream())
+                    .anyMatch(subtask -> "RUNNING".equals(subtask.status())
+                            && subtask.taskManagerId().isPresent()
+                            && subtask.taskManagerId().equals(failure.taskManagerId()));
+            Matcher remote = CLOSED_REMOTE_TASK_MANAGER.matcher(failure.rootCause());
+            return runningPeer && remote.matches() && resourceId.equals(remote.group(1));
+        }).toList();
     }
 
     /**
@@ -121,25 +159,30 @@ public record TaskManagerKillEffect(
                                     .orElse(""));
         }
         FlinkJobObservation after = observedAfter.orElseThrow();
-        if (kill.jobManagerTimeAfterKill().isEmpty()) {
+        if (kill.jobManagerTimeBeforeKill().isEmpty() || kill.jobManagerTimeAfterKill().isEmpty()) {
             return unconfirmed(kill, Outcome.EVIDENCE_UNAVAILABLE,
-                    "the JobManager clock could not be sampled after the confirmed process exit");
+                    "the fresh pre-injection or confirmed post-exit JobManager clock sample is missing");
         }
+        long beforeKill = kill.jobManagerTimeBeforeKill().orElseThrow();
         long afterKill = kill.jobManagerTimeAfterKill().orElseThrow();
-        if (afterKill < before.jobManagerTimeMillis()
+        if (beforeKill < before.jobManagerTimeMillis()
+                || afterKill < beforeKill
                 || after.jobManagerTimeMillis() < afterKill) {
             return unconfirmed(kill, Outcome.EVIDENCE_UNAVAILABLE,
                     "JobManager clock samples do not establish the order of the kill and recovery");
         }
-        List<FlinkJobObservation.Failure> failures = after.failuresAfter(afterKill).stream()
+        List<FlinkJobObservation.Failure> failures = after.failuresAfter(beforeKill).stream()
                 .filter(failure -> !before.failures().contains(failure))
+                // The observation spans REST calls. An event after its initial clock sample
+                // needs a subsequent observation before it can establish completed recovery.
+                .filter(failure -> failure.timestampMillis() <= after.jobManagerTimeMillis())
                 .toList();
-        List<FlinkJobObservation.Failure> hostFailures = failures.stream()
-                .filter(failure -> failure.taskManagerId().filter(resourceId::equals).isPresent())
-                .toList();
+        List<FlinkJobObservation.Failure> hostFailures = targetFailures(kill, failures);
         Optional<FlinkJobObservation.Restore> restore = after.restoredCheckpoints()
                 > before.restoredCheckpoints()
-                ? after.latestRestore().filter(latest -> latest.restoredAtMillis() > afterKill)
+                ? after.latestRestore().filter(latest -> latest.restoredAtMillis() > beforeKill)
+                        .filter(latest -> latest.restoredAtMillis() <= after.jobManagerTimeMillis())
+                        .filter(latest -> !before.latestRestore().filter(latest::equals).isPresent())
                         // Flink timestamps have millisecond precision: equal times are ordered
                         // only to that precision, but an earlier restore cannot prove recovery.
                         .filter(latest -> hostFailures.stream().anyMatch(failure ->
@@ -148,20 +191,20 @@ public record TaskManagerKillEffect(
 
         if (hostFailures.isEmpty()) {
             return new TaskManagerKillEffect(kill, Outcome.NO_RECOVERY_OBSERVED, restore, failures,
-                    "Flink recorded " + failures.size() + " new failure(s) after the post-exit"
-                            + " clock sample, none on targeted TaskManager " + resourceId);
+                    "Flink recorded " + failures.size() + " new failure(s) after the pre-injection"
+                            + " clock sample, none attributable to targeted TaskManager " + resourceId);
         }
         if (restore.isPresent()) {
             FlinkJobObservation.Restore restored = restore.orElseThrow();
             return new TaskManagerKillEffect(kill, Outcome.CHECKPOINT_RESTORED, restore, failures,
                     "Flink restored checkpoint " + restored.checkpointId() + " "
-                            + (restored.restoredAtMillis() - afterKill)
-                            + " ms after the post-exit clock sample");
+                            + (restored.restoredAtMillis() - beforeKill)
+                            + " ms after the fresh pre-injection clock sample");
         }
         if (before.completedCheckpoints() > 0) {
             return new TaskManagerKillEffect(kill, Outcome.NO_RECOVERY_OBSERVED, restore, failures,
                     before.completedCheckpoints() + " checkpoint(s) had completed before the kill,"
-                            + " but no restore followed a matching post-kill host failure");
+                            + " but no restore followed a matching target failure after injection began");
         }
         boolean restarted = after.state() == FlinkJobState.FINISHED
                 || after.activeSubtasks().stream().anyMatch(current ->

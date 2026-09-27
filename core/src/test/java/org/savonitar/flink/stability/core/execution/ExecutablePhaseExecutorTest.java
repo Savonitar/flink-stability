@@ -268,13 +268,14 @@ class ExecutablePhaseExecutorTest {
         PhaseExecutionEvidence evidence = executor.execute(plan, JOB);
 
         assertEquals(
-                List.of("observe-job", "kill:taskmanager-1", "sample-jobmanager-time",
+                List.of("observe-job", "sample-jobmanager-time", "kill:taskmanager-1", "sample-jobmanager-time",
                         "restart:taskmanager"), events);
         assertEquals(1, evidence.taskManagerKills().size());
         PhaseExecutionEvidence.TaskManagerKill kill = evidence.taskManagerKills().getFirst();
         assertEquals("$/phases/0/steps/0", kill.path());
         assertEquals("taskmanager-1", kill.target());
         assertEquals(Optional.of(RUNNING_JOB), kill.jobBeforeKill().observation());
+        assertEquals(OptionalLong.of(1_250), kill.jobManagerTimeBeforeKill());
         assertEquals(OptionalLong.of(1_500), kill.jobManagerTimeAfterKill());
         assertEquals(Optional.of(new TaskManagerControl.Identity(
                 "taskmanager-1", "taskmanager-1-container-1", "taskmanager-1-resource-1")),
@@ -306,7 +307,7 @@ class ExecutablePhaseExecutorTest {
                 () -> executor.execute(plan, JOB));
 
         assertEquals(
-                List.of("observe-job", "kill:taskmanager-1", "sample-jobmanager-time",
+                List.of("observe-job", "sample-jobmanager-time", "kill:taskmanager-1", "sample-jobmanager-time",
                         "restart:taskmanager"), events);
         assertEquals(
                 PhaseExecutionException.Outcome.INCONCLUSIVE,
@@ -323,7 +324,7 @@ class ExecutablePhaseExecutorTest {
                 PhaseExecutionException.class,
                 () -> executor.execute(plan, JOB));
 
-        assertEquals(List.of("observe-job", "kill:taskmanager-1"), events);
+        assertEquals(List.of("observe-job", "sample-jobmanager-time", "kill:taskmanager-1"), events);
         assertEquals(PhaseExecutionException.Outcome.INCONCLUSIVE,
                 killFailure.outcome());
         assertEquals("taskmanager.kill.infrastructure", killFailure.reason());
@@ -379,7 +380,7 @@ class ExecutablePhaseExecutorTest {
         PhaseExecutionEvidence evidence = executor.execute(plan, JOB);
 
         assertEquals(
-                List.of("observe-job", "kill:taskmanager-1", "sample-jobmanager-time",
+                List.of("observe-job", "sample-jobmanager-time", "kill:taskmanager-1", "sample-jobmanager-time",
                         "restart:taskmanager"), events);
         FlinkJobObservation.Attempt observed =
                 evidence.taskManagerKills().getFirst().jobBeforeKill();
@@ -388,7 +389,7 @@ class ExecutablePhaseExecutorTest {
     }
 
     @Test
-    void anUnavailablePostExitClockSampleDoesNotPreventRestart() throws Exception {
+    void eitherUnavailableKillClockSampleDoesNotPreventRestart() throws Exception {
         ExecutableScenarioPlan plan = plan(document -> {
             ArrayNode steps = replaceSteps(document);
             ObjectNode target = steps.addObject().putObject("kill").putObject("target");
@@ -397,20 +398,26 @@ class ExecutablePhaseExecutorTest {
             target.put("name", "taskmanager-1");
             steps.addObject().putObject("restart").put("component", "taskmanager");
         });
-        List<String> events = new ArrayList<>();
-        FakeFlink flink = new FakeFlink(events);
-        flink.clockFailure = new IOException("JobManager clock unavailable");
+        for (int failedCall : List.of(1, 2)) {
+            List<String> events = new ArrayList<>();
+            FakeFlink flink = new FakeFlink(events);
+            flink.clockFailure = new IOException("JobManager clock unavailable");
+            flink.clockFailureCall = failedCall;
 
-        PhaseExecutionEvidence evidence = new ExecutablePhaseExecutor(
-                flink, new FakeTaskManagers(events),
-                ExecutablePhaseExecutor.NetworkFaults.NONE, duration -> {}).execute(plan, JOB);
+            PhaseExecutionEvidence evidence = new ExecutablePhaseExecutor(
+                    flink, new FakeTaskManagers(events),
+                    ExecutablePhaseExecutor.NetworkFaults.NONE, duration -> {}).execute(plan, JOB);
 
-        assertEquals(List.of("observe-job", "kill:taskmanager-1", "sample-jobmanager-time",
-                "restart:taskmanager"), events);
-        assertEquals(OptionalLong.empty(), evidence.taskManagerKills().getFirst()
-                .jobManagerTimeAfterKill());
-        assertEquals(PhaseExecutionEvidence.StepStatus.SUCCEEDED,
-                evidence.steps().getLast().status());
+            assertEquals(List.of("observe-job", "sample-jobmanager-time", "kill:taskmanager-1",
+                    "sample-jobmanager-time", "restart:taskmanager"), events);
+            var kill = evidence.taskManagerKills().getFirst();
+            assertEquals(failedCall == 1 ? OptionalLong.empty() : OptionalLong.of(1_250),
+                    kill.jobManagerTimeBeforeKill());
+            assertEquals(failedCall == 2 ? OptionalLong.empty() : OptionalLong.of(1_500),
+                    kill.jobManagerTimeAfterKill());
+            assertEquals(PhaseExecutionEvidence.StepStatus.SUCCEEDED,
+                    evidence.steps().getLast().status());
+        }
     }
 
     @Test
@@ -558,8 +565,10 @@ class ExecutablePhaseExecutorTest {
         assertEquals(List.of("IOException: new leader REST not ready"), fault.observationErrors());
         assertEquals(List.of(JOB, JOB, JOB), flink.haJobs);
         assertEquals(FlinkHaEvidence.Outcome.UNCONFIRMED, FlinkHaEvidence.evaluate(
-                FlinkHaEvidence.Expected.from(plan.phases(), false), Optional.of(result), Optional.empty())
+                FlinkHaEvidence.Expected.from(plan.phases(), true, false), Optional.of(result), Optional.empty())
                 .outcome(), "a restored job alone must not fabricate physical leadership proof");
+        assertTrue(FlinkHaEvidence.faultFailure(fault.raw()).isPresent(),
+                "the fault itself lacks physical proof independently of sampled-history validation");
     }
 
     private static void addLeaderFault(ObjectNode document) {
@@ -739,6 +748,8 @@ class ExecutablePhaseExecutorTest {
         private IOException checkpointFailure;
         private IOException observeFailure;
         private IOException clockFailure;
+        private int clockFailureCall;
+        private int clockCalls;
         private final java.util.Deque<Object> haObservations = new java.util.ArrayDeque<>();
         private final List<FlinkJobHandle> haJobs = new ArrayList<>();
         private final List<Duration> haTimeouts = new ArrayList<>();
@@ -820,10 +831,11 @@ class ExecutablePhaseExecutorTest {
         @Override
         public long jobManagerTimeMillis(FlinkJobHandle job) throws IOException {
             events.add("sample-jobmanager-time");
-            if (clockFailure != null) {
+            clockCalls++;
+            if (clockFailure != null && (clockFailureCall == 0 || clockFailureCall == clockCalls)) {
                 throw clockFailure;
             }
-            return 1_500;
+            return 1_000 + 250L * clockCalls;
         }
 
         @Override

@@ -25,6 +25,13 @@ reads the published ZooKeeper sessions and addresses, then matches them to uniqu
 container incarnations. A standby HTTP response is insufficient proof of leadership.
 The attempt-owned ZooKeeper fixture is anonymous; HA Flink processes explicitly
 disable ZooKeeper SASL, and authenticated ZooKeeper is outside this fixture's coverage.
+The fixture explicitly permits sessions from two to sixty seconds and retains the
+timeout actually negotiated by each Flink incarnation. Missing or mismatched session
+evidence prevents confirmed HA evidence. Ordered leadership samples include initial,
+routing, fault and pre-fence observations. Identical consecutive routing samples share
+one entry with a count and time range. This sampled history cannot rule out elections
+between observations. A no-fault control rejects an observed leadership change or gap
+and requires coherent initial and pre-fence leaders.
 
 One operation selects the current leader, applies its fault, holds it and heals it:
 
@@ -64,6 +71,12 @@ credentials. Its token lifetime is twice `renewal_interval`; the Flink renewal r
 is explicitly 0.5. Issuance, receipt, process identity, fault revision, timestamps and
 request concurrency are recorded. This supports observing bursts; it does not define
 a universal acceptable request rate. Saturation or truncated evidence prevents PASS.
+In JSON, `evidence.flinkHa.tokenEvents` stores each complete event value once.
+Snapshots refer to that table through ordered `eventRanges` pairs with an inclusive
+start and exclusive end, plus `eventCount` and their original counters/flags.
+Concatenate those ranges to reconstruct a snapshot. Conflicting observations with
+the same sequence number remain separate events; deduplication does not conceal
+contradictions or reorder the trace.
 Optional `retry_backoff` (1 second–5 minutes) sets a controlled fixed retry interval.
 It sets the legacy retry-backoff key and the newer initial/max-backoff keys to the
 same value; omitting it preserves the selected Flink version's defaults. The token
@@ -144,6 +157,16 @@ unit tests. The original matrix failures and other component findings remain ope
 A selected experimental Flink 2.4 build still requires its existing image/runtime-JAR
 pins and a matching local workload/connector closure; a release 2.2 run says nothing
 about a particular upstream PR.
+
+The result separates runtime image identity, HA effect, process health and final
+record-set verification. `evidence.processFence` includes per-process outcomes and
+actual state observations before the first terminal kill, after declared kills and
+after terminal kills, with available exit/OOM/finished-at metadata. Partial fence
+results and failed inspections remain visible after cleanup. Unexpected exits and
+OOM kills prevent a clean PASS; an existing data or completion FAIL keeps its
+original reason. An unconfirmed election alone does not invalidate a proven image
+identity. These corrective evidence checks do not add exit metadata retroactively
+to the earlier matrix; a new runtime execution is required to verify them.
 
 PASS requires exact final data plus complete experiment evidence. For leader faults,
 that includes changed sessions on another physical JM, a confirmed effective fault,

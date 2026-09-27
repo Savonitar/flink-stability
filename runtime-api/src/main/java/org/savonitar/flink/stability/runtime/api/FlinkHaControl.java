@@ -16,6 +16,61 @@ public interface FlinkHaControl {
         throw new UnsupportedOperationException("Dynamic Flink REST routing is unsupported");
     }
 
+    /** Bounded observations already made by startup, routing, faults and the pre-fence boundary. */
+    default Optional<Observations> haObservations() {
+        return Optional.empty();
+    }
+
+    enum ObservationMoment { INITIAL, ROUTING, FAULT, PRE_FENCE }
+
+    record LeadershipObservation(long sequence, long sampleCount,
+                                 long firstObservedAtMillis, long lastObservedAtMillis,
+                                 ObservationMoment moment, Optional<Leadership> leadership,
+                                 Optional<String> error) {
+        public LeadershipObservation {
+            if (sequence < 1 || sampleCount < 1) {
+                throw new IllegalArgumentException("Observation sequence and count must be positive");
+            }
+            Objects.requireNonNull(moment, "moment");
+            Objects.requireNonNull(leadership, "leadership");
+            Objects.requireNonNull(error, "error");
+            if (leadership.isPresent() && error.isPresent()) {
+                throw new IllegalArgumentException("A failed observation has no confirmed leadership");
+            }
+        }
+    }
+
+    /** One session establishment message from the identified Flink container's own stdout. */
+    record NegotiatedSession(String sessionId, long timeoutMillis, String logLine) {
+        public NegotiatedSession {
+            sessionId = requireNonBlank(sessionId, "sessionId");
+            logLine = requireNonBlank(logLine, "logLine");
+            if (timeoutMillis < 1) throw new IllegalArgumentException("Session timeout must be positive");
+        }
+    }
+
+    record SessionEvidence(String logicalName, FlinkComponentRole role, String runtimeId,
+                           String classLoadProcess, long requestedTimeoutMillis,
+                           List<NegotiatedSession> negotiated, boolean overflow) {
+        public SessionEvidence {
+            logicalName = requireNonBlank(logicalName, "logicalName");
+            Objects.requireNonNull(role, "role");
+            runtimeId = requireNonBlank(runtimeId, "runtimeId");
+            classLoadProcess = requireNonBlank(classLoadProcess, "classLoadProcess");
+            if (requestedTimeoutMillis < 1) throw new IllegalArgumentException("Session timeout must be positive");
+            negotiated = List.copyOf(Objects.requireNonNull(negotiated, "negotiated"));
+        }
+    }
+
+    /** Not a continuous election history: intervals between samples remain unobserved. */
+    record Observations(List<LeadershipObservation> leadership, List<SessionEvidence> sessions,
+                        boolean overflow) {
+        public Observations {
+            leadership = List.copyOf(Objects.requireNonNull(leadership, "leadership"));
+            sessions = List.copyOf(Objects.requireNonNull(sessions, "sessions"));
+        }
+    }
+
     /**
      * The requested timeout bounds fault work and leadership observation. Safety cleanup has
      * separate budgets: at most five seconds for the token service, then thirty seconds for
@@ -76,9 +131,22 @@ public interface FlinkHaControl {
         }
     }
 
-    record ProcessState(String runtimeId, boolean running, boolean paused) {
+    record ProcessState(String runtimeId, boolean running, boolean paused,
+                        Optional<Long> exitCode, Optional<Boolean> oomKilled,
+                        Optional<String> finishedAt) {
         public ProcessState {
             runtimeId = requireNonBlank(runtimeId, "runtimeId");
+            Objects.requireNonNull(exitCode, "exitCode");
+            Objects.requireNonNull(oomKilled, "oomKilled");
+            finishedAt = Objects.requireNonNull(finishedAt, "finishedAt")
+                    .map(value -> requireNonBlank(value, "finishedAt"));
+            if (running && (exitCode.isPresent() || finishedAt.isPresent())) {
+                throw new IllegalArgumentException("A running process has no observed exit");
+            }
+        }
+
+        public ProcessState(String runtimeId, boolean running, boolean paused) {
+            this(runtimeId, running, paused, Optional.empty(), Optional.empty(), Optional.empty());
         }
     }
 

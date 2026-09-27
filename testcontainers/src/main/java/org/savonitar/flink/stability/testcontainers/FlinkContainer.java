@@ -3,6 +3,7 @@ package org.savonitar.flink.stability.testcontainers;
 import org.savonitar.flink.stability.runtime.api.FlinkClassLoadLog;
 import org.savonitar.flink.stability.runtime.api.FlinkComponentRole;
 import org.savonitar.flink.stability.runtime.api.FlinkRuntimeTarget;
+import org.savonitar.flink.stability.runtime.api.FlinkHaControl;
 import org.slf4j.LoggerFactory;
 import org.testcontainers.containers.BindMode;
 import org.testcontainers.containers.GenericContainer;
@@ -18,6 +19,7 @@ import java.nio.file.Path;
 import java.nio.file.attribute.PosixFilePermissions;
 import java.time.Duration;
 import java.util.List;
+import java.util.ArrayList;
 import java.util.Objects;
 import java.util.concurrent.atomic.AtomicReference;
 
@@ -38,6 +40,7 @@ final class FlinkContainer implements FlinkComponentFactory {
     private FlinkHaRuntime highAvailability;
     private SyntheticTokenPlugin tokenPlugin;
     private int tokenServicePort;
+    private final List<VerifiedFlinkContainer> containers = new ArrayList<>();
 
     /** Creates a factory for one exact image/bundle binding. */
     FlinkContainer(
@@ -76,6 +79,8 @@ final class FlinkContainer implements FlinkComponentFactory {
         FlinkClassLoadLog log = classLoadLogs.register(logicalName);
         VerifiedFlinkContainer container = new VerifiedFlinkContainer(
                 flinkImage, runtimeTarget, this::verifyImageId, log);
+        container.observeHaSessions(logicalName, FlinkComponentRole.JOB_MANAGER);
+        containers.add(container);
         configurePlugin(container);
         return container
                 .withNetwork(network)
@@ -102,6 +107,8 @@ final class FlinkContainer implements FlinkComponentFactory {
         FlinkClassLoadLog log = classLoadLogs.register(logicalName);
         VerifiedFlinkContainer container = new VerifiedFlinkContainer(
                 flinkImage, runtimeTarget, this::verifyImageId, log);
+        container.observeHaSessions(logicalName, FlinkComponentRole.TASK_MANAGER);
+        containers.add(container);
         configurePlugin(container);
         container
                 .withNetwork(network)
@@ -174,6 +181,11 @@ final class FlinkContainer implements FlinkComponentFactory {
     @Override
     public void configureHighAvailability(FlinkHaRuntime runtime) {
         highAvailability = Objects.requireNonNull(runtime, "runtime");
+    }
+
+    @Override
+    public List<FlinkHaControl.SessionEvidence> haSessions() {
+        return containers.stream().flatMap(container -> container.haSessionEvidence().stream()).toList();
     }
 
     @Override

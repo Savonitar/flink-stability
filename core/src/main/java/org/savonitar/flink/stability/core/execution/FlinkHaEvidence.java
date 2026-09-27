@@ -21,7 +21,8 @@ import static org.savonitar.flink.stability.runtime.api.Checks.requireNonBlank;
 
 /** Independent proof that every declared leader fault and optional token fault actually occurred. */
 public record FlinkHaEvidence(
-        Expected expected, Optional<TokenEvidence> tokens, Outcome outcome, String detail) {
+        Expected expected, Optional<TokenEvidence> tokens,
+        Optional<FlinkHaControl.Observations> observations, Outcome outcome, String detail) {
     public static final String TOKEN_CONTAINER_PATH =
             "/opt/flink/plugins/flink-stability-token/flink-stability-token.jar";
     public static final String TOKEN_PROVIDER =
@@ -35,23 +36,24 @@ public record FlinkHaEvidence(
     public FlinkHaEvidence {
         Objects.requireNonNull(expected, "expected");
         Objects.requireNonNull(tokens, "tokens");
+        Objects.requireNonNull(observations, "observations");
         Objects.requireNonNull(outcome, "outcome");
         detail = requireNonBlank(detail, "detail");
     }
 
     /** Retained independently of observations, including faults not reached by execution. */
-    public record Expected(List<DeclaredFault> faults, boolean tokenProviderRequired) {
+    public record Expected(List<DeclaredFault> faults, boolean haRequired, boolean tokenProviderRequired) {
         public Expected {
             faults = List.copyOf(Objects.requireNonNull(faults, "faults"));
         }
 
-        public static Expected from(List<ExecutableScenarioPlan.Phase> phases, boolean tokens) {
+        public static Expected from(List<ExecutableScenarioPlan.Phase> phases, boolean haRequired, boolean tokens) {
             List<DeclaredFault> faults = new ArrayList<>();
             for (int index = 0; index < phases.size(); index++) {
                 collect(phases.get(index).steps(), "$/phases/" + index + "/steps",
                         List.of(), faults);
             }
-            return new Expected(faults, tokens);
+            return new Expected(faults, haRequired, tokens);
         }
 
         private static void collect(List<ExecutableScenarioPlan.Step> steps, String parent,
@@ -109,10 +111,92 @@ public record FlinkHaEvidence(
     public static FlinkHaEvidence evaluate(Expected expected, Optional<PhaseExecutionEvidence> phases,
                                             Optional<TokenEvidence> tokens,
                                             List<FlinkComponentProvisioningEvidence> provisioning) {
-        Optional<String> failure = failure(expected, phases, tokens, provisioning);
-        return new FlinkHaEvidence(expected, tokens,
+        return evaluate(expected, phases, tokens, provisioning, Optional.empty());
+    }
+
+    public static FlinkHaEvidence evaluate(Expected expected, Optional<PhaseExecutionEvidence> phases,
+                                            Optional<TokenEvidence> tokens,
+                                            List<FlinkComponentProvisioningEvidence> provisioning,
+                                            Optional<FlinkHaControl.Observations> observations) {
+        Optional<String> failure = sampledLeadershipFailure(expected, observations, provisioning);
+        if (failure.isEmpty()) failure = failure(expected, phases, tokens, provisioning);
+        return new FlinkHaEvidence(expected, tokens, observations,
                 failure.isPresent() ? Outcome.UNCONFIRMED : Outcome.CONFIRMED,
                 failure.orElse("Every declared leader fault, recovery and required token observation is confirmed"));
+    }
+
+    private static Optional<String> sampledLeadershipFailure(Expected expected,
+            Optional<FlinkHaControl.Observations> observations,
+            List<FlinkComponentProvisioningEvidence> provisioning) {
+        if (!expected.haRequired()) {
+            return expected.faults().isEmpty() ? Optional.empty()
+                    : Optional.of("Declared leader faults require an HA target");
+        }
+        if (observations.isEmpty() || observations.orElseThrow().overflow()) {
+            return Optional.of("Required sampled HA history is missing or overflowed");
+        }
+        var history = observations.orElseThrow();
+        Map<String, FlinkComponentProvisioningEvidence> components = new HashMap<>();
+        for (var component : provisioning) {
+            if (components.putIfAbsent(component.runtimeId(), component) != null) {
+                return Optional.of("HA provisioning contains duplicate physical processes");
+            }
+        }
+        Set<String> sessionProcesses = new HashSet<>();
+        Set<String> classProcesses = new HashSet<>();
+        Long requestedTimeout = null;
+        for (var session : history.sessions()) {
+            var component = components.get(session.runtimeId());
+            if (component == null || !component.logicalName().equals(session.logicalName())
+                    || component.role() != session.role() || !sessionProcesses.add(session.runtimeId())
+                    || !classProcesses.add(session.classLoadProcess())
+                    || component.runtimeJarEvidence().filter(jar ->
+                            !jar.classLoadProcess().equals(session.classLoadProcess())).isPresent()
+                    || session.overflow() || session.negotiated().isEmpty()
+                    || session.requestedTimeoutMillis() < 2_000 || session.requestedTimeoutMillis() > 60_000
+                    || requestedTimeout != null && requestedTimeout != session.requestedTimeoutMillis()
+                    || session.negotiated().stream().anyMatch(value ->
+                            value.timeoutMillis() != session.requestedTimeoutMillis())) {
+                return Optional.of("Flink process session timeout or exact incarnation binding is unconfirmed");
+            }
+            requestedTimeout = session.requestedTimeoutMillis();
+        }
+        if (components.isEmpty() || !sessionProcesses.equals(components.keySet())) {
+            return Optional.of("A provisioned Flink incarnation lacks its own negotiated session evidence");
+        }
+        FlinkHaControl.Leadership initial = null;
+        boolean preFence = false;
+        long sequence = 0;
+        long lastObservedAtMillis = 0;
+        for (var sample : history.leadership()) {
+            if (sample.sequence() != sequence + 1 || sample.firstObservedAtMillis() <= 0
+                    || sample.firstObservedAtMillis() < lastObservedAtMillis
+                    || sample.lastObservedAtMillis() < sample.firstObservedAtMillis()
+                    || sample.sampleCount() > 1 && (sample.moment() != FlinkHaControl.ObservationMoment.ROUTING
+                            || sample.leadership().isEmpty() || sample.error().isPresent())
+                    || preFence || initial == null && sample.moment() != FlinkHaControl.ObservationMoment.INITIAL) {
+                return Optional.of("Sampled HA history is unordered, incomplete or continues after its fence boundary");
+            }
+            sequence += sample.sampleCount();
+            lastObservedAtMillis = sample.lastObservedAtMillis();
+            if (sample.leadership().isPresent()) {
+                var leader = sample.leadership().orElseThrow();
+                var component = components.get(leader.resourceManager().runtimeId());
+                if (!coherent(leader) || component == null || component.role() != FlinkComponentRole.JOB_MANAGER
+                        || !component.logicalName().equals(leader.resourceManager().logicalName())) {
+                    return Optional.of("A sampled leader is torn or not bound to a provisioned JobManager");
+                }
+                if (initial == null && sample.moment() == FlinkHaControl.ObservationMoment.INITIAL) initial = leader;
+                if (initial != null && expected.faults().isEmpty() && !initial.equals(leader)) {
+                    return Optional.of("An undeclared process or leadership session change was observed in the HA control");
+                }
+                if (sample.moment() == FlinkHaControl.ObservationMoment.PRE_FENCE) preFence = true;
+            } else if (initial != null && expected.faults().isEmpty()) {
+                return Optional.of("The HA control has an unsuccessful leadership sample after its initial boundary");
+            }
+        }
+        return initial != null && preFence ? Optional.empty()
+                : Optional.of("Coherent initial and pre-fence HA leadership boundaries are required");
     }
 
     private static Optional<String> failure(Expected expected, Optional<PhaseExecutionEvidence> phases,

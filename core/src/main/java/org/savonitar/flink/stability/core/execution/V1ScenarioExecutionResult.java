@@ -34,6 +34,8 @@ public record V1ScenarioExecutionResult(
         KafkaTransactionVersion.Selection kafkaTransactionVersion,
         FlinkHaEvidence.Expected expectedHa,
         Optional<FlinkHaEvidence.TokenEvidence> tokenEvidence,
+        Optional<org.savonitar.flink.stability.runtime.api.FlinkHaControl.Observations> haObservations,
+        Optional<FlinkProcessWriteFenceEvidence.Observations> processObservations,
         List<String> diagnostics) {
 
     public V1ScenarioExecutionResult {
@@ -60,7 +62,13 @@ public record V1ScenarioExecutionResult(
         Objects.requireNonNull(kafkaTransactionVersion, "kafkaTransactionVersion");
         Objects.requireNonNull(expectedHa, "expectedHa");
         Objects.requireNonNull(tokenEvidence, "tokenEvidence");
-        if (status == Status.PASS && FlinkHaEvidence.evaluate(expectedHa, phaseEvidence, tokenEvidence, flinkProvisioningEvidence)
+        Objects.requireNonNull(haObservations, "haObservations");
+        Objects.requireNonNull(processObservations, "processObservations");
+        if (status == Status.PASS && FlinkProcessHealth.evaluate(expectedFlinkRuntime,
+                processFenceEvidence, processObservations).outcome() != FlinkProcessHealth.Outcome.HEALTHY) {
+            throw new IllegalArgumentException("PASS requires confirmed pre-fence process health");
+        }
+        if (status == Status.PASS && FlinkHaEvidence.evaluate(expectedHa, phaseEvidence, tokenEvidence, flinkProvisioningEvidence, haObservations)
                 .outcome() != FlinkHaEvidence.Outcome.CONFIRMED) {
             throw new IllegalArgumentException("PASS requires every requested leadership and token fault to be confirmed");
         }
@@ -133,6 +141,31 @@ public record V1ScenarioExecutionResult(
         }
     }
 
+    /** Legacy callers must provide observed process state before claiming PASS. */
+    public V1ScenarioExecutionResult(
+            Status status, String reason, String message,
+            Optional<KafkaInputManifest> inputManifest,
+            Optional<PhaseExecutionEvidence> phaseEvidence,
+            Optional<FlinkTerminalWriteFence.Evidence> writeFenceEvidence,
+            Optional<FlinkProcessWriteFenceEvidence> processFenceEvidence,
+            Optional<FlinkJobObservation.Attempt> finalJobObservation,
+            Optional<KafkaIdSetValidationResult> terminalValidation,
+            Optional<KafkaTransactionListing> sinkTransactions,
+            Optional<SubjectClassOrigins> subjectClassOrigins,
+            List<FlinkComponentProvisioningEvidence> flinkProvisioningEvidence,
+            FlinkRuntimeIdentity.ExpectedTarget expectedFlinkRuntime,
+            Optional<SubjectClassOrigins> runtimeClassOrigins,
+            KafkaTransactionVersion.Selection kafkaTransactionVersion,
+            FlinkHaEvidence.Expected expectedHa,
+            Optional<FlinkHaEvidence.TokenEvidence> tokenEvidence,
+            List<String> diagnostics) {
+        this(status, reason, message, inputManifest, phaseEvidence, writeFenceEvidence,
+                processFenceEvidence, finalJobObservation, terminalValidation, sinkTransactions,
+                subjectClassOrigins, flinkProvisioningEvidence, expectedFlinkRuntime,
+                runtimeClassOrigins, kafkaTransactionVersion, expectedHa, tokenEvidence,
+                Optional.empty(), Optional.empty(), diagnostics);
+    }
+
     /** Existing non-HA callers still undergo all requested runtime identity checks. */
     public V1ScenarioExecutionResult(
             Status status, String reason, String message,
@@ -153,7 +186,7 @@ public record V1ScenarioExecutionResult(
                 processFenceEvidence, finalJobObservation, terminalValidation, sinkTransactions,
                 subjectClassOrigins, flinkProvisioningEvidence, expectedFlinkRuntime,
                 runtimeClassOrigins, kafkaTransactionVersion,
-                new FlinkHaEvidence.Expected(List.of(), false), Optional.empty(), diagnostics);
+                new FlinkHaEvidence.Expected(List.of(), false, false), Optional.empty(), diagnostics);
     }
 
     /** Existing callers do not supply runtime class evidence; requested checks still fail closed. */
@@ -200,7 +233,11 @@ public record V1ScenarioExecutionResult(
     }
 
     public FlinkHaEvidence haEvidence() {
-        return FlinkHaEvidence.evaluate(expectedHa, phaseEvidence, tokenEvidence, flinkProvisioningEvidence);
+        return FlinkHaEvidence.evaluate(expectedHa, phaseEvidence, tokenEvidence, flinkProvisioningEvidence, haObservations);
+    }
+
+    public FlinkProcessHealth processHealth() {
+        return FlinkProcessHealth.evaluate(expectedFlinkRuntime, processFenceEvidence, processObservations);
     }
 
     public V1ScenarioExecutionResult withCleanupFailure(Throwable failure) {
@@ -250,6 +287,8 @@ public record V1ScenarioExecutionResult(
                     kafkaTransactionVersion,
                     expectedHa,
                     tokenEvidence,
+                    haObservations,
+                    processObservations,
                     updated);
         }
         return new V1ScenarioExecutionResult(
@@ -270,6 +309,8 @@ public record V1ScenarioExecutionResult(
                 kafkaTransactionVersion,
                 expectedHa,
                 tokenEvidence,
+                haObservations,
+                processObservations,
                 updated);
     }
 }

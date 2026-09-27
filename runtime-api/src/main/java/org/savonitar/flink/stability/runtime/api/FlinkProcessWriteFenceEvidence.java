@@ -34,4 +34,49 @@ public record FlinkProcessWriteFenceEvidence(
         SIGKILLED,
         ALREADY_STOPPED
     }
+
+    public enum Moment {
+        BEFORE_FENCE,
+        AFTER_DECLARED_KILL,
+        AFTER_FENCE_KILL
+    }
+
+    /** Missing/failed inspection is distinct from observing an exited process. */
+    public record Observation(
+            String logicalName, FlinkComponentRole role, Optional<String> runtimeId,
+            Moment moment, Instant observedAt, Optional<FlinkHaControl.ProcessState> state,
+            boolean missing, Optional<String> diagnostic) {
+        public Observation {
+            logicalName = requireNonBlank(logicalName, "logicalName");
+            Objects.requireNonNull(role, "role");
+            runtimeId = Objects.requireNonNull(runtimeId, "runtimeId")
+                    .map(value -> requireNonBlank(value, "runtimeId"));
+            Objects.requireNonNull(moment, "moment");
+            Objects.requireNonNull(observedAt, "observedAt");
+            Objects.requireNonNull(state, "state");
+            diagnostic = Objects.requireNonNull(diagnostic, "diagnostic")
+                    .map(value -> requireNonBlank(value, "diagnostic"));
+            if (state.isPresent() && (missing || diagnostic.isPresent()
+                    || !runtimeId.equals(Optional.of(state.orElseThrow().runtimeId())))) {
+                throw new IllegalArgumentException("Observed process state must match its physical identity");
+            }
+            if (state.isEmpty() && !missing && diagnostic.isEmpty()) {
+                throw new IllegalArgumentException("Unavailable process state requires a diagnostic");
+            }
+        }
+    }
+
+    /** Survives a failed fence; entries do not imply that every process was stopped. */
+    public record Observations(List<Observation> observations, List<Component> fenced,
+                               boolean overflow) {
+        public static final int LIMIT = 1024;
+
+        public Observations {
+            observations = List.copyOf(Objects.requireNonNull(observations, "observations"));
+            fenced = List.copyOf(Objects.requireNonNull(fenced, "fenced"));
+            if (observations.size() > LIMIT || fenced.size() > LIMIT) {
+                throw new IllegalArgumentException("Process observation limit exceeded");
+            }
+        }
+    }
 }

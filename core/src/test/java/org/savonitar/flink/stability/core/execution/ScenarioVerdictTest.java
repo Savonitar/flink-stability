@@ -48,7 +48,9 @@ class ScenarioVerdictTest {
                 result.inputManifest(), result.phaseEvidence(), result.writeFenceEvidence(),
                 result.processFenceEvidence(), result.finalJobObservation(), result.terminalValidation(),
                 result.sinkTransactions(), result.subjectClassOrigins(), result.flinkProvisioningEvidence(),
-                result.expectedFlinkRuntime(), result.runtimeClassOrigins(), feature, result.diagnostics());
+                result.expectedFlinkRuntime(), result.runtimeClassOrigins(), feature,
+                result.expectedHa(), result.tokenEvidence(), result.haObservations(),
+                result.processObservations(), result.diagnostics());
     }
 
     @Test
@@ -60,7 +62,9 @@ class ScenarioVerdictTest {
                 complete.finalJobObservation(), complete.terminalValidation(), complete.sinkTransactions(),
                 complete.subjectClassOrigins(), List.of(), FlinkRuntimeIdentityTest.expected(Optional.empty()),
                 Optional.empty(),
-                KafkaTransactionVersion.Selection.notRequested(), complete.diagnostics());
+                KafkaTransactionVersion.Selection.notRequested(), complete.expectedHa(), complete.tokenEvidence(),
+                complete.haObservations(), complete.processObservations(),
+                complete.diagnostics());
 
         ScenarioVerdict verdict = ScenarioVerdict.of(EXPECT_DUPLICATES, incomplete);
 
@@ -163,7 +167,7 @@ class ScenarioVerdictTest {
                         Optional.empty(), List.of(), List.of())), Optional.empty());
         PhaseExecutionEvidence phases = new PhaseExecutionEvidence(List.of(), List.of(
                 new PhaseExecutionEvidence.TaskManagerKill("$/phases/0/steps/0", List.of(),
-                        "taskmanager-1", finished, OptionalLong.of(600),
+                        "taskmanager-1", finished, OptionalLong.of(550), OptionalLong.of(600),
                         Optional.of(new org.savonitar.flink.stability.runtime.api.TaskManagerControl.Identity(
                                 "taskmanager-1", "tm-1", "resource-1")))), List.of());
         V1ScenarioExecutionResult attempt = terminalAttempt(
@@ -341,6 +345,8 @@ class ScenarioVerdictTest {
                 FlinkRuntimeIdentityTest.expected(Optional.empty()),
                 Optional.empty(),
                 KafkaTransactionVersion.Selection.notRequested(),
+                new FlinkHaEvidence.Expected(List.of(), false, false), Optional.empty(), Optional.empty(),
+                Optional.of(FlinkRuntimeIdentityTest.healthyProcesses(processes)),
                 List.of());
     }
 }
