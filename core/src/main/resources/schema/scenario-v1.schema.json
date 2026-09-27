@@ -405,6 +405,18 @@
         "brokers": {
           "$ref": "#/$defs/positiveIntegerOrTemplate"
         },
+        "transaction_version": {
+          "description": "Optional finalized Kafka transaction.version feature level. Omission preserves the broker's existing behavior.",
+          "oneOf": [
+            {
+              "type": "integer",
+              "enum": [1, 2]
+            },
+            {
+              "$ref": "#/$defs/templateString"
+            }
+          ]
+        },
         "topics": {
           "type": "array",
           "minItems": 1,

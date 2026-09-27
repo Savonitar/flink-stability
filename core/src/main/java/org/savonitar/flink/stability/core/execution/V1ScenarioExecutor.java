@@ -2,6 +2,7 @@ package org.savonitar.flink.stability.core.execution;
 
 import org.savonitar.flink.stability.core.execution.kafka.KafkaInputPreparationException;
 import org.savonitar.flink.stability.core.execution.kafka.KafkaInputManifest;
+import org.savonitar.flink.stability.core.execution.kafka.KafkaTransactionVersion;
 import org.savonitar.flink.stability.core.execution.kafka.KafkaInputPreparer;
 import org.savonitar.flink.stability.core.execution.kafka.PreparedKafkaInput;
 import org.savonitar.flink.stability.core.flink.FlinkJobHandle;
@@ -46,6 +47,7 @@ public final class V1ScenarioExecutor {
     private final FlinkControlFactory flinkControlFactory;
     private final TerminalValidation terminalValidation;
     private final TransactionListing transactionListing;
+    private final TransactionVersionSelection transactionVersionSelection;
     private final AttemptCleanupBoundary cleanupBoundary;
     private final Function<KafkaProxyEndpoint, ExecutablePhaseExecutor.NetworkFaults> networkFaultFactory;
 
@@ -95,6 +97,20 @@ public final class V1ScenarioExecutor {
             TransactionListing transactionListing,
             Duration cleanupTimeout,
             Function<KafkaProxyEndpoint, ExecutablePhaseExecutor.NetworkFaults> networkFaultFactory) {
+        this(runtimeFactory, inputPreparation, flinkControlFactory, terminalValidation,
+                transactionListing, cleanupTimeout, networkFaultFactory,
+                new KafkaTransactionVersion()::select);
+    }
+
+    V1ScenarioExecutor(
+            V1AttemptRuntimeFactory runtimeFactory,
+            InputPreparation inputPreparation,
+            FlinkControlFactory flinkControlFactory,
+            TerminalValidation terminalValidation,
+            TransactionListing transactionListing,
+            Duration cleanupTimeout,
+            Function<KafkaProxyEndpoint, ExecutablePhaseExecutor.NetworkFaults> networkFaultFactory,
+            TransactionVersionSelection transactionVersionSelection) {
         this.runtimeFactory = Objects.requireNonNull(runtimeFactory, "runtimeFactory");
         this.inputPreparation = Objects.requireNonNull(
                 inputPreparation, "inputPreparation");
@@ -106,6 +122,7 @@ public final class V1ScenarioExecutor {
                 transactionListing, "transactionListing");
         this.cleanupBoundary = new AttemptCleanupBoundary(cleanupTimeout);
         this.networkFaultFactory = Objects.requireNonNull(networkFaultFactory, "networkFaultFactory");
+        this.transactionVersionSelection = Objects.requireNonNull(transactionVersionSelection, "transactionVersionSelection");
     }
 
     public V1ScenarioExecutionResult execute(
@@ -150,6 +167,8 @@ public final class V1ScenarioExecutor {
         KafkaTransactionListing sinkTransactions = null;
         SubjectClassOrigins subjectOrigins = null;
         SubjectClassOrigins runtimeOrigins = null;
+        KafkaTransactionVersion.Selection transactionVersion = new KafkaTransactionVersion.Selection(
+                plan.kafka().transactionVersion(), List.of(), Optional.empty());
         List<String> evidenceDiagnostics = new ArrayList<>();
         V1ScenarioExecutionResult result;
         Stage stage = Stage.RUNTIME_CREATION;
@@ -158,6 +177,16 @@ public final class V1ScenarioExecutor {
             resources.runtime = runtime;
             stage = Stage.KAFKA_START;
             KafkaRuntimeEndpoints endpoints = runtime.startKafka(plan.kafka().runtimeTarget());
+            stage = Stage.KAFKA_FEATURE_SELECTION;
+            KafkaTransactionVersion.Selection selected = transactionVersionSelection.select(
+                    endpoints.hostBootstrapServers(), plan.kafka().transactionVersion());
+            if (!selected.requested().equals(plan.kafka().transactionVersion())) {
+                throw new IOException("Kafka transaction.version evidence describes another request");
+            }
+            transactionVersion = selected;
+            if (!transactionVersion.permitsPass()) {
+                throw new IOException("Kafka transaction.version selection is unconfirmed: " + transactionVersion);
+            }
             stage = Stage.KAFKA_PROXY_START;
             ExecutablePhaseExecutor.NetworkFaults networkFaults = startKafkaProxy(
                     runtime, plan, endpoints.internalBootstrapServers());
@@ -280,6 +309,7 @@ public final class V1ScenarioExecutor {
                     runtime,
                     expectedRuntime,
                     runtimeOrigins,
+                    transactionVersion,
                     evidenceDiagnostics);
         } catch (KafkaInputPreparationException failure) {
             inputEvidence = failure.evidence().orElse(inputEvidence);
@@ -298,6 +328,7 @@ public final class V1ScenarioExecutor {
                     runtime,
                     expectedRuntime,
                     runtimeOrigins,
+                    transactionVersion,
                     diagnostics(failure));
         } catch (PhaseExecutionException failure) {
             phases = failure.evidence();
@@ -320,6 +351,7 @@ public final class V1ScenarioExecutor {
                     runtime,
                     expectedRuntime,
                     runtimeOrigins,
+                    transactionVersion,
                     diagnostics(failure));
         } catch (TerminalWriteFenceException failure) {
             processFence = failure.processFenceEvidence().orElse(null);
@@ -339,6 +371,7 @@ public final class V1ScenarioExecutor {
                     runtime,
                     expectedRuntime,
                     runtimeOrigins,
+                    transactionVersion,
                     diagnostics(failure));
         } catch (InterruptedException failure) {
             Thread.currentThread().interrupt();
@@ -357,6 +390,7 @@ public final class V1ScenarioExecutor {
                     runtime,
                     expectedRuntime,
                     runtimeOrigins,
+                    transactionVersion,
                     diagnostics(failure));
         } catch (Exception failure) {
             result = result(
@@ -374,6 +408,7 @@ public final class V1ScenarioExecutor {
                     runtime,
                     expectedRuntime,
                     runtimeOrigins,
+                    transactionVersion,
                     diagnostics(failure));
         }
 
@@ -454,6 +489,7 @@ public final class V1ScenarioExecutor {
             V1AttemptRuntime runtime,
             FlinkRuntimeIdentity.ExpectedTarget expectedRuntime,
             SubjectClassOrigins runtimeOrigins,
+            KafkaTransactionVersion.Selection transactionVersion,
             List<String> diagnostics) {
         List<String> retainedDiagnostics = new ArrayList<>(diagnostics);
         List<FlinkComponentProvisioningEvidence> provisioning = List.of();
@@ -498,6 +534,7 @@ public final class V1ScenarioExecutor {
                 provisioning,
                 expectedRuntime,
                 Optional.ofNullable(runtimeOrigins),
+                transactionVersion,
                 retainedDiagnostics);
     }
 
@@ -571,6 +608,11 @@ public final class V1ScenarioExecutor {
     }
 
     @FunctionalInterface
+    interface TransactionVersionSelection {
+        KafkaTransactionVersion.Selection select(String bootstrapServers, Optional<Integer> requested);
+    }
+
+    @FunctionalInterface
     interface TransactionListing {
         KafkaTransactionListing list(
                 String bootstrapServers,
@@ -620,6 +662,7 @@ public final class V1ScenarioExecutor {
     private enum Stage {
         RUNTIME_CREATION("infrastructure.attempt-runtime-creation-failed", "runtime creation"),
         KAFKA_START("infrastructure.kafka-start-failed", "Kafka startup"),
+        KAFKA_FEATURE_SELECTION(KafkaTransactionVersion.UNCONFIRMED, "Kafka transaction.version selection"),
         KAFKA_PROXY_START("infrastructure.kafka-proxy-start-failed", "Kafka proxy startup"),
         INPUT_PREPARATION("infrastructure.kafka-input-setup-failed", "input preparation"),
         FLINK_START("infrastructure.flink-start-failed", "Flink startup"),

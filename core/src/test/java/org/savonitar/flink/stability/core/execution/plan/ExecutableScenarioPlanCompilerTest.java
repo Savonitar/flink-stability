@@ -31,6 +31,7 @@ import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.function.Consumer;
 import java.util.jar.Attributes;
 import java.util.jar.JarEntry;
@@ -66,6 +67,7 @@ class ExecutableScenarioPlanCompilerTest {
         assertEquals("main", plan.kafka().alias());
         assertEquals("apache/kafka:4.0.0", plan.kafka().imageReference());
         assertEquals(ExecutableScenarioPlan.KafkaMode.KRAFT, plan.kafka().mode());
+        assertTrue(plan.kafka().transactionVersion().isEmpty());
         assertEquals(Duration.ofHours(2),
                 plan.kafka().brokerPolicy().transactionMaxTimeout());
         assertEquals(Map.of(
@@ -110,6 +112,36 @@ class ExecutableScenarioPlanCompilerTest {
                 plan.job().sink());
         assertTrue(plan.phases().getFirst().steps().getFirst()
                 instanceof ExecutableScenarioPlan.AwaitJobState);
+    }
+
+    @Test
+    void preservesExplicitTransactionFeatureVersionsWithoutChangingBrokerStartupPolicy() {
+        ExecutableScenarioPlan.KafkaCluster unselected =
+                compiler.compile(resolved(document -> {})).kafka();
+
+        for (int version : List.of(1, 2)) {
+            ExecutableScenarioPlan.KafkaCluster selected = compiler.compile(resolved(document ->
+                    ((ObjectNode) document.at("/setup/kafka/clusters/main"))
+                            .put("transaction_version", version))).kafka();
+
+            assertEquals(Optional.of(version), selected.transactionVersion());
+            assertEquals(unselected.runtimeTarget(), selected.runtimeTarget());
+        }
+    }
+
+    @Test
+    void rejectsUnsupportedTransactionFeatureVersionsInTypedPlans() {
+        ExecutableScenarioPlan.KafkaCluster kafka =
+                compiler.compile(resolved(document -> {})).kafka();
+
+        for (int version : List.of(-1, 0, 3)) {
+            IllegalArgumentException failure = assertThrows(IllegalArgumentException.class,
+                    () -> new ExecutableScenarioPlan.KafkaCluster(
+                            kafka.alias(), kafka.imageReference(), kafka.mode(), kafka.brokers(),
+                            kafka.brokerPolicy(), kafka.topics(), Optional.of(version),
+                            kafka.proxy()));
+            assertEquals("transactionVersion must be 1 or 2", failure.getMessage());
+        }
     }
 
     @Test

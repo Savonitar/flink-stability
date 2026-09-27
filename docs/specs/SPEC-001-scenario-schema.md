@@ -380,6 +380,25 @@ Connector pull-request gating is the same mechanism with one axis:
   topology before artifact preparation or Docker with
   `runner.kafka.broker-count-unsupported` or
   `runner.kafka.replication-factor-unsupported`; it never rewrites the scenario.
+- **R4.2c** A Kafka cluster may declare `transaction_version: 1` or
+  `transaction_version: 2`, including through integer parameter interpolation.
+  Omission leaves the broker's feature level unchanged and does not claim that
+  either version was selected. This is a pre-workload selection of Kafka's
+  finalized `transaction.version` feature, not a broker configuration property or
+  a storage-formatting instruction. After broker startup and before proxy startup,
+  topic/input preparation, or Flink startup, the runner reads the supported and
+  finalized feature levels. When a change is needed it requests only a safe
+  upgrade or safe downgrade, then independently observes the exact requested
+  finalized level; a supported range or successful update acknowledgement alone
+  is insufficient. These operations, including Admin-client close, share one
+  `30s` deadline. An unsupported,
+  missing, rejected, or unconfirmed selection prevents workload execution and
+  cannot produce `pass`. Retain the original failure and available observations;
+  never retry with an unsafe downgrade or silently continue at another level.
+  Evidence records the requested version, supported range, observed finalized
+  levels and metadata epoch when available, and selection outcome. This setting
+  enables a controlled feature comparison; it does not establish that Kafka 4.0
+  accepts every safe transition between these levels.
 - **R4.3** Topics are declared **under their cluster** — with two clusters, a
   bare `input_topic` is ambiguous. Every topic requires `name`, `partitions`, and
   `replication_factor`; both numeric values are positive integers and replication
@@ -1638,7 +1657,14 @@ Connector pull-request gating is the same mechanism with one axis:
   attempt's own status, reason and message under `attempt`, summarized input and
   phase evidence,
   write/process-fence completion evidence, terminal-validation status/counts/
-  completeness, Flink provisioning count, and diagnostics. Runtime-image evidence
+  completeness, Flink provisioning count, and diagnostics. The Kafka feature
+  selection of R4.2c appears as `evidence.kafkaTransactionVersion`: `status` is
+  `not-requested`, `confirmed`, or `unconfirmed`; `requested` is present when
+  declared; and `observations` retain each available `metadataEpoch`,
+  `finalized: {min, max}`, and `supported: {min, max}`. An unconfirmed selection
+  retains the original `error`, stops before proxy/input/Flink startup, and uses
+  `infrastructure.kafka-transaction-version-unconfirmed`; it cannot match an
+  expected failure. Omission performs no feature Admin calls. Runtime-image evidence
   includes the expected image ID when declared, identity-check outcome and detail,
   and every provisioned incarnation's logical component, role, container ID,
   declared image reference, observed Docker image ID, and connector bundle hashes
@@ -2233,6 +2259,7 @@ Use this catalogue as the checklist for optional v1 fields and patterns:
 | `health_retry_limit` | `health_retry_limit: 2` | The scenario needs a different dirty-health retry budget from the default. |
 | `completion_timeout` | `completion_timeout: 5m` | Bounded jobs legitimately need longer than the default `2m` to reach `FINISHED` before the Flink write fence. |
 | Kafka cluster `mode` | `mode: kraft` | Usually omit in v1; declared only when the author wants topology to be explicit. |
+| Kafka cluster `transaction_version` | `transaction_version: 1` | A controlled comparison requires an exact finalized Kafka transaction feature level before the workload starts. Only integer `1` or `2` is accepted; omission keeps the existing broker behavior. |
 | `setup.flink.jobmanagers` | `jobmanagers: 1` | Usually omit; declaring a value above 1 is rejected in v1. |
 | `setup.flink.taskmanagers` | `taskmanagers: 3` | The scenario targets or requires a specific TaskManager pool size. |
 | Connector `runtime_dependencies` | `runtime_dependencies: []` | Required for a local primary and optional for a Maven primary. Presence selects explicit dependency mode; empty explicitly asserts a shaded/self-contained JAR. Omission selects Maven auto-POM mode and is invalid for local. |

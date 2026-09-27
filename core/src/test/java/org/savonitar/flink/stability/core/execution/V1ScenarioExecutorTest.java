@@ -1,5 +1,6 @@
 package org.savonitar.flink.stability.core.execution;
 
+import org.savonitar.flink.stability.core.execution.kafka.KafkaTransactionVersion;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -79,6 +80,8 @@ class V1ScenarioExecutorTest {
     @TempDir
     Path temporaryDirectory;
 
+    private V1ScenarioExecutor.TransactionVersionSelection featureSelection = new KafkaTransactionVersion()::select;
+
     private V1ScenarioExecutor.TransactionListing transactionListing =
             (bootstrapServers, prefix, timeout) -> new KafkaTransactionListing(
                     prefix,
@@ -134,6 +137,65 @@ class V1ScenarioExecutorTest {
                     assertEquals(result.runtimeJarIdentity(), result.withCleanupFailure(
                             new IOException("cleanup failed")).runtimeJarIdentity());
                 }
+            }
+        }
+    }
+
+    @Test
+    void requestedFeatureIsVerifiedBeforeInputAndFlinkAndSurvivesCleanupFailure() throws Exception {
+        List<String> events = new ArrayList<>();
+        try (Fixture fixture = fixture(document ->
+                ((ObjectNode) document.at("/setup/kafka/clusters/main")).put("transaction_version", 1))) {
+            FakeRuntime runtime = new FakeRuntime(events);
+            runtime.closeFailure = new IllegalStateException("close failed");
+            var selected = new KafkaTransactionVersion.Selection(Optional.of(1), List.of(
+                    new KafkaTransactionVersion.Observation(
+                            Optional.of(new KafkaTransactionVersion.Range((short) 1, (short) 1)),
+                            Optional.of(new KafkaTransactionVersion.Range((short) 0, (short) 2)),
+                            OptionalLong.of(7))), Optional.empty());
+            featureSelection = (bootstrap, requested) -> {
+                events.add("feature-selection");
+                assertEquals("localhost:39092", bootstrap);
+                assertEquals(Optional.of(1), requested);
+                return selected;
+            };
+            V1ScenarioExecutionResult result = executor(events, runtime, new FakeFlink(events),
+                    (bootstrap, topic, ids, timeout) -> passResult()).execute(fixture.bound(), attemptContext());
+            assertEquals("infrastructure.attempt-cleanup-failed", result.reason());
+            assertEquals(selected, result.kafkaTransactionVersion());
+            assertTrue(events.indexOf("kafka-start") < events.indexOf("feature-selection"));
+            assertTrue(events.indexOf("feature-selection") < events.indexOf("input-prepare"));
+            assertTrue(events.indexOf("feature-selection") < events.indexOf("flink-open"));
+        }
+    }
+
+    @Test
+    void unconfirmedFeatureStopsBeforeInputOrFlinkWithOriginalEvidence() throws Exception {
+        for (boolean wrongRequest : List.of(false, true)) {
+            List<String> events = new ArrayList<>();
+            try (Fixture fixture = fixture(document ->
+                    ((ObjectNode) document.at("/setup/kafka/clusters/main")).put("transaction_version", 1))) {
+                var selected = new KafkaTransactionVersion.Selection(Optional.of(1), List.of(
+                        new KafkaTransactionVersion.Observation(
+                                Optional.of(new KafkaTransactionVersion.Range((short) 2, (short) 2)),
+                                Optional.of(new KafkaTransactionVersion.Range((short) 0, (short) 2)),
+                                OptionalLong.of(5))), Optional.of("safe downgrade rejected"));
+                featureSelection = (bootstrap, requested) -> wrongRequest
+                        ? KafkaTransactionVersion.Selection.notRequested() : selected;
+                V1ScenarioExecutionResult result = executor(events, new FakeRuntime(events),
+                        new FakeFlink(events), (bootstrap, topic, ids, timeout) -> passResult())
+                        .execute(fixture.bound(), attemptContext());
+                assertEquals(V1ScenarioExecutionResult.Status.INCONCLUSIVE, result.status());
+                assertEquals(KafkaTransactionVersion.UNCONFIRMED, result.reason());
+                assertEquals(Optional.of(1), result.kafkaTransactionVersion().requested());
+                assertFalse(result.kafkaTransactionVersion().permitsPass());
+                if (!wrongRequest) {
+                    assertEquals(selected, result.kafkaTransactionVersion());
+                }
+                assertFalse(events.contains("input-prepare"));
+                assertFalse(events.contains("flink-open"));
+                assertTrue(events.contains("runtime-close"));
+                assertTrue(result.inputManifest().isEmpty());
             }
         }
     }
@@ -608,6 +670,8 @@ class V1ScenarioExecutorTest {
                         Optional.of(confirmedOrigins()),
                         List.of(),
                         FlinkRuntimeIdentityTest.expected(Optional.empty()),
+                Optional.empty(),
+                KafkaTransactionVersion.Selection.notRequested(),
                         List.of()));
 
         assertTrue(failure.getMessage().contains("confirmed effect"));
@@ -652,6 +716,8 @@ class V1ScenarioExecutorTest {
                         Optional.of(confirmedOrigins()),
                         List.of(),
                         FlinkRuntimeIdentityTest.expected(Optional.empty()),
+                Optional.empty(),
+                KafkaTransactionVersion.Selection.notRequested(),
                         List.of()));
 
         assertTrue(failure.getMessage().contains("network fault"), failure.getMessage());
@@ -1420,7 +1486,7 @@ class V1ScenarioExecutorTest {
                     return transactionListing.list(bootstrapServers, prefix, timeout);
                 },
                 cleanupTimeout,
-                endpoint -> networkFaults);
+                endpoint -> networkFaults, featureSelection);
     }
 
     private Fixture fixture() throws IOException {

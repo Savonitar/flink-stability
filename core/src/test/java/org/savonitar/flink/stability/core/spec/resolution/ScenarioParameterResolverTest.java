@@ -46,6 +46,7 @@ class ScenarioParameterResolverTest {
         assertEquals(1, document.path("health_retry_limit").intValue());
         assertEquals("2m", document.path("completion_timeout").textValue());
         assertEquals("kraft", document.at("/setup/kafka/clusters/main/mode").textValue());
+        assertTrue(document.at("/setup/kafka/clusters/main/transaction_version").isMissingNode());
         assertEquals(1, document.at("/setup/flink/jobmanagers").intValue());
         assertEquals(1, document.at("/setup/flink/taskmanagers").intValue());
         assertEquals("auto", document.at("/workload/jobs/0/start").textValue());
@@ -76,6 +77,7 @@ class ScenarioParameterResolverTest {
         assertFalse(scenario.document().has("health_retry_limit"));
         assertFalse(scenario.document().has("completion_timeout"));
         assertTrue(scenario.at("/setup/kafka/clusters/main/mode").isMissingNode());
+        assertTrue(scenario.at("/setup/kafka/clusters/main/transaction_version").isMissingNode());
         assertTrue(scenario.at("/setup/flink/jobmanagers").isMissingNode());
         assertTrue(scenario.at("/workload/jobs/0/start").isMissingNode());
         assertTrue(scenario.at("/workload/jobs/0/state_backend").isMissingNode());
@@ -256,6 +258,58 @@ class ScenarioParameterResolverTest {
         assertEquals(4, document.at("/workload/jobs/0/parallelism").intValue());
         assertTrue(document.at("/workload/jobs/0/state_ttl/enabled").isBoolean());
         assertTrue(document.at("/workload/jobs/0/state_ttl/enabled").booleanValue());
+    }
+
+    @Test
+    void resolvesKafkaTransactionVersionParametersToIntegers() {
+        ScenarioSpecification scenario = scenario(document -> {
+            parameterWithDefault(document, "transaction_level", "integer", IntNode.valueOf(1));
+            kafkaCluster(document).put("transaction_version", "${transaction_level}");
+        });
+
+        for (int version : List.of(1, 2)) {
+            ResolutionRequest request = version == 1
+                    ? ResolutionRequest.none()
+                    : new ResolutionRequest(Map.of(), Map.of("transaction_level", IntNode.valueOf(version)));
+            ResolvedSide side = resolver.resolve(scenario, request).side(ScenarioSide.SINGLE);
+            JsonNode resolved = side.document().at("/setup/kafka/clusters/main/transaction_version");
+
+            assertTrue(resolved.isIntegralNumber());
+            assertEquals(version, resolved.intValue());
+            assertEquals(Set.of("transaction_level"), side.interpolationProvenance()
+                    .get("$/setup/kafka/clusters/main/transaction_version"));
+        }
+        assertEquals("${transaction_level}",
+                scenario.at("/setup/kafka/clusters/main/transaction_version").textValue());
+    }
+
+    @Test
+    void rejectsUnsupportedKafkaTransactionVersionAfterIntegerParameterResolution() {
+        ScenarioSpecification scenario = scenario(document -> {
+            parameterWithDefault(document, "transaction_level", "integer", IntNode.valueOf(1));
+            kafkaCluster(document).put("transaction_version", "${transaction_level}");
+        });
+
+        SpecificationException exception = assertFailsAt(Stage.RESOLUTION,
+                () -> resolver.resolve(scenario, new ResolutionRequest(
+                        Map.of(), Map.of("transaction_level", IntNode.valueOf(3)))));
+
+        assertHasIssue(exception, "schema.one-of", ResolutionScope.SINGLE,
+                "$/setup/kafka/clusters/main/transaction_version");
+    }
+
+    @Test
+    void rejectsTextKafkaTransactionVersionAfterParameterResolution() {
+        ScenarioSpecification scenario = scenario(document -> {
+            parameterWithDefault(document, "transaction_level", "string", TextNode.valueOf("1"));
+            kafkaCluster(document).put("transaction_version", "${transaction_level}");
+        });
+
+        SpecificationException exception = assertFailsAt(Stage.RESOLUTION,
+                () -> resolver.resolve(scenario, ResolutionRequest.none()));
+
+        assertHasIssue(exception, "schema.one-of", ResolutionScope.SINGLE,
+                "$/setup/kafka/clusters/main/transaction_version");
     }
 
     @Test

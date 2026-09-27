@@ -190,13 +190,20 @@ public final class ExecutableScenarioPlan {
             int brokers,
             KafkaBrokerPolicy brokerPolicy,
             List<KafkaTopic> topics,
+            Optional<Integer> transactionVersion,
             Optional<KafkaProxy> proxy) {
         public KafkaCluster {
             alias = requireNonBlank(alias, "alias");
             imageReference = requireNonBlank(imageReference, "imageReference");
             Objects.requireNonNull(mode, "mode");
             Objects.requireNonNull(brokerPolicy, "brokerPolicy");
+            Objects.requireNonNull(transactionVersion, "transactionVersion");
             Objects.requireNonNull(proxy, "proxy");
+            transactionVersion.ifPresent(version -> {
+                if (version != 1 && version != 2) {
+                    throw new IllegalArgumentException("transactionVersion must be 1 or 2");
+                }
+            });
             if (brokers != 1) {
                 throw new IllegalArgumentException("The first executable boundary requires one broker");
             }
