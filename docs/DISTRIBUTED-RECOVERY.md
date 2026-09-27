@@ -1,8 +1,9 @@
 # Distributed TaskManager recovery
 
 The engine can run one bounded job across several TaskManagers and Kafka partitions.
-The local runner supports 1–16 TaskManagers, each with two slots. The selected job parallelism must fit the total
-capacity; it is preserved in both REST submission and the Flink configuration.
+The local runner supports 1–16 TaskManagers, each with two slots. The selected job
+parallelism must fit the total capacity; it is preserved in both REST submission
+and the Flink configuration.
 
 The two new catalogs use one JobManager, two TaskManagers, parallelism four, four
 partitions per topic and 3,000 integer IDs. Each source subtask delays records by
@@ -23,8 +24,30 @@ mvn -q exec:java -pl cli -Dexec.args="run --catalog-root scenarios --scenario di
 
 Both expect an ordinary PASS: exact IDs with no missing, duplicate, unexpected or
 malformed records, complete input/output boundaries and a confirmed process fence.
-Runtime validation is still pending for these new catalogs. Passing Docker-free
-tests does not establish that a real distributed recovery occurred.
+
+## Observed runtime results
+
+On 2026-09-27, three Docker runs using Flink 2.2.0, Kafka 4.0.0 and connector
+5.0.0-2.2 all finished with exactly 3,000 IDs and complete process evidence:
+
+| Scenario | Checkpoint restores | Data verdict |
+| --- | --- | --- |
+| Existing `bounded-eos` | 1 | PASS |
+| `distributed-eos` | 5 | PASS |
+| `distributed-eos-no-fault` | 0 | PASS |
+
+The distributed run confirmed work on both initial TaskManagers and recovery after
+the named TM2 kill. TM1's container survived, but its tasks also restarted. Recovery
+attempts continued using the dead TM2 endpoint until Flink disconnected it; all five
+restores used checkpoint 3. A separate local validation check required exactly one
+restore and therefore rejected this run. Its failed result is retained. Multiple
+restores have not been classified as a component defect or a violated guarantee.
+
+The two fault runs also logged fenced transaction commit errors despite exact final
+data, and all three runs reported omitted `currentSendTime` metrics due to name
+collisions. These observations remain unexplained. A PASS here establishes the
+scenario's data and evidence checks, not the absence of component errors. These
+three runs provide no token, HA or distributed mutant-calibration coverage.
 
 ## Targeted operations and evidence
 
@@ -39,8 +62,7 @@ With several TaskManagers, a restart must name its target:
 The compiler tracks each target independently through phases and loops. It rejects
 an ambiguous restart, double kill, wrong-target restart or an unhealed kill. Only
 sequential faults are supported: restart the previous killed TM before killing another.
-The
-single-TM restart shorthand remains supported. Named image upgrades are not supported.
+The single-TM restart shorthand remains supported. Named image upgrades are not supported.
 
 Every container incarnation receives its own Flink ResourceID. Kill evidence binds
 the logical target to that ResourceID and its actual Docker runtime ID. A successful
