@@ -709,6 +709,7 @@ class KafkaInputPreparerTest {
                 List.of(
                         new ExecutableScenarioPlan.KafkaTopic("input", 2, 1),
                         new ExecutableScenarioPlan.KafkaTopic("output", 2, 1)),
+                Optional.empty(),
                 Optional.empty());
     }
 

@@ -46,9 +46,16 @@ Important properties of this boundary:
   JAR is rejected before Docker starts;
 - the bundled workload JAR is thin and declares `Flink-Stability-Workload-Protocol: v1`;
 - generated input is acknowledged and reconciled before its exclusive stopping offsets are used;
+- optional Kafka-cluster `transaction_version: 1` or `2` selects and verifies the
+  finalized feature level before proxy/input/Flink startup; a rejected or unconfirmed
+  safe transition stops the attempt and retains its error, without an unsafe fallback;
 - terminal Kafka validation never runs unless the Flink process fence succeeds;
 - timeouts, partial evidence, cleanup failures, and validation failures have stable reason codes;
 - operational logs use stderr and the command result is emitted as one JSON document on stdout.
+
+Transaction feature selection is covered by Docker-free policy tests. Acceptance of
+the `1`/`2` transitions on a real Kafka 4.0 broker still requires container validation;
+declaring the setting is not proof that a transition is supported by that broker.
 
 ## Requirements
 

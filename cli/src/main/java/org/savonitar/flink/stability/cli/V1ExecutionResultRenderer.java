@@ -56,6 +56,21 @@ final class V1ExecutionResultRenderer {
         expectation.put("matched", verdict.matched());
 
         ObjectNode evidence = root.putObject("evidence");
+        var selection = result.kafkaTransactionVersion();
+        ObjectNode transactionVersion = evidence.putObject("kafkaTransactionVersion");
+        transactionVersion.put("status", selection.requested().isEmpty() ? "not-requested"
+                : selection.confirmed() ? "confirmed" : "unconfirmed");
+        selection.requested().ifPresent(value -> transactionVersion.put("requested", value));
+        selection.error().ifPresent(value -> transactionVersion.put("error", value));
+        ArrayNode observations = transactionVersion.putArray("observations");
+        selection.observations().forEach(observation -> {
+            ObjectNode observed = observations.addObject();
+            observation.metadataEpoch().ifPresent(value -> observed.put("metadataEpoch", value));
+            observation.finalized().ifPresent(range -> observed.putObject("finalized")
+                    .put("min", range.minimum()).put("max", range.maximum()));
+            observation.supported().ifPresent(range -> observed.putObject("supported")
+                    .put("min", range.minimum()).put("max", range.maximum()));
+        });
         ObjectNode input = evidence.putObject("input");
         input.put("status", "not-started");
         input.put("complete", false);

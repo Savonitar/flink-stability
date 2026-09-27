@@ -1,5 +1,6 @@
 package org.savonitar.flink.stability.core.execution;
 
+import org.savonitar.flink.stability.core.execution.kafka.KafkaTransactionVersion;
 import org.junit.jupiter.api.Test;
 import org.savonitar.flink.stability.core.execution.plan.ExecutableScenarioPlan.ExpectedOutcome;
 import org.savonitar.flink.stability.core.execution.plan.ExecutableScenarioPlan.NetworkFaultAction;
@@ -25,13 +26,41 @@ class ScenarioVerdictTest {
             ExpectedOutcome.failure("kafka.id-set", DUPLICATES);
 
     @Test
+    void unconfirmedRequestedFeatureCannotBlessANegativeControlOrConstructAPass() {
+        var missing = new KafkaTransactionVersion.Selection(Optional.of(1), List.of(), Optional.empty());
+        V1ScenarioExecutionResult failed = attempt(V1ScenarioExecutionResult.Status.FAIL, DUPLICATES);
+        V1ScenarioExecutionResult unconfirmed = withFeature(failed, missing);
+        assertEquals(ScenarioVerdict.Status.INCONCLUSIVE,
+                ScenarioVerdict.of(EXPECT_DUPLICATES, unconfirmed).status());
+        assertEquals(KafkaTransactionVersion.UNCONFIRMED,
+                ScenarioVerdict.of(EXPECT_DUPLICATES, unconfirmed).reason());
+        assertEquals(DUPLICATES, unconfirmed.reason());
+        assertEquals(V1ScenarioExecutionResult.Status.FAIL, unconfirmed.status());
+        V1ScenarioExecutionResult passed = attempt(V1ScenarioExecutionResult.Status.PASS,
+                "validator.kafka.id-set.match");
+        org.junit.jupiter.api.Assertions.assertThrows(IllegalArgumentException.class,
+                () -> withFeature(passed, missing));
+    }
+
+    private static V1ScenarioExecutionResult withFeature(V1ScenarioExecutionResult result,
+                                                        KafkaTransactionVersion.Selection feature) {
+        return new V1ScenarioExecutionResult(result.status(), result.reason(), result.message(),
+                result.inputManifest(), result.phaseEvidence(), result.writeFenceEvidence(),
+                result.processFenceEvidence(), result.finalJobObservation(), result.terminalValidation(),
+                result.sinkTransactions(), result.subjectClassOrigins(), result.flinkProvisioningEvidence(),
+                result.expectedFlinkRuntime(), result.runtimeClassOrigins(), feature, result.diagnostics());
+    }
+
+    @Test
     void aPinnedDataFailureCannotMatchWithoutRuntimeImageEvidence() {
         V1ScenarioExecutionResult complete = attempt(V1ScenarioExecutionResult.Status.FAIL, DUPLICATES);
         V1ScenarioExecutionResult incomplete = new V1ScenarioExecutionResult(
                 complete.status(), complete.reason(), complete.message(), complete.inputManifest(),
                 complete.phaseEvidence(), complete.writeFenceEvidence(), complete.processFenceEvidence(),
                 complete.finalJobObservation(), complete.terminalValidation(), complete.sinkTransactions(),
-                complete.subjectClassOrigins(), List.of(), FlinkRuntimeIdentityTest.expected(Optional.empty()), complete.diagnostics());
+                complete.subjectClassOrigins(), List.of(), FlinkRuntimeIdentityTest.expected(Optional.empty()),
+                Optional.empty(),
+                KafkaTransactionVersion.Selection.notRequested(), complete.diagnostics());
 
         ScenarioVerdict verdict = ScenarioVerdict.of(EXPECT_DUPLICATES, incomplete);
 
@@ -173,7 +202,9 @@ class ScenarioVerdictTest {
                 Optional.empty(), Optional.empty(), Optional.empty(), Optional.empty(),
                 Optional.empty(), Optional.empty(), Optional.empty(), Optional.empty(),
                 List.of(),
-                FlinkRuntimeIdentityTest.expected(Optional.empty()), List.of());
+                FlinkRuntimeIdentityTest.expected(Optional.empty()),
+                Optional.empty(),
+                KafkaTransactionVersion.Selection.notRequested(), List.of());
 
         ScenarioVerdict verdict = ScenarioVerdict.of(EXPECT_DUPLICATES, unsupported);
 
@@ -219,6 +250,8 @@ class ScenarioVerdictTest {
                     complete.finalJobObservation(), oracle, complete.sinkTransactions(),
                     complete.subjectClassOrigins(), complete.flinkProvisioningEvidence(),
                     FlinkRuntimeIdentityTest.expected(Optional.empty()),
+                Optional.empty(),
+                KafkaTransactionVersion.Selection.notRequested(),
                     complete.diagnostics());
 
             ScenarioVerdict verdict = ScenarioVerdict.of(EXPECT_DUPLICATES, invalid);
@@ -259,6 +292,8 @@ class ScenarioVerdictTest {
                 origins,
                 List.of(),
                 FlinkRuntimeIdentityTest.expected(Optional.empty()),
+                Optional.empty(),
+                KafkaTransactionVersion.Selection.notRequested(),
                 List.of());
     }
 
@@ -302,6 +337,8 @@ class ScenarioVerdictTest {
                 origins,
                 FlinkRuntimeIdentityTest.provisioning(1),
                 FlinkRuntimeIdentityTest.expected(Optional.empty()),
+                Optional.empty(),
+                KafkaTransactionVersion.Selection.notRequested(),
                 List.of());
     }
 }

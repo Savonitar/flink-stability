@@ -819,6 +819,9 @@ public final class ExecutableScenarioPlanCompiler {
                 1,
                 KafkaBrokerPolicy.v1SingleBroker(),
                 topics,
+                clusterNode.has("transaction_version")
+                        ? Optional.of(clusterNode.path("transaction_version").intValue())
+                        : Optional.empty(),
                 NetworkFaultCompiler.proxy(document));
         ObjectNode flinkNode = (ObjectNode) document.at("/setup/flink");
         ExecutableScenarioPlan.FlinkCluster flink = new ExecutableScenarioPlan.FlinkCluster(

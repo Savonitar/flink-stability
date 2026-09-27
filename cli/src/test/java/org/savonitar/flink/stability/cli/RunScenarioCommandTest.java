@@ -1,5 +1,6 @@
 package org.savonitar.flink.stability.cli;
 
+import org.savonitar.flink.stability.core.execution.kafka.KafkaTransactionVersion;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.Test;
@@ -264,7 +265,8 @@ class RunScenarioCommandTest {
                             component.withRuntimeJarEvidence(jar, component.logicalName() + "#1")).toList(),
                     new FlinkRuntimeIdentity.ExpectedTarget(EXPECTED_RUNTIME.imageId(),
                             EXPECTED_RUNTIME.components(), Optional.of(jar)),
-                    observed ? Optional.of(origins) : Optional.empty(), List.of());
+                    observed ? Optional.of(origins) : Optional.empty(),
+                    KafkaTransactionVersion.Selection.notRequested(), List.of());
             JsonNode runtime = JSON.readTree(new V1ExecutionResultRenderer().render(
                     "bounded-eos", context("1234abcd"), expectation, result)).at("/evidence/flinkRuntime");
             assertEquals(observed ? "confirmed" : "unconfirmed", runtime.at("/runtimeJar/status").textValue());
@@ -324,6 +326,30 @@ class RunScenarioCommandTest {
     }
 
     @Test
+    void featureSelectionKeepsRequestedAndObservedLevelsAndOriginalError() throws Exception {
+        var observation = new KafkaTransactionVersion.Observation(
+                Optional.of(new KafkaTransactionVersion.Range((short) 2, (short) 2)),
+                Optional.of(new KafkaTransactionVersion.Range((short) 0, (short) 2)),
+                java.util.OptionalLong.of(5));
+        var selection = new KafkaTransactionVersion.Selection(Optional.of(1), List.of(observation),
+                Optional.of("UnsupportedVersionException: safe downgrade rejected"));
+        var result = new V1ScenarioExecutionResult(V1ScenarioExecutionResult.Status.INCONCLUSIVE,
+                KafkaTransactionVersion.UNCONFIRMED, "feature selection failed",
+                Optional.empty(), Optional.empty(), Optional.empty(), Optional.empty(), Optional.empty(),
+                Optional.empty(), Optional.empty(), Optional.empty(), List.of(), EXPECTED_RUNTIME,
+                Optional.empty(), selection, List.of());
+        JsonNode output = JSON.readTree(new V1ExecutionResultRenderer().render(
+                "bounded-eos", context("1234abcd"), expectation, result));
+        JsonNode evidence = output.at("/evidence/kafkaTransactionVersion");
+        assertEquals("unconfirmed", evidence.path("status").textValue());
+        assertEquals(1, evidence.path("requested").intValue());
+        assertEquals(2, evidence.at("/observations/0/finalized/max").intValue());
+        assertEquals(0, evidence.at("/observations/0/supported/min").intValue());
+        assertEquals(5, evidence.at("/observations/0/metadataEpoch").longValue());
+        assertEquals(selection.error().orElseThrow(), evidence.path("error").textValue());
+    }
+
+    @Test
     void partialEvidenceIsExplicitAndDoesNotPublishProvisionalDefectTotals()
             throws Exception {
         FlinkProcessWriteFenceEvidence processFence = runtimeFence();
@@ -357,6 +383,8 @@ class RunScenarioCommandTest {
                 SUBJECT_ORIGINS,
                 runtimeComponents(),
                 EXPECTED_RUNTIME,
+                Optional.empty(),
+                KafkaTransactionVersion.Selection.notRequested(),
                 List.of());
 
         JsonNode output = JSON.readTree(new V1ExecutionResultRenderer().render(
@@ -439,6 +467,8 @@ class RunScenarioCommandTest {
                 SUBJECT_ORIGINS,
                 runtimeComponents(),
                 EXPECTED_RUNTIME,
+                Optional.empty(),
+                KafkaTransactionVersion.Selection.notRequested(),
                 List.of());
 
         JsonNode evidence = JSON.readTree(new V1ExecutionResultRenderer().render(
@@ -865,6 +895,8 @@ class RunScenarioCommandTest {
                 SUBJECT_ORIGINS,
                 runtimeComponents(),
                 EXPECTED_RUNTIME,
+                Optional.empty(),
+                KafkaTransactionVersion.Selection.notRequested(),
                 List.of());
     }
 
@@ -899,6 +931,8 @@ class RunScenarioCommandTest {
                 SUBJECT_ORIGINS,
                 runtimeComponents(),
                 EXPECTED_RUNTIME,
+                Optional.empty(),
+                KafkaTransactionVersion.Selection.notRequested(),
                 List.of());
     }
 
@@ -933,6 +967,8 @@ class RunScenarioCommandTest {
                 SUBJECT_ORIGINS,
                 runtimeComponents(),
                 EXPECTED_RUNTIME,
+                Optional.empty(),
+                KafkaTransactionVersion.Selection.notRequested(),
                 List.of());
     }
 
@@ -1005,6 +1041,8 @@ class RunScenarioCommandTest {
                 Optional.empty(),
                 components,
                 new FlinkRuntimeIdentity.ExpectedTarget(Optional.empty(), EXPECTED_RUNTIME.components()),
+                Optional.empty(),
+                KafkaTransactionVersion.Selection.notRequested(),
                 List.of("diagnostic"));
     }
 

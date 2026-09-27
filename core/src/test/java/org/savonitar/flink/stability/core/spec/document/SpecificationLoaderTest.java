@@ -1,5 +1,7 @@
 package org.savonitar.flink.stability.core.spec.document;
 
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.node.JsonNodeFactory;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
@@ -40,6 +42,50 @@ class SpecificationLoaderTest {
         assertInstanceOf(SuiteSpecification.class, suite);
         assertEquals(DocumentKind.SUITE, suite.kind());
         assertEquals("smoke-suite", suite.name());
+    }
+
+    @Test
+    void acceptsExplicitKafkaTransactionVersionsInRawAndResolvedDocuments() {
+        Path source = resource("minimal.yaml");
+        for (int version : List.of(1, 2)) {
+            ObjectNode document = loader.loadScenario(source).document();
+            ((ObjectNode) document.at("/setup/kafka/clusters/main"))
+                    .put("transaction_version", version);
+
+            ScenarioSpecification raw = loader.validateScenarioDocument(source, document);
+            ScenarioSpecification resolved = loader.validateResolvedScenario(source, document);
+
+            assertEquals(version, raw.at("/setup/kafka/clusters/main/transaction_version").intValue());
+            assertEquals(version, resolved.at("/setup/kafka/clusters/main/transaction_version").intValue());
+        }
+    }
+
+    @Test
+    void rejectsInvalidKafkaTransactionVersionsInRawAndResolvedDocuments() {
+        Path source = resource("minimal.yaml");
+        JsonNodeFactory nodes = JsonNodeFactory.instance;
+        List<JsonNode> invalidValues = List.of(
+                nodes.numberNode(0),
+                nodes.numberNode(3),
+                nodes.numberNode(1.5),
+                nodes.textNode("1"),
+                nodes.booleanNode(true),
+                nodes.nullNode());
+        for (JsonNode version : invalidValues) {
+            ObjectNode document = loader.loadScenario(source).document();
+            ((ObjectNode) document.at("/setup/kafka/clusters/main"))
+                    .set("transaction_version", version);
+
+            SpecificationException raw = assertFailsAt(
+                    Stage.DOCUMENT,
+                    () -> loader.validateScenarioDocument(source, document));
+            SpecificationException resolved = assertFailsAt(
+                    Stage.DOCUMENT,
+                    () -> loader.validateResolvedScenario(source, document));
+
+            assertHasIssue(raw, "schema.one-of", "$/setup/kafka/clusters/main/transaction_version");
+            assertHasIssue(resolved, "schema.one-of", "$/setup/kafka/clusters/main/transaction_version");
+        }
     }
 
     @Test
