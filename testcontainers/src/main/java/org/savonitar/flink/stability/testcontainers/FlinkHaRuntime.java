@@ -113,6 +113,7 @@ final class FlinkHaRuntime implements AutoCloseable {
             quorum = "host.testcontainers.internal:" + gates.get(logicalName).port();
         }
         String result = "\nhigh-availability.type: zookeeper"
+                + "\nzookeeper.sasl.disable: true"
                 + "\nhigh-availability.cluster-id: /" + clusterId
                 + "\nhigh-availability.storageDir: file:/flink/checkpoints/ha"
                 + "\nhigh-availability.zookeeper.quorum: " + quorum

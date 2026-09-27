@@ -44,6 +44,44 @@ class FlinkContainerTest {
     Path temporaryDirectory;
 
     @Test
+    void anonymousHaDisablesZooKeeperSaslForInitialAndReplacementProcesses() throws Exception {
+        var configuration = new FlinkRuntimeTarget.HighAvailability(
+                "zookeeper:3.9.3", Duration.ofSeconds(6));
+        try (var firstGate = new FlinkHaRuntime.TcpGate("127.0.0.1", 1);
+             var secondGate = new FlinkHaRuntime.TcpGate("127.0.0.1", 1);
+             var runtime = new FlinkHaRuntime(configuration, System::nanoTime,
+                     unused -> Optional.empty(),
+                     Map.of("jobmanager-1", firstGate, "jobmanager-2", secondGate))) {
+            FlinkContainer factory = new FlinkContainer(
+                    emptyTarget().withTaskManagers(2).withHighAvailability(configuration),
+                    Network.SHARED, temporaryDirectory.resolve("anonymous-ha"));
+            factory.configureHighAvailability(runtime);
+            List<GenericContainer<?>> processes = List.of(
+                    factory.createJobManager("jobmanager-1"), factory.createJobManager("jobmanager-2"),
+                    factory.createTaskManager("taskmanager-1"), factory.createTaskManager("taskmanager-2"),
+                    factory.createJobManager("jobmanager-1"), factory.createTaskManager("taskmanager-2"));
+            for (GenericContainer<?> process : processes) {
+                assertEquals(List.of("zookeeper.sasl.disable: true"),
+                        process.getEnvMap().get("FLINK_PROPERTIES").lines()
+                                .filter(line -> line.startsWith("zookeeper.sasl.disable:")).toList());
+            }
+        }
+    }
+
+    @Test
+    void standaloneProcessesDoNotOverrideZooKeeperSasl() {
+        FlinkContainer factory = new FlinkContainer(emptyTarget().withTaskManagers(2),
+                Network.SHARED, temporaryDirectory.resolve("standalone-sasl"));
+        List<GenericContainer<?>> processes = List.of(factory.createJobManager("jobmanager-1"),
+                factory.createTaskManager("taskmanager-1"), factory.createTaskManager("taskmanager-2"),
+                factory.createJobManager("jobmanager-1"), factory.createTaskManager("taskmanager-2"));
+        for (GenericContainer<?> process : processes) {
+            assertTrue(process.getEnvMap().get("FLINK_PROPERTIES").lines()
+                    .noneMatch(line -> line.startsWith("zookeeper.sasl.disable:")));
+        }
+    }
+
+    @Test
     void explicitTokenRetryBackoffReachesEveryProcessAndOmissionPreservesRuntimeDefaults() {
         for (Optional<Duration> backoff : List.of(Optional.<Duration>empty(), Optional.of(Duration.ofSeconds(3)))) {
             FlinkRuntimeTarget target = emptyTarget().withTokenProvider(

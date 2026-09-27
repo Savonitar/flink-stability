@@ -777,6 +777,9 @@ Connector pull-request gating is the same mechanism with one axis:
   all TaskManagers share the attempt's checkpoint and HA metadata storage. The
   ZooKeeper namespace and every advertised JobManager incarnation are attempt-owned;
   replacing a process must not reuse its physical endpoint identity.
+  This is an anonymous ZooKeeper fixture: every HA Flink process, including
+  replacements, explicitly uses `zookeeper.sasl.disable: true`. Standalone execution
+  receives no such override. Authenticated ZooKeeper is outside this fixture.
   Each JobManager reaches ZooKeeper through its own controllable TCP gate. Closing
   a gate terminates existing connections and rejects new ones; token-service traffic
   uses a separate path. Leader observations read ZooKeeper's published RM, dispatcher
