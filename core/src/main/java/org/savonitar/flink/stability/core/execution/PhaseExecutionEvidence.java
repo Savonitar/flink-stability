@@ -58,7 +58,8 @@ public record PhaseExecutionEvidence(
             FlinkJobObservation.Attempt jobBefore,
             FlinkJobObservation.Attempt jobAfter,
             FlinkHaControl.LeaderFaultEvidence raw,
-            List<String> observationErrors) {
+            List<String> observationErrors,
+            Optional<TokenCheckpointBarrier.Evidence> recoveryBarrier) {
         public LeaderFault {
             path = requireNonBlank(path, "path");
             loopIterations = List.copyOf(Objects.requireNonNull(loopIterations, "loopIterations"));
@@ -67,6 +68,13 @@ public record PhaseExecutionEvidence(
             Objects.requireNonNull(jobAfter, "jobAfter");
             Objects.requireNonNull(raw, "raw");
             observationErrors = List.copyOf(Objects.requireNonNull(observationErrors, "observationErrors"));
+            Objects.requireNonNull(recoveryBarrier, "recoveryBarrier");
+        }
+
+        public LeaderFault(String path, List<LoopIteration> loopIterations, String jobId,
+                           FlinkJobObservation.Attempt jobBefore, FlinkJobObservation.Attempt jobAfter,
+                           FlinkHaControl.LeaderFaultEvidence raw, List<String> observationErrors) {
+            this(path, loopIterations, jobId, jobBefore, jobAfter, raw, observationErrors, Optional.empty());
         }
 
         public LeaderFault(String path, List<LoopIteration> loopIterations, String jobId,

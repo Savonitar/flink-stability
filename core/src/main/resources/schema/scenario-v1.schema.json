@@ -1350,6 +1350,7 @@
           "required": ["mode", "duration", "timeout"],
           "properties": {
             "mode": {"enum": ["kill", "pause", "isolate-zookeeper"]},
+            "recovery_barrier": {"enum": ["token-checkpoint"]},
             "duration": {"$ref": "#/$defs/nonEmptyString"},
             "timeout": {"$ref": "#/$defs/nonEmptyString"},
             "token_fault": {

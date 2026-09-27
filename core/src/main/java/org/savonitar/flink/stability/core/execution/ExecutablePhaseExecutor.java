@@ -10,6 +10,7 @@ import org.savonitar.flink.stability.runtime.api.TaskManagerActionTimeoutExcepti
 import org.savonitar.flink.stability.runtime.api.TaskManagerControl;
 import org.savonitar.flink.stability.runtime.api.FlinkHaControl;
 import org.savonitar.flink.stability.runtime.api.MonotonicDeadline;
+import org.savonitar.flink.stability.runtime.api.V1AttemptRuntime;
 
 import java.io.IOException;
 import java.time.Duration;
@@ -103,8 +104,9 @@ public final class ExecutablePhaseExecutor {
             FlinkJobHandle job) throws PhaseExecutionException {
         Objects.requireNonNull(plan, "plan");
         Objects.requireNonNull(job, "job");
-        Recorder evidence = new Recorder();
+        Recorder evidence = new Recorder(plan.flink().taskmanagers());
         for (int phaseIndex = 0; phaseIndex < plan.phases().size(); phaseIndex++) {
+            if (evidence.stopFurtherSteps) break;
             ExecutableScenarioPlan.Phase phase = plan.phases().get(phaseIndex);
             executeSteps(
                     phaseIndex,
@@ -128,6 +130,7 @@ public final class ExecutablePhaseExecutor {
             Recorder evidence)
             throws PhaseExecutionException {
         for (int stepIndex = 0; stepIndex < steps.size(); stepIndex++) {
+            if (evidence.stopFurtherSteps) return;
             ExecutableScenarioPlan.Step step = steps.get(stepIndex);
             String path = stepsPath + "/" + stepIndex;
             if (step instanceof ExecutableScenarioPlan.AwaitJobState await) {
@@ -489,7 +492,15 @@ public final class ExecutablePhaseExecutor {
         MonotonicDeadline deadline = MonotonicDeadline.start(request.timeout(), nanoTime);
         FlinkJobObservation.Attempt before = observe(job, deadline.remaining());
         FlinkHaControl.LeaderFaultEvidence raw;
+        TokenCheckpointBarrier.Operation barrier = fault.recoveryBarrier().isPresent()
+                && taskManagers instanceof V1AttemptRuntime runtime
+                ? new TokenCheckpointBarrier.Operation(runtime, flink, job,
+                    evidence.expectedTaskManagers, deadline, sleeper) : null;
         try {
+            if (fault.recoveryBarrier().isPresent() && (barrier == null || !barrier.beforeFault())) {
+                throw new IllegalStateException("Pre-fault token-checkpoint readiness is unconfirmed");
+            }
+            if (barrier != null) before = observe(job, deadline.remaining());
             if (before.observation().filter(observed -> observed.state() == FlinkJobState.RUNNING
                     && observed.completedCheckpoints() > 0).isEmpty()) {
                 throw new IllegalStateException(
@@ -534,13 +545,25 @@ public final class ExecutablePhaseExecutor {
                 break;
             }
         }
+        if (barrier != null && raw.errors().isEmpty() && raw.applied() && raw.healed()
+                && recoveredAfterLeadership(before, after)) {
+            barrier.afterHeal(raw);
+        }
+        Optional<TokenCheckpointBarrier.Evidence> barrierEvidence = Optional.ofNullable(barrier)
+                .map(TokenCheckpointBarrier.Operation::evidence);
+        if (fault.recoveryBarrier().isPresent() && (barrierEvidence.isEmpty()
+                || !barrierEvidence.orElseThrow().errors().isEmpty()
+                || barrierEvidence.orElseThrow().afterCheckpoint().isEmpty())) {
+            // Continue to the terminal fence/oracle, but no later phase action may overtake this barrier.
+            evidence.stopFurtherSteps = true;
+        }
         evidence.leaderFaults.add(new PhaseExecutionEvidence.LeaderFault(
-                path, iterations, job.jobId(), before, after, raw, observationErrors));
+                path, iterations, job.jobId(), before, after, raw, observationErrors, barrierEvidence));
         // Missing effect evidence is evaluated after the data oracle, never used to skip it.
         evidence.steps.add(new PhaseExecutionEvidence.StepEvidence(
                 phaseIndex, phaseName, path, iterations, PhaseExecutionEvidence.StepKind.LEADER_FAULT,
-                raw.errors().isEmpty() ? PhaseExecutionEvidence.StepStatus.SUCCEEDED
-                        : PhaseExecutionEvidence.StepStatus.FAILED,
+                raw.errors().isEmpty() && !(fault.recoveryBarrier().isPresent() && evidence.stopFurtherSteps)
+                        ? PhaseExecutionEvidence.StepStatus.SUCCEEDED : PhaseExecutionEvidence.StepStatus.FAILED,
                 "mode=" + request.mode() + " applied=" + raw.applied() + " healed=" + raw.healed()));
     }
 
@@ -574,6 +597,7 @@ public final class ExecutablePhaseExecutor {
             Recorder evidence)
             throws PhaseExecutionException {
         for (int iteration = 1; iteration <= loop.times(); iteration++) {
+            if (evidence.stopFurtherSteps) return;
             List<PhaseExecutionEvidence.LoopIteration> iterations =
                     new ArrayList<>(outerIterations);
             iterations.add(new PhaseExecutionEvidence.LoopIteration(
@@ -653,6 +677,12 @@ public final class ExecutablePhaseExecutor {
         private final List<PhaseExecutionEvidence.NetworkFault> networkFaults = new ArrayList<>();
         private final List<PhaseExecutionEvidence.TaskManagerRestart> restarts = new ArrayList<>();
         private final List<PhaseExecutionEvidence.LeaderFault> leaderFaults = new ArrayList<>();
+        private final int expectedTaskManagers;
+        private boolean stopFurtherSteps;
+
+        private Recorder(int expectedTaskManagers) {
+            this.expectedTaskManagers = expectedTaskManagers;
+        }
 
         private PhaseExecutionEvidence snapshot() {
             return new PhaseExecutionEvidence(steps, kills, networkFaults, restarts, leaderFaults);

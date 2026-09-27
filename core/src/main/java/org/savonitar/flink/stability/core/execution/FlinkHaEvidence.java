@@ -42,18 +42,28 @@ public record FlinkHaEvidence(
     }
 
     /** Retained independently of observations, including faults not reached by execution. */
-    public record Expected(List<DeclaredFault> faults, boolean haRequired, boolean tokenProviderRequired) {
+    public record Expected(List<DeclaredFault> faults, boolean haRequired, boolean tokenProviderRequired,
+                           int expectedTaskManagers) {
         public Expected {
             faults = List.copyOf(Objects.requireNonNull(faults, "faults"));
         }
 
+        public Expected(List<DeclaredFault> faults, boolean haRequired, boolean tokenProviderRequired) {
+            this(faults, haRequired, tokenProviderRequired, 0);
+        }
+
         public static Expected from(List<ExecutableScenarioPlan.Phase> phases, boolean haRequired, boolean tokens) {
+            return from(phases, haRequired, tokens, 0);
+        }
+
+        public static Expected from(List<ExecutableScenarioPlan.Phase> phases, boolean haRequired, boolean tokens,
+                                    int taskManagers) {
             List<DeclaredFault> faults = new ArrayList<>();
             for (int index = 0; index < phases.size(); index++) {
                 collect(phases.get(index).steps(), "$/phases/" + index + "/steps",
                         List.of(), faults);
             }
-            return new Expected(faults, haRequired, tokens);
+            return new Expected(faults, haRequired, tokens, taskManagers);
         }
 
         private static void collect(List<ExecutableScenarioPlan.Step> steps, String parent,
@@ -66,7 +76,7 @@ public record FlinkHaEvidence(
                     if (faults.size() == 100) {
                         throw new IllegalArgumentException("At most 100 expanded leader faults are supported");
                     }
-                    faults.add(new DeclaredFault(path, iterations, fault.request()));
+                    faults.add(new DeclaredFault(path, iterations, fault.request(), fault.recoveryBarrier()));
                 } else if (step instanceof ExecutableScenarioPlan.Loop loop && containsLeaderFault(loop.steps())) {
                     for (int iteration = 1; iteration <= loop.times(); iteration++) {
                         List<PhaseExecutionEvidence.LoopIteration> nested = new ArrayList<>(iterations);
@@ -84,11 +94,18 @@ public record FlinkHaEvidence(
     }
 
     public record DeclaredFault(String path, List<PhaseExecutionEvidence.LoopIteration> loopIterations,
-                                FlinkHaControl.LeaderFaultRequest request) {
+                                FlinkHaControl.LeaderFaultRequest request,
+                                Optional<ExecutableScenarioPlan.RecoveryBarrier> recoveryBarrier) {
         public DeclaredFault {
             path = requireNonBlank(path, "path");
             loopIterations = List.copyOf(Objects.requireNonNull(loopIterations, "loopIterations"));
             Objects.requireNonNull(request, "request");
+            Objects.requireNonNull(recoveryBarrier, "recoveryBarrier");
+        }
+
+        public DeclaredFault(String path, List<PhaseExecutionEvidence.LoopIteration> loops,
+                             FlinkHaControl.LeaderFaultRequest request) {
+            this(path, loops, request, Optional.empty());
         }
     }
 
@@ -119,7 +136,7 @@ public record FlinkHaEvidence(
                                             List<FlinkComponentProvisioningEvidence> provisioning,
                                             Optional<FlinkHaControl.Observations> observations) {
         Optional<String> failure = sampledLeadershipFailure(expected, observations, provisioning);
-        if (failure.isEmpty()) failure = failure(expected, phases, tokens, provisioning);
+        if (failure.isEmpty()) failure = failure(expected, phases, tokens, provisioning, observations);
         return new FlinkHaEvidence(expected, tokens, observations,
                 failure.isPresent() ? Outcome.UNCONFIRMED : Outcome.CONFIRMED,
                 failure.orElse("Every declared leader fault, recovery and required token observation is confirmed"));
@@ -201,10 +218,15 @@ public record FlinkHaEvidence(
 
     private static Optional<String> failure(Expected expected, Optional<PhaseExecutionEvidence> phases,
                                              Optional<TokenEvidence> tokens,
-                                             List<FlinkComponentProvisioningEvidence> provisioning) {
+                                             List<FlinkComponentProvisioningEvidence> provisioning,
+                                             Optional<FlinkHaControl.Observations> history) {
         if (phases.isEmpty()) {
             return expected.faults().isEmpty() && !expected.tokenProviderRequired() ? Optional.empty()
                     : Optional.of("No phase evidence establishes the declared HA operations");
+        }
+        if (expected.faults().stream().anyMatch(fault -> fault.recoveryBarrier().isPresent())
+                && expected.faults().stream().anyMatch(fault -> fault.recoveryBarrier().isEmpty())) {
+            return Optional.of("Mixed leader faults lack explicit recovery-barrier ordering for every operation");
         }
         PhaseExecutionEvidence phase = phases.orElseThrow();
         List<PhaseExecutionEvidence.StepEvidence> steps = phase.steps().stream()
@@ -214,6 +236,7 @@ public record FlinkHaEvidence(
         }
         Set<DeclaredFault> locations = new HashSet<>();
         Set<String> transferredSessions = new HashSet<>();
+        Set<String> checkpointTriggers = new HashSet<>();
         Set<FlinkJobObservation.Restore> recoveries = new HashSet<>();
         long lastHealedAtMillis = 0;
         Optional<TokenServiceControl.Snapshot> previousTokens = Optional.empty();
@@ -270,6 +293,28 @@ public record FlinkHaEvidence(
                     return Optional.of("Leader faults lack append-only token snapshots in operation order");
                 }
                 previousTokens = raw.tokensAfter();
+            }
+            if (declaration.recoveryBarrier().isPresent()) {
+                if (!expected.tokenProviderRequired() || observed.recoveryBarrier().isEmpty() || tokens.isEmpty()) {
+                    return Optional.of("Declared recovery barrier is missing");
+                }
+                invalid = TokenCheckpointBarrier.failure(observed.recoveryBarrier().orElseThrow(), observed.raw(),
+                        expected.expectedTaskManagers(), tokens.orElseThrow(), provisioning, history);
+                if (invalid.isPresent()) return invalid;
+                String trigger = observed.recoveryBarrier().orElseThrow().checkpoint().orElseThrow().triggerId();
+                if (!checkpointTriggers.add(trigger)) return Optional.of("Recovery barriers replayed a checkpoint trigger");
+                if (index + 1 < phase.leaderFaults().size()) {
+                    invalid = TokenCheckpointBarrier.orderFailure(observed.recoveryBarrier().orElseThrow(),
+                            phase.leaderFaults().get(index + 1).recoveryBarrier());
+                    if (invalid.isPresent()) return invalid;
+                    var settled = observed.recoveryBarrier().orElseThrow().afterHeal().orElseThrow().snapshot();
+                    if (phase.leaderFaults().get(index + 1).raw().tokensBefore()
+                            .filter(next -> prefix(settled, next)).isEmpty()) {
+                        return Optional.of("A later leader fault preceded the token recovery barrier");
+                    }
+                }
+            } else if (observed.recoveryBarrier().isPresent()) {
+                return Optional.of("An undeclared recovery barrier changed the experiment");
             }
             if (declaration.request().tokenFault().isPresent()) {
                 if (!expected.tokenProviderRequired() || tokens.isEmpty()
@@ -334,7 +379,7 @@ public record FlinkHaEvidence(
                 : Optional.of("Physical process or ZooKeeper connection evidence does not prove the declared fault");
     }
 
-    private static boolean coherent(FlinkHaControl.Leadership leadership) {
+    static boolean coherent(FlinkHaControl.Leadership leadership) {
         var rm = leadership.resourceManager();
         return rm.runtimeId().equals(leadership.dispatcher().runtimeId())
                 && rm.runtimeId().equals(leadership.restServer().runtimeId())
@@ -405,10 +450,34 @@ public record FlinkHaEvidence(
                         origin.sources().getOrDefault(type, List.of()).contains(TOKEN_CONTAINER_PATH)))) {
             return Optional.of("New ResourceManager token acquisition has no provisioned process and plugin origin binding");
         }
+        var finalWindow = nextTokens.orElse(finalSnapshot);
+        Optional<String> effect = tokenFaultEffectFailure(raw, finalWindow, process.orElseThrow());
+        if (effect.isPresent()) return effect;
+        long healed = after.events().stream().filter(event -> event.sequence() > before.events().size()
+                && event.kind() == TokenServiceControl.Kind.MODE_CHANGED
+                && event.mode() == TokenServiceControl.Mode.HEALTHY).mapToLong(TokenServiceControl.Event::sequence)
+                .max().orElseThrow();
+        return healthyDelivery(finalWindow.events(), healed, process, participants(tokens, provisioning))
+                ? Optional.empty() : Optional.of("No healthy token delivery followed token fault healing");
+    }
+
+    /** The actual fault trace predicate is also required before an opt-in barrier can advance. */
+    static Optional<String> tokenFaultEffectFailure(FlinkHaControl.LeaderFaultEvidence raw,
+                                                    TokenServiceControl.Snapshot finalSnapshot, String process) {
+        if (raw.request().tokenFault().isEmpty()) return Optional.empty();
+        if (raw.tokensBefore().isEmpty() || raw.tokensDuring().isEmpty() || raw.tokensAfter().isEmpty()) {
+            return Optional.of("Token fault snapshots are missing");
+        }
+        var before = raw.tokensBefore().orElseThrow();
+        var during = raw.tokensDuring().orElseThrow();
+        var after = raw.tokensAfter().orElseThrow();
+        if (!completeTrace(before) || !completeTrace(during) || !completeTrace(after)
+                || !completeTrace(finalSnapshot) || !prefix(before, during) || !prefix(during, after)
+                || !prefix(after, finalSnapshot)) return Optional.of("Token fault trace is incomplete");
         var requested = raw.request().tokenFault().orElseThrow();
         long previous = before.events().size();
         // A later fault's recovery cannot supply the missing healthy delivery of this one.
-        List<TokenServiceControl.Event> events = nextTokens.orElse(finalSnapshot).events();
+        List<TokenServiceControl.Event> events = finalSnapshot.events();
         var armed = during.events().stream().filter(event -> event.sequence() > previous
                 && event.kind() == TokenServiceControl.Kind.MODE_CHANGED
                 && event.mode() == requested.mode()
@@ -424,7 +493,7 @@ public record FlinkHaEvidence(
                 && event.sequence() > revision.sequence() && event.sequence() < heal.orElseThrow().sequence()
                 && event.revision() == revision.revision() && event.mode() == requested.mode()
                 && "jobmanager".equals(event.role())
-                && process.orElseThrow().equals(event.process())
+                && process.equals(event.process())
                 && initialized(events, event, TokenServiceControl.Kind.PROVIDER_INITIALIZED)).toList();
         boolean completed = starts.stream().anyMatch(start -> events.stream().anyMatch(outcome ->
                 sameRequest(start, outcome) && outcome.sequence() > start.sequence()
@@ -440,9 +509,7 @@ public record FlinkHaEvidence(
                         && finished.sequence() > outcome.sequence()
                         && finished.kind() == TokenServiceControl.Kind.REQUEST_FINISHED)));
         if (!completed) return Optional.of("No actual acquisition and outcome occurred under the declared token revision");
-        return healthyDelivery(events, heal.orElseThrow().sequence(), process, participants(tokens, provisioning))
-                ? Optional.empty()
-                : Optional.of("No healthy token delivery followed token fault healing");
+        return Optional.empty();
     }
 
     private static boolean tokenFaultOutcome(FlinkHaControl.TokenFault requested,
@@ -461,7 +528,7 @@ public record FlinkHaEvidence(
         };
     }
 
-    private static Optional<String> processLabel(List<FlinkComponentProvisioningEvidence> provisioning,
+    static Optional<String> processLabel(List<FlinkComponentProvisioningEvidence> provisioning,
                                                   FlinkHaControl.LeaderIdentity leader) {
         int incarnation = 0;
         Set<String> runtimeIds = new HashSet<>();
@@ -483,7 +550,7 @@ public record FlinkHaEvidence(
         return Optional.ofNullable(process);
     }
 
-    private static boolean sameRequest(TokenServiceControl.Event start, TokenServiceControl.Event event) {
+    static boolean sameRequest(TokenServiceControl.Event start, TokenServiceControl.Event event) {
         return start.requestId() > 0 && start.requestId() == event.requestId()
                 && start.revision() == event.revision() && start.mode() == event.mode()
                 && start.process().equals(event.process()) && start.role().equals(event.role());
@@ -515,7 +582,7 @@ public record FlinkHaEvidence(
                         && initialized(events, received, TokenServiceControl.Kind.RECEIVER_INITIALIZED)));
     }
 
-    private static boolean initialized(List<TokenServiceControl.Event> events,
+    static boolean initialized(List<TokenServiceControl.Event> events,
                                        TokenServiceControl.Event operation, TokenServiceControl.Kind kind) {
         return events.stream().anyMatch(event -> event.kind() == kind
                 && event.sequence() < operation.sequence()
@@ -552,7 +619,7 @@ public record FlinkHaEvidence(
         return new TokenParticipants(Set.copyOf(issuers), Set.copyOf(receivers));
     }
 
-    private static boolean completeTrace(TokenServiceControl.Snapshot snapshot) {
+    static boolean completeTrace(TokenServiceControl.Snapshot snapshot) {
         if (snapshot.overflow() || snapshot.saturated()) return false;
         long sequence = 0;
         Map<Long, TokenServiceControl.Event> requests = new HashMap<>();
@@ -581,7 +648,7 @@ public record FlinkHaEvidence(
         return active == snapshot.activeRequests() && maximum == snapshot.maxConcurrentRequests();
     }
 
-    private static boolean prefix(TokenServiceControl.Snapshot first, TokenServiceControl.Snapshot second) {
+    static boolean prefix(TokenServiceControl.Snapshot first, TokenServiceControl.Snapshot second) {
         return first.events().size() <= second.events().size()
                 && second.events().subList(0, first.events().size()).equals(first.events());
     }

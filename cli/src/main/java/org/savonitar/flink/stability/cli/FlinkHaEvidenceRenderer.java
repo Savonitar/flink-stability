@@ -4,6 +4,7 @@ import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import org.savonitar.flink.stability.core.execution.FlinkHaEvidence;
 import org.savonitar.flink.stability.core.execution.PhaseExecutionEvidence;
+import org.savonitar.flink.stability.core.execution.TokenCheckpointBarrier;
 import org.savonitar.flink.stability.core.flink.FlinkJobObservation;
 import org.savonitar.flink.stability.runtime.api.FlinkHaControl;
 import org.savonitar.flink.stability.runtime.api.TokenServiceControl;
@@ -26,12 +27,14 @@ final class FlinkHaEvidenceRenderer {
         node.put("detail", evidence.detail());
         node.put("haRequired", evidence.expected().haRequired());
         node.put("tokenProviderRequired", evidence.expected().tokenProviderRequired());
+        node.put("expectedTaskManagers", evidence.expected().expectedTaskManagers());
         evidence.observations().ifPresent(value -> observations(node.putObject("observations"), value));
         ArrayNode requests = node.putArray("requestedFaults");
         evidence.expected().faults().forEach(fault -> {
             ObjectNode requested = requests.addObject();
             location(requested, fault.path(), fault.loopIterations());
             request(requested.putObject("request"), fault.request());
+            fault.recoveryBarrier().ifPresent(value -> requested.put("recoveryBarrier", "token-checkpoint"));
         });
         ArrayNode observations = node.putArray("leaderFaults");
         faults.forEach(fault -> {
@@ -42,6 +45,7 @@ final class FlinkHaEvidenceRenderer {
             job(observed.putObject("jobAfter"), fault.jobAfter());
             ArrayNode observationErrors = observed.putArray("observationErrors");
             fault.observationErrors().forEach(observationErrors::add);
+            fault.recoveryBarrier().ifPresent(value -> barrier(observed.putObject("recoveryBarrier"), value, trace));
             var raw = fault.raw();
             request(observed.putObject("request"), raw.request());
             raw.before().ifPresent(value -> leadership(observed.putObject("before"), value));
@@ -84,6 +88,55 @@ final class FlinkHaEvidenceRenderer {
             ArrayNode errors = rendered.putArray("errors");
             tokens.errors().forEach(errors::add);
         });
+    }
+
+    private static void barrier(ObjectNode node, TokenCheckpointBarrier.Evidence value, TokenTrace trace) {
+        node.put("kind", "token-checkpoint");
+        value.beforeFault().ifPresent(ready -> ready(node.putObject("beforeFault"), ready, trace));
+        value.afterHeal().ifPresent(ready -> ready(node.putObject("afterHeal"), ready, trace));
+        value.beforeCheckpoint().ifPresent(sample -> sample(node.putObject("beforeCheckpoint"), sample));
+        value.afterCheckpoint().ifPresent(sample -> sample(node.putObject("afterCheckpoint"), sample));
+        value.checkpoint().ifPresent(checkpoint -> {
+            ObjectNode item = node.putObject("checkpoint");
+            item.put("triggerId", checkpoint.triggerId());
+            item.put("submissionAttempted", checkpoint.submissionAttempted());
+            checkpoint.acknowledgedId().ifPresent(id -> item.put("acknowledgedId", id));
+            ArrayNode polls = item.putArray("observations");
+            checkpoint.observations().forEach(poll -> {
+                ObjectNode observed = polls.addObject().put("state", poll.state().name());
+                poll.checkpointId().ifPresent(id -> observed.put("checkpointId", id));
+                poll.failure().ifPresent(failure -> observed.put("failure", failure));
+            });
+        });
+        receivers(node.putArray("afterCheckpointReceivers"), value.afterCheckpointReceivers());
+        ArrayNode errors = node.putArray("errors");
+        value.errors().forEach(errors::add);
+    }
+
+    private static void ready(ObjectNode node, TokenCheckpointBarrier.Ready value, TokenTrace trace) {
+        sample(node.putObject("beforeTokens"), value.beforeTokens());
+        sample(node.putObject("afterTokens"), value.afterTokens());
+        receivers(node.putArray("receivers"), value.receivers());
+        node.put("issuerProcess", value.issuerProcess());
+        node.put("afterSequence", value.afterSequence());
+        node.put("issuedSequence", value.issuedSequence());
+        trace.snapshot(node.putObject("entrySnapshot"), value.entrySnapshot());
+        trace.snapshot(node.putObject("snapshot"), value.snapshot());
+    }
+
+    private static void receivers(ArrayNode node, List<TokenCheckpointBarrier.Receiver> values) {
+        values.forEach(value -> node.addObject().put("logicalName", value.identity().logicalName())
+                .put("runtimeId", value.identity().runtimeId()).put("resourceId", value.identity().resourceId())
+                .put("classLoadProcess", value.classLoadProcess()));
+    }
+
+    private static void sample(ObjectNode node, FlinkHaControl.LeadershipObservation sample) {
+        node.put("sequence", sample.sequence()).put("sampleCount", sample.sampleCount())
+                .put("firstObservedAtMillis", sample.firstObservedAtMillis())
+                .put("lastObservedAtMillis", sample.lastObservedAtMillis())
+                .put("moment", sample.moment().name().toLowerCase(Locale.ROOT));
+        sample.leadership().ifPresent(value -> leadership(node.putObject("leadership"), value));
+        sample.error().ifPresent(value -> node.put("error", value));
     }
 
     private static void location(ObjectNode node, String path,

@@ -1,0 +1,9 @@
+format: v1
+kind: expected-result
+
+meta:
+  name: ha-token-repeat-failure.expected
+  scenario: ha-token-repeat-failure
+
+default:
+  outcome: pass

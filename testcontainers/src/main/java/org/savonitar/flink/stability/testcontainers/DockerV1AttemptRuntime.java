@@ -109,6 +109,11 @@ public final class DockerV1AttemptRuntime implements V1AttemptRuntime {
     }
 
     @Override
+    public Optional<Identity> taskManagerIdentity(String targetName, Duration timeout) {
+        return clusters.taskManagerIdentity(targetName, timeout);
+    }
+
+    @Override
     public FlinkProcessWriteFenceEvidence stopAllFlinkProcesses(Duration timeout) {
         return clusters.establishFlinkProcessWriteFence(timeout);
     }

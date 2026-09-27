@@ -154,7 +154,8 @@ public final class V1ScenarioExecutor {
                 plan.flink().expectedImageId(), plan.flink().expectedComponents(),
                 plan.flink().expectedRuntimeJar());
         FlinkHaEvidence.Expected expectedHa = FlinkHaEvidence.Expected.from(
-                plan.phases(), plan.flink().highAvailability().isPresent(), plan.flink().tokenProvider().isPresent());
+                plan.phases(), plan.flink().highAvailability().isPresent(), plan.flink().tokenProvider().isPresent(),
+                plan.flink().taskmanagers());
 
         V1AttemptRuntime runtime = null;
         FlinkScenarioControl flink = null;

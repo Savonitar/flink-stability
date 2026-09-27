@@ -1440,7 +1440,7 @@ Connector pull-request gating is the same mechanism with one axis:
   not show recovery. A scenario whose bounded input finishes before its kill, or
   whose TaskManager hosts no active subtask, therefore cannot pass, including as
   an expected-failure control (R8.7a).
-- **R6.12b** `leader_fault: { mode, duration, timeout, token_fault? }` is an atomic,
+- **R6.12b** `leader_fault: { mode, duration, timeout, token_fault?, recovery_barrier? }` is an atomic,
   automatically healed HA operation. `mode` is `kill`, `pause`, or
   `isolate-zookeeper`; the target is the observed current leader, never a guessed
   logical slot. `duration` is positive and at most 2 minutes; `timeout` is longer
@@ -1474,6 +1474,38 @@ Connector pull-request gating is the same mechanism with one axis:
   response attempt is not enough. Repeated faults require ordered, distinct transfer
   and restore observations and append-only token traces. Missing proof prevents PASS and cannot hide a data
   FAIL. Internal job restart count is evidence, not a maximum-one-restore guarantee.
+- **R6.12c** Optional `leader_fault.recovery_barrier: token-checkpoint` requires
+  `setup.flink.token_provider`; omission preserves the existing operation. This
+  opt-in protocol shares the original fault deadline. When requested, every leader
+  fault in the scenario must declare it; mixed implicit ordering is unsupported.
+  Each completed barrier must precede the next readiness sample in the retained
+  sequence, including coalesced sample counts. Before injection, sample the
+  coherent current leader, retain a token trace watermark, and require a new healthy
+  request/issuance after it, followed by the same token's receipt on every expected
+  live TaskManager incarnation. A request from a different RM process cannot qualify.
+  After unconditional fault healing and recovery of the same job, require a new
+  healthy request after the retained heal revision (or the post-heal trace boundary
+  if no token fault was requested), issued by the newly observed RM process and
+  acknowledged by all expected live TMs. Also require the original request to have
+  experienced its declared fault on that RM process (full delay or acknowledged
+  HTTP failure) before advancing; healthy recovery cannot replace a missed fault.
+  Then submit exactly one checkpoint trigger
+  for that job and poll its exact trigger ID to a successful concrete checkpoint ID.
+  Retain submission/acknowledgement, status observations, partial failures, token
+  snapshots and physical receiver identities. An unknown POST outcome is never
+  replayed. Fresh coherent leadership samples must bracket token delivery and the
+  checkpoint with the same RM/dispatcher/REST sessions; reject observed intervening
+  changes or gaps even if leadership later returns. TM identities must remain the
+  same through the checkpoint. This is sampled session evidence: token SPI events
+  identify a process/provider instance and request, not an internal RM session.
+  It cannot exclude unsampled elections or stale work queued inside the same process.
+  Each readiness/checkpoint polling stage retains at most 1,500 observations;
+  exhausting the deadline or bound leaves the barrier unconfirmed. A failed barrier
+  stops later phase actions, while the existing terminal fence and exact-ID oracle
+  still run. A data or bounded-completion FAIL remains FAIL; complete data with
+  incomplete barrier proof cannot PASS. Original catalogs do not acquire this field
+  implicitly.
+
 - **R6.13** A suite entry is `{ scenario, as?, parameters?, runs? }`. `as`
   defaults to the scenario name and is **required** when the same scenario
   appears more than once in a suite. `runs`, when present, is a positive integer

@@ -5,6 +5,7 @@ import org.junit.jupiter.api.Test;
 import org.savonitar.flink.stability.core.execution.FlinkHaEvidence;
 import org.savonitar.flink.stability.core.execution.PhaseExecutionEvidence;
 import org.savonitar.flink.stability.core.execution.SubjectClassOrigins;
+import org.savonitar.flink.stability.core.execution.TokenCheckpointBarrier;
 import org.savonitar.flink.stability.core.flink.FlinkJobObservation;
 import org.savonitar.flink.stability.core.flink.FlinkJobState;
 import org.savonitar.flink.stability.runtime.api.FlinkHaControl;
@@ -99,7 +100,11 @@ class FlinkHaEvidenceRendererTest {
                 List.of(), List.of())), Optional.empty());
         var loops = List.of(new PhaseExecutionEvidence.LoopIteration("$/phases/0/steps/0", 2, 3));
         var fault = new PhaseExecutionEvidence.LeaderFault("$/phases/0/steps/0/loop/steps/0",
-                loops, "stable-job-id", before, after, raw, List.of("HTTP 404 during new leader startup"));
+                loops, "stable-job-id", before, after, raw, List.of("HTTP 404 during new leader startup"),
+                Optional.of(new TokenCheckpointBarrier.Evidence(Optional.empty(), Optional.empty(),
+                        Optional.empty(), Optional.empty(), Optional.of(new TokenCheckpointBarrier.Checkpoint(
+                                "b".repeat(32), true, Optional.empty(), List.of())), List.of(),
+                        List.of("unknown checkpoint submission outcome"))));
         var expected = new FlinkHaEvidence.Expected(List.of(new FlinkHaEvidence.DeclaredFault(
                 fault.path(), loops, request)), true, true);
         var origins = new SubjectClassOrigins(FlinkHaEvidence.TOKEN_CONTAINER_PATH, List.of(
@@ -131,5 +136,10 @@ class FlinkHaEvidenceRendererTest {
         assertEquals("a".repeat(64), node.at("/tokens/pluginSha256").asText());
         assertEquals("jobmanager-2#1", node.at("/tokens/classes/0/process").asText());
         assertEquals("one class-load log missing", node.at("/tokens/classLoadFailure").asText());
+        assertEquals("token-checkpoint", node.at("/leaderFaults/0/recoveryBarrier/kind").asText());
+        assertTrue(node.at("/leaderFaults/0/recoveryBarrier/checkpoint/submissionAttempted").asBoolean());
+        assertEquals("b".repeat(32), node.at("/leaderFaults/0/recoveryBarrier/checkpoint/triggerId").asText());
+        assertFalse(node.at("/leaderFaults/0/recoveryBarrier/checkpoint").has("acknowledgedId"));
+        assertEquals("unknown checkpoint submission outcome", node.at("/leaderFaults/0/recoveryBarrier/errors/0").asText());
     }
 }

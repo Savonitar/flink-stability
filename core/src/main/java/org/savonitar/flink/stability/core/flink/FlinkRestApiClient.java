@@ -98,6 +98,17 @@ public final class FlinkRestApiClient implements FlinkScenarioControl {
     }
 
     @Override
+    public String triggerCheckpoint(FlinkJobHandle job, String triggerId, Duration timeout) throws IOException {
+        return FlinkCheckpointTrigger.submit(job, triggerId, timeout, mapper, this::execute, nanoTime);
+    }
+
+    @Override
+    public FlinkCheckpointTrigger.Observation checkpointStatus(
+            FlinkJobHandle job, String triggerId, Duration timeout) throws IOException {
+        return FlinkCheckpointTrigger.status(job, triggerId, timeout, this::execute, nanoTime);
+    }
+
+    @Override
     public String uploadJar(Path jar, String expectedSha256) throws IOException {
         Objects.requireNonNull(jar, "jar");
         Objects.requireNonNull(expectedSha256, "expectedSha256");

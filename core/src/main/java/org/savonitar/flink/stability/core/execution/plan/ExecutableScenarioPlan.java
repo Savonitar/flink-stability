@@ -813,9 +813,17 @@ public final class ExecutableScenarioPlan {
             KillTaskManager, RestartTaskManager, Loop, EndTxnFault, LeaderFault {}
 
     /** One bounded fault of the observed leader, including unconditional healing. */
-    public record LeaderFault(FlinkHaControl.LeaderFaultRequest request) implements Step {
+    public enum RecoveryBarrier { TOKEN_CHECKPOINT }
+
+    public record LeaderFault(FlinkHaControl.LeaderFaultRequest request,
+                              Optional<RecoveryBarrier> recoveryBarrier) implements Step {
         public LeaderFault {
             Objects.requireNonNull(request, "request");
+            Objects.requireNonNull(recoveryBarrier, "recoveryBarrier");
+        }
+
+        public LeaderFault(FlinkHaControl.LeaderFaultRequest request) {
+            this(request, Optional.empty());
         }
     }
 

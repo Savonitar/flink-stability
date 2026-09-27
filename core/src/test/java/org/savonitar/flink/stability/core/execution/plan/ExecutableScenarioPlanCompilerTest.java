@@ -75,6 +75,7 @@ class ExecutableScenarioPlanCompilerTest {
         assertEquals(org.savonitar.flink.stability.runtime.api.FlinkHaControl.Mode.ISOLATE_ZOOKEEPER,
                 step.request().mode());
         assertEquals(Duration.ofSeconds(5), step.request().tokenFault().orElseThrow().delay());
+        assertTrue(step.recoveryBarrier().isEmpty(), "existing leader fault semantics are unchanged");
         try (PreparedScenarioPlan prepared = new ArtifactPlanResolver().resolve(resolved,
                 new ArtifactResolutionOptions(artifactRoot, true))) {
             PreparedExecutableScenarioPlan bound = compiler.bind(prepared, plan);
@@ -82,6 +83,47 @@ class ExecutableScenarioPlanCompilerTest {
             assertEquals(plan.flink().tokenProvider(), bound.flinkRuntimeTarget().tokenProvider());
             assertEquals(2, bound.flinkRuntimeTarget().jobManagers());
         }
+    }
+
+    @Test
+    void recoveryBarrierIsExplicitAndRequiresSyntheticTokens() {
+        for (boolean tokens : List.of(false, true)) {
+            ResolvedScenarioPlan resolved = resolved(document -> {
+                enableHa(document);
+                if (tokens) ((ObjectNode) document.at("/setup/flink")).putObject("token_provider")
+                        .put("renewal_interval", "2s");
+                replaceSteps(document).addObject().putObject("leader_fault")
+                        .put("mode", "isolate-zookeeper").put("duration", "15s").put("timeout", "2m")
+                        .put("recovery_barrier", "token-checkpoint");
+            });
+            if (tokens) {
+                var plan = compiler.compile(resolved);
+                var fault = (ExecutableScenarioPlan.LeaderFault) plan.phases().getFirst().steps().getFirst();
+                assertEquals(Optional.of(ExecutableScenarioPlan.RecoveryBarrier.TOKEN_CHECKPOINT), fault.recoveryBarrier());
+                assertTrue(fault.request().tokenFault().isEmpty());
+            } else {
+                SpecificationException failure = assertFailsAt(Stage.RUNNER_CAPABILITY, () -> compiler.compile(resolved));
+                assertTrue(failure.diagnostics().stream().anyMatch(issue ->
+                        issue.code().equals("runner.phase.token-provider-required")));
+            }
+        }
+    }
+
+    @Test
+    void rejectsMixedOrdinaryAndSynchronizedLeaderFaults() {
+        ResolvedScenarioPlan resolved = resolved(document -> {
+            enableHa(document);
+            ((ObjectNode) document.at("/setup/flink")).putObject("token_provider").put("renewal_interval", "2s");
+            ArrayNode steps = replaceSteps(document);
+            steps.addObject().putObject("leader_fault").put("mode", "isolate-zookeeper")
+                    .put("duration", "15s").put("timeout", "2m").put("recovery_barrier", "token-checkpoint");
+            steps.addObject().putObject("loop").put("times", 2).putArray("steps")
+                    .addObject().putObject("leader_fault").put("mode", "isolate-zookeeper")
+                    .put("duration", "15s").put("timeout", "2m");
+        });
+        SpecificationException failure = assertFailsAt(Stage.RUNNER_CAPABILITY, () -> compiler.compile(resolved));
+        assertTrue(failure.diagnostics().stream().anyMatch(issue ->
+                issue.code().equals("runner.phase.mixed-recovery-barriers")));
     }
 
     @Test

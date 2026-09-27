@@ -146,6 +146,26 @@ class ClusterManagerTest {
     }
 
     @Test
+    void identityInspectionUsesTheCallerBudgetAndRejectsNonpositiveTimeouts() {
+        AtomicLong clock = new AtomicLong();
+        try (ClusterManager manager = manager(new RecordingFactory(),
+                () -> clock.getAndAdd(Duration.ofMillis(2).toNanos()))) {
+            manager.startFlink(target());
+            ContainerOperationTimeoutException failure = assertThrows(
+                    ContainerOperationTimeoutException.class,
+                    () -> manager.taskManagerIdentity("taskmanager-1", Duration.ofMillis(1)));
+            assertEquals(Duration.ofMillis(1), failure.timeout());
+            assertTrue(manager.isTaskManagerRunning("taskmanager-1"));
+            for (Duration invalid : List.of(Duration.ZERO, Duration.ofNanos(-1))) {
+                assertThrows(IllegalArgumentException.class,
+                        () -> manager.taskManagerIdentity("taskmanager-1", invalid));
+                assertThrows(IllegalArgumentException.class,
+                        () -> manager.taskManagerIdentity("taskmanager-99", invalid));
+            }
+        }
+    }
+
+    @Test
     void startsTheFixedV1TopologyAndReturnsItsRestEndpoint() {
         RecordingFactory factory = new RecordingFactory();
 

@@ -30,6 +30,11 @@ class TaskManagerControlTest {
         assertEquals(List.of(timeout), restarts);
         assertTrue(control.taskManagerIdentity("taskmanager-1").isEmpty());
         assertTrue(control.taskManagerIdentity("taskmanager-2").isEmpty());
+        assertTrue(control.taskManagerIdentity("taskmanager-1", timeout).isEmpty());
+        for (Duration invalid : List.of(Duration.ZERO, Duration.ofMillis(-1))) {
+            assertThrows(IllegalArgumentException.class,
+                    () -> control.taskManagerIdentity("taskmanager-1", invalid));
+        }
     }
 
     @Test

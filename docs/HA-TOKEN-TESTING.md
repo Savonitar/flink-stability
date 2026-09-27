@@ -177,3 +177,30 @@ the matching synthetic response; a server-side response attempt alone is insuffi
 Repeated operations need independent sessions and restore observations in execution
 order, with append-only token traces. Missing proof stays inconclusive. Component errors and
 unexpected recovery amplification remain findings even when the exact-ID oracle passes.
+
+The new `ha-token-repeat-control`, `ha-token-repeat-delay`,
+`ha-token-repeat-failure` and `ha-token-repeat-linkage` catalogs keep the released
+5.0.0-2.2 connector and PASS expectations. They use the explicit 300 ms workload and
+five-minute completion window. The fault cells request three 15-second leadership
+isolations with `recovery_barrier: token-checkpoint`; delay mode keeps the existing
+five-second acquisition delay. The original ten catalogs are unchanged. The healthy
+control has no injected fault; a comparison batch separately requires its healthy
+issuance to reach both provisioned TMs.
+
+Each opt-in fault first waits for a newly issued healthy token and receipt on every
+expected live TM. After healing, another new request from the observed current RM
+process must deliver the same token to all TMs, followed by one explicitly triggered
+checkpoint completing under its exact trigger ID. The next fault cannot overtake
+that barrier. All waits share the declared two-minute fault budget. An ambiguous
+checkpoint submission is retained and never retried; an unconfirmed barrier stops
+later phase actions and leaves the terminal fence/oracle intact. Partial evidence
+and data failures remain visible. Leadership is sampled around these operations;
+observed intermediate changes reject even if the original leader returns. Token
+telemetry identifies a process/provider instance, not an internal RM session, so
+this does not prove the absence of stale queued work within that process.
+
+These new catalogs have not yet established a released-connector runtime outcome.
+The retained original F9 bounded-completion failures remain authoritative. Local
+investigation may generate separately labeled copies selecting a hash-pinned
+experimental connector repair; that does not change these defaults or establish a
+fix in the released connector. No checkpoint-drain completion workaround is used.

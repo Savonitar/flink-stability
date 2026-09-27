@@ -59,12 +59,28 @@ final class HighAvailabilityPlanCompiler {
             validateSteps(source, document.path("phases").get(index).path("steps"),
                     "$/phases/" + index + "/steps", ha, flink.has("token_provider"), issues);
         }
+        boolean barrier = false;
+        boolean ordinary = false;
+        for (JsonNode phase : document.path("phases")) {
+            barrier |= hasBarrierChoice(phase.path("steps"), true);
+            ordinary |= hasBarrierChoice(phase.path("steps"), false);
+        }
+        if (barrier && ordinary) issues.add(issue(source, "runner.phase.mixed-recovery-barriers", "$/phases",
+                "When token-checkpoint synchronization is requested, every leader fault must declare it"));
         BigInteger count = BigInteger.ZERO;
         for (JsonNode phase : document.path("phases")) count = count.add(faultCount(phase.path("steps")));
         if (count.compareTo(BigInteger.valueOf(100)) > 0) {
             issues.add(issue(source, "runner.phase.ha-fault-count-unsupported", "$/phases",
                     "An invocation supports at most 100 expanded leader faults"));
         }
+    }
+
+    private static boolean hasBarrierChoice(JsonNode steps, boolean present) {
+        for (JsonNode step : steps) {
+            if (step.has("leader_fault") && step.path("leader_fault").has("recovery_barrier") == present) return true;
+            if (step.has("loop") && hasBarrierChoice(step.at("/loop/steps"), present)) return true;
+        }
+        return false;
     }
 
     private static BigInteger faultCount(JsonNode steps) {
@@ -94,6 +110,10 @@ final class HighAvailabilityPlanCompiler {
                 if (hold.isPresent() && timeout.isPresent() && hold.get().compareTo(timeout.get()) >= 0) {
                     issues.add(issue(source, "runner.phase.ha-timeout-invalid", field + "/timeout",
                             "The action timeout must exceed its fault hold duration"));
+                }
+                if (fault.has("recovery_barrier") && !tokens) {
+                    issues.add(issue(source, "runner.phase.token-provider-required", field,
+                            "The token-checkpoint recovery barrier requires setup.flink.token_provider"));
                 }
                 if (fault.has("token_fault")) {
                     if (!tokens) issues.add(issue(source, "runner.phase.token-provider-required", field,
@@ -146,6 +166,8 @@ final class HighAvailabilityPlanCompiler {
         return new ExecutableScenarioPlan.LeaderFault(new FlinkHaControl.LeaderFaultRequest(
                 FlinkHaControl.Mode.valueOf(value.path("mode").asText().replace('-', '_').toUpperCase(Locale.ROOT)),
                 parseDuration(value.path("duration").asText()),
-                parseDuration(value.path("timeout").asText()), token));
+                parseDuration(value.path("timeout").asText()), token),
+                value.has("recovery_barrier")
+                        ? Optional.of(ExecutableScenarioPlan.RecoveryBarrier.TOKEN_CHECKPOINT) : Optional.empty());
     }
 }

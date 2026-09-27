@@ -571,6 +571,27 @@ class ExecutablePhaseExecutorTest {
                 "the fault itself lacks physical proof independently of sampled-history validation");
     }
 
+    @Test
+    void unconfirmedOptInBarrierStopsLaterActionsAndReturnsEvidenceForTheTerminalOracle() throws Exception {
+        ExecutableScenarioPlan plan = plan(document -> {
+            addLeaderFault(document);
+            ((ObjectNode) document.at("/setup/flink")).putObject("token_provider").put("renewal_interval", "2s");
+            ((ObjectNode) document.at("/phases/0/steps/0/leader_fault"))
+                    .put("recovery_barrier", "token-checkpoint");
+            ((ArrayNode) document.at("/phases/0/steps")).addObject().putObject("wait").put("duration", "1ms");
+        });
+        List<String> events = new ArrayList<>();
+        var result = new ExecutablePhaseExecutor(new FakeFlink(events), new FakeTaskManagers(events),
+                ExecutablePhaseExecutor.NetworkFaults.NONE, delay -> events.add("unexpected-sleep"))
+                .execute(plan, JOB);
+        assertEquals(1, result.steps().size());
+        assertEquals(PhaseExecutionEvidence.StepStatus.FAILED, result.steps().getFirst().status());
+        assertFalse(events.contains("fault-leader"));
+        assertFalse(events.contains("unexpected-sleep"));
+        assertTrue(result.leaderFaults().getFirst().raw().errors().stream().anyMatch(error ->
+                error.contains("Pre-fault token-checkpoint readiness")));
+    }
+
     private static void addLeaderFault(ObjectNode document) {
         ObjectNode setup = (ObjectNode) document.at("/setup/flink");
         setup.put("jobmanagers", 2);

@@ -89,6 +89,24 @@ class SpecificationLoaderTest {
     }
 
     @Test
+    void acceptsOnlyTheImplementedExplicitRecoveryBarrier() {
+        Path source = resource("minimal.yaml");
+        for (String value : List.of("token-checkpoint", "checkpoint", "true")) {
+            ObjectNode document = loader.loadScenario(source).document();
+            ((ObjectNode) document.at("/phases/0")).putArray("steps").addObject().putObject("leader_fault")
+                    .put("mode", "isolate-zookeeper").put("duration", "15s").put("timeout", "2m")
+                    .put("recovery_barrier", value);
+            if (value.equals("token-checkpoint")) {
+                loader.validateScenarioDocument(source, document);
+                loader.validateResolvedScenario(source, document);
+            } else {
+                assertFailsAt(Stage.DOCUMENT, () -> loader.validateScenarioDocument(source, document));
+                assertFailsAt(Stage.DOCUMENT, () -> loader.validateResolvedScenario(source, document));
+            }
+        }
+    }
+
+    @Test
     void namedRestartsCannotUpgradeImagesOrTargetOtherComponentKinds() {
         Path source = resource("minimal.yaml");
         for (String component : List.of("taskmanager", "jobmanager", "flink", "kafka")) {

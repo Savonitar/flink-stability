@@ -333,13 +333,17 @@ public final class ClusterManager implements AutoCloseable {
 
     /** Does not reuse an earlier incarnation's identity after kill or failed replacement. */
     public synchronized Optional<TaskManagerControl.Identity> taskManagerIdentity(String name) {
+        return taskManagerIdentity(name, IDENTITY_TIMEOUT);
+    }
+
+    public synchronized Optional<TaskManagerControl.Identity> taskManagerIdentity(String name, Duration timeout) {
+        ContainerOperationDeadline deadline = ContainerOperationDeadline.start(
+                "reading TaskManager identity for " + name, timeout, monotonicNanos);
         ComponentSlot slot = taskManagers.get(name);
         if (slot == null || !slot.hasHandle()) {
             return Optional.empty();
         }
         ContainerHandle handle = slot.handle;
-        ContainerOperationDeadline deadline = ContainerOperationDeadline.start(
-                "reading TaskManager identity for " + name, IDENTITY_TIMEOUT, monotonicNanos);
         return ContainerDriverCallBoundary.call(deadline, "observing TaskManager " + name, () -> {
             if (!handle.isRunning()) {
                 return Optional.empty();
