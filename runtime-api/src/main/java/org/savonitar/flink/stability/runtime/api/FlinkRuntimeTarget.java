@@ -9,20 +9,31 @@ import static org.savonitar.flink.stability.runtime.api.Checks.requireNonBlank;
 import static org.savonitar.flink.stability.runtime.api.Checks.requireSha256;
 /** One effective Flink image and its mandatory verified connector-bundle installation. */
 public final class FlinkRuntimeTarget {
+    public static final int TASK_SLOTS_PER_TASK_MANAGER = 2;
+    /** Bounds eager topology allocation and local Docker fan-out before provisioning. */
+    public static final int MAX_TASK_MANAGERS = 16;
+
     private final String imageReference;
     private final FlinkConnectorBundleInstallation connectorBundle;
     private final Optional<String> expectedImageId;
     private final Optional<RuntimeJar> expectedRuntimeJar;
+    private final int taskManagers;
 
     private FlinkRuntimeTarget(
             String imageReference,
             FlinkConnectorBundleInstallation connectorBundle,
             Optional<String> expectedImageId,
-            Optional<RuntimeJar> expectedRuntimeJar) {
+            Optional<RuntimeJar> expectedRuntimeJar,
+            int taskManagers) {
         this.imageReference = requireNonBlank(imageReference, "imageReference");
         this.connectorBundle = Objects.requireNonNull(connectorBundle, "connectorBundle");
         this.expectedImageId = Objects.requireNonNull(expectedImageId, "expectedImageId");
         this.expectedRuntimeJar = Objects.requireNonNull(expectedRuntimeJar, "expectedRuntimeJar");
+        if (taskManagers < 1 || taskManagers > MAX_TASK_MANAGERS) {
+            throw new IllegalArgumentException("taskManagers must be between 1 and "
+                    + MAX_TASK_MANAGERS);
+        }
+        this.taskManagers = taskManagers;
     }
 
     /**
@@ -40,19 +51,30 @@ public final class FlinkRuntimeTarget {
                             + imageReference + " versus "
                             + connectorBundle.targetFlinkImageReference());
         }
-        return new FlinkRuntimeTarget(imageReference, connectorBundle, Optional.empty(), Optional.empty());
+        return new FlinkRuntimeTarget(imageReference, connectorBundle, Optional.empty(), Optional.empty(), 1);
     }
 
     /** Requires every physical Flink process to use this local Docker image identity. */
     public FlinkRuntimeTarget withExpectedImageId(String imageId) {
         return new FlinkRuntimeTarget(imageReference, connectorBundle,
-                Optional.of(requireDockerImageId(imageId, "expectedImageId")), expectedRuntimeJar);
+                Optional.of(requireDockerImageId(imageId, "expectedImageId")), expectedRuntimeJar,
+                taskManagers);
     }
 
     /** Requires the selected runtime JAR bytes in every physical Flink process. */
     public FlinkRuntimeTarget withExpectedRuntimeJar(RuntimeJar runtimeJar) {
         return new FlinkRuntimeTarget(imageReference, connectorBundle, expectedImageId,
-                Optional.of(Objects.requireNonNull(runtimeJar, "runtimeJar")));
+                Optional.of(Objects.requireNonNull(runtimeJar, "runtimeJar")), taskManagers);
+    }
+
+    /** Keeps one JobManager and provisions this many named TaskManager slots. */
+    public FlinkRuntimeTarget withTaskManagers(int count) {
+        return new FlinkRuntimeTarget(imageReference, connectorBundle, expectedImageId,
+                expectedRuntimeJar, count);
+    }
+
+    public int taskManagers() {
+        return taskManagers;
     }
 
     public String imageReference() {
@@ -93,17 +115,20 @@ public final class FlinkRuntimeTarget {
                 && imageReference.equals(target.imageReference)
                 && Objects.equals(connectorBundle, target.connectorBundle)
                 && expectedImageId.equals(target.expectedImageId)
-                && expectedRuntimeJar.equals(target.expectedRuntimeJar);
+                && expectedRuntimeJar.equals(target.expectedRuntimeJar)
+                && taskManagers == target.taskManagers;
     }
 
     @Override
     public int hashCode() {
-        return Objects.hash(imageReference, connectorBundle, expectedImageId, expectedRuntimeJar);
+        return Objects.hash(imageReference, connectorBundle, expectedImageId, expectedRuntimeJar,
+                taskManagers);
     }
 
     @Override
     public String toString() {
-        return imageReference + " (binding " + connectorBundle.targetBindingSha256()
+        return imageReference + " (TaskManagers " + taskManagers
+                + ", binding " + connectorBundle.targetBindingSha256()
                 + expectedImageId.map(value -> ", expected image " + value).orElse("")
                 + expectedRuntimeJar.map(value -> ", runtime JAR " + value).orElse("") + ")";
     }

@@ -2,6 +2,7 @@ package org.savonitar.flink.stability.core.execution;
 
 import org.savonitar.flink.stability.core.execution.plan.ExecutableScenarioPlan;
 import org.savonitar.flink.stability.core.flink.FlinkJobObservation;
+import org.savonitar.flink.stability.runtime.api.TaskManagerControl;
 
 import java.time.Duration;
 import java.util.List;
@@ -18,12 +19,21 @@ import static org.savonitar.flink.stability.runtime.api.Checks.requireNonBlank;
 public record PhaseExecutionEvidence(
         List<StepEvidence> steps,
         List<TaskManagerKill> taskManagerKills,
-        List<NetworkFault> networkFaults) {
+        List<NetworkFault> networkFaults,
+        List<TaskManagerRestart> taskManagerRestarts) {
     public PhaseExecutionEvidence {
         steps = List.copyOf(Objects.requireNonNull(steps, "steps"));
         taskManagerKills = List.copyOf(Objects.requireNonNull(
                 taskManagerKills, "taskManagerKills"));
         networkFaults = List.copyOf(Objects.requireNonNull(networkFaults, "networkFaults"));
+        taskManagerRestarts = List.copyOf(Objects.requireNonNull(
+                taskManagerRestarts, "taskManagerRestarts"));
+    }
+
+    public PhaseExecutionEvidence(List<StepEvidence> steps,
+                                  List<TaskManagerKill> taskManagerKills,
+                                  List<NetworkFault> networkFaults) {
+        this(steps, taskManagerKills, networkFaults, List.of());
     }
 
     public PhaseExecutionEvidence(List<StepEvidence> steps) {
@@ -31,22 +41,81 @@ public record PhaseExecutionEvidence(
     }
 
     /**
-     * A confirmed process exit, its pre-kill job observation, and a JobManager clock sample
-     * requested after exit. Recovery events must follow that sample to prove post-kill timing.
+     * A confirmed process exit, its baseline job observation, and fresh JobManager clock samples
+     * requested after baseline/identity collection immediately before injection and after exit.
      */
     public record TaskManagerKill(
             String path,
             List<LoopIteration> loopIterations,
             String target,
             FlinkJobObservation.Attempt jobBeforeKill,
-            OptionalLong jobManagerTimeAfterKill) {
+            OptionalLong jobManagerTimeBeforeKill,
+            OptionalLong jobManagerTimeAfterKill,
+            Optional<TaskManagerControl.Identity> identity,
+            Optional<String> identityFailure) {
         public TaskManagerKill {
             path = requireNonBlank(path, "path");
             loopIterations = List.copyOf(Objects.requireNonNull(
                     loopIterations, "loopIterations"));
             target = requireNonBlank(target, "target");
             Objects.requireNonNull(jobBeforeKill, "jobBeforeKill");
+            Objects.requireNonNull(jobManagerTimeBeforeKill, "jobManagerTimeBeforeKill");
             Objects.requireNonNull(jobManagerTimeAfterKill, "jobManagerTimeAfterKill");
+            Objects.requireNonNull(identity, "identity");
+            Objects.requireNonNull(identityFailure, "identityFailure");
+            if (identity.isPresent() && identityFailure.isPresent()) {
+                throw new IllegalArgumentException("Identity observation cannot both succeed and fail");
+            }
+        }
+
+        public TaskManagerKill(String path, List<LoopIteration> loopIterations, String target,
+                               FlinkJobObservation.Attempt jobBeforeKill,
+                               OptionalLong jobManagerTimeBeforeKill,
+                               OptionalLong jobManagerTimeAfterKill,
+                               Optional<TaskManagerControl.Identity> identity) {
+            this(path, loopIterations, target, jobBeforeKill,
+                    jobManagerTimeBeforeKill, jobManagerTimeAfterKill,
+                    identity, Optional.empty());
+        }
+
+        public TaskManagerKill(String path, List<LoopIteration> loopIterations, String target,
+                               FlinkJobObservation.Attempt jobBeforeKill,
+                               OptionalLong jobManagerTimeBeforeKill,
+                               OptionalLong jobManagerTimeAfterKill) {
+            this(path, loopIterations, target, jobBeforeKill,
+                    jobManagerTimeBeforeKill, jobManagerTimeAfterKill,
+                    Optional.empty());
+        }
+    }
+
+    /** A successful named restart and the physical incarnation it replaced. */
+    public record TaskManagerRestart(
+            String path,
+            List<LoopIteration> loopIterations,
+            String target,
+            Optional<TaskManagerControl.Identity> previousIdentity,
+            Optional<TaskManagerControl.Identity> replacementIdentity,
+            Optional<String> previousIdentityFailure,
+            Optional<String> replacementIdentityFailure) {
+        public TaskManagerRestart {
+            path = requireNonBlank(path, "path");
+            loopIterations = List.copyOf(Objects.requireNonNull(loopIterations, "loopIterations"));
+            target = requireNonBlank(target, "target");
+            Objects.requireNonNull(previousIdentity, "previousIdentity");
+            Objects.requireNonNull(replacementIdentity, "replacementIdentity");
+            Objects.requireNonNull(previousIdentityFailure, "previousIdentityFailure");
+            Objects.requireNonNull(replacementIdentityFailure, "replacementIdentityFailure");
+            if ((previousIdentity.isPresent() && previousIdentityFailure.isPresent())
+                    || (replacementIdentity.isPresent() && replacementIdentityFailure.isPresent())) {
+                throw new IllegalArgumentException("Identity observation cannot both succeed and fail");
+            }
+        }
+
+        public TaskManagerRestart(String path, List<LoopIteration> loopIterations, String target,
+                                  Optional<TaskManagerControl.Identity> previousIdentity,
+                                  Optional<TaskManagerControl.Identity> replacementIdentity) {
+            this(path, loopIterations, target, previousIdentity, replacementIdentity,
+                    Optional.empty(), Optional.empty());
         }
     }
 

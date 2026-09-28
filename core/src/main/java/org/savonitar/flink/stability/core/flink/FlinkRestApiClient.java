@@ -42,7 +42,6 @@ public final class FlinkRestApiClient implements FlinkScenarioControl {
     private static final long POLL_INTERVAL_MILLIS = 250;
     private static final int MAX_ERROR_BODY_CHARS = 4096;
     private static final int MAX_OBSERVED_FAILURES = 20;
-    private static final int MAX_ROOT_CAUSE_CHARS = 300;
 
     private final Transport transport;
     private final ObjectMapper mapper;
@@ -350,9 +349,7 @@ public final class FlinkRestApiClient implements FlinkScenarioControl {
                 rootCause = line.substring("Caused by: ".length());
             }
         }
-        return rootCause.length() <= MAX_ROOT_CAUSE_CHARS
-                ? rootCause
-                : rootCause.substring(0, MAX_ROOT_CAUSE_CHARS) + "…";
+        return rootCause;
     }
 
     @Override

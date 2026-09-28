@@ -136,7 +136,8 @@ public final class ExecutableScenarioPlanCompiler {
                 connectorBundle,
                 workloadArtifact.preparedPath(),
                 jobPath);
-        FlinkRuntimeTarget runtimeTarget = runtimeTargetFactory.create(connectorBundle);
+        FlinkRuntimeTarget runtimeTarget = runtimeTargetFactory.create(connectorBundle)
+                .withTaskManagers(executablePlan.flink().taskmanagers());
         runtimeTarget = executablePlan.flink().expectedImageId()
                 .map(runtimeTarget::withExpectedImageId).orElse(runtimeTarget);
         runtimeTarget = executablePlan.flink().expectedRuntimeJar()
@@ -275,14 +276,14 @@ public final class ExecutableScenarioPlanCompiler {
                 "runner.flink.jobmanager-count-unsupported",
                 "The first runner requires exactly one JobManager",
                 issues);
-        requireEqualInteger(
-                source,
-                flink.path("taskmanagers"),
-                1,
-                "$/setup/flink/taskmanagers",
-                "runner.flink.taskmanager-count-unsupported",
-                "The first runner requires exactly one TaskManager",
-                issues);
+        requirePositiveInt(source, flink.path("taskmanagers"),
+                "$/setup/flink/taskmanagers", issues);
+        if (flink.path("taskmanagers").bigIntegerValue().compareTo(
+                BigInteger.valueOf(FlinkRuntimeTarget.MAX_TASK_MANAGERS)) > 0) {
+            issues.add(issue(source, "runner.flink.taskmanager-count-unsupported",
+                    "$/setup/flink/taskmanagers", "The local runner supports at most "
+                            + FlinkRuntimeTarget.MAX_TASK_MANAGERS + " TaskManagers"));
+        }
         if (flink.get("config") instanceof ObjectNode config && !config.isEmpty()) {
             issues.add(issue(
                     source,
@@ -327,14 +328,16 @@ public final class ExecutableScenarioPlanCompiler {
                     jobPath + "/start",
                     "The first runner starts its one job automatically"));
         }
-        requireEqualInteger(
-                source,
-                job.path("parallelism"),
-                1,
-                jobPath + "/parallelism",
-                "runner.workload.parallelism-unsupported",
-                "The first runner requires job parallelism=1",
-                issues);
+        requirePositiveInt(source, job.path("parallelism"), jobPath + "/parallelism", issues);
+        if (job.path("parallelism").bigIntegerValue().compareTo(
+                document.at("/setup/flink/taskmanagers").bigIntegerValue().multiply(
+                        BigInteger.valueOf(FlinkRuntimeTarget.TASK_SLOTS_PER_TASK_MANAGER))) > 0) {
+            issues.add(issue(source, "runner.workload.insufficient-task-slots",
+                    jobPath + "/parallelism",
+                    "Job parallelism exceeds the provisioned capacity of "
+                            + FlinkRuntimeTarget.TASK_SLOTS_PER_TASK_MANAGER
+                            + " slots per TaskManager"));
+        }
 
         JsonNode jobConnectors = job.get("connectors");
         if (!(jobConnectors instanceof ArrayNode connectorArray)
@@ -519,7 +522,7 @@ public final class ExecutableScenarioPlanCompiler {
                     false,
                     issues);
         }
-        validateTaskManagerLifecycle(source, phases, issues);
+        TaskManagerLifecycleCompiler.validate(source, document, issues);
     }
 
     private static void validateSteps(
@@ -561,10 +564,7 @@ public final class ExecutableScenarioPlanCompiler {
                             true,
                             issues);
                 }
-                case "kill" -> validateKill(source, (ObjectNode) step.get("kill"),
-                        stepPath + "/kill", issues);
-                case "restart" -> validateRestart(source, (ObjectNode) step.get("restart"),
-                        stepPath + "/restart", issues);
+                case "kill", "restart" -> { /* Validated together with per-target lifecycle. */ }
                 case "network_fault" -> NetworkFaultCompiler.validateStep(
                         source, (ObjectNode) step.get(key), stepPath + "/network_fault",
                         inLoop, issues);
@@ -612,135 +612,6 @@ public final class ExecutableScenarioPlanCompiler {
                     path + "/condition/count",
                     issues);
         }
-    }
-
-    private static void validateKill(
-            Path source,
-            ObjectNode kill,
-            String path,
-            List<Diagnostic> issues) {
-        ObjectNode target = (ObjectNode) kill.get("target");
-        if (!"named".equals(target.path("kind").textValue())
-                || !"taskmanager".equals(target.path("role").textValue())
-                || !"taskmanager-1".equals(target.path("name").textValue())) {
-            issues.add(issue(
-                    source,
-                    "runner.phase.kill-target-unsupported",
-                    path + "/target",
-                    "The first runner can kill only named taskmanager-1"));
-        }
-    }
-
-    private static void validateRestart(
-            Path source,
-            ObjectNode restart,
-            String path,
-            List<Diagnostic> issues) {
-        if (!"taskmanager".equals(restart.path("component").textValue())) {
-            issues.add(issue(
-                    source,
-                    "runner.phase.restart-component-unsupported",
-                    path + "/component",
-                    "The first runner can restart only the TaskManager"));
-        }
-        if (restart.has("image")) {
-            issues.add(issue(
-                    source,
-                    "runner.phase.restart-image-unsupported",
-                    path + "/image",
-                    "The first runner restarts the current verified runtime target"));
-        }
-    }
-
-    private static void validateTaskManagerLifecycle(
-            Path source,
-            ArrayNode phases,
-            List<Diagnostic> issues) {
-        TaskManagerState state = TaskManagerState.active();
-        for (int phaseIndex = 0; phaseIndex < phases.size(); phaseIndex++) {
-            ObjectNode phase = (ObjectNode) phases.get(phaseIndex);
-            state = validateTaskManagerLifecycleInSteps(
-                    source,
-                    (ArrayNode) phase.get("steps"),
-                    "$/phases/" + phaseIndex + "/steps",
-                    state,
-                    issues);
-        }
-        if (!state.running()) {
-            issues.add(issue(
-                    source,
-                    "runner.phase.taskmanager-kill-unhealed",
-                    state.lastKillPath(),
-                    "A killed TaskManager must have a reachable taskmanager restart"));
-        }
-    }
-
-    private static TaskManagerState validateTaskManagerLifecycleInSteps(
-            Path source,
-            ArrayNode steps,
-            String stepsPath,
-            TaskManagerState initial,
-            List<Diagnostic> issues) {
-        TaskManagerState state = initial;
-        for (int index = 0; index < steps.size(); index++) {
-            ObjectNode step = (ObjectNode) steps.get(index);
-            String stepPath = stepsPath + "/" + index;
-            if (step.has("kill") && isSupportedTaskManagerKill((ObjectNode) step.get("kill"))) {
-                if (!state.running()) {
-                    issues.add(issue(
-                            source,
-                            "runner.phase.taskmanager-already-stopped",
-                            stepPath + "/kill",
-                            "Cannot kill taskmanager-1 before it has been restarted"));
-                } else {
-                    state = TaskManagerState.stopped(stepPath + "/kill");
-                }
-            } else if (step.has("restart")
-                    && isSupportedTaskManagerRestart((ObjectNode) step.get("restart"))) {
-                if (state.running()) {
-                    issues.add(issue(
-                            source,
-                            "runner.phase.taskmanager-already-running",
-                            stepPath + "/restart",
-                            "TaskManager restart must heal a preceding kill"));
-                } else {
-                    state = TaskManagerState.active();
-                }
-            } else if (step.get("loop") instanceof ObjectNode loop) {
-                TaskManagerState before = state;
-                state = validateTaskManagerLifecycleInSteps(
-                        source,
-                        (ArrayNode) loop.get("steps"),
-                        stepPath + "/loop/steps",
-                        state,
-                        issues);
-                if (loop.path("times").bigIntegerValue().compareTo(BigInteger.ONE) > 0
-                        && !sameLifecycleState(before, state)) {
-                    issues.add(issue(
-                            source,
-                            "runner.phase.loop-taskmanager-lifecycle-unstable",
-                            stepPath + "/loop",
-                            "A repeated loop must restore taskmanager-1 to its entry state"));
-                }
-            }
-        }
-        return state;
-    }
-
-    private static boolean isSupportedTaskManagerKill(ObjectNode kill) {
-        ObjectNode target = (ObjectNode) kill.get("target");
-        return "named".equals(target.path("kind").textValue())
-                && "taskmanager".equals(target.path("role").textValue())
-                && "taskmanager-1".equals(target.path("name").textValue());
-    }
-
-    private static boolean isSupportedTaskManagerRestart(ObjectNode restart) {
-        return "taskmanager".equals(restart.path("component").textValue())
-                && !restart.has("image");
-    }
-
-    private static boolean sameLifecycleState(TaskManagerState left, TaskManagerState right) {
-        return left.running() == right.running();
     }
 
     private static void validateTerminalValidation(
@@ -826,7 +697,8 @@ public final class ExecutableScenarioPlanCompiler {
         ObjectNode flinkNode = (ObjectNode) document.at("/setup/flink");
         ExecutableScenarioPlan.FlinkCluster flink = new ExecutableScenarioPlan.FlinkCluster(
                 flinkNode.path("image").textValue(),
-                Optional.ofNullable(flinkNode.path("image_id").textValue()), 1, 1,
+                Optional.ofNullable(flinkNode.path("image_id").textValue()),
+                1, flinkNode.path("taskmanagers").intValue(),
                 Optional.ofNullable(flinkNode.get("runtime_jar")).map(jar ->
                         new FlinkRuntimeTarget.RuntimeJar(jar.path("container_path").textValue(),
                                 jar.path("sha256").textValue())));
@@ -872,7 +744,7 @@ public final class ExecutableScenarioPlanCompiler {
                                 : ExecutableScenarioPlan.CheckpointStorage.JOBMANAGER);
         Map<String, String> standardFlinkConfiguration =
                 ExecutableScenarioPlan.standardFlinkConfiguration(
-                        1,
+                        jobNode.path("parallelism").intValue(),
                         ExecutableScenarioPlan.StateBackend.HASHMAP,
                         checkpointing);
         ExecutableScenarioPlan.Job job = new ExecutableScenarioPlan.Job(
@@ -880,7 +752,7 @@ public final class ExecutableScenarioPlanCompiler {
                 jobNode.path("jar").textValue(),
                 jobNode.withArray("connectors").get(0).textValue(),
                 ExecutableScenarioPlan.StartMode.AUTO,
-                1,
+                jobNode.path("parallelism").intValue(),
                 source,
                 sink,
                 ExecutableScenarioPlan.StateBackend.HASHMAP,
@@ -1013,7 +885,8 @@ public final class ExecutableScenarioPlanCompiler {
                 steps.add(new ExecutableScenarioPlan.KillTaskManager(
                         kill.at("/target/name").textValue()));
             } else if (step.has("restart")) {
-                steps.add(new ExecutableScenarioPlan.RestartTaskManager());
+                steps.add(new ExecutableScenarioPlan.RestartTaskManager(
+                        step.path("restart").path("name").asText("taskmanager-1")));
             } else if (step.get("network_fault") instanceof ObjectNode networkFault) {
                 steps.add(NetworkFaultCompiler.step(networkFault));
             } else if (step.get("loop") instanceof ObjectNode loop) {
@@ -1218,13 +1091,4 @@ public final class ExecutableScenarioPlanCompiler {
         return value.replace("~", "~0").replace("/", "~1");
     }
 
-    private record TaskManagerState(boolean running, String lastKillPath) {
-        private static TaskManagerState active() {
-            return new TaskManagerState(true, null);
-        }
-
-        private static TaskManagerState stopped(String killPath) {
-            return new TaskManagerState(false, killPath);
-        }
-    }
 }

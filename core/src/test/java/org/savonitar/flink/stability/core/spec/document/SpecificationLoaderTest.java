@@ -89,6 +89,22 @@ class SpecificationLoaderTest {
     }
 
     @Test
+    void namedRestartsCannotUpgradeImagesOrTargetOtherComponentKinds() {
+        Path source = resource("minimal.yaml");
+        for (String component : List.of("taskmanager", "jobmanager", "flink", "kafka")) {
+            ObjectNode document = loader.loadScenario(source).document();
+            ObjectNode restart = ((ObjectNode) document.at("/phases/0"))
+                    .putArray("steps").addObject().putObject("restart")
+                    .put("component", component).put("name", "taskmanager-1");
+            if (component.equals("taskmanager")) {
+                loader.validateScenarioDocument(source, document);
+                restart.put("image", "flink:2.2.1");
+            }
+            assertFailsAt(Stage.DOCUMENT, () -> loader.validateScenarioDocument(source, document));
+        }
+    }
+
+    @Test
     void rejectsMissingFormatBeforeKindDispatch() throws IOException {
         Path document = write("missing-format.yaml", "kind: unknown\n");
 

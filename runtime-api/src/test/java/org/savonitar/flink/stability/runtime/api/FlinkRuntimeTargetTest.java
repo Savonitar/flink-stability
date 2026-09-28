@@ -14,6 +14,30 @@ class FlinkRuntimeTargetTest {
     private static final String IMAGE_ID = "sha256:" + "a".repeat(64);
 
     @Test
+    void taskManagerCountIsImmutableAndSurvivesBothRuntimePins() {
+        FlinkRuntimeTarget.RuntimeJar jar = new FlinkRuntimeTarget.RuntimeJar(
+                "/opt/flink/lib/flink-dist-2.2.0.jar", "d".repeat(64));
+        FlinkRuntimeTarget original = target();
+        FlinkRuntimeTarget expanded = original.withTaskManagers(3)
+                .withExpectedImageId(IMAGE_ID).withExpectedRuntimeJar(jar);
+
+        assertEquals(1, original.taskManagers());
+        assertEquals(3, expanded.taskManagers());
+        assertEquals(2, FlinkRuntimeTarget.TASK_SLOTS_PER_TASK_MANAGER);
+        assertSame(original.connectorBundle(), expanded.connectorBundle());
+        FlinkRuntimeTarget reordered = original.withExpectedRuntimeJar(jar)
+                .withExpectedImageId(IMAGE_ID).withTaskManagers(3);
+        assertEquals(expanded, reordered);
+        assertEquals(expanded.hashCode(), reordered.hashCode());
+        assertNotEquals(expanded, expanded.withTaskManagers(2));
+        assertThrows(IllegalArgumentException.class, () -> original.withTaskManagers(0));
+        assertThrows(IllegalArgumentException.class, () -> original.withTaskManagers(-1));
+        assertThrows(IllegalArgumentException.class, () -> original.withTaskManagers(17));
+        assertThrows(IllegalArgumentException.class,
+                () -> original.withTaskManagers(Integer.MAX_VALUE));
+    }
+
+    @Test
     void runtimeJarPinIsImmutableAndSurvivesImagePinningInEitherOrder() {
         FlinkRuntimeTarget.RuntimeJar jar = new FlinkRuntimeTarget.RuntimeJar(
                 "/opt/flink/lib/flink-dist-2.2.1-SNAPSHOT.jar", "d".repeat(64));

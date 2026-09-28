@@ -21,6 +21,7 @@ import org.savonitar.flink.stability.runtime.api.FlinkComponentProvisioningEvide
 import org.savonitar.flink.stability.runtime.api.FlinkComponentRole;
 import org.savonitar.flink.stability.runtime.api.FlinkRuntimeTarget;
 import org.savonitar.flink.stability.runtime.api.ProvisionedConnectorArtifact;
+import org.savonitar.flink.stability.runtime.api.TaskManagerControl;
 import picocli.CommandLine;
 
 import java.io.IOException;
@@ -425,6 +426,8 @@ class RunScenarioCommandTest {
                         output.at("/evidence/flinkJob/status").textValue()),
                 () -> assertTrue(output.at("/evidence/taskManagerKills").isArray()),
                 () -> assertTrue(output.at("/evidence/taskManagerKills").isEmpty()),
+                () -> assertTrue(output.at("/evidence/taskManagerRestarts").isArray()),
+                () -> assertTrue(output.at("/evidence/taskManagerRestarts").isEmpty()),
                 () -> assertEquals("partial", input.path("status").textValue()),
                 () -> assertEquals(1, input.path("observed").longValue()),
                 () -> assertFalse(input.path("reconciliationComplete").booleanValue()),
@@ -437,10 +440,51 @@ class RunScenarioCommandTest {
     }
 
     @Test
+    void rendersPeerAttributionWithoutReplacingTheReportingTaskManagerIdentity() throws Exception {
+        String type = "org.apache.flink.runtime.io.network.netty.exception.RemoteTransportException";
+        String target = "flink-stability-taskmanager-2-1-6fc0d9a9-9fda-4d54-8c99-352bb2f1318b";
+        String peer = "flink-stability-taskmanager-1-1-acd3214c-9d1f-4b07-8d34-7f50ea24f7a0";
+        var peerFailure = new FlinkJobObservation.Failure(1_300, type,
+                type + ": Connection unexpectedly closed by remote task manager "
+                        + "'192.168.100.100/192.168.100.100:36917 [ " + target
+                        + " ] '. This might indicate that the remote task manager was lost.", Optional.of(peer));
+        assertEquals(305, peerFailure.rootCause().length());
+        var before = new FlinkJobObservation(1_000, FlinkJobState.RUNNING, 2, 0,
+                Optional.empty(), List.of(), List.of(
+                        new FlinkJobObservation.Subtask("Source", 0, 0, "RUNNING", Optional.of(target)),
+                        new FlinkJobObservation.Subtask("Sink", 1, 0, "RUNNING", Optional.of(peer))));
+        var kill = new PhaseExecutionEvidence.TaskManagerKill(
+                "$/phases/1/steps/0", List.of(), "taskmanager-2",
+                new FlinkJobObservation.Attempt(Optional.of(before), Optional.empty()),
+                java.util.OptionalLong.of(1_200), java.util.OptionalLong.of(1_500),
+                Optional.of(new TaskManagerControl.Identity("taskmanager-2", "container-2", target)));
+        var after = new FlinkJobObservation(9_000, FlinkJobState.FINISHED, 3, 1,
+                Optional.of(new FlinkJobObservation.Restore(2, 1_400)), List.of(peerFailure), List.of());
+        JsonNode rendered = renderEvidence(new PhaseExecutionEvidence(List.of(), List.of(kill), List.of()),
+                Optional.of(new FlinkJobObservation.Attempt(Optional.of(after), Optional.empty())))
+                .at("/taskManagerKills/0");
+
+        assertTrue(rendered.path("confirmed").booleanValue());
+        assertEquals(1_200, rendered.path("jobManagerTimeBeforeKill").longValue());
+        assertEquals(1_500, rendered.path("jobManagerTimeAfterKill").longValue());
+        assertEquals(1_400, rendered.path("restoredAtMillis").longValue());
+        assertEquals(200, rendered.path("restoredAfterPreInjectionMs").longValue());
+        assertEquals(-100, rendered.path("restoredAfterKillObservationMs").longValue());
+        assertEquals(1, rendered.path("qualifyingTargetFailures").size());
+        assertEquals(peer, rendered.at("/qualifyingTargetFailures/0/taskManagerId").textValue());
+        assertEquals(target, rendered.at("/qualifyingTargetFailures/0/targetResourceId").textValue());
+        assertEquals("remote-transport", rendered.at("/qualifyingTargetFailures/0/attribution").textValue());
+        assertEquals(peerFailure.rootCause(), rendered.at("/qualifyingTargetFailures/0/rootCause").textValue());
+    }
+
+    @Test
     void rendersTheJobObservationAndTheEffectOfEachTaskManagerKill() throws Exception {
         FlinkJobObservation.Failure lostTaskManager = new FlinkJobObservation.Failure(
                 12_000, "ResourceManagerException",
                 "TaskManager with id tm-1 is no longer reachable.", Optional.of("tm-1"));
+        FlinkJobObservation.Failure otherTaskManager = new FlinkJobObservation.Failure(
+                14_000, "OtherTaskManagerException",
+                "Unrelated failure on tm-other.", Optional.of("tm-other"));
         PhaseExecutionEvidence phases = new PhaseExecutionEvidence(
                 List.of(),
                 List.of(new PhaseExecutionEvidence.TaskManagerKill(
@@ -453,8 +497,17 @@ class RunScenarioCommandTest {
                                         List.of(),
                                         List.of(new FlinkJobObservation.Subtask(
                                                 "Kafka Source", 0, 0, "RUNNING",
-                                                Optional.of("tm-1"))))),
-                                Optional.empty()), java.util.OptionalLong.of(2_000))),
+                                                Optional.of("tm-1")),
+                                                new FlinkJobObservation.Subtask(
+                                                        "Kafka Source", 1, 2, "RUNNING",
+                                                        Optional.of("tm-other")),
+                                                new FlinkJobObservation.Subtask(
+                                                        "Kafka Sink", 0, 1, "DEPLOYING",
+                                                        Optional.of("tm-1"))))),
+                                Optional.empty()), java.util.OptionalLong.of(1_500),
+                        java.util.OptionalLong.of(2_000),
+                        Optional.of(new TaskManagerControl.Identity(
+                                "taskmanager-1", "tm", "tm-1")))),
                 List.of(new PhaseExecutionEvidence.NetworkFault(
                         "$/phases/2/steps/0",
                         "phases-2-steps-0",
@@ -476,7 +529,7 @@ class RunScenarioCommandTest {
                 Optional.of(new FlinkJobObservation(
                         20_000, FlinkJobState.FINISHED, 20, 1,
                         Optional.of(new FlinkJobObservation.Restore(4, 13_000)),
-                        List.of(lostTaskManager), List.of())),
+                        List.of(otherTaskManager, lostTaskManager), List.of())),
                 Optional.empty());
         FlinkProcessWriteFenceEvidence processes = runtimeFence();
         KafkaIdSetValidationResult terminal = passResult().terminalValidation().orElseThrow();
@@ -511,17 +564,39 @@ class RunScenarioCommandTest {
                 () -> assertEquals("FINISHED", job.path("state").textValue()),
                 () -> assertEquals(1, job.path("restoredCheckpoints").longValue()),
                 () -> assertEquals(4, job.path("latestRestoredCheckpoint").longValue()),
-                () -> assertEquals(1, job.path("failures").intValue()),
+                () -> assertEquals(2, job.path("failures").intValue()),
                 () -> assertEquals("$/phases/1/steps/0", kill.path("path").textValue()),
+                () -> assertEquals("taskmanager-1", kill.at("/identity/logicalName").textValue()),
+                () -> assertEquals("tm", kill.at("/identity/runtimeId").textValue()),
+                () -> assertEquals("tm-1", kill.at("/identity/resourceId").textValue()),
+                () -> assertTrue(kill.path("identityFailure").isNull()),
                 () -> assertEquals("checkpoint-restored", kill.path("outcome").textValue()),
                 () -> assertTrue(kill.path("confirmed").booleanValue()),
                 () -> assertEquals("RUNNING", kill.path("jobStateBeforeKill").textValue()),
                 () -> assertEquals(4, kill.path("completedCheckpointsBeforeKill").longValue()),
-                () -> assertEquals(1, kill.path("activeSubtasksBeforeKill").longValue()),
+                () -> assertEquals(3, kill.path("activeSubtasksBeforeKill").longValue()),
+                () -> assertEquals(3, kill.path("subtasksBeforeKill").size()),
+                () -> assertEquals("tm-other", kill.at("/subtasksBeforeKill/1/taskManagerId").textValue()),
+                () -> assertEquals("DEPLOYING", kill.at("/subtasksBeforeKill/2/status").textValue()),
+                () -> assertEquals(1, kill.path("targetedRunningSubtasksBeforeKill").size()),
+                () -> assertEquals(JSON.valueToTree(Map.of(
+                        "vertexName", "Kafka Source", "index", 0, "attempt", 0,
+                        "status", "RUNNING", "taskManagerId", "tm-1")),
+                        kill.at("/targetedRunningSubtasksBeforeKill/0")),
                 () -> assertEquals(4, kill.path("restoredCheckpoint").longValue()),
+                () -> assertEquals(1_500, kill.path("jobManagerTimeBeforeKill").longValue()),
                 () -> assertEquals(2_000, kill.path("jobManagerTimeAfterKill").longValue()),
                 () -> assertEquals(11_000, kill.path("restoredAfterKillObservationMs").longValue()),
-                () -> assertEquals(1, kill.path("failuresAfterKill").intValue()),
+                () -> assertEquals(2, kill.path("failuresAfterKill").intValue()),
+                () -> assertEquals(1, kill.path("qualifyingTargetFailures").size()),
+                () -> assertEquals(JSON.valueToTree(Map.of(
+                        "taskManagerId", "tm-1", "targetResourceId", "tm-1", "attribution", "reporter",
+                        "timestampMillis", 12_000,
+                        "exceptionName", "ResourceManagerException",
+                        "rootCause", lostTaskManager.rootCause())),
+                        kill.at("/qualifyingTargetFailures/0")),
+                () -> assertFalse(kill.path("qualifyingTargetFailures").toString()
+                        .contains(otherTaskManager.rootCause())),
                 () -> assertEquals("TaskManager with id tm-1 is no longer reachable.",
                         kill.path("firstFailureAfterKill").textValue()),
                 () -> assertEquals("drop-response", fault.path("action").textValue()),
@@ -539,6 +614,106 @@ class RunScenarioCommandTest {
                         evidence.at("/subjectClasses/status").textValue()),
                 () -> assertEquals("taskmanager-1#1",
                         evidence.at("/subjectClasses/processes/0/process").textValue()));
+    }
+
+    @Test
+    void rendersDistinctKillAndReplacementIdentitiesForTwoNamedTaskManagers() throws Exception {
+        List<PhaseExecutionEvidence.StepEvidence> steps = new ArrayList<>();
+        List<PhaseExecutionEvidence.TaskManagerKill> kills = new ArrayList<>();
+        List<PhaseExecutionEvidence.TaskManagerRestart> restarts = new ArrayList<>();
+        FlinkJobObservation.Attempt unavailable = new FlinkJobObservation.Attempt(
+                Optional.empty(), Optional.of("job observation unavailable"));
+        for (int slot = 1; slot <= 2; slot++) {
+            String target = "taskmanager-" + slot;
+            String killPath = "$/phases/1/steps/" + ((slot - 1) * 2);
+            String restartPath = "$/phases/1/steps/" + ((slot - 1) * 2 + 1);
+            var previous = new TaskManagerControl.Identity(
+                    target, "container-" + slot + "-old", "resource-" + slot + "-old");
+            var replacement = new TaskManagerControl.Identity(
+                    target, "container-" + slot + "-new", "resource-" + slot + "-new");
+            kills.add(new PhaseExecutionEvidence.TaskManagerKill(
+                    killPath, List.of(), target, unavailable,
+                    java.util.OptionalLong.empty(), java.util.OptionalLong.empty(),
+                    Optional.of(previous)));
+            restarts.add(new PhaseExecutionEvidence.TaskManagerRestart(
+                    restartPath, List.of(), target, Optional.of(previous), Optional.of(replacement)));
+            steps.add(new PhaseExecutionEvidence.StepEvidence(
+                    1, "recovery", restartPath, List.of(),
+                    PhaseExecutionEvidence.StepKind.RESTART_TASKMANAGER,
+                    PhaseExecutionEvidence.StepStatus.SUCCEEDED, "replacement started"));
+        }
+        JsonNode evidence = renderIncompletePhases(
+                new PhaseExecutionEvidence(steps, kills, List.of(), restarts));
+
+        assertEquals(2, evidence.path("taskManagerKills").size());
+        assertEquals(2, evidence.path("taskManagerRestarts").size());
+        for (int slot = 1; slot <= 2; slot++) {
+            JsonNode kill = evidence.path("taskManagerKills").get(slot - 1);
+            JsonNode restart = evidence.path("taskManagerRestarts").get(slot - 1);
+            JsonNode previous = JSON.valueToTree(Map.of(
+                    "logicalName", "taskmanager-" + slot,
+                    "runtimeId", "container-" + slot + "-old",
+                    "resourceId", "resource-" + slot + "-old"));
+            JsonNode replacement = JSON.valueToTree(Map.of(
+                    "logicalName", "taskmanager-" + slot,
+                    "runtimeId", "container-" + slot + "-new",
+                    "resourceId", "resource-" + slot + "-new"));
+            assertEquals("taskmanager-" + slot, kill.path("target").textValue());
+            assertEquals("$/phases/1/steps/" + ((slot - 1) * 2), kill.path("path").textValue());
+            assertEquals(previous, kill.path("identity"));
+            assertTrue(kill.path("identityFailure").isNull());
+            assertFalse(kill.path("confirmed").booleanValue());
+            assertEquals("taskmanager-" + slot, restart.path("target").textValue());
+            assertEquals("$/phases/1/steps/" + ((slot - 1) * 2 + 1), restart.path("path").textValue());
+            assertEquals(previous, restart.path("previousIdentity"));
+            assertEquals(replacement, restart.path("replacementIdentity"));
+            assertTrue(restart.path("previousIdentityFailure").isNull());
+            assertTrue(restart.path("replacementIdentityFailure").isNull());
+            assertTrue(restart.path("loopIterations").isArray());
+            assertTrue(restart.path("loopIterations").isEmpty());
+        }
+    }
+
+    @Test
+    void keepsMissingKillAndRestartIdentitiesExplicitWithoutLosingLoopCoordinates() throws Exception {
+        List<PhaseExecutionEvidence.LoopIteration> iterations = List.of(
+                new PhaseExecutionEvidence.LoopIteration("$/phases/1/steps/0", 2, 3));
+        var kill = new PhaseExecutionEvidence.TaskManagerKill(
+                "$/phases/1/steps/0/loop/steps/0", iterations, "taskmanager-2",
+                new FlinkJobObservation.Attempt(
+                        Optional.empty(), Optional.of("job observation unavailable")),
+                java.util.OptionalLong.empty(), java.util.OptionalLong.empty(), Optional.empty(),
+                Optional.of("IllegalStateException: original identity lookup failed"));
+        var restart = new PhaseExecutionEvidence.TaskManagerRestart(
+                "$/phases/1/steps/0/loop/steps/1", iterations, "taskmanager-2",
+                Optional.empty(), Optional.empty(),
+                Optional.of("IllegalStateException: previous identity unavailable"),
+                Optional.of("IOException: replacement identity lookup failed"));
+        JsonNode evidence = renderIncompletePhases(new PhaseExecutionEvidence(
+                List.of(), List.of(kill), List.of(), List.of(restart)));
+        JsonNode renderedKill = evidence.at("/taskManagerKills/0");
+        JsonNode renderedRestart = evidence.at("/taskManagerRestarts/0");
+
+        assertAll(
+                () -> assertEquals("taskmanager-2", renderedKill.path("target").textValue()),
+                () -> assertTrue(renderedKill.path("identity").isNull()),
+                () -> assertEquals("IllegalStateException: original identity lookup failed",
+                        renderedKill.path("identityFailure").textValue()),
+                () -> assertTrue(renderedKill.path("subtasksBeforeKill").isEmpty()),
+                () -> assertTrue(renderedKill.path("targetedRunningSubtasksBeforeKill").isEmpty()),
+                () -> assertTrue(renderedKill.path("qualifyingTargetFailures").isEmpty()),
+                () -> assertFalse(renderedKill.path("confirmed").booleanValue()),
+                () -> assertEquals(kill.path(), renderedKill.path("path").textValue()),
+                () -> assertEquals("2/3", renderedKill.at("/loopIterations/0").textValue()),
+                () -> assertEquals("taskmanager-2", renderedRestart.path("target").textValue()),
+                () -> assertEquals(restart.path(), renderedRestart.path("path").textValue()),
+                () -> assertEquals("2/3", renderedRestart.at("/loopIterations/0").textValue()),
+                () -> assertTrue(renderedRestart.path("previousIdentity").isNull()),
+                () -> assertTrue(renderedRestart.path("replacementIdentity").isNull()),
+                () -> assertEquals("IllegalStateException: previous identity unavailable",
+                        renderedRestart.path("previousIdentityFailure").textValue()),
+                () -> assertEquals("IOException: replacement identity lookup failed",
+                        renderedRestart.path("replacementIdentityFailure").textValue()));
     }
 
     @Test
@@ -850,6 +1025,24 @@ class RunScenarioCommandTest {
                 1,
                 nonce,
                 temporaryDirectory.resolve("checkpoints/attempt-1-" + nonce));
+    }
+
+    private JsonNode renderIncompletePhases(PhaseExecutionEvidence phases) throws Exception {
+        return renderEvidence(phases, Optional.empty());
+    }
+
+    private JsonNode renderEvidence(PhaseExecutionEvidence phases,
+                                   Optional<FlinkJobObservation.Attempt> observation) throws Exception {
+        V1ScenarioExecutionResult result = new V1ScenarioExecutionResult(
+                V1ScenarioExecutionResult.Status.INCONCLUSIVE,
+                "test.partial",
+                "attempt ended before final job observation",
+                Optional.empty(), Optional.of(phases), Optional.empty(), Optional.empty(),
+                observation, Optional.empty(), Optional.empty(), Optional.empty(),
+                List.of(), EXPECTED_RUNTIME, Optional.empty(),
+                KafkaTransactionVersion.Selection.notRequested(), List.of(), List.of());
+        return JSON.readTree(new V1ExecutionResultRenderer().render(
+                "distributed-recovery", context("1234abcd"), expectation, result)).path("evidence");
     }
 
     /** Runtime proof that the subject connector's classes ran; a PASS requires it. */

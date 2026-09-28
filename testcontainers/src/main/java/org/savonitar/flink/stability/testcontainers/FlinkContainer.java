@@ -23,7 +23,8 @@ import java.util.concurrent.atomic.AtomicReference;
 
 final class FlinkContainer implements FlinkComponentFactory {
     private static final String CHECKPOINT_PATH = "/flink/checkpoints";
-    private static final String TASK_SLOTS_PROPERTY = "taskmanager.numberOfTaskSlots: 2";
+    private static final String TASK_SLOTS_PROPERTY = "taskmanager.numberOfTaskSlots: "
+            + FlinkRuntimeTarget.TASK_SLOTS_PER_TASK_MANAGER;
     private static final String PRIMARY_JOB_MANAGER_ALIAS = "jobmanager-1";
     private static final String COMPONENT_LABEL = "org.savonitar.flink-stability.component";
     static final int JOB_MANAGER_PORT = 8081;
@@ -90,14 +91,16 @@ final class FlinkContainer implements FlinkComponentFactory {
     GenericContainer<?> createTaskManager(String logicalName) {
         FlinkClassLoadLog log = classLoadLogs.register(logicalName);
         VerifiedFlinkContainer container = new VerifiedFlinkContainer(
-                flinkImage, runtimeTarget, this::verifyImageId, log)
+                flinkImage, runtimeTarget, this::verifyImageId, log);
+        container
                 .withNetwork(network)
                 .withNetworkAliases(logicalName)
                 .withLabel(COMPONENT_LABEL, logicalName)
                 .withFileSystemBind(
                         checkpointStorageRoot.toString(), CHECKPOINT_PATH, BindMode.READ_WRITE)
                 .withEnv("JOB_MANAGER_RPC_ADDRESS", PRIMARY_JOB_MANAGER_ALIAS)
-                .withEnv("FLINK_PROPERTIES", flinkProperties("taskmanager", log))
+                .withEnv("FLINK_PROPERTIES", flinkProperties("taskmanager", log)
+                        + "\ntaskmanager.resource-id: " + container.resourceId())
                 .withCommand("taskmanager")
                 .withLogConsumer(createLogConsumer("TASK_MANAGER_LOGS." + logicalName));
         if (runtimeTarget.expectedRuntimeJar().isPresent()) {

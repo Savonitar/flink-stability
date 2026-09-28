@@ -78,6 +78,8 @@ public record FlinkRuntimeIdentity(Outcome outcome, String detail, String reason
         }
         Map<String, FlinkComponentProvisioningEvidence> byRuntimeId = new HashMap<>();
         Map<String, Long> incarnations = new HashMap<>();
+        Map<String, String> latestRuntimeIds = new HashMap<>();
+        Map<String, Integer> provisionOrder = new HashMap<>();
         for (FlinkComponentProvisioningEvidence component : provisioning) {
             if (expected.components().get(component.logicalName()) != component.role()) {
                 return unconfirmed("A provisioned Flink process does not match an expected slot: "
@@ -88,24 +90,81 @@ public record FlinkRuntimeIdentity(Outcome outcome, String detail, String reason
                         + component.runtimeId());
             }
             incarnations.merge(component.logicalName(), 1L, Long::sum);
+            latestRuntimeIds.putIfAbsent(component.logicalName(), component.runtimeId());
+            provisionOrder.put(component.runtimeId(), provisionOrder.size());
         }
         if (phases.isEmpty()) {
             return unconfirmed("No phase evidence establishes the required Flink replacements");
         }
-        long restarts = phases.stream().flatMap(phase -> phase.steps().stream())
+        PhaseExecutionEvidence phase = phases.orElseThrow();
+        List<PhaseExecutionEvidence.StepEvidence> restartSteps = phase.steps().stream()
                 .filter(step -> step.kind() == PhaseExecutionEvidence.StepKind.RESTART_TASKMANAGER
                         && step.status() == PhaseExecutionEvidence.StepStatus.SUCCEEDED)
-                .count();
-        long taskManagerSlots = expected.components().values().stream()
-                .filter(role -> role == FlinkComponentRole.TASK_MANAGER).count();
-        // Current restart evidence is untargeted because the executable runner permits one TM.
-        if (restarts > 0 && taskManagerSlots != 1) {
-            return unconfirmed("Untargeted restart evidence cannot identify a TaskManager slot");
+                .toList();
+        if (restartSteps.size() != phase.taskManagerRestarts().size()) {
+            return unconfirmed("Every successful TaskManager restart requires targeted identity evidence");
+        }
+        if (!restartSteps.isEmpty() && !restartsMatchPrecedingKills(phase)) {
+            return unconfirmed("TaskManager restart predecessor does not match its preceding unhealed kill");
+        }
+        Map<String, Long> restartsBySlot = new HashMap<>();
+        Set<StepIdentity> restartLocations = new HashSet<>();
+        Set<String> replacementIds = new HashSet<>();
+        Map<String, String> latestResourceIds = new HashMap<>();
+        Set<String> resourceIds = new HashSet<>();
+        for (int index = 0; index < restartSteps.size(); index++) {
+            PhaseExecutionEvidence.StepEvidence step = restartSteps.get(index);
+            PhaseExecutionEvidence.TaskManagerRestart restart = phase.taskManagerRestarts().get(index);
+            StepIdentity location = new StepIdentity(step.path(), step.loopIterations());
+            if (!restartLocations.add(location)
+                    || !location.equals(new StepIdentity(restart.path(), restart.loopIterations()))
+                    || expected.components().get(restart.target()) != FlinkComponentRole.TASK_MANAGER
+                    || restart.previousIdentity().isEmpty() || restart.replacementIdentity().isEmpty()) {
+                return unconfirmed("TaskManager restart has missing, duplicate, or mismatched target evidence");
+            }
+            var previous = restart.previousIdentity().orElseThrow();
+            var replacement = restart.replacementIdentity().orElseThrow();
+            FlinkComponentProvisioningEvidence oldProcess = byRuntimeId.get(previous.runtimeId());
+            FlinkComponentProvisioningEvidence newProcess = byRuntimeId.get(replacement.runtimeId());
+            if (!restart.target().equals(previous.logicalName())
+                    || !restart.target().equals(replacement.logicalName())
+                    || oldProcess == null || newProcess == null
+                    || !restart.target().equals(oldProcess.logicalName())
+                    || !restart.target().equals(newProcess.logicalName())
+                    || !previous.runtimeId().equals(latestRuntimeIds.get(restart.target()))
+                    || previous.runtimeId().equals(replacement.runtimeId())
+                    || previous.resourceId().equals(replacement.resourceId())
+                    || provisionOrder.get(previous.runtimeId()) >= provisionOrder.get(replacement.runtimeId())
+                    || !replacementIds.add(replacement.runtimeId())) {
+                return unconfirmed("TaskManager restart does not replace the observed incarnation of "
+                        + restart.target());
+            }
+            String lastResource = latestResourceIds.get(restart.target());
+            if ((lastResource != null && !lastResource.equals(previous.resourceId()))
+                    || (lastResource == null && !resourceIds.add(previous.resourceId()))
+                    || !resourceIds.add(replacement.resourceId())) {
+                return unconfirmed("TaskManager restart reuses or misidentifies a Flink resource identity");
+            }
+            latestRuntimeIds.put(restart.target(), replacement.runtimeId());
+            latestResourceIds.put(restart.target(), replacement.resourceId());
+            restartsBySlot.merge(restart.target(), 1L, Long::sum);
+        }
+        for (PhaseExecutionEvidence.TaskManagerKill kill : phase.taskManagerKills()) {
+            if (kill.identity().isEmpty()) {
+                return unconfirmed("A killed TaskManager has no observed physical identity");
+            }
+            var identity = kill.identity().orElseThrow();
+            FlinkComponentProvisioningEvidence killed = byRuntimeId.get(identity.runtimeId());
+            if (!kill.target().equals(identity.logicalName()) || killed == null
+                    || !kill.target().equals(killed.logicalName())
+                    || killed.role() != FlinkComponentRole.TASK_MANAGER) {
+                return unconfirmed("A killed TaskManager has no matching provisioning identity");
+            }
         }
         for (Map.Entry<String, FlinkComponentRole> slot : expected.components().entrySet()) {
-            long required = 1 + (slot.getValue() == FlinkComponentRole.TASK_MANAGER ? restarts : 0);
-            if (incarnations.getOrDefault(slot.getKey(), 0L) < required) {
-                return unconfirmed("Provisioning evidence omits an initial or replacement Flink process: "
+            long required = 1 + restartsBySlot.getOrDefault(slot.getKey(), 0L);
+            if (incarnations.getOrDefault(slot.getKey(), 0L) != required) {
+                return unconfirmed("Provisioning evidence does not match initial and replacement processes for "
                         + slot.getKey());
             }
         }
@@ -117,11 +176,12 @@ public record FlinkRuntimeIdentity(Outcome outcome, String detail, String reason
             FlinkComponentProvisioningEvidence observed = component.runtimeId()
                     .map(byRuntimeId::get).orElse(null);
             if (observed == null || observed.role() != component.role()
-                    || !observed.logicalName().equals(component.logicalName())) {
+                    || !observed.logicalName().equals(component.logicalName())
+                    || !observed.runtimeId().equals(latestRuntimeIds.get(component.logicalName()))
+                    || !fencedSlots.add(component.logicalName())) {
                 return unconfirmed("A fenced Flink process has no matching provisioning identity: "
                         + component.logicalName() + " " + component.runtimeId().orElse("unknown"));
             }
-            fencedSlots.add(component.logicalName());
         }
         if (!fencedSlots.containsAll(expected.components().keySet())) {
             return unconfirmed("The process fence does not identify every expected Flink slot");
@@ -129,6 +189,48 @@ public record FlinkRuntimeIdentity(Outcome outcome, String detail, String reason
         return new FlinkRuntimeIdentity(Outcome.CONFIRMED,
                 "Every recorded Flink incarnation used local Docker image " + observedImageId
                         + "; initial, replacement, and fenced process identities are covered");
+    }
+
+    private record StepIdentity(String path, List<PhaseExecutionEvidence.LoopIteration> iterations) {}
+
+    private static boolean restartsMatchPrecedingKills(PhaseExecutionEvidence phase) {
+        Map<String, PhaseExecutionEvidence.TaskManagerKill> unhealed = new HashMap<>();
+        Set<StepIdentity> locations = new HashSet<>();
+        int killIndex = 0;
+        int restartIndex = 0;
+        for (PhaseExecutionEvidence.StepEvidence step : phase.steps()) {
+            if (step.status() != PhaseExecutionEvidence.StepStatus.SUCCEEDED
+                    || (step.kind() != PhaseExecutionEvidence.StepKind.KILL_TASKMANAGER
+                    && step.kind() != PhaseExecutionEvidence.StepKind.RESTART_TASKMANAGER)) {
+                continue;
+            }
+            StepIdentity location = new StepIdentity(step.path(), step.loopIterations());
+            if (!locations.add(location)) {
+                return false;
+            }
+            if (step.kind() == PhaseExecutionEvidence.StepKind.KILL_TASKMANAGER) {
+                if (killIndex >= phase.taskManagerKills().size()) {
+                    return false;
+                }
+                var kill = phase.taskManagerKills().get(killIndex++);
+                if (!location.equals(new StepIdentity(kill.path(), kill.loopIterations()))
+                        || unhealed.putIfAbsent(kill.target(), kill) != null) {
+                    return false;
+                }
+            } else {
+                if (restartIndex >= phase.taskManagerRestarts().size()) {
+                    return false;
+                }
+                var restart = phase.taskManagerRestarts().get(restartIndex++);
+                var kill = unhealed.remove(restart.target());
+                if (!location.equals(new StepIdentity(restart.path(), restart.loopIterations()))
+                        || kill == null || !kill.identity().equals(restart.previousIdentity())) {
+                    return false;
+                }
+            }
+        }
+        return killIndex == phase.taskManagerKills().size()
+                && restartIndex == phase.taskManagerRestarts().size();
     }
 
     private static FlinkRuntimeIdentity unconfirmed(String detail) {

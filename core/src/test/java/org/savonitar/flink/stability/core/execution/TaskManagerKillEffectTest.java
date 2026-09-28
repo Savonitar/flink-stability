@@ -3,6 +3,7 @@ package org.savonitar.flink.stability.core.execution;
 import org.junit.jupiter.api.Test;
 import org.savonitar.flink.stability.core.flink.FlinkJobObservation;
 import org.savonitar.flink.stability.core.flink.FlinkJobState;
+import org.savonitar.flink.stability.runtime.api.TaskManagerControl;
 
 import java.util.List;
 import java.util.Optional;
@@ -19,6 +20,185 @@ class TaskManagerKillEffectTest {
                     "org.apache.flink.runtime.resourcemanager.exceptions.ResourceManagerException",
                     "TaskManager with id tm-1 is no longer reachable.",
                     Optional.of("tm-1"));
+
+    @Test
+    void aPeerTransportFailureAndFirstRestoreDuringTheKillConfirmItsDirectEffect() {
+        // The peer detects the killed incarnation before the process-exit REST sample returns.
+        // No later deployment retries or failures on the dead worker are needed.
+        var peerFailure = closedConnection(1_300, Optional.of("tm-peer"), "tm-1");
+        var effect = only(timedKill(observed(distributedBefore()),
+                        OptionalLong.of(1_200), OptionalLong.of(1_500)),
+                observed(finished(9_000, 1,
+                        Optional.of(new FlinkJobObservation.Restore(2, 1_400)),
+                        List.of(peerFailure))));
+
+        assertEquals(TaskManagerKillEffect.Outcome.CHECKPOINT_RESTORED, effect.outcome());
+        assertEquals(List.of(peerFailure), effect.qualifyingTargetFailures());
+        assertEquals(Optional.of("tm-peer"), effect.qualifyingTargetFailures().getFirst().taskManagerId());
+        assertEquals(1_400, effect.restore().orElseThrow().restoredAtMillis());
+    }
+
+    @Test
+    void aTargetFailureAtThePostExitSampleStillFollowsTheFreshPreInjectionBoundary() {
+        var failure = new FlinkJobObservation.Failure(
+                1_500, "TaskManagerException", "lost worker", Optional.of("tm-1"));
+        var effect = only(timedKill(observed(distributedBefore()),
+                        OptionalLong.of(1_200), OptionalLong.of(1_500)),
+                observed(finished(9_000, 1,
+                        Optional.of(new FlinkJobObservation.Restore(2, 1_500)), List.of(failure))));
+
+        assertTrue(effect.outcome().confirmed());
+    }
+
+    @Test
+    void aPeerCannotAttributeAnotherOrPartialIncarnationToTheKill() {
+        for (String wrong : List.of("tm-2", "tm-1-old", "prefix-tm-1", "tm-10", "tm-1-suffix")) {
+            var failure = closedConnection(1_300, Optional.of("tm-peer"), wrong);
+            var effect = only(timedKill(observed(distributedBefore()),
+                            OptionalLong.of(1_200), OptionalLong.of(1_500)),
+                    observed(finished(9_000, 1,
+                            Optional.of(new FlinkJobObservation.Restore(2, 1_600)), List.of(failure))));
+
+            assertEquals(TaskManagerKillEffect.Outcome.NO_RECOVERY_OBSERVED, effect.outcome(), wrong);
+            assertTrue(effect.qualifyingTargetFailures().isEmpty(), wrong);
+        }
+    }
+
+    @Test
+    void aGenericPeerFailureOrResourceIdMentionCannotConfirmTheKill() {
+        for (String cause : List.of("Unrelated failure mentioning tm-1",
+                "java.lang.RuntimeException: " + closedConnection(0, Optional.empty(), "tm-1").rootCause(),
+                closedConnection(0, Optional.empty(), "tm-1").rootCause().replace(
+                        "RemoteTransportException", "ApplicationException"))) {
+            var failure = new FlinkJobObservation.Failure(
+                    1_300, "ApplicationException", cause, Optional.of("tm-peer"));
+            var effect = only(timedKill(observed(distributedBefore()),
+                            OptionalLong.of(1_200), OptionalLong.of(1_500)),
+                    observed(finished(9_000, 1,
+                            Optional.of(new FlinkJobObservation.Restore(2, 1_600)), List.of(failure))));
+
+            assertFalse(effect.outcome().confirmed(), cause);
+            assertTrue(effect.qualifyingTargetFailures().isEmpty(), cause);
+        }
+    }
+
+    @Test
+    void aRemoteTransportFailureRequiresAnObservedRunningPeer() {
+        for (Optional<String> reporter : List.of(Optional.<String>empty(), Optional.of("unknown-peer"))) {
+            var failure = closedConnection(1_300, reporter, "tm-1");
+            var effect = only(timedKill(observed(distributedBefore()),
+                            OptionalLong.of(1_200), OptionalLong.of(1_500)),
+                    observed(finished(9_000, 1,
+                            Optional.of(new FlinkJobObservation.Restore(2, 1_600)), List.of(failure))));
+
+            assertFalse(effect.outcome().confirmed());
+        }
+    }
+
+    @Test
+    void anUnseenFailureDuringBaselineCollectionDoesNotBecomeKillEvidence() {
+        // Unlike a failure already in baseline history, this one occurred after that history
+        // endpoint was read, but before the fresh pre-injection sample completed.
+        var failure = closedConnection(1_100, Optional.of("tm-peer"), "tm-1");
+        var effect = only(timedKill(observed(distributedBefore()),
+                        OptionalLong.of(1_200), OptionalLong.of(1_500)),
+                observed(finished(9_000, 1,
+                        Optional.of(new FlinkJobObservation.Restore(2, 1_600)), List.of(failure))));
+
+        assertFalse(effect.outcome().confirmed());
+        assertTrue(effect.failuresAfterKill().isEmpty());
+    }
+
+    @Test
+    void missingOrReversedFreshPreInjectionTimingFailsClosed() {
+        for (OptionalLong beforeInjection : List.of(
+                OptionalLong.empty(), OptionalLong.of(900), OptionalLong.of(1_600))) {
+            var effect = only(timedKill(observed(distributedBefore()),
+                            beforeInjection, OptionalLong.of(1_500)),
+                    observed(finished(9_000, 1,
+                            Optional.of(new FlinkJobObservation.Restore(2, 5_000)),
+                            List.of(LOST_TASK_MANAGER))));
+
+            assertEquals(TaskManagerKillEffect.Outcome.EVIDENCE_UNAVAILABLE, effect.outcome());
+        }
+    }
+
+    @Test
+    void anAlreadyObservedRestoreCannotBeReusedEvenWithAnIncreasedCounter() {
+        var previous = new FlinkJobObservation.Restore(2, 5_000);
+        var before = new FlinkJobObservation(1_000, FlinkJobState.RUNNING, 2, 1,
+                Optional.of(previous), List.of(), activeOn("tm-1"));
+        var effect = only(timedKill(observed(before), OptionalLong.of(1_200), OptionalLong.of(1_500)),
+                observed(finished(9_000, 2, Optional.of(previous), List.of(LOST_TASK_MANAGER))));
+
+        assertFalse(effect.outcome().confirmed());
+        assertTrue(effect.restore().isEmpty());
+    }
+
+    @Test
+    void eventsAfterTheFinalObservationClockNeedALaterObservation() {
+        for (long failureTime : List.of(1_300L, 10_000L)) {
+            var failure = closedConnection(failureTime, Optional.of("tm-peer"), "tm-1");
+            var effect = only(timedKill(observed(distributedBefore()),
+                            OptionalLong.of(1_200), OptionalLong.of(1_500)),
+                    observed(finished(9_000, 1,
+                            Optional.of(new FlinkJobObservation.Restore(2, 11_000)), List.of(failure))));
+
+            assertFalse(effect.outcome().confirmed());
+            assertTrue(effect.restore().isEmpty());
+            assertEquals(failureTime < 9_000 ? List.of(failure) : List.of(), effect.failuresAfterKill());
+        }
+    }
+
+    @Test
+    void anotherActiveTaskManagersFailureCannotConfirmTheTargetedKill() {
+        FlinkJobObservation before = new FlinkJobObservation(
+                1_000, FlinkJobState.RUNNING, 2, 0, Optional.empty(), List.of(), List.of(
+                        new FlinkJobObservation.Subtask("Kafka Source", 0, 0,
+                                "RUNNING", Optional.of("tm-1")),
+                        new FlinkJobObservation.Subtask("Kafka Source", 1, 0,
+                                "RUNNING", Optional.of("tm-2"))));
+        FlinkJobObservation.Failure otherFailure = new FlinkJobObservation.Failure(
+                4_000, "TaskManagerException", "other host failed", Optional.of("tm-2"));
+        TaskManagerKillEffect effect = only(kill(observed(before)), observed(finished(
+                9_000, 1, Optional.of(new FlinkJobObservation.Restore(2, 5_000)),
+                List.of(otherFailure))));
+
+        assertEquals(TaskManagerKillEffect.Outcome.NO_RECOVERY_OBSERVED, effect.outcome());
+        assertFalse(effect.outcome().confirmed());
+    }
+
+    @Test
+    void idleOrNotYetRunningTargetsCannotBorrowAnotherHostsPlacement() {
+        for (String targetState : List.of("DEPLOYING", "INITIALIZING", "CANCELED")) {
+            FlinkJobObservation before = new FlinkJobObservation(
+                    1_000, FlinkJobState.RUNNING, 2, 0, Optional.empty(), List.of(), List.of(
+                            new FlinkJobObservation.Subtask("Kafka Source", 0, 0,
+                                    targetState, Optional.of("tm-1")),
+                            new FlinkJobObservation.Subtask("Kafka Source", 1, 0,
+                                    "RUNNING", Optional.of("tm-2"))));
+            TaskManagerKillEffect effect = only(kill(observed(before)), observed(finished(
+                    9_000, 1, Optional.of(new FlinkJobObservation.Restore(2, 5_000)),
+                    List.of(LOST_TASK_MANAGER))));
+
+            assertEquals(TaskManagerKillEffect.Outcome.NO_ACTIVE_SUBTASK_BEFORE_KILL,
+                    effect.outcome(), targetState);
+        }
+    }
+
+    @Test
+    void missingOrWrongLogicalIdentityCannotConfirmRecovery() {
+        for (Optional<TaskManagerControl.Identity> identity : List.of(
+                Optional.<TaskManagerControl.Identity>empty(),
+                Optional.of(new TaskManagerControl.Identity("taskmanager-2", "container-1", "tm-1")))) {
+            TaskManagerKillEffect effect = only(kill(observed(runningOn("tm-1", 1_000, 2, 0)),
+                    OptionalLong.of(1_500), identity), observed(finished(
+                    9_000, 1, Optional.of(new FlinkJobObservation.Restore(2, 5_000)),
+                    List.of(LOST_TASK_MANAGER))));
+
+            assertEquals(TaskManagerKillEffect.Outcome.EVIDENCE_UNAVAILABLE, effect.outcome());
+        }
+    }
 
     @Test
     void aHostFailureAndACheckpointRestoreAfterTheKillConfirmIt() {
@@ -69,7 +249,7 @@ class TaskManagerKillEffectTest {
                         List.of(elsewhere))));
 
         assertEquals(TaskManagerKillEffect.Outcome.NO_RECOVERY_OBSERVED, effect.outcome());
-        assertTrue(effect.detail().contains("none on a TaskManager that hosted"),
+        assertTrue(effect.detail().contains("none attributable to targeted TaskManager tm-1"),
                 effect.detail());
     }
 
@@ -215,7 +395,7 @@ class TaskManagerKillEffectTest {
     }
 
     @Test
-    void anEventAtThePostExitClockSampleIsTemporallyAmbiguous() {
+    void anEventAtThePreInjectionClockSampleIsTemporallyAmbiguous() {
         TaskManagerKillEffect effect = only(
                 kill(observed(runningOn("tm-1", 1_000, 0, 0)), OptionalLong.of(4_000)),
                 observed(finished(9_000, 0, Optional.empty(), List.of(LOST_TASK_MANAGER))));
@@ -283,7 +463,9 @@ class TaskManagerKillEffectTest {
         List<TaskManagerKillEffect> effects = TaskManagerKillEffect.evaluate(
                 List.of(
                         kill(observed(runningOn("tm-1", 1_000, 2, 0))),
-                        kill(observed(beforeSecond))),
+                        kill(observed(beforeSecond), OptionalLong.of(6_500),
+                                Optional.of(new TaskManagerControl.Identity(
+                                        "taskmanager-1", "container-2", "tm-2")))),
                 Optional.of(observed(finished(9_000, 1, Optional.of(firstRestore),
                         List.of(LOST_TASK_MANAGER)))));
 
@@ -311,8 +493,39 @@ class TaskManagerKillEffectTest {
 
     private static PhaseExecutionEvidence.TaskManagerKill kill(
             FlinkJobObservation.Attempt before, OptionalLong afterKill) {
+        return kill(before, afterKill, Optional.of(new TaskManagerControl.Identity(
+                "taskmanager-1", "container-1", "tm-1")));
+    }
+
+    private static PhaseExecutionEvidence.TaskManagerKill kill(
+            FlinkJobObservation.Attempt before, OptionalLong afterKill,
+            Optional<TaskManagerControl.Identity> identity) {
         return new PhaseExecutionEvidence.TaskManagerKill(
-                "$/phases/1/steps/0", List.of(), "taskmanager-1", before, afterKill);
+                "$/phases/1/steps/0", List.of(), "taskmanager-1", before,
+                afterKill, afterKill, identity);
+    }
+
+    private static PhaseExecutionEvidence.TaskManagerKill timedKill(
+            FlinkJobObservation.Attempt before, OptionalLong preInjection, OptionalLong postExit) {
+        return new PhaseExecutionEvidence.TaskManagerKill(
+                "$/phases/1/steps/0", List.of(), "taskmanager-1", before, preInjection, postExit,
+                Optional.of(new TaskManagerControl.Identity("taskmanager-1", "container-1", "tm-1")));
+    }
+
+    private static FlinkJobObservation distributedBefore() {
+        return new FlinkJobObservation(1_000, FlinkJobState.RUNNING, 2, 0,
+                Optional.empty(), List.of(), List.of(
+                        new FlinkJobObservation.Subtask("Kafka Source", 0, 0, "RUNNING", Optional.of("tm-1")),
+                        new FlinkJobObservation.Subtask("Kafka Sink", 1, 0, "RUNNING", Optional.of("tm-peer"))));
+    }
+
+    private static FlinkJobObservation.Failure closedConnection(
+            long timestamp, Optional<String> reporter, String remoteResourceId) {
+        String type = "org.apache.flink.runtime.io.network.netty.exception.RemoteTransportException";
+        return new FlinkJobObservation.Failure(timestamp, type,
+                type + ": Connection unexpectedly closed by remote task manager '172.20.0.5/172.20.0.5:36917 [ "
+                        + remoteResourceId + " ] '. This might indicate that the remote task manager was lost.",
+                reporter);
     }
 
     private static FlinkJobObservation.Attempt observed(FlinkJobObservation observation) {

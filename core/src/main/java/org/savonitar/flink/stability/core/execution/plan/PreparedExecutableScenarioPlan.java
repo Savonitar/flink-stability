@@ -42,6 +42,9 @@ public final class PreparedExecutableScenarioPlan {
         if (!flinkRuntimeTarget.imageReference().equals(executablePlan.flink().imageReference())) {
             throw new IllegalArgumentException("Runtime target image differs from executable plan");
         }
+        if (flinkRuntimeTarget.taskManagers() != executablePlan.flink().taskmanagers()) {
+            throw new IllegalArgumentException("Runtime TaskManager count differs from executable plan");
+        }
         if (!flinkRuntimeTarget.expectedImageId().equals(executablePlan.flink().expectedImageId())) {
             throw new IllegalArgumentException("Runtime image ID differs from executable plan");
         }

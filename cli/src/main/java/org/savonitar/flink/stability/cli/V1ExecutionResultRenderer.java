@@ -10,13 +10,16 @@ import org.savonitar.flink.stability.core.execution.TaskManagerKillEffect;
 import org.savonitar.flink.stability.core.execution.V1AttemptContext;
 import org.savonitar.flink.stability.core.execution.V1ScenarioExecutionResult;
 import org.savonitar.flink.stability.core.execution.plan.ExecutableScenarioPlan;
+import org.savonitar.flink.stability.core.flink.FlinkJobObservation;
 import org.savonitar.flink.stability.runtime.api.ProvisionedConnectorArtifact;
+import org.savonitar.flink.stability.runtime.api.TaskManagerControl;
 
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Optional;
 
 /** Renders one stable, machine-readable summary without dumping record-level evidence. */
 final class V1ExecutionResultRenderer {
@@ -150,20 +153,54 @@ final class V1ExecutionResultRenderer {
             effect.kill().loopIterations().forEach(iteration -> iterations.add(
                     iteration.iteration() + "/" + iteration.totalIterations()));
             kill.put("target", effect.kill().target());
+            putIdentity(kill, "identity", effect.kill().identity());
+            kill.put("identityFailure", effect.kill().identityFailure().orElse(null));
             kill.put("outcome", effect.outcome().name().toLowerCase(Locale.ROOT)
                     .replace('_', '-'));
             kill.put("confirmed", effect.outcome().confirmed());
+            ArrayNode subtasks = kill.putArray("subtasksBeforeKill");
+            ArrayNode targetedSubtasks = kill.putArray("targetedRunningSubtasksBeforeKill");
+            ArrayNode qualifyingFailures = kill.putArray("qualifyingTargetFailures");
+            effect.kill().identity()
+                    .filter(identity -> effect.kill().target().equals(identity.logicalName()))
+                    .ifPresent(identity -> {
+                        effect.kill().jobBeforeKill().observation().ifPresent(before ->
+                                before.subtasks().stream()
+                                        .filter(subtask -> "RUNNING".equals(subtask.status()))
+                                        .filter(subtask -> subtask.taskManagerId()
+                                                .filter(identity.resourceId()::equals).isPresent())
+                                        .forEach(subtask -> putSubtask(targetedSubtasks, subtask)));
+                        effect.qualifyingTargetFailures().stream()
+                                .forEach(failure -> {
+                                    ObjectNode matching = qualifyingFailures.addObject();
+                                    matching.put("taskManagerId", failure.taskManagerId().orElse(null));
+                                    matching.put("targetResourceId", identity.resourceId());
+                                    matching.put("attribution", failure.taskManagerId()
+                                            .filter(identity.resourceId()::equals).isPresent()
+                                            ? "reporter" : "remote-transport");
+                                    matching.put("timestampMillis", failure.timestampMillis());
+                                    matching.put("exceptionName", failure.exceptionName());
+                                    matching.put("rootCause", failure.rootCause());
+                                });
+                    });
             effect.kill().jobBeforeKill().observation().ifPresent(before -> {
+                before.subtasks().forEach(subtask -> putSubtask(subtasks, subtask));
                 kill.put("jobStateBeforeKill", before.state().name());
                 kill.put("completedCheckpointsBeforeKill", before.completedCheckpoints());
                 kill.put("activeSubtasksBeforeKill", before.activeSubtasks().size());
                 effect.restore().ifPresent(restore -> {
                     kill.put("restoredCheckpoint", restore.checkpointId());
+                    kill.put("restoredAtMillis", restore.restoredAtMillis());
+                    effect.kill().jobManagerTimeBeforeKill().ifPresent(sample ->
+                            kill.put("restoredAfterPreInjectionMs",
+                                    restore.restoredAtMillis() - sample));
                     effect.kill().jobManagerTimeAfterKill().ifPresent(sample ->
                             kill.put("restoredAfterKillObservationMs",
                                     restore.restoredAtMillis() - sample));
                 });
             });
+            effect.kill().jobManagerTimeBeforeKill().ifPresent(sample ->
+                    kill.put("jobManagerTimeBeforeKill", sample));
             effect.kill().jobManagerTimeAfterKill().ifPresent(sample ->
                     kill.put("jobManagerTimeAfterKill", sample));
             kill.put("failuresAfterKill", effect.failuresAfterKill().size());
@@ -173,6 +210,19 @@ final class V1ExecutionResultRenderer {
             }
             kill.put("detail", effect.detail());
         }
+        ArrayNode restarts = evidence.putArray("taskManagerRestarts");
+        result.phaseEvidence().ifPresent(phases -> phases.taskManagerRestarts().forEach(restart -> {
+            ObjectNode restarted = restarts.addObject();
+            restarted.put("path", restart.path());
+            ArrayNode iterations = restarted.putArray("loopIterations");
+            restart.loopIterations().forEach(iteration -> iterations.add(
+                    iteration.iteration() + "/" + iteration.totalIterations()));
+            restarted.put("target", restart.target());
+            putIdentity(restarted, "previousIdentity", restart.previousIdentity());
+            putIdentity(restarted, "replacementIdentity", restart.replacementIdentity());
+            restarted.put("previousIdentityFailure", restart.previousIdentityFailure().orElse(null));
+            restarted.put("replacementIdentityFailure", restart.replacementIdentityFailure().orElse(null));
+        }));
         ArrayNode networkFaults = evidence.putArray("networkFaults");
         result.phaseEvidence().ifPresent(phases -> phases.networkFaults().forEach(fault -> {
             ObjectNode rendered = networkFaults.addObject();
@@ -347,5 +397,27 @@ final class V1ExecutionResultRenderer {
         } catch (JsonProcessingException failure) {
             throw new IllegalStateException("Could not render scenario result", failure);
         }
+    }
+
+    private static void putIdentity(
+            ObjectNode parent, String name, Optional<TaskManagerControl.Identity> identity) {
+        if (identity.isEmpty()) {
+            parent.putNull(name);
+            return;
+        }
+        TaskManagerControl.Identity observed = identity.orElseThrow();
+        ObjectNode rendered = parent.putObject(name);
+        rendered.put("logicalName", observed.logicalName());
+        rendered.put("runtimeId", observed.runtimeId());
+        rendered.put("resourceId", observed.resourceId());
+    }
+
+    private static void putSubtask(ArrayNode parent, FlinkJobObservation.Subtask subtask) {
+        ObjectNode rendered = parent.addObject();
+        rendered.put("vertexName", subtask.vertexName());
+        rendered.put("index", subtask.index());
+        rendered.put("attempt", subtask.attempt());
+        rendered.put("status", subtask.status());
+        rendered.put("taskManagerId", subtask.taskManagerId().orElse(null));
     }
 }

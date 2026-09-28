@@ -182,9 +182,9 @@ The first runner supports:
 
 - one plain scenario, one run, and no health retry;
 - one Apache Kafka 4.0 broker with the input and sink topics;
-- one Flink 2.2 or explicitly pinned experimental 2.4 JobManager and one TaskManager;
-- one auto-started protocol-v1 job with parallelism `1` and an `EXACTLY_ONCE` or
-  `AT_LEAST_ONCE` Kafka sink;
+- one Flink 2.2 or explicitly pinned experimental 2.4 JobManager and 1–16 TaskManagers;
+- one auto-started protocol-v1 job with positive parallelism up to the provisioned
+  capacity (two slots per TaskManager), and an `EXACTLY_ONCE` or `AT_LEAST_ONCE` Kafka sink;
 - one verified connector closure;
 - bounded generated integer input, capped at 1,000,000 records for the in-memory runner;
 - the currently registered wait/await, loop, and named TaskManager kill/restart phase operations;
@@ -195,12 +195,17 @@ The first runner supports:
   expected `kafka.id-set` failure.
 
 A TaskManager kill counts only if Flink shows that it affected the job: a failure on
-a TaskManager that hosted active subtasks, followed by a checkpoint restore, or by a
+the targeted TaskManager ResourceID that hosted a RUNNING subtask, followed by a checkpoint restore, or by a
 restart when no checkpoint existed yet. Otherwise a passing oracle becomes
 `inconclusive` with `taskmanager.kill.effect-unconfirmed`
 ([SPEC-001 R6.12a](docs/specs/SPEC-001-scenario-schema.md)). The JSON result reports
-this under `evidence.taskManagerKills` and `evidence.flinkJob`, and lists the sink's
+this under `evidence.taskManagerKills`, retains old/new process identities under
+`evidence.taskManagerRestarts`, records `evidence.flinkJob`, and lists the sink's
 unresolved Kafka transactions after the fence under `evidence.sinkTransactions`.
+
+The separate [distributed recovery scenarios](docs/DISTRIBUTED-RECOVERY.md) use two
+TaskManagers, parallelism four, four Kafka partitions and a named kill/restart.
+They retain the same exact-ID oracle; existing canonical scenarios keep their parameters.
 
 A network fault counts only if the proxy dropped every requested message before the
 step's `trigger_deadline`. Otherwise a passing oracle becomes `inconclusive` with

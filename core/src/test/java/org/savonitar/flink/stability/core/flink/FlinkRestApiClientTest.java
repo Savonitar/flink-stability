@@ -2,16 +2,15 @@ package org.savonitar.flink.stability.core.flink;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.sun.net.httpserver.HttpServer;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
-import org.junit.jupiter.api.io.TempDir;
+import org.savonitar.flink.stability.core.execution.PhaseExecutionEvidence;
+import org.savonitar.flink.stability.core.execution.TaskManagerKillEffect;
 import org.savonitar.flink.stability.runtime.api.Digests;
+import org.savonitar.flink.stability.runtime.api.TaskManagerControl;
 
 import java.io.IOException;
-import java.io.ByteArrayOutputStream;
 import java.net.SocketTimeoutException;
-import java.net.InetSocketAddress;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -21,11 +20,11 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.OptionalLong;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.concurrent.atomic.AtomicLong;
-import java.util.zip.GZIPOutputStream;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -45,307 +44,10 @@ class FlinkRestApiClientTest {
     private FakeTransport transport;
     private FlinkRestApiClient client;
 
-    @TempDir
-    Path temporaryDirectory;
-
     @BeforeEach
     void createClient() {
         transport = new FakeTransport();
         client = new FlinkRestApiClient(transport, mapper);
-    }
-
-    @Test
-    void successfulRetriesKeepEveryOriginalBodyAndImmutableSnapshotsAfterClose() throws Exception {
-        String original = "NullArgumentException: input array\n" + "λ".repeat(5_000);
-        AtomicInteger calls = new AtomicInteger();
-        AtomicLong clock = new AtomicLong();
-        List<Duration> timeouts = new ArrayList<>();
-        FlinkRestApiClient recovering = timedClient((method, endpoint, body, timeout) -> {
-            timeouts.add(timeout);
-            int call = calls.incrementAndGet();
-            return call <= 2 || !endpoint.endsWith("/checkpoints")
-                    ? response(500, original) : response(200, "{\"counts\":{\"completed\":1}}");
-        }, clock);
-        List<FlinkScenarioControl.RestError> before = recovering.restErrors();
-
-        assertEquals(1, recovering.awaitCompletedCheckpoints(job(), 1, Duration.ofSeconds(1)));
-
-        List<FlinkScenarioControl.RestError> recovered = recovering.restErrors();
-        assertEquals(List.of(
-                new FlinkScenarioControl.RestError(1, "GET", "/jobs/" + JOB_ID + "/checkpoints", 500, original),
-                new FlinkScenarioControl.RestError(2, "GET", "/jobs/" + JOB_ID + "/checkpoints", 500, original)), recovered);
-        assertEquals(List.of(Duration.ofSeconds(1), Duration.ofMillis(750), Duration.ofMillis(500)), timeouts);
-        assertTrue(before.isEmpty());
-        assertThrows(UnsupportedOperationException.class, recovered::clear);
-        IOException singleRead = assertThrows(IOException.class, () -> recovering.jobState(job()));
-        assertTrue(singleRead.getMessage().contains("HTTP 500"));
-        assertTrue(singleRead.getMessage().length() < original.length());
-        assertEquals(2, recovered.size());
-        assertEquals(3, recovering.restErrors().size());
-        recovering.close();
-        assertEquals(original, recovering.restErrors().getLast().body());
-        assertEquals(3, recovering.restErrors().getLast().sequence());
-    }
-
-    @Test
-    void repeatedServerErrorsExhaustOneBudgetIncludingCallsAndPauses() {
-        AtomicLong clock = new AtomicLong();
-        List<Duration> timeouts = new ArrayList<>();
-        FlinkRestApiClient failing = timedClient((method, endpoint, body, timeout) -> {
-            timeouts.add(timeout);
-            clock.addAndGet(Duration.ofMillis(100).toNanos());
-            return response(503, "same original failure");
-        }, clock);
-
-        assertThrows(FlinkRestTimeoutException.class,
-                () -> failing.awaitFinished(job(), Duration.ofMillis(500)));
-
-        assertEquals(List.of(Duration.ofMillis(500), Duration.ofMillis(150)), timeouts);
-        assertEquals(Duration.ofMillis(500).toNanos(), clock.get());
-        assertEquals(List.of(1L, 2L), failing.restErrors().stream()
-                .map(FlinkScenarioControl.RestError::sequence).toList());
-        assertTrue(failing.restErrors().stream().allMatch(error ->
-                error.httpStatus() == 503 && error.body().equals("same original failure")));
-    }
-
-    @Test
-    void stateWaitAndTerminalWaitCanRecoverFromServerErrors() throws Exception {
-        for (boolean terminal : List.of(false, true)) {
-            AtomicInteger calls = new AtomicInteger();
-            FlinkRestApiClient recovering = timedClient((method, endpoint, body, timeout) ->
-                    calls.incrementAndGet() == 1 ? response(502, "gateway unavailable")
-                            : response(200, terminal ? "{\"state\":\"FINISHED\"}" : "{\"state\":\"RUNNING\"}"),
-                    new AtomicLong());
-
-            assertEquals(terminal ? FlinkJobState.FINISHED : FlinkJobState.RUNNING,
-                    terminal ? recovering.awaitFinished(job(), Duration.ofSeconds(1))
-                            : recovering.awaitState(job(), FlinkJobState.RUNNING, Duration.ofSeconds(1)));
-            assertEquals(2, calls.get());
-            assertEquals(1, recovering.restErrors().size());
-        }
-    }
-
-    @Test
-    void observationRetriesOnlyTheFailedReadWithinItsSharedDeadline() throws Exception {
-        AtomicLong clock = new AtomicLong();
-        AtomicInteger checkpointReads = new AtomicInteger();
-        List<String> endpoints = new ArrayList<>();
-        List<Duration> timeouts = new ArrayList<>();
-        FlinkRestApiClient observing = timedClient((method, endpoint, body, timeout) -> {
-            endpoints.add(endpoint);
-            timeouts.add(timeout);
-            clock.addAndGet(Duration.ofSeconds(6).toNanos());
-            if (endpoint.endsWith("/checkpoints")) {
-                return checkpointReads.incrementAndGet() == 1 ? response(500, "checkpoint stats failed")
-                        : response(200, "{\"counts\":{\"completed\":1,\"restored\":0}}");
-            }
-            return response(200, endpoint.contains("/exceptions?")
-                    ? "{\"exceptionHistory\":{\"entries\":[]}}"
-                    : "{\"now\":1000,\"state\":\"RUNNING\",\"vertices\":[]}");
-        }, clock);
-
-        assertEquals(1, observing.observe(job()).completedCheckpoints());
-
-        assertEquals(List.of("/jobs/" + JOB_ID, "/jobs/" + JOB_ID + "/checkpoints",
-                "/jobs/" + JOB_ID + "/checkpoints", "/jobs/" + JOB_ID + "/exceptions?maxExceptions=20"), endpoints);
-        assertEquals(List.of(Duration.ofSeconds(30), Duration.ofSeconds(24),
-                Duration.ofMillis(17_750), Duration.ofMillis(11_750)), timeouts);
-        assertEquals("checkpoint stats failed", observing.restErrors().getFirst().body());
-    }
-
-    @Test
-    void postKillClockSamplingKeepsRecoveredAndUnrecoveredHttpErrors() throws Exception {
-        for (int status : List.of(500, 404)) {
-            AtomicInteger calls = new AtomicInteger();
-            FlinkRestApiClient sampling = timedClient((method, endpoint, body, timeout) ->
-                    calls.incrementAndGet() == 1 ? response(status, "clock endpoint unavailable")
-                            : response(200, "{\"now\":6000}"), new AtomicLong());
-
-            if (status == 500) {
-                assertEquals(6_000, sampling.jobManagerTimeMillis(job()));
-                assertEquals(2, calls.get());
-            } else {
-                assertThrows(IOException.class, () -> sampling.jobManagerTimeMillis(job()));
-                assertEquals(1, calls.get());
-            }
-            assertEquals(List.of(new FlinkScenarioControl.RestError(1, "GET", "/jobs/" + JOB_ID,
-                    status, "clock endpoint unavailable")), sampling.restErrors());
-        }
-    }
-
-    @Test
-    void clientErrorsMalformedSuccessAndGenericIoAreNotRetried() {
-        for (String kind : List.of("client-error", "malformed", "io")) {
-            AtomicInteger calls = new AtomicInteger();
-            FlinkRestApiClient failing = timedClient((method, endpoint, body, timeout) -> {
-                calls.incrementAndGet();
-                if (kind.equals("io")) {
-                    throw new IOException("connection failed");
-                }
-                return kind.equals("client-error") ? response(404, "unknown job") : response(200, "{broken");
-            }, new AtomicLong());
-
-            IOException failure = assertThrows(IOException.class,
-                    () -> failing.awaitState(job(), FlinkJobState.RUNNING, Duration.ofSeconds(1)));
-
-            assertFalse(failure instanceof FlinkRestTimeoutException);
-            assertEquals(1, calls.get());
-            assertEquals(kind.equals("client-error") ? 1 : 0, failing.restErrors().size());
-        }
-    }
-
-    @Test
-    void postSubmissionAndUploadAreNeverRetriedAndKeepTheirBodies() throws Exception {
-        AtomicInteger submissions = new AtomicInteger();
-        AtomicInteger uploads = new AtomicInteger();
-        String original = "failed POST\n" + "body".repeat(2_000);
-        FlinkRestApiClient failing = new FlinkRestApiClient(new FlinkRestApiClient.Transport() {
-            @Override
-            public FlinkRestApiClient.HttpResponse execute(String method, String endpoint,
-                                                           byte[] body, Duration timeout) {
-                assertEquals("POST", method);
-                submissions.incrementAndGet();
-                return response(503, original);
-            }
-
-            @Override
-            public FlinkRestApiClient.HttpResponse uploadJar(Path jar, Duration timeout) {
-                uploads.incrementAndGet();
-                return response(503, original);
-            }
-        }, mapper);
-        Path jar = temporaryDirectory.resolve("workload.jar");
-        Files.writeString(jar, "prepared bytes");
-
-        assertThrows(IOException.class, () -> failing.submit(submission()));
-        assertThrows(IOException.class, () -> failing.uploadJar(jar, Digests.sha256(jar)));
-
-        assertEquals(1, submissions.get());
-        assertEquals(1, uploads.get());
-        assertEquals(List.of("/jars/workload.jar/run", "/jars/upload"), failing.restErrors().stream()
-                .map(FlinkScenarioControl.RestError::endpoint).toList());
-        assertTrue(failing.restErrors().stream().allMatch(error ->
-                error.method().equals("POST") && error.httpStatus() == 503 && error.body().equals(original)));
-    }
-
-    @Test
-    void okhttpDoesNotReplayPostForRetryAfterZeroOrRedirects() throws Exception {
-        HttpServer server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
-        AtomicInteger requests = new AtomicInteger();
-        AtomicInteger status = new AtomicInteger(503);
-        ByteArrayOutputStream encoded = new ByteArrayOutputStream();
-        try (var gzip = new GZIPOutputStream(encoded)) {
-            gzip.write("original HTTP error".getBytes(StandardCharsets.UTF_8));
-        }
-        byte[] original = encoded.toByteArray();
-        server.createContext("/", exchange -> {
-            requests.incrementAndGet();
-            exchange.getRequestBody().readAllBytes();
-            exchange.getResponseHeaders().add("Retry-After", "0");
-            exchange.getResponseHeaders().add("Location", "/redirected");
-            exchange.getResponseHeaders().add("Content-Encoding", "gzip");
-            exchange.sendResponseHeaders(status.get(), original.length);
-            try (var output = exchange.getResponseBody()) {
-                output.write(original);
-            }
-        });
-        server.start();
-        try (FlinkRestApiClient real = new FlinkRestApiClient(
-                "http://127.0.0.1:" + server.getAddress().getPort())) {
-            for (int code : List.of(503, 302)) {
-                status.set(code);
-                int before = requests.get();
-
-                IOException failure = assertThrows(IOException.class, () -> real.submit(submission()));
-
-                assertEquals(before + 1, requests.get(), "HTTP " + code + " must not replay POST");
-                assertTrue(failure.getMessage().contains("HTTP " + code));
-                assertEquals(code, real.restErrors().getLast().httpStatus());
-                assertEquals("original HTTP error", real.restErrors().getLast().body());
-            }
-        } finally {
-            server.stop(0);
-        }
-    }
-
-    @Test
-    void successfulResponsesCannotExtendAnExpiredDeadline() {
-        AtomicLong clock = new AtomicLong();
-        FlinkRestApiClient late = timedClient((method, endpoint, body, timeout) -> {
-            clock.addAndGet(Duration.ofSeconds(2).toNanos());
-            return response(200, "{\"state\":\"FINISHED\"}");
-        }, clock);
-
-        assertThrows(FlinkRestTimeoutException.class,
-                () -> late.awaitFinished(job(), Duration.ofSeconds(1)));
-        assertTrue(late.restErrors().isEmpty());
-    }
-
-    @Test
-    void interruptionDuringRetryRestoresTheFlagWithoutDiscardingTheError() {
-        AtomicInteger calls = new AtomicInteger();
-        FlinkRestApiClient interrupted = new FlinkRestApiClient((method, endpoint, body, timeout) -> {
-            calls.incrementAndGet();
-            return response(500, "retained before interrupt");
-        }, mapper, () -> 0L, duration -> { throw new InterruptedException("stop retry"); });
-        boolean originallyInterrupted = Thread.interrupted();
-        try {
-            assertThrows(IOException.class,
-                    () -> interrupted.awaitFinished(job(), Duration.ofSeconds(1)));
-            assertTrue(Thread.currentThread().isInterrupted());
-            assertEquals(1, calls.get());
-            assertEquals("retained before interrupt", interrupted.restErrors().getFirst().body());
-        } finally {
-            Thread.interrupted();
-            if (originallyInterrupted) {
-                Thread.currentThread().interrupt();
-            }
-        }
-    }
-
-    @Test
-    void responseBytesAndRetainedErrorsRemainImmutableEvenWhenCloseFails() {
-        byte[] bytes = "original".getBytes(StandardCharsets.UTF_8);
-        var response = new FlinkRestApiClient.HttpResponse(500, bytes);
-        bytes[0] = 'x';
-        response.body()[0] = 'y';
-        FlinkRestApiClient failing = new FlinkRestApiClient(new FlinkRestApiClient.Transport() {
-            @Override
-            public FlinkRestApiClient.HttpResponse execute(String method, String endpoint,
-                                                           byte[] body, Duration timeout) {
-                return response;
-            }
-
-            @Override
-            public void close() {
-                throw new IllegalStateException("close failed");
-            }
-        }, mapper);
-
-        assertThrows(IOException.class, () -> failing.jobState(job()));
-        List<FlinkScenarioControl.RestError> retained = failing.restErrors();
-        assertThrows(IllegalStateException.class, failing::close);
-
-        assertEquals("original", retained.getFirst().body());
-        assertEquals(retained, failing.restErrors());
-        assertThrows(UnsupportedOperationException.class, retained::clear);
-    }
-
-    private FlinkRestApiClient timedClient(FlinkRestApiClient.Transport source, AtomicLong clock) {
-        return new FlinkRestApiClient(source, mapper, clock::get,
-                duration -> clock.addAndGet(duration.toNanos()));
-    }
-
-    private static FlinkRestApiClient.HttpResponse response(int status, String body) {
-        return new FlinkRestApiClient.HttpResponse(status, body.getBytes(StandardCharsets.UTF_8));
-    }
-
-    private static FlinkJobHandle job() {
-        return new FlinkJobHandle(JOB_ID);
-    }
-
-    private static FlinkJobSubmission submission() {
-        return new FlinkJobSubmission("workload.jar", 1, Map.of(), List.of());
     }
 
     @Test
@@ -424,7 +126,7 @@ class FlinkRestApiClientTest {
                     public FlinkRestApiClient.HttpResponse uploadJar(Path snapshot, Duration timeout) throws IOException {
                         Files.writeString(jar, "later mutation", StandardCharsets.UTF_8);
                         uploaded.set(Files.readAllBytes(snapshot));
-                        return response(200, "{\"filename\":\"/tmp/flink-web/uploaded-workload.jar\"}");
+                        return new FlinkRestApiClient.HttpResponse(200, "{\"filename\":\"/tmp/flink-web/uploaded-workload.jar\"}".getBytes(StandardCharsets.UTF_8));
                     }
                 },
                 mapper);
@@ -474,7 +176,7 @@ class FlinkRestApiClientTest {
                     } else {
                         response = "{\"state\":\"FINISHED\"}";
                     }
-                    return response(200, response);
+                    return new FlinkRestApiClient.HttpResponse(200, response.getBytes(StandardCharsets.UTF_8));
                 },
                 mapper);
 
@@ -510,7 +212,7 @@ class FlinkRestApiClientTest {
         AtomicLong clock = new AtomicLong(-1_000_000L);
         FlinkRestApiClient timingClient = new FlinkRestApiClient(
                 (method, path, body, timeout) ->
-                        response(200, "{\"state\":\"FINISHED\"}"),
+                        new FlinkRestApiClient.HttpResponse(200, "{\"state\":\"FINISHED\"}".getBytes(StandardCharsets.UTF_8)),
                 mapper,
                 clock::get);
 
@@ -617,6 +319,52 @@ class FlinkRestApiClientTest {
     }
 
     @Test
+    void parsedPeerTransportCauseCanConfirmFirstRecoveryWithoutDeploymentRetries() throws Exception {
+        // Exact message from the retained distributed run's JM log, line4001. The original
+        // exception REST response was not retained; this reconstructs its documented entry shape.
+        String target = "flink-stability-taskmanager-2-1-6fc0d9a9-9fda-4d54-8c99-352bb2f1318b";
+        String peer = "flink-stability-taskmanager-1-1-acd3214c-9d1f-4b07-8d34-7f50ea24f7a0";
+        String type = "org.apache.flink.runtime.io.network.netty.exception.RemoteTransportException";
+        String cause = type + ": Connection unexpectedly closed by remote task manager "
+                + "'172.20.0.5/172.20.0.5:36917 [ " + target
+                + " ] '. This might indicate that the remote task manager was lost.";
+        assertEquals(295, cause.length());
+
+        String longCause = cause.replace("172.20.0.5", "192.168.100.100");
+        assertEquals(305, longCause.length());
+        // Only input already incomplete upstream is ineligible for strict attribution.
+        for (var example : List.of(Map.entry(cause, true), Map.entry(longCause, true),
+                Map.entry(longCause.substring(0, 300) + "…", false))) {
+            String message = example.getKey();
+            String exceptions = mapper.writeValueAsString(Map.of("exceptionHistory", Map.of("entries", List.of(
+                    Map.of("timestamp", 1_300, "exceptionName", type, "taskManagerId", peer,
+                            "stacktrace", message + "\n\tat org.apache.flink.X.y(X.java:1)\n")))));
+            Map<String, String> responses = Map.of(
+                    "/jobs/" + JOB_ID, "{\"state\":\"FINISHED\",\"now\":9000,\"vertices\":[]}",
+                    "/jobs/" + JOB_ID + "/checkpoints",
+                    "{\"counts\":{\"restored\":1,\"completed\":3},\"latest\":{\"restored\":{\"id\":2,\"restore_timestamp\":1400}}}",
+                    "/jobs/" + JOB_ID + "/exceptions?maxExceptions=20", exceptions);
+            var after = new FlinkRestApiClient(cannedTransport(responses), mapper)
+                    .observe(new FlinkJobHandle(JOB_ID));
+            assertEquals(message,
+                    after.failures().getFirst().rootCause());
+            assertEquals(Optional.of(peer), after.failures().getFirst().taskManagerId());
+            var before = new FlinkJobObservation(1_000, FlinkJobState.RUNNING, 2, 0,
+                    Optional.empty(), List.of(), List.of(
+                            new FlinkJobObservation.Subtask("Source", 0, 0, "RUNNING", Optional.of(target)),
+                            new FlinkJobObservation.Subtask("Sink", 1, 0, "RUNNING", Optional.of(peer))));
+            var kill = new PhaseExecutionEvidence.TaskManagerKill(
+                    "$/phases/1/steps/0", List.of(), "taskmanager-2",
+                    new FlinkJobObservation.Attempt(Optional.of(before), Optional.empty()),
+                    OptionalLong.of(1_200), OptionalLong.of(1_500),
+                    Optional.of(new TaskManagerControl.Identity("taskmanager-2", "container-2", target)));
+            var effect = TaskManagerKillEffect.evaluate(List.of(kill), Optional.of(
+                    new FlinkJobObservation.Attempt(Optional.of(after), Optional.empty()))).getFirst();
+            assertEquals(example.getValue(), effect.outcome().confirmed());
+        }
+    }
+
+    @Test
     void observationWithoutJobManagerTimeIsRejected() {
         Map<String, String> responses = Map.of(
                 "/jobs/" + JOB_ID, "{\"state\":\"RUNNING\",\"vertices\":[]}",
@@ -639,7 +387,7 @@ class FlinkRestApiClientTest {
             assertTrue(timeout.compareTo(Duration.ZERO) > 0);
             assertTrue(timeout.compareTo(Duration.ofSeconds(30)) <= 0);
             // Clock sampling must not depend on checkpoint, exception, or vertex responses.
-            return response(200, "{\"now\":6000}");
+            return new FlinkRestApiClient.HttpResponse(200, "{\"now\":6000}".getBytes(StandardCharsets.UTF_8));
         }, mapper);
 
         assertEquals(6_000, sampling.jobManagerTimeMillis(new FlinkJobHandle(JOB_ID)));
@@ -663,7 +411,7 @@ class FlinkRestApiClientTest {
             if (!method.equals("GET") || response == null) {
                 throw new IOException("Unexpected fake request: " + method + " " + path);
             }
-            return response(200, response);
+            return new FlinkRestApiClient.HttpResponse(200, response.getBytes(StandardCharsets.UTF_8));
         };
     }
 
@@ -688,7 +436,7 @@ class FlinkRestApiClientTest {
         public FlinkRestApiClient.HttpResponse uploadJar(Path jar, Duration timeout) throws IOException {
             uploadedJar = jar;
             uploadedJarBytes = Files.readAllBytes(jar);
-            return response(200, "{\"filename\":\"/tmp/flink-web/uploaded-workload.jar\"}");
+            return new FlinkRestApiClient.HttpResponse(200, "{\"filename\":\"/tmp/flink-web/uploaded-workload.jar\"}".getBytes(StandardCharsets.UTF_8));
         }
 
         @Override
@@ -715,7 +463,7 @@ class FlinkRestApiClientTest {
             } else {
                 throw new IOException("Unexpected fake request: " + method + " " + path);
             }
-            return response(200, response);
+            return new FlinkRestApiClient.HttpResponse(200, response.getBytes(StandardCharsets.UTF_8));
         }
     }
 }

@@ -115,6 +115,146 @@ class ExecutableScenarioPlanCompilerTest {
     }
 
     @Test
+    void bindsDistributedTopologyAndPreservesParallelismThroughSubmissionConfiguration()
+            throws IOException {
+        createJar(artifactRoot.resolve("connector.jar"), false, null);
+        createJar(artifactRoot.resolve("job.jar"), true, "v1");
+        ResolvedScenarioPlan resolved = resolved(document -> {
+            useLocalArtifacts(document);
+            ((ObjectNode) document.at("/setup/flink")).put("taskmanagers", 2);
+            ((ObjectNode) document.at("/workload/jobs/0")).put("parallelism", 4);
+            for (var topic : document.at("/setup/kafka/clusters/main/topics")) {
+                ((ObjectNode) topic).put("partitions", 4);
+            }
+            ArrayNode steps = replaceSteps(document);
+            addKill(steps, "taskmanager-2");
+            steps.addObject().putObject("restart").put("component", "taskmanager")
+                    .put("name", "taskmanager-2");
+        });
+        ExecutableScenarioPlan plan = compiler.compile(resolved);
+        assertEquals(2, plan.flink().taskmanagers());
+        assertEquals(3, plan.flink().expectedComponents().size());
+        assertEquals(4, plan.job().parallelism());
+        assertEquals(4, plan.input().partitions());
+        assertEquals("4", plan.job().standardFlinkConfiguration().get("parallelism.default"));
+        assertEquals("4", plan.job().materializeFlinkConfiguration(
+                "kafka:9092", Map.of(0, 3L, 1, 3L, 2, 2L, 3, 2L), 1, "1234abcd")
+                .get("parallelism.default"));
+        assertEquals(new ExecutableScenarioPlan.RestartTaskManager("taskmanager-2"),
+                plan.phases().getFirst().steps().get(1));
+        try (PreparedScenarioPlan prepared = new ArtifactPlanResolver().resolve(
+                resolved, ArtifactResolutionOptions.online(artifactRoot))) {
+            assertEquals(2, compiler.bind(prepared, plan).flinkRuntimeTarget().taskManagers());
+        }
+    }
+
+    @Test
+    void rejectsParallelismBeyondAvailableSlotsBeforeProvisioning() {
+        ResolvedScenarioPlan resolved = resolved(document -> {
+            ((ObjectNode) document.at("/setup/flink")).put("taskmanagers", 2);
+            ((ObjectNode) document.at("/workload/jobs/0")).put("parallelism", 5);
+        });
+        SpecificationException failure = assertFailsAt(Stage.RUNNER_CAPABILITY,
+                () -> compiler.compile(resolved));
+        assertEquals("runner.workload.insufficient-task-slots",
+                failure.diagnostics().getFirst().code());
+    }
+
+    @Test
+    void rejectsOversizedTopologiesBeforeAllocatingComponentMaps() {
+        for (int count : List.of(17, Integer.MAX_VALUE)) {
+            ResolvedScenarioPlan resolved = resolved(document ->
+                    ((ObjectNode) document.at("/setup/flink")).put("taskmanagers", count));
+            SpecificationException failure = assertFailsAt(Stage.RUNNER_CAPABILITY,
+                    () -> compiler.compile(resolved));
+            assertTrue(failure.diagnostics().stream().anyMatch(issue ->
+                    issue.code().equals("runner.flink.taskmanager-count-unsupported")));
+        }
+    }
+
+    @Test
+    void typedProcessOperationsRejectNoncanonicalTaskManagerNames() {
+        for (String name : List.of("jobmanager-1", "taskmanager-0", "taskmanager-01",
+                "taskmanager-2147483648")) {
+            assertThrows(IllegalArgumentException.class,
+                    () -> new ExecutableScenarioPlan.KillTaskManager(name));
+            assertThrows(IllegalArgumentException.class,
+                    () -> new ExecutableScenarioPlan.RestartTaskManager(name));
+        }
+    }
+
+    @Test
+    void requiresNamedRestartsAndTracksEveryTargetIndependently() {
+        for (String restartName : List.of("", "taskmanager-1", "taskmanager-2")) {
+            ResolvedScenarioPlan resolved = resolved(document -> {
+                ((ObjectNode) document.at("/setup/flink")).put("taskmanagers", 2);
+                ArrayNode steps = replaceSteps(document);
+                addKill(steps, "taskmanager-2");
+                ObjectNode restart = steps.addObject().putObject("restart")
+                        .put("component", "taskmanager");
+                if (!restartName.isEmpty()) {
+                    restart.put("name", restartName);
+                }
+            });
+            if (restartName.equals("taskmanager-2")) {
+                compiler.compile(resolved);
+            } else {
+                SpecificationException failure = assertFailsAt(Stage.RUNNER_CAPABILITY,
+                        () -> compiler.compile(resolved));
+                assertTrue(failure.diagnostics().stream().anyMatch(issue -> issue.code().equals(
+                        restartName.isEmpty() ? "runner.phase.restart-target-required"
+                                : "runner.phase.taskmanager-already-running")));
+                assertTrue(failure.diagnostics().stream().anyMatch(issue ->
+                        issue.code().equals("runner.phase.taskmanager-kill-unhealed")));
+            }
+        }
+    }
+
+    @Test
+    void repeatedLoopsMustBalanceEachTargetNotJustTheTotalRunningCount() {
+        ResolvedScenarioPlan resolved = resolved(document -> {
+            ((ObjectNode) document.at("/setup/flink")).put("taskmanagers", 2);
+            ArrayNode steps = replaceSteps(document);
+            addKill(steps, "taskmanager-1");
+            ObjectNode loop = steps.addObject().putObject("loop").put("times", 2);
+            ArrayNode body = loop.putArray("steps");
+            body.addObject().putObject("restart").put("component", "taskmanager")
+                    .put("name", "taskmanager-1");
+            addKill(body, "taskmanager-2");
+            steps.addObject().putObject("restart").put("component", "taskmanager")
+                    .put("name", "taskmanager-2");
+        });
+        SpecificationException failure = assertFailsAt(Stage.RUNNER_CAPABILITY,
+                () -> compiler.compile(resolved));
+        assertTrue(failure.diagnostics().stream().anyMatch(issue ->
+                issue.code().equals("runner.phase.loop-taskmanager-lifecycle-unstable")));
+    }
+
+    @Test
+    void rejectsOverlappingKillsEvenWhenBothTargetsAreEventuallyRestarted() {
+        ResolvedScenarioPlan resolved = resolved(document -> {
+            ((ObjectNode) document.at("/setup/flink")).put("taskmanagers", 2);
+            ObjectNode loop = replaceSteps(document).addObject().putObject("loop").put("times", 3);
+            ArrayNode steps = loop.putArray("steps");
+            addKill(steps, "taskmanager-1");
+            addKill(steps, "taskmanager-2");
+            for (String name : List.of("taskmanager-2", "taskmanager-1")) {
+                steps.addObject().putObject("restart").put("component", "taskmanager")
+                        .put("name", name);
+            }
+        });
+        SpecificationException failure = assertFailsAt(Stage.RUNNER_CAPABILITY,
+                () -> compiler.compile(resolved));
+        assertTrue(failure.diagnostics().stream().anyMatch(issue ->
+                issue.code().equals("runner.phase.taskmanager-kill-overlap-unsupported")));
+    }
+
+    private static void addKill(ArrayNode steps, String name) {
+        steps.addObject().putObject("kill").putObject("target")
+                .put("kind", "named").put("role", "taskmanager").put("name", name);
+    }
+
+    @Test
     void preservesExplicitTransactionFeatureVersionsWithoutChangingBrokerStartupPolicy() {
         ExecutableScenarioPlan.KafkaCluster unselected =
                 compiler.compile(resolved(document -> {})).kafka();
@@ -412,8 +552,6 @@ class ExecutableScenarioPlanCompilerTest {
         assertEquals(List.of(
                         "$/health_retry_limit",
                         "$/runs",
-                        "$/setup/flink/taskmanagers",
-                        "$/workload/jobs/0/parallelism",
                         "$/workload/jobs/0/program_args",
                         "$/workload/jobs/0/restart_strategy/type",
                         "$/workload/jobs/0/start",
@@ -948,8 +1086,9 @@ class ExecutableScenarioPlanCompilerTest {
                 }),
                 new Case("runner.kafka.proxy-listen-unsupported", document -> {
                     dropFault(document, "drop-request");
+                    ((ObjectNode) document.at("/setup/flink")).put("taskmanagers", 2);
                     ((ObjectNode) document.at("/setup/proxies/kafka-proxy"))
-                            .put("listen", "taskmanager-1:9092");
+                            .put("listen", "taskmanager-2:9092");
                 }),
                 new Case("runner.kafka.proxy-count-unsupported", document -> {
                     dropFault(document, "drop-request");
