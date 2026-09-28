@@ -178,6 +178,13 @@ Repeated operations need independent sessions and restore observations in execut
 order, with append-only token traces. Missing proof stays inconclusive. Component errors and
 unexpected recovery amplification remain findings even when the exact-ID oracle passes.
 
+The generic healthy-token evidence gate proves healthy JobManager issuance followed
+by a matching receipt on at least one verified, provisioned TaskManager. With two
+TMs, one valid receipt can satisfy this gate; it does not establish delivery to both.
+The opt-in recovery barriers below and the independent twelve-case comparison runner
+require fresh delivery to every declared TM. Their all-TM coverage is stronger than
+the generic control gate and must be reported separately.
+
 The new `ha-token-repeat-control`, `ha-token-repeat-delay`,
 `ha-token-repeat-failure` and `ha-token-repeat-linkage` catalogs keep the released
 5.0.0-2.2 connector and PASS expectations. They use the explicit 300 ms workload and
@@ -194,8 +201,15 @@ checkpoint completing under its exact trigger ID. The next fault cannot overtake
 that barrier. All waits share the declared two-minute fault budget. An ambiguous
 checkpoint submission is retained and never retried; an unconfirmed barrier stops
 later phase actions and leaves the terminal fence/oracle intact. Partial evidence
-and data failures remain visible. Leadership is sampled around these operations;
-observed intermediate changes reject even if the original leader returns. Token
+and data failures remain visible. Sampled leadership must remain unchanged from the
+start of pre-fault token readiness through actual fault selection, and from the
+healed leader's token-readiness sample through the post-checkpoint sample. An observed
+change or gap within either interval rejects the barrier, even if the leader returns.
+Adjacent barriers enforce ordering: the next readiness wait starts after the previous
+checkpoint barrier completes. Fault scenarios do not impose a global no-election
+rule outside those guarded intervals. Additional observed transitions remain evidence
+and findings; neither exactly N elections/restores nor continuous stability between
+samples is established. Token
 telemetry identifies a process/provider instance, not an internal RM session, so
 this does not prove the absence of stale queued work within that process.
 

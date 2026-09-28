@@ -801,9 +801,11 @@ Connector pull-request gating is the same mechanism with one axis:
   consumes the request deadline. In both standalone and HA execution, the REST
   transport never follows redirects, retries a failed connection, or automatically
   replays an unsuccessful HTTP response (including 408/503 with `Retry-After: 0`).
-  This policy covers reads and mutations. Explicit bounded polling operations may
-  issue their next documented observation, but an unsuccessful request is surfaced
-  with its original HTTP status/body and is never silently retried by the transport.
+  This transport policy covers reads and mutations. The client may explicitly retry
+  GET 5xx under R6.4a within the original deadline, including leader resolution and
+  pauses; retain every original error. Checkpoint-trigger POST is single-attempt,
+  including 503 with `Retry-After: 0`, and retains its full original response.
+  Checkpoint status polling uses the same remaining barrier budget.
 - **R4.13h** Optional `setup.flink.token_provider.renewal_interval` (1 second–5 minutes)
   enables the bundled synthetic delegation-token provider/receiver plugin. Its JAR
   lives only under `plugins/flink-stability-token/`, with verified bytes in each
@@ -1224,6 +1226,21 @@ Connector pull-request gating is the same mechanism with one axis:
   savepoint completed, log marker, Kafka transaction state, record threshold.
   Adding a condition requires code — which it needs anyway, to be implemented and
   tested.
+- **R6.4a** The implemented Flink REST client may retry HTTP `5xx` only for a
+  `GET` inside an existing await/observation deadline. Calls and pauses (up to
+  `250ms`, bounded by time remaining) share that original monotonic budget; a
+  successful retry grants no new timeout. Deadline exhaustion uses the existing
+  timeout path and caller's timeout policy, not a synthetic successful observation.
+  The client never retries submission/upload `POST`, HTTP `4xx`, malformed successful
+  JSON or ordinary I/O failures. Transport-level automatic retries/redirect follow-ups
+  must not bypass this rule or hide error responses.
+  Before deciding to retry or throw, retain each received non-success HTTP response
+  in order: one-based sequence, method, endpoint, status and the complete UTF-8
+  error body. Repeated identical errors remain separate. An exception message may
+  show a bounded preview, but cannot replace retained response evidence. A recovered
+  error remains evidence of a component anomaly; retry success does not classify or
+  close the finding. Failed body reads remain I/O failures, not fabricated complete
+  HTTP bodies.
 - **R6.5** A plain time `wait: { duration: <duration> }` remains available but is
   never the primary trigger for a race-window scenario.
 - **R6.6** Repetition is an explicit `loop` step containing nested steps.
@@ -1426,7 +1443,10 @@ Connector pull-request gating is the same mechanism with one axis:
   that the remote task manager was lost.` diagnostic. Its bracketed ResourceID must
   equal the complete targeted incarnation, and the reporting peer must also have
   hosted a RUNNING subtask in the baseline. Generic peer failures, partial ID matches,
-  truncated causes and arbitrary mentions of the target do not qualify. Missing target
+  causes already truncated upstream and arbitrary mentions of the target do not qualify.
+  Preserve the full extracted innermost cause line for attribution and structured
+  evidence, including complete diagnostics longer than 300 characters; a shortened
+  presentation summary must not replace that evidence. Missing target
   identity is `evidence-unavailable`; retain the identity lookup
   error, if any, without blocking healing/fencing. No inference from all
   observed hosts or from a Docker ID masquerading as a ResourceID is allowed. Each observation has one fixed internal `30s` deadline; its failure is recorded as
@@ -1491,6 +1511,8 @@ Connector pull-request gating is the same mechanism with one axis:
   HTTP failure) before advancing; healthy recovery cannot replace a missed fault.
   Then submit exactly one checkpoint trigger
   for that job and poll its exact trigger ID to a successful concrete checkpoint ID.
+  Omit the optional checkpoint type to use Flink's configured default: `DEFAULT`
+  is not a serialized enum value in the released Flink 2.2 REST contract.
   Retain submission/acknowledgement, status observations, partial failures, token
   snapshots and physical receiver identities. An unknown POST outcome is never
   replayed. Fresh coherent leadership samples must bracket token delivery and the
@@ -1884,6 +1906,11 @@ Connector pull-request gating is the same mechanism with one axis:
   report. Environment-health sampling, independently resolved OCI digests, and
   the full resolved/artifact/configuration/provenance report remain roadmap work;
   the summary must not claim that those absent fields were collected.
+  `evidence.flinkRest` includes `errorCount` and ordered `errors` with `sequence`,
+  `method`, `endpoint`, `httpStatus` and full `body` from R6.4a. Snapshot these records
+  before client/runtime cleanup on every attempt exit, including recovered awaits,
+  observations and post-kill clock sampling. Cleanup failures and earlier data failures
+  must preserve the original HTTP evidence; a client that has not opened reports zero.
   Structured `evidence.taskManagerRestarts` entries retain the step path and loop
   iterations, logical target and previous/replacement Docker and Flink ResourceIDs.
   Every successful restart must account for a new provisioned incarnation of that

@@ -425,7 +425,7 @@ public final class V1ScenarioExecutor {
                     diagnostics(failure));
         }
 
-        return result;
+        return result.withFlinkRestErrors(flink == null ? List.of() : flink.restErrors());
     }
 
     private static SubjectClassOrigins subjectOrigins(

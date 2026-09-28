@@ -76,6 +76,13 @@ final class V1ExecutionResultRenderer {
             observation.supported().ifPresent(range -> observed.putObject("supported")
                     .put("min", range.minimum()).put("max", range.maximum()));
         });
+        ObjectNode rest = evidence.putObject("flinkRest");
+        rest.put("errorCount", result.flinkRestErrors().size());
+        ArrayNode restErrors = rest.putArray("errors");
+        result.flinkRestErrors().forEach(error -> restErrors.addObject()
+                .put("sequence", error.sequence()).put("method", error.method())
+                .put("endpoint", error.endpoint()).put("httpStatus", error.httpStatus())
+                .put("body", error.body()));
         ObjectNode input = evidence.putObject("input");
         input.put("status", "not-started");
         input.put("complete", false);

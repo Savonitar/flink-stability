@@ -33,8 +33,7 @@ public final class FlinkCheckpointTrigger {
     static String submit(FlinkJobHandle job, String triggerId, Duration timeout, ObjectMapper mapper,
                          Request request, LongSupplier clock) throws IOException {
         String path = path(job, triggerId);
-        byte[] body = mapper.writeValueAsBytes(mapper.createObjectNode()
-                .put("triggerId", triggerId).put("checkpointType", "DEFAULT"));
+        byte[] body = mapper.writeValueAsBytes(mapper.createObjectNode().put("triggerId", triggerId));
         JsonNode response = request.execute("POST", path, body, MonotonicDeadline.start(timeout, clock));
         JsonNode acknowledged = response.path("request-id");
         if (!acknowledged.isTextual() || !triggerId.equals(acknowledged.textValue())) {

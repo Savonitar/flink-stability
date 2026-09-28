@@ -114,7 +114,7 @@ class FlinkRestApiClientTest {
         FlinkRestApiClient snapshotClient = new FlinkRestApiClient(
                 new FlinkRestApiClient.Transport() {
                     @Override
-                    public byte[] execute(
+                    public FlinkRestApiClient.HttpResponse execute(
                             String method,
                             String endpoint,
                             byte[] body,
@@ -123,11 +123,10 @@ class FlinkRestApiClientTest {
                     }
 
                     @Override
-                    public byte[] uploadJar(Path snapshot, Duration timeout) throws IOException {
+                    public FlinkRestApiClient.HttpResponse uploadJar(Path snapshot, Duration timeout) throws IOException {
                         Files.writeString(jar, "later mutation", StandardCharsets.UTF_8);
                         uploaded.set(Files.readAllBytes(snapshot));
-                        return "{\"filename\":\"/tmp/flink-web/uploaded-workload.jar\"}"
-                                .getBytes(StandardCharsets.UTF_8);
+                        return new FlinkRestApiClient.HttpResponse(200, "{\"filename\":\"/tmp/flink-web/uploaded-workload.jar\"}".getBytes(StandardCharsets.UTF_8));
                     }
                 },
                 mapper);
@@ -177,7 +176,7 @@ class FlinkRestApiClientTest {
                     } else {
                         response = "{\"state\":\"FINISHED\"}";
                     }
-                    return response.getBytes(StandardCharsets.UTF_8);
+                    return new FlinkRestApiClient.HttpResponse(200, response.getBytes(StandardCharsets.UTF_8));
                 },
                 mapper);
 
@@ -213,7 +212,7 @@ class FlinkRestApiClientTest {
         AtomicLong clock = new AtomicLong(-1_000_000L);
         FlinkRestApiClient timingClient = new FlinkRestApiClient(
                 (method, path, body, timeout) ->
-                        "{\"state\":\"FINISHED\"}".getBytes(StandardCharsets.UTF_8),
+                        new FlinkRestApiClient.HttpResponse(200, "{\"state\":\"FINISHED\"}".getBytes(StandardCharsets.UTF_8)),
                 mapper,
                 clock::get);
 
@@ -331,8 +330,12 @@ class FlinkRestApiClientTest {
                 + " ] '. This might indicate that the remote task manager was lost.";
         assertEquals(295, cause.length());
 
-        for (boolean truncated : List.of(false, true)) {
-            String message = truncated ? cause.replace("172.20.0.5/", "x".repeat(300) + "/") : cause;
+        String longCause = cause.replace("172.20.0.5", "192.168.100.100");
+        assertEquals(305, longCause.length());
+        // Only input already incomplete upstream is ineligible for strict attribution.
+        for (var example : List.of(Map.entry(cause, true), Map.entry(longCause, true),
+                Map.entry(longCause.substring(0, 300) + "…", false))) {
+            String message = example.getKey();
             String exceptions = mapper.writeValueAsString(Map.of("exceptionHistory", Map.of("entries", List.of(
                     Map.of("timestamp", 1_300, "exceptionName", type, "taskManagerId", peer,
                             "stacktrace", message + "\n\tat org.apache.flink.X.y(X.java:1)\n")))));
@@ -343,7 +346,7 @@ class FlinkRestApiClientTest {
                     "/jobs/" + JOB_ID + "/exceptions?maxExceptions=20", exceptions);
             var after = new FlinkRestApiClient(cannedTransport(responses), mapper)
                     .observe(new FlinkJobHandle(JOB_ID));
-            assertEquals(truncated ? message.substring(0, 300) + "…" : cause,
+            assertEquals(message,
                     after.failures().getFirst().rootCause());
             assertEquals(Optional.of(peer), after.failures().getFirst().taskManagerId());
             var before = new FlinkJobObservation(1_000, FlinkJobState.RUNNING, 2, 0,
@@ -357,7 +360,7 @@ class FlinkRestApiClientTest {
                     Optional.of(new TaskManagerControl.Identity("taskmanager-2", "container-2", target)));
             var effect = TaskManagerKillEffect.evaluate(List.of(kill), Optional.of(
                     new FlinkJobObservation.Attempt(Optional.of(after), Optional.empty()))).getFirst();
-            assertEquals(!truncated, effect.outcome().confirmed());
+            assertEquals(example.getValue(), effect.outcome().confirmed());
         }
     }
 
@@ -384,7 +387,7 @@ class FlinkRestApiClientTest {
             assertTrue(timeout.compareTo(Duration.ZERO) > 0);
             assertTrue(timeout.compareTo(Duration.ofSeconds(30)) <= 0);
             // Clock sampling must not depend on checkpoint, exception, or vertex responses.
-            return "{\"now\":6000}".getBytes(StandardCharsets.UTF_8);
+            return new FlinkRestApiClient.HttpResponse(200, "{\"now\":6000}".getBytes(StandardCharsets.UTF_8));
         }, mapper);
 
         assertEquals(6_000, sampling.jobManagerTimeMillis(new FlinkJobHandle(JOB_ID)));
@@ -408,7 +411,7 @@ class FlinkRestApiClientTest {
             if (!method.equals("GET") || response == null) {
                 throw new IOException("Unexpected fake request: " + method + " " + path);
             }
-            return response.getBytes(StandardCharsets.UTF_8);
+            return new FlinkRestApiClient.HttpResponse(200, response.getBytes(StandardCharsets.UTF_8));
         };
     }
 
@@ -430,15 +433,14 @@ class FlinkRestApiClientTest {
 
     private final class FakeTransport implements FlinkRestApiClient.Transport {
         @Override
-        public byte[] uploadJar(Path jar, Duration timeout) throws IOException {
+        public FlinkRestApiClient.HttpResponse uploadJar(Path jar, Duration timeout) throws IOException {
             uploadedJar = jar;
             uploadedJarBytes = Files.readAllBytes(jar);
-            return "{\"filename\":\"/tmp/flink-web/uploaded-workload.jar\"}"
-                    .getBytes(StandardCharsets.UTF_8);
+            return new FlinkRestApiClient.HttpResponse(200, "{\"filename\":\"/tmp/flink-web/uploaded-workload.jar\"}".getBytes(StandardCharsets.UTF_8));
         }
 
         @Override
-        public byte[] execute(
+        public FlinkRestApiClient.HttpResponse execute(
                 String method,
                 String path,
                 byte[] body,
@@ -461,7 +463,7 @@ class FlinkRestApiClientTest {
             } else {
                 throw new IOException("Unexpected fake request: " + method + " " + path);
             }
-            return response.getBytes(StandardCharsets.UTF_8);
+            return new FlinkRestApiClient.HttpResponse(200, response.getBytes(StandardCharsets.UTF_8));
         }
     }
 }

@@ -55,7 +55,7 @@ public record FlinkJobObservation(
 
     /**
      * One exception-history entry. {@code rootCause} is the innermost cause line of Flink's
-     * stack trace, bounded in length.
+     * stack trace, retained in full for semantic attribution and structured evidence.
      */
     public record Failure(
             long timestampMillis,

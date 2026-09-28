@@ -3,10 +3,13 @@ package org.savonitar.flink.stability.core.execution;
 import org.junit.jupiter.api.Test;
 import org.savonitar.flink.stability.runtime.api.FlinkComponentProvisioningEvidence;
 import org.savonitar.flink.stability.runtime.api.FlinkHaControl;
+import org.savonitar.flink.stability.runtime.api.TokenServiceControl;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
+import java.util.OptionalLong;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 
@@ -89,6 +92,51 @@ class FlinkHaObservationsTest {
         assertEquals(FlinkHaEvidence.Outcome.UNCONFIRMED, FlinkHaEvidence.evaluate(
                 new FlinkHaEvidence.Expected(List.of(), true, false), Optional.of(new PhaseExecutionEvidence(List.of())),
                 Optional.empty(), withReplacement, Optional.of(history())).outcome());
+    }
+
+    @Test
+    void genericHealthyTokenControlConfirmsOneValidReceiptAmongTwoProvisionedTaskManagers() {
+        var components = new ArrayList<>(COMPONENTS);
+        components.add(FlinkRuntimeIdentityTest.component("taskmanager-2", "tm-2", FlinkRuntimeIdentityTest.IMAGE_ID));
+        var observations = new FlinkHaControl.Observations(List.of(
+                sample(1, FlinkHaControl.ObservationMoment.INITIAL, INITIAL),
+                new FlinkHaControl.LeadershipObservation(2, 1, 100, 100,
+                        FlinkHaControl.ObservationMoment.PRE_FENCE, Optional.of(INITIAL), Optional.empty())),
+                components.stream().map(component -> session(component, component.runtimeId(), 6_000, false)).toList(), false);
+        var origins = new SubjectClassOrigins(FlinkHaEvidence.TOKEN_CONTAINER_PATH,
+                components.stream().map(component -> new SubjectClassOrigins.ProcessOrigin(
+                        component.logicalName() + "#1", component.logicalName().startsWith("jobmanager-")
+                        ? Map.of(FlinkHaEvidence.TOKEN_PROVIDER, List.of(FlinkHaEvidence.TOKEN_CONTAINER_PATH),
+                                FlinkHaEvidence.TOKEN_RECEIVER, List.of(FlinkHaEvidence.TOKEN_CONTAINER_PATH))
+                        : Map.of(FlinkHaEvidence.TOKEN_RECEIVER, List.of(FlinkHaEvidence.TOKEN_CONTAINER_PATH)))).toList(),
+                Optional.empty());
+        var events = List.of(
+                healthyEvent(1, TokenServiceControl.Kind.PROVIDER_INITIALIZED, "jobmanager-1", 0, 0),
+                healthyEvent(2, TokenServiceControl.Kind.RECEIVER_INITIALIZED, "jobmanager-1", 0, 0),
+                healthyEvent(3, TokenServiceControl.Kind.RECEIVER_INITIALIZED, "taskmanager-1", 0, 0),
+                healthyEvent(4, TokenServiceControl.Kind.RECEIVER_INITIALIZED, "taskmanager-2", 0, 0),
+                healthyEvent(5, TokenServiceControl.Kind.REQUEST_STARTED, "jobmanager-1", 1, 0),
+                healthyEvent(6, TokenServiceControl.Kind.ISSUED, "jobmanager-1", 1, 1),
+                healthyEvent(7, TokenServiceControl.Kind.REQUEST_FINISHED, "jobmanager-1", 1, 0),
+                healthyEvent(8, TokenServiceControl.Kind.RECEIVED, "taskmanager-1", 0, 1));
+        for (boolean retainReceipt : List.of(true, false)) {
+            var snapshot = new TokenServiceControl.Snapshot(
+                    retainReceipt ? events : events.subList(0, events.size() - 1), false, false, 0, 1);
+            var tokens = new FlinkHaEvidence.TokenEvidence(Optional.of("a".repeat(64)), Optional.of(origins),
+                    Optional.of(snapshot), List.of());
+            assertEquals(retainReceipt ? FlinkHaEvidence.Outcome.CONFIRMED : FlinkHaEvidence.Outcome.UNCONFIRMED,
+                    FlinkHaEvidence.evaluate(new FlinkHaEvidence.Expected(List.of(), true, true, 2),
+                            Optional.of(new PhaseExecutionEvidence(List.of())), Optional.of(tokens), components,
+                            Optional.of(observations)).outcome());
+        }
+    }
+
+    private static TokenServiceControl.Event healthyEvent(long sequence, TokenServiceControl.Kind kind,
+            String process, long request, long token) {
+        return new TokenServiceControl.Event(sequence, kind, process + "#1",
+                process.startsWith("jobmanager-") ? "jobmanager" : "taskmanager", sequence * 10, sequence * 10_000_000,
+                request, 0, TokenServiceControl.Mode.HEALTHY,
+                token == 0 ? OptionalLong.empty() : OptionalLong.of(token), "");
     }
 
     private static FlinkHaControl.Observations withLast(FlinkHaControl.Leadership last) {

@@ -2,6 +2,9 @@ package org.savonitar.flink.stability.core.flink;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.sun.net.httpserver.HttpServer;
+import org.apache.flink.core.execution.CheckpointType;
+import org.apache.flink.runtime.rest.messages.checkpoints.CheckpointTriggerRequestBody;
+import org.apache.flink.runtime.rest.util.RestMapperUtils;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.Timeout;
 import org.junit.jupiter.params.ParameterizedTest;
@@ -44,9 +47,20 @@ class FlinkCheckpointTriggerTest {
                 problem.set("Unexpected method or exact-trigger route");
             }
             if (call == 1) {
-                var body = MAPPER.readTree(exchange.getRequestBody());
-                if (!body.equals(MAPPER.createObjectNode().put("triggerId", TRIGGER)
-                        .put("checkpointType", "DEFAULT"))) problem.set("Unexpected checkpoint request body");
+                byte[] requestBytes = exchange.getRequestBody().readAllBytes();
+                try {
+                    // Parse our wire bytes with the released Flink 2.2 REST contract.
+                    for (var mapper : List.of(RestMapperUtils.getStrictObjectMapper(),
+                            RestMapperUtils.getFlexibleObjectMapper())) {
+                        var body = mapper.readValue(requestBytes, CheckpointTriggerRequestBody.class);
+                        if (!TRIGGER.equals(body.getTriggerId().orElseThrow().toString())
+                                || body.getCheckpointType() != CheckpointType.CONFIGURED) {
+                            problem.set("Released checkpoint parser did not preserve trigger ID or configured default");
+                        }
+                    }
+                } catch (IOException | RuntimeException failure) {
+                    problem.set("Released checkpoint parser rejected the client request: " + failure);
+                }
             }
             String body = switch (call) {
                 case 1 -> "{\"request-id\":\"" + TRIGGER + "\"}";
@@ -82,8 +96,19 @@ class FlinkCheckpointTriggerTest {
         }
     }
 
+    @Test
+    void releasedCheckpointParsersRejectTheDefaultAliasUsedByTheOriginalClient() {
+        byte[] originalBody = ("{\"triggerId\":\"" + TRIGGER
+                + "\",\"checkpointType\":\"DEFAULT\"}").getBytes(StandardCharsets.UTF_8);
+        for (var mapper : List.of(RestMapperUtils.getStrictObjectMapper(),
+                RestMapperUtils.getFlexibleObjectMapper())) {
+            assertThrows(IOException.class,
+                    () -> mapper.readValue(originalBody, CheckpointTriggerRequestBody.class));
+        }
+    }
+
     @ParameterizedTest
-    @ValueSource(ints = {307, 408, 503})
+    @ValueSource(ints = {307, 400, 408, 503})
     void failedCheckpointPostPreservesTheOriginalErrorAndIsNeverReplayed(int status) throws Exception {
         AtomicInteger calls = new AtomicInteger();
         HttpServer server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
@@ -130,7 +155,7 @@ class FlinkCheckpointTriggerTest {
             AtomicInteger calls = new AtomicInteger();
             try (FlinkRestApiClient client = new FlinkRestApiClient((method, path, body, timeout) -> {
                 calls.incrementAndGet();
-                return response.getBytes(StandardCharsets.UTF_8);
+                return new FlinkRestApiClient.HttpResponse(200, response.getBytes(StandardCharsets.UTF_8));
             }, MAPPER)) {
                 assertThrows(IOException.class, () -> client.triggerCheckpoint(JOB, TRIGGER, BUDGET));
                 assertEquals(1, calls.get());
@@ -165,8 +190,9 @@ class FlinkCheckpointTriggerTest {
         List<Duration> budgets = new ArrayList<>();
         try (FlinkRestApiClient client = new FlinkRestApiClient((method, path, body, timeout) -> {
             budgets.add(timeout);
-            return (method.equals("POST") ? "{\"request-id\":\"" + TRIGGER + "\"}"
-                    : "{\"status\":{\"id\":\"IN_PROGRESS\"}}").getBytes(StandardCharsets.UTF_8);
+            return new FlinkRestApiClient.HttpResponse(200, (method.equals("POST")
+                    ? "{\"request-id\":\"" + TRIGGER + "\"}"
+                    : "{\"status\":{\"id\":\"IN_PROGRESS\"}}").getBytes(StandardCharsets.UTF_8));
         }, MAPPER, () -> 0L)) {
             client.triggerCheckpoint(JOB, TRIGGER, BUDGET);
             client.checkpointStatus(JOB, TRIGGER, BUDGET);
@@ -182,7 +208,8 @@ class FlinkCheckpointTriggerTest {
     }
 
     private static FlinkRestApiClient response(String json) {
-        return new FlinkRestApiClient((method, path, body, timeout) -> json.getBytes(StandardCharsets.UTF_8), MAPPER);
+        return new FlinkRestApiClient((method, path, body, timeout) ->
+                new FlinkRestApiClient.HttpResponse(200, json.getBytes(StandardCharsets.UTF_8)), MAPPER);
     }
 
     private static String url(HttpServer server) {
