@@ -267,7 +267,8 @@ class RunScenarioCommandTest {
                     new FlinkRuntimeIdentity.ExpectedTarget(EXPECTED_RUNTIME.imageId(),
                             EXPECTED_RUNTIME.components(), Optional.of(jar)),
                     observed ? Optional.of(origins) : Optional.empty(),
-                    KafkaTransactionVersion.Selection.notRequested(), List.of(), List.of());
+                    KafkaTransactionVersion.Selection.notRequested(), base.expectedHa(), base.tokenEvidence(),
+                    base.haObservations(), base.processObservations(), List.of());
             JsonNode runtime = JSON.readTree(new V1ExecutionResultRenderer().render(
                     "bounded-eos", context("1234abcd"), expectation, result)).at("/evidence/flinkRuntime");
             assertEquals(observed ? "confirmed" : "unconfirmed", runtime.at("/runtimeJar/status").textValue());
@@ -338,7 +339,7 @@ class RunScenarioCommandTest {
                 KafkaTransactionVersion.UNCONFIRMED, "feature selection failed",
                 Optional.empty(), Optional.empty(), Optional.empty(), Optional.empty(), Optional.empty(),
                 Optional.empty(), Optional.empty(), Optional.empty(), List.of(), EXPECTED_RUNTIME,
-                Optional.empty(), selection, List.of(), List.of());
+                Optional.empty(), selection, List.of());
         JsonNode output = JSON.readTree(new V1ExecutionResultRenderer().render(
                 "bounded-eos", context("1234abcd"), expectation, result));
         JsonNode evidence = output.at("/evidence/kafkaTransactionVersion");
@@ -362,7 +363,7 @@ class RunScenarioCommandTest {
                 "infrastructure.example", "example", Optional.empty(), Optional.empty(), Optional.empty(),
                 Optional.empty(), Optional.empty(), Optional.empty(), Optional.empty(), Optional.empty(),
                 List.of(), EXPECTED_RUNTIME, Optional.empty(),
-                KafkaTransactionVersion.Selection.notRequested(), errors, List.of());
+                KafkaTransactionVersion.Selection.notRequested(), List.of()).withFlinkRestErrors(errors);
         JsonNode output = JSON.readTree(new V1ExecutionResultRenderer().render(
                 "bounded-eos", context("1234abcd"), expectation, result));
         assertEquals(2, output.at("/evidence/flinkRest/errorCount").intValue());
@@ -413,7 +414,6 @@ class RunScenarioCommandTest {
                 EXPECTED_RUNTIME,
                 Optional.empty(),
                 KafkaTransactionVersion.Selection.notRequested(),
-                List.of(),
                 List.of());
 
         JsonNode output = JSON.readTree(new V1ExecutionResultRenderer().render(
@@ -550,8 +550,8 @@ class RunScenarioCommandTest {
                 EXPECTED_RUNTIME,
                 Optional.empty(),
                 KafkaTransactionVersion.Selection.notRequested(),
-                List.of(),
-                List.of());
+                new org.savonitar.flink.stability.core.execution.FlinkHaEvidence.Expected(List.of(), false, false),
+                Optional.empty(), Optional.empty(), Optional.of(healthyProcesses(processes)), List.of());
 
         JsonNode evidence = JSON.readTree(new V1ExecutionResultRenderer().render(
                 "bounded-eos", context("1234abcd"), expectation, result)).path("evidence");
@@ -1027,6 +1027,45 @@ class RunScenarioCommandTest {
                 temporaryDirectory.resolve("checkpoints/attempt-1-" + nonce));
     }
 
+    @Test
+    void rendersPerProcessExitMetadataAndPartialFenceWithoutInventingCompletion() throws Exception {
+        var base = passResult();
+        var fence = runtimeFence();
+        var first = fence.components().getFirst();
+        var observation = new FlinkProcessWriteFenceEvidence.Observation(first.logicalName(), first.role(),
+                first.runtimeId(), FlinkProcessWriteFenceEvidence.Moment.BEFORE_FENCE, Instant.EPOCH,
+                Optional.of(new org.savonitar.flink.stability.runtime.api.FlinkHaControl.ProcessState(
+                        first.runtimeId().orElseThrow(), false, false, Optional.of(137L), Optional.of(true),
+                        Optional.of("2026-09-27T12:00:00Z"))), false, Optional.empty());
+        var stopped = new FlinkProcessWriteFenceEvidence.Component(first.logicalName(), first.role(),
+                first.runtimeId(), FlinkProcessWriteFenceEvidence.Outcome.ALREADY_STOPPED);
+        for (boolean complete : List.of(false, true)) {
+            var components = complete ? List.of(stopped, fence.components().getLast()) : List.of(stopped);
+            var result = new V1ScenarioExecutionResult(V1ScenarioExecutionResult.Status.FAIL,
+                    "verification.flink.process-fence-failed", "retained failure", Optional.empty(), base.phaseEvidence(),
+                    Optional.empty(), complete ? Optional.of(new FlinkProcessWriteFenceEvidence(components, Instant.EPOCH))
+                            : Optional.empty(),
+                    Optional.empty(), Optional.empty(), Optional.empty(), base.subjectClassOrigins(),
+                    base.flinkProvisioningEvidence(), base.expectedFlinkRuntime(), base.runtimeClassOrigins(),
+                    base.kafkaTransactionVersion(), base.expectedHa(), base.tokenEvidence(), base.haObservations(),
+                    Optional.of(new FlinkProcessWriteFenceEvidence.Observations(List.of(observation), components, false)),
+                    List.of());
+            JsonNode json = JSON.readTree(new V1ExecutionResultRenderer().render(
+                    "bounded-eos", context("1234abcd"), expectation, result));
+            var rendered = json.at("/evidence/processFence");
+            assertEquals(complete ? "complete" : "partial", rendered.path("status").textValue());
+            assertEquals(complete, rendered.path("completed").booleanValue());
+            assertEquals(components.size(), rendered.path("components").size());
+            assertEquals("already-stopped", rendered.at("/components/0/outcome").textValue());
+            assertEquals(first.runtimeId().orElseThrow(), rendered.at("/observations/0/runtimeId").textValue());
+            assertEquals(137, rendered.at("/observations/0/state/exitCode").intValue());
+            assertTrue(rendered.at("/observations/0/state/oomKilled").booleanValue());
+            assertEquals("2026-09-27T12:00:00Z", rendered.at("/observations/0/state/finishedAt").textValue());
+            assertEquals("unexpected-exit", rendered.at("/health/outcome").textValue());
+            assertEquals("verification.flink.process-fence-failed", json.at("/attempt/reason").textValue());
+        }
+    }
+
     private JsonNode renderIncompletePhases(PhaseExecutionEvidence phases) throws Exception {
         return renderEvidence(phases, Optional.empty());
     }
@@ -1040,7 +1079,7 @@ class RunScenarioCommandTest {
                 Optional.empty(), Optional.of(phases), Optional.empty(), Optional.empty(),
                 observation, Optional.empty(), Optional.empty(), Optional.empty(),
                 List.of(), EXPECTED_RUNTIME, Optional.empty(),
-                KafkaTransactionVersion.Selection.notRequested(), List.of(), List.of());
+                KafkaTransactionVersion.Selection.notRequested(), List.of());
         return JSON.readTree(new V1ExecutionResultRenderer().render(
                 "distributed-recovery", context("1234abcd"), expectation, result)).path("evidence");
     }
@@ -1086,6 +1125,22 @@ class RunScenarioCommandTest {
                         FlinkProcessWriteFenceEvidence.Outcome.SIGKILLED)).toList(), Instant.EPOCH);
     }
 
+    private static FlinkProcessWriteFenceEvidence.Observations healthyProcesses(
+            FlinkProcessWriteFenceEvidence fence) {
+        var events = new java.util.ArrayList<FlinkProcessWriteFenceEvidence.Observation>();
+        for (var component : fence.components()) {
+            for (var moment : List.of(FlinkProcessWriteFenceEvidence.Moment.BEFORE_FENCE,
+                    FlinkProcessWriteFenceEvidence.Moment.AFTER_FENCE_KILL)) {
+                events.add(new FlinkProcessWriteFenceEvidence.Observation(component.logicalName(),
+                        component.role(), component.runtimeId(), moment, fence.completedAt(),
+                        Optional.of(new org.savonitar.flink.stability.runtime.api.FlinkHaControl.ProcessState(component.runtimeId().orElseThrow(),
+                                moment == FlinkProcessWriteFenceEvidence.Moment.BEFORE_FENCE, false)),
+                        false, Optional.empty()));
+            }
+        }
+        return new FlinkProcessWriteFenceEvidence.Observations(events, fence.components(), false);
+    }
+
     private static V1ScenarioExecutionResult passResult() {
         FlinkProcessWriteFenceEvidence processes = runtimeFence();
         FlinkTerminalWriteFence.Evidence fence = new FlinkTerminalWriteFence.Evidence(
@@ -1119,7 +1174,8 @@ class RunScenarioCommandTest {
                 EXPECTED_RUNTIME,
                 Optional.empty(),
                 KafkaTransactionVersion.Selection.notRequested(),
-                List.of(),
+                new org.savonitar.flink.stability.core.execution.FlinkHaEvidence.Expected(List.of(), false, false),
+                Optional.empty(), Optional.empty(), Optional.of(healthyProcesses(processes)),
                 List.of());
     }
 
@@ -1156,7 +1212,8 @@ class RunScenarioCommandTest {
                 EXPECTED_RUNTIME,
                 Optional.empty(),
                 KafkaTransactionVersion.Selection.notRequested(),
-                List.of(),
+                new org.savonitar.flink.stability.core.execution.FlinkHaEvidence.Expected(List.of(), false, false),
+                Optional.empty(), Optional.empty(), Optional.of(healthyProcesses(processes)),
                 List.of());
     }
 
@@ -1193,7 +1250,8 @@ class RunScenarioCommandTest {
                 EXPECTED_RUNTIME,
                 Optional.empty(),
                 KafkaTransactionVersion.Selection.notRequested(),
-                List.of(),
+                new org.savonitar.flink.stability.core.execution.FlinkHaEvidence.Expected(List.of(), false, false),
+                Optional.empty(), Optional.empty(), Optional.of(healthyProcesses(processes)),
                 List.of());
     }
 
@@ -1268,7 +1326,6 @@ class RunScenarioCommandTest {
                 new FlinkRuntimeIdentity.ExpectedTarget(Optional.empty(), EXPECTED_RUNTIME.components()),
                 Optional.empty(),
                 KafkaTransactionVersion.Selection.notRequested(),
-                List.of(),
                 List.of("diagnostic"));
     }
 

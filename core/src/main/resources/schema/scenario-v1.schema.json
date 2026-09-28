@@ -607,6 +607,24 @@
           "$ref": "#/$defs/positiveIntegerOrTemplate",
           "default": 1
         },
+        "high_availability": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["zookeeper_image", "session_timeout"],
+          "properties": {
+            "zookeeper_image": {"$ref": "#/$defs/nonEmptyString"},
+            "session_timeout": {"$ref": "#/$defs/nonEmptyString"}
+          }
+        },
+        "token_provider": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["renewal_interval"],
+          "properties": {
+            "renewal_interval": {"$ref": "#/$defs/nonEmptyString"},
+            "retry_backoff": {"$ref": "#/$defs/nonEmptyString"}
+          }
+        },
         "config": {
           "type": "object",
           "additionalProperties": {
@@ -1302,6 +1320,9 @@
           "$ref": "#/$defs/networkFaultStep"
         },
         {
+          "$ref": "#/$defs/leaderFaultStep"
+        },
+        {
           "$ref": "#/$defs/checkpointStep"
         },
         {
@@ -1317,6 +1338,33 @@
           "$ref": "#/$defs/validateStep"
         }
       ]
+    },
+    "leaderFaultStep": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["leader_fault"],
+      "properties": {
+        "leader_fault": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["mode", "duration", "timeout"],
+          "properties": {
+            "mode": {"enum": ["kill", "pause", "isolate-zookeeper"]},
+            "recovery_barrier": {"enum": ["token-checkpoint"]},
+            "duration": {"$ref": "#/$defs/nonEmptyString"},
+            "timeout": {"$ref": "#/$defs/nonEmptyString"},
+            "token_fault": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["mode"],
+              "properties": {
+                "mode": {"enum": ["delay", "fail", "linkage-error"]},
+                "delay": {"$ref": "#/$defs/nonEmptyString"}
+              }
+            }
+          }
+        }
+      }
     },
     "awaitStep": {
       "type": "object",

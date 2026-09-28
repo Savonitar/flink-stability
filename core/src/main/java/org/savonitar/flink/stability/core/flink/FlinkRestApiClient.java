@@ -72,6 +72,20 @@ public final class FlinkRestApiClient implements FlinkScenarioControl {
                 .build()), new ObjectMapper(), System::nanoTime);
     }
 
+    /** Resolves an owned leader endpoint under the request's existing total deadline. */
+    @FunctionalInterface
+    public interface EndpointResolver {
+        String resolve(Duration timeout) throws IOException;
+    }
+
+    /** Installed before submission for HA; leader discovery never retries a mutation. */
+    public void useEndpointResolver(EndpointResolver resolver) {
+        if (!(transport instanceof OkHttpTransport http)) {
+            throw new IllegalStateException("Dynamic endpoints require the HTTP transport");
+        }
+        http.endpointResolver = Objects.requireNonNull(resolver, "resolver");
+    }
+
     FlinkRestApiClient(Transport transport, ObjectMapper mapper) {
         this(transport, mapper, System::nanoTime);
     }
@@ -89,6 +103,17 @@ public final class FlinkRestApiClient implements FlinkScenarioControl {
         this.mapper = Objects.requireNonNull(mapper, "mapper");
         this.nanoTime = Objects.requireNonNull(nanoTime, "nanoTime");
         this.sleeper = Objects.requireNonNull(sleeper, "sleeper");
+    }
+
+    @Override
+    public String triggerCheckpoint(FlinkJobHandle job, String triggerId, Duration timeout) throws IOException {
+        return FlinkCheckpointTrigger.submit(job, triggerId, timeout, mapper, this::execute, nanoTime);
+    }
+
+    @Override
+    public FlinkCheckpointTrigger.Observation checkpointStatus(
+            FlinkJobHandle job, String triggerId, Duration timeout) throws IOException {
+        return FlinkCheckpointTrigger.status(job, triggerId, timeout, this::execute, nanoTime);
     }
 
     @Override
@@ -252,8 +277,13 @@ public final class FlinkRestApiClient implements FlinkScenarioControl {
 
     @Override
     public FlinkJobObservation observe(FlinkJobHandle job) throws IOException {
+        return observe(job, OBSERVATION_TIMEOUT);
+    }
+
+    @Override
+    public FlinkJobObservation observe(FlinkJobHandle job, Duration timeout) throws IOException {
         Objects.requireNonNull(job, "job");
-        MonotonicDeadline deadline = MonotonicDeadline.start(OBSERVATION_TIMEOUT, nanoTime);
+        MonotonicDeadline deadline = MonotonicDeadline.start(timeout, nanoTime);
         String jobPath = "/jobs/" + pathSegment(job.jobId());
         JsonNode details = get(jobPath, deadline);
         JsonNode checkpoints = get(jobPath + "/checkpoints", deadline);
@@ -539,6 +569,7 @@ public final class FlinkRestApiClient implements FlinkScenarioControl {
     private static final class OkHttpTransport implements Transport {
         private final String jobManagerUrl;
         private final OkHttpClient client;
+        private volatile EndpointResolver endpointResolver;
 
         private OkHttpTransport(String jobManagerUrl, OkHttpClient client) {
             this.jobManagerUrl = jobManagerUrl;
@@ -551,7 +582,8 @@ public final class FlinkRestApiClient implements FlinkScenarioControl {
                 String endpoint,
                 byte[] body,
                 Duration timeout) throws IOException {
-            Request.Builder builder = new Request.Builder().url(jobManagerUrl + endpoint);
+            MonotonicDeadline deadline = MonotonicDeadline.start(timeout, System::nanoTime);
+            Request.Builder builder = new Request.Builder().url(resolve(deadline) + endpoint);
             if ("GET".equals(method)) {
                 builder.get();
             } else if ("POST".equals(method)) {
@@ -561,12 +593,13 @@ public final class FlinkRestApiClient implements FlinkScenarioControl {
             }
             Request request = builder.build();
             Call call = client.newCall(request);
-            call.timeout().timeout(safePositiveNanos(timeout), TimeUnit.NANOSECONDS);
+            call.timeout().timeout(safePositiveNanos(remaining(deadline)), TimeUnit.NANOSECONDS);
             return execute(call);
         }
 
         @Override
         public HttpResponse uploadJar(Path jar, Duration timeout) throws IOException {
+            MonotonicDeadline deadline = MonotonicDeadline.start(timeout, System::nanoTime);
             RequestBody multipart = new MultipartBody.Builder()
                     .setType(MultipartBody.FORM)
                     .addFormDataPart(
@@ -575,11 +608,11 @@ public final class FlinkRestApiClient implements FlinkScenarioControl {
                             RequestBody.create(jar.toFile(), JAR))
                     .build();
             Request request = new Request.Builder()
-                    .url(jobManagerUrl + "/jars/upload")
+                    .url(resolve(deadline) + "/jars/upload")
                     .post(multipart)
                     .build();
             Call call = client.newCall(request);
-            call.timeout().timeout(safePositiveNanos(timeout), TimeUnit.NANOSECONDS);
+            call.timeout().timeout(safePositiveNanos(remaining(deadline)), TimeUnit.NANOSECONDS);
             return execute(call);
         }
 
@@ -594,6 +627,15 @@ public final class FlinkRestApiClient implements FlinkScenarioControl {
         @Override
         public void close() {
             client.connectionPool().evictAll();
+        }
+
+        private String resolve(MonotonicDeadline deadline) throws IOException {
+            EndpointResolver resolver = endpointResolver;
+            try {
+                return resolver == null ? jobManagerUrl : normalizeUrl(resolver.resolve(remaining(deadline)));
+            } catch (RuntimeException unavailable) {
+                throw new IOException("Cannot resolve the owned Flink REST leader", unavailable);
+            }
         }
 
         private static long safePositiveNanos(Duration timeout) {

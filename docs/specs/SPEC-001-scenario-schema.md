@@ -519,8 +519,8 @@ Connector pull-request gating is the same mechanism with one axis:
   declare the intended count explicitly.
 - **R4.12** JobManager count greater than 1 requires Flink HA services
   (ZooKeeper or Kubernetes HA backend, HA storage, leader election). v1 permits
-  only 1, so an omitted `jobmanagers` resolves to 1 and a higher declared value
-  is rejected with `unsupported-capability: multiple-jobmanagers` before
+  1, or exactly 2 when `high_availability` is declared. An omitted `jobmanagers`
+  resolves to 1; unsupported counts are rejected before
   provisioning rather than silently starting a broken cluster.
 - **R4.13** Every v1 artifact has a **declared reference** (image reference,
   Maven coordinate where permitted, or local path) *and* a **resolved identity**
@@ -768,6 +768,67 @@ Connector pull-request gating is the same mechanism with one axis:
   R7.1c and R7.3b.
 
 ---
+
+### Executable HA and synthetic token service
+
+- **R4.13g** Optional `setup.flink.high_availability` declares `zookeeper_image`
+  (official `zookeeper:3.9.x`) and `session_timeout` (2–60 seconds). This mode requires
+  exactly two JobManagers and filesystem checkpoint storage. Both JobManagers and
+  all TaskManagers share the attempt's checkpoint and HA metadata storage. The
+  ZooKeeper namespace and every advertised JobManager incarnation are attempt-owned;
+  replacing a process must not reuse its physical endpoint identity.
+  This is an anonymous ZooKeeper fixture: every HA Flink process, including
+  replacements, explicitly uses `zookeeper.sasl.disable: true`. Standalone execution
+  receives no such override. Authenticated ZooKeeper is outside this fixture.
+  The fixture configures ZooKeeper's supported session range explicitly as 2–60
+  seconds. Each provisioned Flink incarnation retains its own negotiated session
+  messages, bound to the Docker ID and class-log process name. Missing, ambiguous,
+  overflowed or mismatched negotiated timeouts prevent confirmed HA evidence.
+  Initial, routing, fault and pre-fence leadership samples are retained in order.
+  Consecutive identical successful routing samples may be coalesced with their
+  count and first/last observation times; changes, failures and boundaries remain
+  distinct. This is sampled history, not proof that no election occurred between
+  observations. A no-fault HA control requires coherent initial and pre-fence
+  boundaries and rejects any observed intervening leadership change or gap.
+  Retention is bounded to 4,096 leadership entries after coalescing, 128 negotiated
+  session messages per incarnation and 8,192 characters per collected log line.
+  Exceeding a bound prevents confirmed HA evidence; truncation cannot imply success.
+  Each JobManager reaches ZooKeeper through its own controllable TCP gate. Closing
+  a gate terminates existing connections and rejects new ones; token-service traffic
+  uses a separate path. Leader observations read ZooKeeper's published RM, dispatcher
+  and REST session/address records and bind them to the provisioned physical process.
+  A successful REST response alone is not leader evidence. REST leader resolution
+  consumes the request deadline. In both standalone and HA execution, the REST
+  transport never follows redirects, retries a failed connection, or automatically
+  replays an unsuccessful HTTP response (including 408/503 with `Retry-After: 0`).
+  This transport policy covers reads and mutations. The client may explicitly retry
+  GET 5xx under R6.4a within the original deadline, including leader resolution and
+  pauses; retain every original error. Checkpoint-trigger POST is single-attempt,
+  including 503 with `Retry-After: 0`, and retains its full original response.
+  Checkpoint status polling uses the same remaining barrier budget.
+- **R4.13h** Optional `setup.flink.token_provider.renewal_interval` (1 second–5 minutes)
+  enables the bundled synthetic delegation-token provider/receiver plugin. Its JAR
+  lives only under `plugins/flink-stability-token/`, with verified bytes in each
+  process and observed plugin class sources. Tokens contain fixture identifiers,
+  not real credentials. Token lifetime is twice the interval and Flink's renewal
+  ratio is 0.5; this controls scheduled renewal, not an exact request-rate guarantee.
+  Optional `token_provider.retry_backoff` (1 second–5 minutes) sets the legacy
+  `security.delegation.tokens.renewal.retry.backoff` and newer
+  `security.delegation.tokens.renewal.retry.initial.backoff` / `retry.max.backoff`
+  keys to the same duration, making a fixed retry schedule explicit. Omission
+  preserves the runtime defaults. Controlled-backoff catalogs make no claim about
+  default or exponential-backoff behavior.
+  The local service records ordered initialization, request, issue, failure and
+  receipt events with process incarnation, mode/revision, token identity and clocks.
+  Event overflow or request saturation makes evidence incomplete. This fixture
+  exercises acquisition/distribution; it does not authenticate Kafka or implement
+  version-specific callback extensions to Flink's token SPI.
+  JSON stores full token events once in `evidence.flinkHa.tokenEvents`. Each token
+  snapshot retains its counters/overflow/saturation flags, `eventCount`, and ordered
+  `eventRanges`: zero-based `[startInclusive, endExclusive]` pairs into that table.
+  Concatenating the ranges reconstructs the exact snapshot, including its order and
+  repeated entries. Interning compares the entire event, so contradictory events
+  with the same sequence number remain distinct and available for diagnosis.
 
 ## 5. Workload / job configuration
 
@@ -1399,6 +1460,74 @@ Connector pull-request gating is the same mechanism with one axis:
   not show recovery. A scenario whose bounded input finishes before its kill, or
   whose TaskManager hosts no active subtask, therefore cannot pass, including as
   an expected-failure control (R8.7a).
+- **R6.12b** `leader_fault: { mode, duration, timeout, token_fault?, recovery_barrier? }` is an atomic,
+  automatically healed HA operation. `mode` is `kill`, `pause`, or
+  `isolate-zookeeper`; the target is the observed current leader, never a guessed
+  logical slot. `duration` is positive and at most 2 minutes; `timeout` is longer
+  than the hold duration and at most 5 minutes. An optional `token_fault` has mode
+  `delay`, `fail`, or `linkage-error`; only `delay` requires a delay of 1 ms–30 s.
+  The token fault is armed before disrupting the leader and healed after the hold
+  interval, including failure paths. A token fault requires the declared fixture.
+  A kill recreates its logical slot, a pause resumes it, and isolation reopens its
+  ZooKeeper gate. All physical incarnations remain covered by runtime identity and
+  the final process fence.
+  The action timeout is shared by the initial job observation, fault work,
+  leadership discovery and the recovered-job observation. Safety healing
+  has independent budgets of 5 seconds for the token service and 30 seconds for
+  the process or gate. Both are attempted even after action timeout or failure of
+  the other heal. These budgets do not renew the leadership-observation deadline;
+  an expired observation cannot become a confirmed transfer through cleanup.
+  An invocation supports at most 100 leader faults after expanding loops. A pending
+  TaskManager kill must be healed before a leader fault; overlapping RM/TM loss is
+  not yet an executable combined operation.
+
+  Confirmation requires the same submitted job running after a completed checkpoint
+  before injection, observed target/process fault state, changed leadership sessions
+  on another physical JobManager, healing and subsequent recovery of that job.
+  The engine retains the fault's path/loop coordinates, physical identities,
+  leadership records, gate counts, timing, errors and before/after job observations.
+  Requested token faults additionally require a correlated request/outcome from the
+  new RM incarnation while the fault was active, followed by healthy issuance and
+  receipt. A delay's actual elapsed time must establish the requested delay; setting
+  a mode alone is insufficient. A failure response additionally requires the plugin
+  to acknowledge receiving the matching status/request/revision; a server-side
+  response attempt is not enough. Repeated faults require ordered, distinct transfer
+  and restore observations and append-only token traces. Missing proof prevents PASS and cannot hide a data
+  FAIL. Internal job restart count is evidence, not a maximum-one-restore guarantee.
+- **R6.12c** Optional `leader_fault.recovery_barrier: token-checkpoint` requires
+  `setup.flink.token_provider`; omission preserves the existing operation. This
+  opt-in protocol shares the original fault deadline. When requested, every leader
+  fault in the scenario must declare it; mixed implicit ordering is unsupported.
+  Each completed barrier must precede the next readiness sample in the retained
+  sequence, including coalesced sample counts. Before injection, sample the
+  coherent current leader, retain a token trace watermark, and require a new healthy
+  request/issuance after it, followed by the same token's receipt on every expected
+  live TaskManager incarnation. A request from a different RM process cannot qualify.
+  After unconditional fault healing and recovery of the same job, require a new
+  healthy request after the retained heal revision (or the post-heal trace boundary
+  if no token fault was requested), issued by the newly observed RM process and
+  acknowledged by all expected live TMs. Also require the original request to have
+  experienced its declared fault on that RM process (full delay or acknowledged
+  HTTP failure) before advancing; healthy recovery cannot replace a missed fault.
+  Then submit exactly one checkpoint trigger
+  for that job and poll its exact trigger ID to a successful concrete checkpoint ID.
+  Omit the optional checkpoint type to use Flink's configured default: `DEFAULT`
+  is not a serialized enum value in the released Flink 2.2 REST contract.
+  Retain submission/acknowledgement, status observations, partial failures, token
+  snapshots and physical receiver identities. An unknown POST outcome is never
+  replayed. Fresh coherent leadership samples must bracket token delivery and the
+  checkpoint with the same RM/dispatcher/REST sessions; reject observed intervening
+  changes or gaps even if leadership later returns. TM identities must remain the
+  same through the checkpoint. This is sampled session evidence: token SPI events
+  identify a process/provider instance and request, not an internal RM session.
+  It cannot exclude unsampled elections or stale work queued inside the same process.
+  Each readiness/checkpoint polling stage retains at most 1,500 observations;
+  exhausting the deadline or bound leaves the barrier unconfirmed. A failed barrier
+  stops later phase actions, while the existing terminal fence and exact-ID oracle
+  still run. A data or bounded-completion FAIL remains FAIL; complete data with
+  incomplete barrier proof cannot PASS. Original catalogs do not acquire this field
+  implicitly.
+
 - **R6.13** A suite entry is `{ scenario, as?, parameters?, runs? }`. `as`
   defaults to the scenario name and is **required** when the same scenario
   appears more than once in a suite. `runs`, when present, is a positive integer
@@ -1504,6 +1633,33 @@ Connector pull-request gating is the same mechanism with one axis:
   `SIGKILLED` or `ALREADY_STOPPED` outcome, plus the fence-completion timestamp.
   The same evidence is retained when a forced fence succeeds after job-completion
   timeout or another terminalization failure.
+
+  Before sending the first terminal kill, the runner inspects every known Flink
+  process within a shared telemetry budget of at most `10s` and one quarter of
+  the remaining physical-fence budget. Process samples run before a pre-fence
+  leadership sample, which can use at most `5s` of the telemetry remainder.
+  Expired or failed telemetry is retained and does not prevent physical kill
+  attempts under the original absolute fence deadline. Evidence retains each logical name, role,
+  exact container ID, observation timestamp, running/paused state and available
+  Docker exit code, OOM flag and finished-at value. A missing container and a
+  failed inspection remain distinct from an observed exit. Declared kills retain
+  their actual inspected termination state before removal, including when removal
+  subsequently fails. No stopped state is synthesized from a requested action.
+  Successful component outcomes and observations survive a later fence failure;
+  JSON reports `partial`, not `complete`, for an incomplete fence. Retention is
+  bounded to 1,024 observations and 1,024 component outcomes; overflow prevents
+  a clean PASS.
+
+  A stopped or missing pre-fence process without a preceding exact-ID declared
+  kill is `flink.process.unexpected-exit`. An observed OOM kill remains an
+  unexpected finding even when SIGKILL was requested. A passing data oracle then
+  yields FAIL; missing, contradictory, paused or incomplete process evidence
+  yields `flink.process.state-unconfirmed`. `ALREADY_STOPPED` alone does not prove
+  an expected termination. These findings cannot overwrite an existing data FAIL
+  or `verification.*` reason, and they prevent an expected-failure match. Physical
+  runtime/image identity is evaluated separately from HA fault/recovery effect:
+  known provisioning and exact replacement/fence identities do not become an
+  image-identity failure merely because leadership or token recovery is unconfirmed.
 
   Starting the process fence is irreversible for that attempt: no Flink process
   may subsequently be created or restarted. Later attempt cleanup may remove the
@@ -1847,7 +2003,7 @@ Connector pull-request gating is the same mechanism with one axis:
   exact and fail-closed: one plain scenario with `runs: 1`; one Kafka cluster
   containing exactly the distinct input and sink topics; one subject connector;
   one auto-started job with positive integer parallelism whose Kafka sink is
-  `EXACTLY_ONCE` or `AT_LEAST_ONCE`; one JobManager and 1–16 TaskManagers
+  `EXACTLY_ONCE` or `AT_LEAST_ONCE`; one JobManager (two with R4.13g HA) and 1–16 TaskManagers
   (`runner.flink.taskmanager-count-unsupported` above that local resource bound);
   exactly two task slots per TaskManager, with parallelism no greater than their
   total capacity (`runner.workload.insufficient-task-slots` otherwise); no free-form
@@ -2331,7 +2487,7 @@ Use this catalogue as the checklist for optional v1 fields and patterns:
 | `completion_timeout` | `completion_timeout: 5m` | Bounded jobs legitimately need longer than the default `2m` to reach `FINISHED` before the Flink write fence. |
 | Kafka cluster `mode` | `mode: kraft` | Usually omit in v1; declared only when the author wants topology to be explicit. |
 | Kafka cluster `transaction_version` | `transaction_version: 1` | A controlled comparison requires an exact finalized Kafka transaction feature level before the workload starts. Only integer `1` or `2` is accepted; omission keeps the existing broker behavior. |
-| `setup.flink.jobmanagers` | `jobmanagers: 1` | Usually omit; declaring a value above 1 is rejected in v1. |
+| `setup.flink.jobmanagers` | `jobmanagers: 1` | Use exactly 2 with `high_availability`; other counts remain unsupported. |
 | `setup.flink.taskmanagers` | `taskmanagers: 3` | The scenario targets or requires a specific TaskManager pool size. |
 | Connector `runtime_dependencies` | `runtime_dependencies: []` | Required for a local primary and optional for a Maven primary. Presence selects explicit dependency mode; empty explicitly asserts a shaded/self-contained JAR. Omission selects Maven auto-POM mode and is invalid for local. |
 | Job `start` | `start: manual` | A phase intentionally starts the job later with a `start` step. |

@@ -1,5 +1,6 @@
 package org.savonitar.flink.stability.runtime.api;
 
+import java.time.Duration;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.regex.Pattern;
@@ -18,13 +19,17 @@ public final class FlinkRuntimeTarget {
     private final Optional<String> expectedImageId;
     private final Optional<RuntimeJar> expectedRuntimeJar;
     private final int taskManagers;
+    private final Optional<HighAvailability> highAvailability;
+    private final Optional<TokenProvider> tokenProvider;
 
     private FlinkRuntimeTarget(
             String imageReference,
             FlinkConnectorBundleInstallation connectorBundle,
             Optional<String> expectedImageId,
             Optional<RuntimeJar> expectedRuntimeJar,
-            int taskManagers) {
+            int taskManagers,
+            Optional<HighAvailability> highAvailability,
+            Optional<TokenProvider> tokenProvider) {
         this.imageReference = requireNonBlank(imageReference, "imageReference");
         this.connectorBundle = Objects.requireNonNull(connectorBundle, "connectorBundle");
         this.expectedImageId = Objects.requireNonNull(expectedImageId, "expectedImageId");
@@ -34,6 +39,8 @@ public final class FlinkRuntimeTarget {
                     + MAX_TASK_MANAGERS);
         }
         this.taskManagers = taskManagers;
+        this.highAvailability = Objects.requireNonNull(highAvailability, "highAvailability");
+        this.tokenProvider = Objects.requireNonNull(tokenProvider, "tokenProvider");
     }
 
     /**
@@ -51,26 +58,86 @@ public final class FlinkRuntimeTarget {
                             + imageReference + " versus "
                             + connectorBundle.targetFlinkImageReference());
         }
-        return new FlinkRuntimeTarget(imageReference, connectorBundle, Optional.empty(), Optional.empty(), 1);
+        return new FlinkRuntimeTarget(imageReference, connectorBundle, Optional.empty(), Optional.empty(),
+                1, Optional.empty(), Optional.empty());
     }
 
     /** Requires every physical Flink process to use this local Docker image identity. */
     public FlinkRuntimeTarget withExpectedImageId(String imageId) {
         return new FlinkRuntimeTarget(imageReference, connectorBundle,
                 Optional.of(requireDockerImageId(imageId, "expectedImageId")), expectedRuntimeJar,
-                taskManagers);
+                taskManagers, highAvailability, tokenProvider);
     }
 
     /** Requires the selected runtime JAR bytes in every physical Flink process. */
     public FlinkRuntimeTarget withExpectedRuntimeJar(RuntimeJar runtimeJar) {
         return new FlinkRuntimeTarget(imageReference, connectorBundle, expectedImageId,
-                Optional.of(Objects.requireNonNull(runtimeJar, "runtimeJar")), taskManagers);
+                Optional.of(Objects.requireNonNull(runtimeJar, "runtimeJar")), taskManagers,
+                highAvailability, tokenProvider);
     }
 
     /** Keeps one JobManager and provisions this many named TaskManager slots. */
     public FlinkRuntimeTarget withTaskManagers(int count) {
         return new FlinkRuntimeTarget(imageReference, connectorBundle, expectedImageId,
-                expectedRuntimeJar, count);
+                expectedRuntimeJar, count, highAvailability, tokenProvider);
+    }
+
+    public FlinkRuntimeTarget withHighAvailability(HighAvailability configuration) {
+        return new FlinkRuntimeTarget(imageReference, connectorBundle, expectedImageId,
+                expectedRuntimeJar, taskManagers, Optional.of(configuration), tokenProvider);
+    }
+
+    public FlinkRuntimeTarget withTokenProvider(TokenProvider configuration) {
+        return new FlinkRuntimeTarget(imageReference, connectorBundle, expectedImageId,
+                expectedRuntimeJar, taskManagers, highAvailability, Optional.of(configuration));
+    }
+
+    public Optional<HighAvailability> highAvailability() {
+        return highAvailability;
+    }
+
+    public Optional<TokenProvider> tokenProvider() {
+        return tokenProvider;
+    }
+
+    public int jobManagers() {
+        return highAvailability.isPresent() ? 2 : 1;
+    }
+
+    public record HighAvailability(String zookeeperImage, Duration sessionTimeout) {
+        public HighAvailability {
+            zookeeperImage = requireNonBlank(zookeeperImage, "zookeeperImage");
+            requirePositive(sessionTimeout, "sessionTimeout");
+            if (sessionTimeout.toMillis() > Integer.MAX_VALUE) {
+                throw new IllegalArgumentException("sessionTimeout exceeds ZooKeeper's millisecond range");
+            }
+        }
+    }
+
+    public record TokenProvider(Duration renewalInterval, Optional<Duration> retryBackoff) {
+        public TokenProvider(Duration renewalInterval) {
+            this(renewalInterval, Optional.empty());
+        }
+
+        public TokenProvider {
+            requirePositive(renewalInterval, "renewalInterval");
+            if (renewalInterval.compareTo(Duration.ofMillis(50)) < 0
+                    || renewalInterval.compareTo(Duration.ofMinutes(30)) > 0) {
+                throw new IllegalArgumentException("renewalInterval must be between 50 ms and 30 minutes");
+            }
+            Objects.requireNonNull(retryBackoff, "retryBackoff").ifPresent(backoff -> {
+                if (backoff.compareTo(Duration.ofSeconds(1)) < 0
+                        || backoff.compareTo(Duration.ofMinutes(5)) > 0) {
+                    throw new IllegalArgumentException("retryBackoff must be between 1 second and 5 minutes");
+                }
+            });
+        }
+    }
+
+    private static void requirePositive(Duration value, String name) {
+        if (Objects.requireNonNull(value, name).isNegative() || value.isZero()) {
+            throw new IllegalArgumentException(name + " must be positive");
+        }
     }
 
     public int taskManagers() {
@@ -116,13 +183,15 @@ public final class FlinkRuntimeTarget {
                 && Objects.equals(connectorBundle, target.connectorBundle)
                 && expectedImageId.equals(target.expectedImageId)
                 && expectedRuntimeJar.equals(target.expectedRuntimeJar)
-                && taskManagers == target.taskManagers;
+                && taskManagers == target.taskManagers
+                && highAvailability.equals(target.highAvailability)
+                && tokenProvider.equals(target.tokenProvider);
     }
 
     @Override
     public int hashCode() {
         return Objects.hash(imageReference, connectorBundle, expectedImageId, expectedRuntimeJar,
-                taskManagers);
+                taskManagers, highAvailability, tokenProvider);
     }
 
     @Override

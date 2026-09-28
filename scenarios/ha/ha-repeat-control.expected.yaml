@@ -1,0 +1,9 @@
+format: v1
+kind: expected-result
+
+meta:
+  name: ha-repeat-control.expected
+  scenario: ha-repeat-control
+
+default:
+  outcome: pass

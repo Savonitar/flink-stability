@@ -4,6 +4,8 @@ import org.savonitar.flink.stability.runtime.api.FlinkClassLoadLog;
 import org.savonitar.flink.stability.runtime.api.FlinkComponentProvisioningEvidence;
 import org.savonitar.flink.stability.runtime.api.FlinkProcessWriteFenceEvidence;
 import org.savonitar.flink.stability.runtime.api.FlinkRuntimeTarget;
+import org.savonitar.flink.stability.runtime.api.FlinkHaControl;
+import org.savonitar.flink.stability.runtime.api.TokenServiceControl;
 import org.savonitar.flink.stability.runtime.api.KafkaProxyEndpoint;
 import org.savonitar.flink.stability.runtime.api.KafkaProxyTarget;
 import org.savonitar.flink.stability.runtime.api.KafkaRuntimeEndpoints;
@@ -48,6 +50,32 @@ public final class DockerV1AttemptRuntime implements V1AttemptRuntime {
     }
 
     @Override
+    public String currentFlinkRestEndpoint(Duration timeout) {
+        return clusters.currentFlinkRestEndpoint(timeout);
+    }
+
+    @Override
+    public Optional<FlinkHaControl.Observations> haObservations() {
+        return clusters.haObservations();
+    }
+
+    @Override
+    public FlinkHaControl.LeaderFaultEvidence faultLeader(
+            FlinkHaControl.LeaderFaultRequest request, Duration remainingBudget) {
+        return clusters.faultLeader(request, remainingBudget);
+    }
+
+    @Override
+    public Optional<String> tokenPluginSha256() {
+        return clusters.tokenPluginSha256();
+    }
+
+    @Override
+    public Optional<TokenServiceControl.Snapshot> tokenServiceEvidence() {
+        return clusters.tokenServiceEvidence();
+    }
+
+    @Override
     public void killTaskManager(String targetName, Duration timeout)
             throws TaskManagerActionTimeoutException {
         try {
@@ -81,8 +109,18 @@ public final class DockerV1AttemptRuntime implements V1AttemptRuntime {
     }
 
     @Override
+    public Optional<Identity> taskManagerIdentity(String targetName, Duration timeout) {
+        return clusters.taskManagerIdentity(targetName, timeout);
+    }
+
+    @Override
     public FlinkProcessWriteFenceEvidence stopAllFlinkProcesses(Duration timeout) {
         return clusters.establishFlinkProcessWriteFence(timeout);
+    }
+
+    @Override
+    public Optional<FlinkProcessWriteFenceEvidence.Observations> flinkProcessObservations() {
+        return Optional.of(clusters.processObservations());
     }
 
     @Override

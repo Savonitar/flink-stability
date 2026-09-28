@@ -2,6 +2,7 @@ package org.savonitar.flink.stability.testcontainers;
 
 import org.savonitar.flink.stability.runtime.api.FlinkComponentProvisioningEvidence;
 import org.savonitar.flink.stability.runtime.api.TaskManagerControl;
+import org.savonitar.flink.stability.runtime.api.FlinkHaControl;
 
 import java.util.Optional;
 
@@ -15,13 +16,21 @@ interface ContainerHandle {
     void stop();
 
     /** SIGKILLs, confirms termination, and removes the container within one deadline. */
-    void killAndRemoveWithin(ContainerOperationDeadline deadline);
+    FlinkHaControl.ProcessState killAndRemoveWithin(ContainerOperationDeadline deadline);
+
+    /** Publishes observed termination before removal, even if removal subsequently fails. */
+    default FlinkHaControl.ProcessState killAndRemoveWithin(ContainerOperationDeadline deadline,
+            java.util.function.Consumer<FlinkHaControl.ProcessState> observed) {
+        FlinkHaControl.ProcessState state = killAndRemoveWithin(deadline);
+        observed.accept(state);
+        return state;
+    }
 
     /**
      * SIGKILLs and confirms process termination within the shared fence deadline while retaining
      * the physical handle for later cleanup.
      */
-    void killProcessForWriteFence(ContainerOperationDeadline deadline);
+    FlinkHaControl.ProcessState killProcessForWriteFence(ContainerOperationDeadline deadline);
 
     /** Reports process liveness within the enclosing operation deadline. */
     boolean isRunningWithin(ContainerOperationDeadline deadline);
@@ -36,5 +45,21 @@ interface ContainerHandle {
 
     default Optional<TaskManagerControl.Identity> taskManagerIdentity() {
         return Optional.empty();
+    }
+
+    default String advertisedAlias() {
+        throw new UnsupportedOperationException("Container has no advertised Flink identity");
+    }
+
+    default FlinkHaControl.ProcessState processState(ContainerOperationDeadline deadline) {
+        throw new UnsupportedOperationException("Detailed process state is unsupported");
+    }
+
+    default void pauseWithin(ContainerOperationDeadline deadline) {
+        throw new UnsupportedOperationException("Process pause is unsupported");
+    }
+
+    default void resumeWithin(ContainerOperationDeadline deadline) {
+        throw new UnsupportedOperationException("Process resume is unsupported");
     }
 }

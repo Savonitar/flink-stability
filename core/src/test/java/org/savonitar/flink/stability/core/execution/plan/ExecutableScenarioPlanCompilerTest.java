@@ -54,6 +54,194 @@ class ExecutableScenarioPlanCompilerTest {
     Path artifactRoot;
 
     @Test
+    void bindsHaAndSyntheticTokensWithoutChangingTheWorkloadContract() throws IOException {
+        createJar(artifactRoot.resolve("connector.jar"), false, null);
+        createJar(artifactRoot.resolve("job.jar"), true, "v1");
+        ResolvedScenarioPlan resolved = resolved(document -> {
+            useLocalArtifacts(document);
+            enableHa(document);
+            ((ObjectNode) document.at("/setup/flink")).putObject("token_provider")
+                    .put("renewal_interval", "2s").put("retry_backoff", "3s");
+            ObjectNode fault = replaceSteps(document).addObject().putObject("leader_fault")
+                    .put("mode", "isolate-zookeeper").put("duration", "15s").put("timeout", "2m");
+            fault.putObject("token_fault").put("mode", "delay").put("delay", "5s");
+        });
+        ExecutableScenarioPlan plan = compiler.compile(resolved);
+        assertEquals(2, plan.flink().jobmanagers());
+        assertEquals(Optional.of(Duration.ofSeconds(3)),
+                plan.flink().tokenProvider().orElseThrow().retryBackoff());
+        assertEquals(3, plan.flink().expectedComponents().size());
+        var step = (ExecutableScenarioPlan.LeaderFault) plan.phases().getFirst().steps().getFirst();
+        assertEquals(org.savonitar.flink.stability.runtime.api.FlinkHaControl.Mode.ISOLATE_ZOOKEEPER,
+                step.request().mode());
+        assertEquals(Duration.ofSeconds(5), step.request().tokenFault().orElseThrow().delay());
+        assertTrue(step.recoveryBarrier().isEmpty(), "existing leader fault semantics are unchanged");
+        try (PreparedScenarioPlan prepared = new ArtifactPlanResolver().resolve(resolved,
+                new ArtifactResolutionOptions(artifactRoot, true))) {
+            PreparedExecutableScenarioPlan bound = compiler.bind(prepared, plan);
+            assertEquals(plan.flink().highAvailability(), bound.flinkRuntimeTarget().highAvailability());
+            assertEquals(plan.flink().tokenProvider(), bound.flinkRuntimeTarget().tokenProvider());
+            assertEquals(2, bound.flinkRuntimeTarget().jobManagers());
+        }
+    }
+
+    @Test
+    void recoveryBarrierIsExplicitAndRequiresSyntheticTokens() {
+        for (boolean tokens : List.of(false, true)) {
+            ResolvedScenarioPlan resolved = resolved(document -> {
+                enableHa(document);
+                if (tokens) ((ObjectNode) document.at("/setup/flink")).putObject("token_provider")
+                        .put("renewal_interval", "2s");
+                replaceSteps(document).addObject().putObject("leader_fault")
+                        .put("mode", "isolate-zookeeper").put("duration", "15s").put("timeout", "2m")
+                        .put("recovery_barrier", "token-checkpoint");
+            });
+            if (tokens) {
+                var plan = compiler.compile(resolved);
+                var fault = (ExecutableScenarioPlan.LeaderFault) plan.phases().getFirst().steps().getFirst();
+                assertEquals(Optional.of(ExecutableScenarioPlan.RecoveryBarrier.TOKEN_CHECKPOINT), fault.recoveryBarrier());
+                assertTrue(fault.request().tokenFault().isEmpty());
+            } else {
+                SpecificationException failure = assertFailsAt(Stage.RUNNER_CAPABILITY, () -> compiler.compile(resolved));
+                assertTrue(failure.diagnostics().stream().anyMatch(issue ->
+                        issue.code().equals("runner.phase.token-provider-required")));
+            }
+        }
+    }
+
+    @Test
+    void rejectsMixedOrdinaryAndSynchronizedLeaderFaults() {
+        ResolvedScenarioPlan resolved = resolved(document -> {
+            enableHa(document);
+            ((ObjectNode) document.at("/setup/flink")).putObject("token_provider").put("renewal_interval", "2s");
+            ArrayNode steps = replaceSteps(document);
+            steps.addObject().putObject("leader_fault").put("mode", "isolate-zookeeper")
+                    .put("duration", "15s").put("timeout", "2m").put("recovery_barrier", "token-checkpoint");
+            steps.addObject().putObject("loop").put("times", 2).putArray("steps")
+                    .addObject().putObject("leader_fault").put("mode", "isolate-zookeeper")
+                    .put("duration", "15s").put("timeout", "2m");
+        });
+        SpecificationException failure = assertFailsAt(Stage.RUNNER_CAPABILITY, () -> compiler.compile(resolved));
+        assertTrue(failure.diagnostics().stream().anyMatch(issue ->
+                issue.code().equals("runner.phase.mixed-recovery-barriers")));
+    }
+
+    @Test
+    void rejectsLeaderFaultWithoutHaAndTokenFaultWithoutTheFixture() {
+        for (boolean ha : List.of(false, true)) {
+            ResolvedScenarioPlan resolved = resolved(document -> {
+                if (ha) enableHa(document);
+                ObjectNode fault = replaceSteps(document).addObject().putObject("leader_fault")
+                        .put("mode", "pause").put("duration", "15s").put("timeout", "2m");
+                fault.putObject("token_fault").put("mode", "fail");
+            });
+            SpecificationException failure = assertFailsAt(Stage.RUNNER_CAPABILITY,
+                    () -> compiler.compile(resolved));
+            assertTrue(failure.diagnostics().stream().anyMatch(issue -> issue.code().equals(
+                    ha ? "runner.phase.token-provider-required" : "runner.phase.ha-required")));
+        }
+    }
+
+    @Test
+    void preservesDefaultTokenRetryUnlessExplicitlyBounded() {
+        ResolvedScenarioPlan defaults = resolved(document ->
+                ((ObjectNode) document.at("/setup/flink")).putObject("token_provider")
+                        .put("renewal_interval", "2s"));
+        assertTrue(compiler.compile(defaults).flink().tokenProvider().orElseThrow()
+                .retryBackoff().isEmpty());
+        for (String backoff : List.of("0s", "999ms", "6m")) {
+            ResolvedScenarioPlan invalid = resolved(document ->
+                    ((ObjectNode) document.at("/setup/flink")).putObject("token_provider")
+                            .put("renewal_interval", "2s").put("retry_backoff", backoff));
+            SpecificationException failure = assertFailsAt(Stage.RUNNER_CAPABILITY,
+                    () -> compiler.compile(invalid));
+            assertTrue(failure.diagnostics().stream().anyMatch(issue ->
+                    issue.code().equals(backoff.equals("0s")
+                            ? "runner.value.duration-unsupported" : "runner.duration.out-of-range")));
+        }
+    }
+
+    @Test
+    void rejectsHaWithVolatileCheckpointStorageOrUnboundedFaultDuration() {
+        for (boolean volatileStorage : List.of(false, true)) {
+            ResolvedScenarioPlan resolved = resolved(document -> {
+                enableHa(document);
+                if (volatileStorage) ((ObjectNode) document.at("/workload/jobs/0/checkpointing"))
+                        .putObject("storage").put("type", "jobmanager");
+                replaceSteps(document).addObject().putObject("leader_fault")
+                        .put("mode", "kill").put("duration", "3m").put("timeout", "2m");
+            });
+            SpecificationException failure = assertFailsAt(Stage.RUNNER_CAPABILITY,
+                    () -> compiler.compile(resolved));
+            assertTrue(failure.diagnostics().stream().anyMatch(issue -> issue.code().equals(
+                    volatileStorage ? "runner.flink.ha-checkpoint-storage-required"
+                            : "runner.phase.ha-timeout-invalid")));
+        }
+    }
+
+    @Test
+    void boundsExpandedLeaderFaultsWithoutExpandingLargeLoops() {
+        for (int repetitions : List.of(3, 100, 101, Integer.MAX_VALUE)) {
+            ResolvedScenarioPlan resolved = resolved(document -> {
+                enableHa(document);
+                ObjectNode loop = replaceSteps(document).addObject().putObject("loop")
+                        .put("times", repetitions);
+                loop.putArray("steps").addObject().putObject("leader_fault")
+                        .put("mode", "pause").put("duration", "15s").put("timeout", "2m");
+            });
+            if (repetitions <= 100) {
+                compiler.compile(resolved);
+            } else {
+                SpecificationException failure = assertFailsAt(Stage.RUNNER_CAPABILITY,
+                        () -> compiler.compile(resolved));
+                assertTrue(failure.diagnostics().stream().anyMatch(issue ->
+                        issue.code().equals("runner.phase.ha-fault-count-unsupported")));
+            }
+        }
+    }
+
+    @Test
+    void rejectsLeaderFaultWhileTaskManagerKillRemainsUnhealed() {
+        ResolvedScenarioPlan resolved = resolved(document -> {
+            enableHa(document);
+            ArrayNode steps = replaceSteps(document);
+            addKill(steps, "taskmanager-1");
+            steps.addObject().putObject("leader_fault")
+                    .put("mode", "pause").put("duration", "15s").put("timeout", "2m");
+            steps.addObject().putObject("restart").put("component", "taskmanager");
+        });
+        SpecificationException failure = assertFailsAt(Stage.RUNNER_CAPABILITY,
+                () -> compiler.compile(resolved));
+        assertTrue(failure.diagnostics().stream().anyMatch(issue ->
+                issue.code().equals("runner.phase.ha-taskmanager-overlap-unsupported")));
+    }
+
+    @Test
+    void reservesHaNetworkAliasesIncludingFutureIncarnations() {
+        for (String host : List.of("jobmanager-2", "jobmanager-1-1", "jobmanager-2-101",
+                "flink-zookeeper")) {
+            ResolvedScenarioPlan resolved = resolved(document -> {
+                enableHa(document);
+                routeSinkThroughProxy(document);
+                ((ObjectNode) document.at("/setup/proxies/kafka-proxy"))
+                        .put("listen", host + ":9092");
+            });
+            SpecificationException failure = assertFailsAt(Stage.RUNNER_CAPABILITY,
+                    () -> compiler.compile(resolved));
+            assertTrue(failure.diagnostics().stream().anyMatch(issue ->
+                    issue.code().equals("runner.kafka.proxy-listen-unsupported")));
+        }
+    }
+
+    private static void enableHa(ObjectNode document) {
+        ObjectNode flink = (ObjectNode) document.at("/setup/flink");
+        flink.put("jobmanagers", 2).putObject("high_availability")
+                .put("zookeeper_image", "zookeeper:3.9.3").put("session_timeout", "6s");
+        ((ObjectNode) document.at("/workload/jobs/0/checkpointing"))
+                .putObject("storage").put("type", "filesystem");
+    }
+
+    @Test
     void compilesTheMinimalPlainScenarioIntoTypedRuntimeValues() {
         ResolvedScenarioPlan resolved = resolved(document -> {});
 

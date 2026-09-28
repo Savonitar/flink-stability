@@ -48,7 +48,9 @@ class ScenarioVerdictTest {
                 result.inputManifest(), result.phaseEvidence(), result.writeFenceEvidence(),
                 result.processFenceEvidence(), result.finalJobObservation(), result.terminalValidation(),
                 result.sinkTransactions(), result.subjectClassOrigins(), result.flinkProvisioningEvidence(),
-                result.expectedFlinkRuntime(), result.runtimeClassOrigins(), feature, result.flinkRestErrors(), result.diagnostics());
+                result.expectedFlinkRuntime(), result.runtimeClassOrigins(), feature,
+                result.expectedHa(), result.tokenEvidence(), result.haObservations(),
+                result.processObservations(), result.diagnostics());
     }
 
     @Test
@@ -60,7 +62,9 @@ class ScenarioVerdictTest {
                 complete.finalJobObservation(), complete.terminalValidation(), complete.sinkTransactions(),
                 complete.subjectClassOrigins(), List.of(), FlinkRuntimeIdentityTest.expected(Optional.empty()),
                 Optional.empty(),
-                KafkaTransactionVersion.Selection.notRequested(), List.of(), complete.diagnostics());
+                KafkaTransactionVersion.Selection.notRequested(), complete.expectedHa(), complete.tokenEvidence(),
+                complete.haObservations(), complete.processObservations(),
+                complete.diagnostics());
 
         ScenarioVerdict verdict = ScenarioVerdict.of(EXPECT_DUPLICATES, incomplete);
 
@@ -206,7 +210,7 @@ class ScenarioVerdictTest {
                 List.of(),
                 FlinkRuntimeIdentityTest.expected(Optional.empty()),
                 Optional.empty(),
-                KafkaTransactionVersion.Selection.notRequested(), List.of(), List.of());
+                KafkaTransactionVersion.Selection.notRequested(), List.of());
 
         ScenarioVerdict verdict = ScenarioVerdict.of(EXPECT_DUPLICATES, unsupported);
 
@@ -254,7 +258,6 @@ class ScenarioVerdictTest {
                     FlinkRuntimeIdentityTest.expected(Optional.empty()),
                 Optional.empty(),
                 KafkaTransactionVersion.Selection.notRequested(),
-                List.of(),
                     complete.diagnostics());
 
             ScenarioVerdict verdict = ScenarioVerdict.of(EXPECT_DUPLICATES, invalid);
@@ -297,7 +300,6 @@ class ScenarioVerdictTest {
                 FlinkRuntimeIdentityTest.expected(Optional.empty()),
                 Optional.empty(),
                 KafkaTransactionVersion.Selection.notRequested(),
-                List.of(),
                 List.of());
     }
 
@@ -343,7 +345,8 @@ class ScenarioVerdictTest {
                 FlinkRuntimeIdentityTest.expected(Optional.empty()),
                 Optional.empty(),
                 KafkaTransactionVersion.Selection.notRequested(),
-                List.of(),
+                new FlinkHaEvidence.Expected(List.of(), false, false), Optional.empty(), Optional.empty(),
+                Optional.of(FlinkRuntimeIdentityTest.healthyProcesses(processes)),
                 List.of());
     }
 }

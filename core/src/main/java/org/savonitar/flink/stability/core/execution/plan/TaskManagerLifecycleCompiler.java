@@ -80,6 +80,10 @@ final class TaskManagerLifecycleCompiler {
                     issues.add(issue(source, "runner.phase.taskmanager-already-running",
                             stepPath + "/restart", "A restart must heal a preceding kill of " + name));
                 }
+            } else if (step.has("leader_fault") && !stopped.isEmpty()) {
+                issues.add(issue(source, "runner.phase.ha-taskmanager-overlap-unsupported",
+                        stepPath + "/leader_fault",
+                        "Heal the preceding TaskManager kill before an atomic leader fault"));
             } else if (step.get("loop") instanceof ObjectNode loop) {
                 Map<String, String> before = new LinkedHashMap<>(stopped);
                 validateSteps(source, (ArrayNode) loop.path("steps"), stepPath + "/loop/steps",

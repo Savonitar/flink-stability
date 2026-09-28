@@ -1,0 +1,9 @@
+format: v1
+kind: expected-result
+
+meta:
+  name: ha-token-repeat-linkage.expected
+  scenario: ha-token-repeat-linkage
+
+default:
+  outcome: pass

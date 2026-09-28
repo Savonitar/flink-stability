@@ -32,6 +32,8 @@ import org.savonitar.flink.stability.core.execution.plan.PreparedExecutableScena
 import org.savonitar.flink.stability.core.validation.kafka.KafkaIdSetValidationResult;
 import org.savonitar.flink.stability.core.validation.kafka.KafkaTransactionListing;
 import org.savonitar.flink.stability.runtime.api.FlinkClassLoadLog;
+import org.savonitar.flink.stability.runtime.api.FlinkHaControl;
+import org.savonitar.flink.stability.runtime.api.TokenServiceControl;
 import org.savonitar.flink.stability.runtime.api.FlinkComponentProvisioningEvidence;
 import org.savonitar.flink.stability.runtime.api.FlinkProcessWriteFenceEvidence;
 import org.savonitar.flink.stability.runtime.api.FlinkRuntimeTarget;
@@ -89,6 +91,36 @@ class V1ScenarioExecutorTest {
                             prefix + "-0-1", "CompleteCommit", 7, 0, List.of())));
 
     @Test
+    void processHealthCannotHideDataFailureOrPermitCleanPassAndSurvivesCleanup() throws Exception {
+        for (boolean oraclePasses : List.of(true, false)) {
+            for (boolean exited : List.of(true, false)) {
+                List<String> events = new ArrayList<>();
+                try (Fixture fixture = fixture()) {
+                    FakeRuntime runtime = new FakeRuntime(events);
+                    runtime.unexpectedProcessExit = exited;
+                    runtime.missingProcessObservations = !exited;
+                    V1ScenarioExecutionResult result = executor(events, runtime, new FakeFlink(events),
+                            (bootstrap, topic, ids, timeout) -> oraclePasses ? passResult() : missingResult())
+                            .execute(fixture.bound(), attemptContext());
+                    String processReason = exited ? FlinkProcessHealth.UNEXPECTED_EXIT : FlinkProcessHealth.UNCONFIRMED;
+                    assertEquals(oraclePasses ? processReason : missingResult().reason(), result.reason());
+                    assertEquals(oraclePasses && !exited ? V1ScenarioExecutionResult.Status.INCONCLUSIVE
+                            : V1ScenarioExecutionResult.Status.FAIL, result.status());
+                    assertEquals(oraclePasses ? passResult() : missingResult(), result.terminalValidation().orElseThrow());
+                    assertEquals(result.processObservations(), result.withCleanupFailure(
+                            new IOException("cleanup failed")).processObservations());
+                    if (!oraclePasses) {
+                        var verdict = ScenarioVerdict.of(ExecutableScenarioPlan.ExpectedOutcome.failure(
+                                "kafka.id-set", missingResult().reason()), result);
+                        assertEquals(ScenarioVerdict.Status.INCONCLUSIVE, verdict.status());
+                        assertEquals(processReason, verdict.reason());
+                    }
+                }
+            }
+        }
+    }
+
+    @Test
     void requestedRuntimeProvenanceGatesBothPassingOraclesAndMatchingNegativeControls() throws Exception {
         for (boolean oraclePasses : List.of(false, true)) {
             for (String evidence : List.of("confirmed", "foreign", "missing", "aliased")) {
@@ -137,6 +169,95 @@ class V1ScenarioExecutorTest {
                     assertEquals(result.runtimeJarIdentity(), result.withCleanupFailure(
                             new IOException("cleanup failed")).runtimeJarIdentity());
                 }
+            }
+        }
+    }
+
+    @Test
+    void unconfirmedLeaderOperationStillFencesAndRunsOracleRetainingRawDataFailure() throws Exception {
+        for (boolean oraclePasses : List.of(true, false)) {
+            List<String> events = new ArrayList<>();
+            try (Fixture fixture = fixture(document -> {
+                ObjectNode flink = (ObjectNode) document.at("/setup/flink");
+                flink.put("jobmanagers", 2);
+                flink.putObject("high_availability").put("zookeeper_image", "zookeeper:3.9.3")
+                        .put("session_timeout", "2s");
+                ((ObjectNode) document.at("/workload/jobs/0/checkpointing"))
+                        .putObject("storage").put("type", "filesystem");
+                var steps = (com.fasterxml.jackson.databind.node.ArrayNode) document.at("/phases/0/steps");
+                steps.removeAll();
+                steps.addObject().putObject("leader_fault").put("mode", "pause")
+                        .put("duration", "1ms").put("timeout", "2s");
+            })) {
+                FakeFlink flink = new FakeFlink(events);
+                flink.observations.add(job(1_000, FlinkJobState.RUNNING, 1, 0));
+                FakeRuntime runtime = new FakeRuntime(events);
+                V1ScenarioExecutionResult result = executor(events, runtime, flink,
+                        (bootstrap, topic, ids, timeout) -> {
+                            events.add("oracle");
+                            return oraclePasses ? passResult() : missingResult();
+                        }).execute(fixture.bound(), attemptContext());
+
+                assertTrue(events.indexOf("oracle") > events.indexOf("process-fence"));
+                assertTrue(result.writeFenceEvidence().isPresent());
+                assertTrue(result.terminalValidation().isPresent());
+                var faults = result.phaseEvidence().orElseThrow().leaderFaults();
+                assertEquals(1, faults.size());
+                assertTrue(faults.getFirst().raw().errors().getFirst().contains("UnsupportedOperationException"));
+                assertEquals(JOB.jobId(), faults.getFirst().jobId());
+                assertEquals(1, result.expectedHa().faults().size());
+                assertEquals(FlinkHaEvidence.Outcome.UNCONFIRMED, result.haEvidence().outcome());
+                assertEquals(oraclePasses ? V1ScenarioExecutionResult.Status.INCONCLUSIVE
+                        : V1ScenarioExecutionResult.Status.FAIL, result.status());
+                if (!oraclePasses) assertEquals(missingResult().reason(), result.reason());
+                assertEquals(result.phaseEvidence(), result.withCleanupFailure(
+                        new IOException("cleanup failed")).phaseEvidence());
+            }
+        }
+    }
+
+    @Test
+    void requestedTokenEvidenceIsCheckedAfterOracleAndSurvivesEveryResultCopy() throws Exception {
+        for (boolean oraclePasses : List.of(true, false)) {
+            List<String> events = new ArrayList<>();
+            try (Fixture fixture = fixture(document ->
+                    ((ObjectNode) document.at("/setup/flink")).putObject("token_provider")
+                            .put("renewal_interval", "2s"))) {
+                FakeRuntime runtime = new FakeRuntime(events);
+                V1ScenarioExecutionResult result = executor(events, runtime, new FakeFlink(events),
+                        (bootstrap, topic, ids, timeout) -> {
+                            events.add("oracle");
+                            return oraclePasses ? passResult() : missingResult();
+                        }).execute(fixture.bound(), attemptContext());
+
+                assertTrue(events.indexOf("oracle") > events.indexOf("process-fence"));
+                assertTrue(result.terminalValidation().isPresent());
+                assertTrue(result.expectedHa().tokenProviderRequired());
+                assertTrue(result.tokenEvidence().isPresent());
+                assertTrue(result.tokenEvidence().orElseThrow().snapshot().isEmpty());
+                assertEquals(FlinkHaEvidence.Outcome.UNCONFIRMED, result.haEvidence().outcome());
+                assertEquals(oraclePasses ? V1ScenarioExecutionResult.Status.INCONCLUSIVE
+                        : V1ScenarioExecutionResult.Status.FAIL, result.status());
+                assertEquals(oraclePasses ? "flink.ha.effect-unconfirmed"
+                        : missingResult().reason(), result.reason());
+                assertEquals(result.expectedHa(), result.withCleanupFailure(
+                        new IOException("cleanup failed")).expectedHa());
+                assertEquals(result.tokenEvidence(), result.withPreparedArtifactCleanupFailure(
+                        new IOException("artifact cleanup failed")).tokenEvidence());
+                if (!oraclePasses) {
+                    assertEquals(ScenarioVerdict.Status.INCONCLUSIVE, ScenarioVerdict.of(
+                            new ExecutableScenarioPlan.ExpectedOutcome(
+                                    ExecutableScenarioPlan.ExpectedOutcome.Outcome.FAIL,
+                                    Optional.of("kafka-id-set"), Optional.of(missingResult().reason())),
+                            result).status());
+                }
+                assertThrows(IllegalArgumentException.class, () -> new V1ScenarioExecutionResult(
+                        V1ScenarioExecutionResult.Status.PASS, passResult().reason(), "forged pass",
+                        result.inputManifest(), result.phaseEvidence(), result.writeFenceEvidence(),
+                        result.processFenceEvidence(), result.finalJobObservation(), Optional.of(passResult()),
+                        result.sinkTransactions(), result.subjectClassOrigins(), result.flinkProvisioningEvidence(),
+                        result.expectedFlinkRuntime(), result.runtimeClassOrigins(), result.kafkaTransactionVersion(),
+                        result.expectedHa(), result.tokenEvidence(), result.diagnostics()));
             }
         }
     }
@@ -201,6 +322,27 @@ class V1ScenarioExecutorTest {
     }
 
     @Test
+    void aPassResultCannotOmitProcessHealthThroughTheCompatibilityConstructor() throws Exception {
+        List<String> events = new ArrayList<>();
+        try (Fixture fixture = fixture(V1ScenarioExecutorTest::requestRuntimeJar)) {
+            V1ScenarioExecutionResult result = executor(events, new FakeRuntime(events),
+                    new FakeFlink(events), (bootstrap, topic, ids, timeout) -> passResult())
+                    .execute(fixture.bound(), attemptContext());
+            assertEquals(V1ScenarioExecutionResult.Status.PASS, result.status());
+
+            IllegalArgumentException failure = assertThrows(IllegalArgumentException.class,
+                    () -> new V1ScenarioExecutionResult(result.status(), result.reason(), result.message(),
+                            result.inputManifest(), result.phaseEvidence(), result.writeFenceEvidence(),
+                            result.processFenceEvidence(), result.finalJobObservation(), result.terminalValidation(),
+                            result.sinkTransactions(), result.subjectClassOrigins(), result.flinkProvisioningEvidence(),
+                            result.expectedFlinkRuntime(), result.runtimeClassOrigins(), result.kafkaTransactionVersion(),
+                            result.expectedHa(), result.tokenEvidence(), result.diagnostics()));
+
+            assertTrue(failure.getMessage().contains("pre-fence process health"), failure.getMessage());
+        }
+    }
+
+    @Test
     void recoveredRestErrorsSurviveEveryAttemptExitAndBothCleanupCopies() throws Exception {
         for (String failureAt : List.of("success", "phase", "fence")) {
             List<String> events = new ArrayList<>();
@@ -240,6 +382,10 @@ class V1ScenarioExecutorTest {
                     assertEquals(List.of(error), copy.flinkRestErrors(), failureAt);
                     assertEquals(result.runtimeClassOrigins(), copy.runtimeClassOrigins(), failureAt);
                     assertEquals(result.runtimeJarIdentity(), copy.runtimeJarIdentity(), failureAt);
+                    assertEquals(result.expectedHa(), copy.expectedHa(), failureAt);
+                    assertEquals(result.tokenEvidence(), copy.tokenEvidence(), failureAt);
+                    assertEquals(result.haObservations(), copy.haObservations(), failureAt);
+                    assertEquals(result.processObservations(), copy.processObservations(), failureAt);
                 }
                 assertThrows(UnsupportedOperationException.class, () -> result.flinkRestErrors().clear());
             }
@@ -247,22 +393,87 @@ class V1ScenarioExecutorTest {
     }
 
     @Test
-    void aPassResultCannotOmitRequestedRuntimeClassEvidenceThroughTheCompatibilityConstructor()
-            throws Exception {
+    void restEvidenceCopiesRetainNonemptyHaTokenAndProcessEvidenceIncludingDataFailure() throws Exception {
+        for (boolean oraclePasses : List.of(true, false)) {
+            List<String> events = new ArrayList<>();
+            try (Fixture fixture = fixture(document -> {
+                ObjectNode flink = (ObjectNode) document.at("/setup/flink");
+                flink.put("jobmanagers", 2);
+                flink.putObject("high_availability").put("zookeeper_image", "zookeeper:3.9.3")
+                        .put("session_timeout", "2s");
+                flink.putObject("token_provider").put("renewal_interval", "2s");
+                ((ObjectNode) document.at("/workload/jobs/0/checkpointing"))
+                        .putObject("storage").put("type", "filesystem");
+            })) {
+                FakeRuntime runtime = new FakeRuntime(events);
+                var tokens = new TokenServiceControl.Snapshot(List.of(new TokenServiceControl.Event(
+                        1, TokenServiceControl.Kind.PROVIDER_INITIALIZED, "jobmanager-1#1", "jobmanager",
+                        10, 10, 0, 0, TokenServiceControl.Mode.HEALTHY, OptionalLong.empty(), "initialized")),
+                        false, false, 0, 0);
+                var history = new FlinkHaControl.Observations(List.of(new FlinkHaControl.LeadershipObservation(
+                        1, 1, 10, 10, FlinkHaControl.ObservationMoment.INITIAL,
+                        Optional.empty(), Optional.of("leader sample unavailable"))), List.of(), false);
+                runtime.tokenSnapshot = Optional.of(tokens);
+                runtime.haHistory = Optional.of(history);
+                FakeFlink flink = new FakeFlink(events);
+                var error = new FlinkScenarioControl.RestError(
+                        1, "GET", "/jobs/job-1/checkpoints", 503, "original HA read failure");
+                flink.httpErrors.add(error);
+
+                V1ScenarioExecutionResult result = executor(events, runtime, flink,
+                        (bootstrap, topic, ids, timeout) -> oraclePasses ? passResult() : missingResult())
+                        .execute(fixture.bound(), attemptContext());
+
+                assertTrue(result.expectedHa().haRequired());
+                assertTrue(result.expectedHa().tokenProviderRequired());
+                assertEquals(Optional.of(tokens), result.tokenEvidence().orElseThrow().snapshot());
+                assertEquals(Optional.of(history), result.haObservations());
+                assertFalse(result.processObservations().orElseThrow().observations().isEmpty());
+                assertEquals(List.of(error), result.flinkRestErrors());
+                assertEquals(oraclePasses ? V1ScenarioExecutionResult.Status.INCONCLUSIVE
+                        : V1ScenarioExecutionResult.Status.FAIL, result.status());
+                if (!oraclePasses) assertEquals(missingResult().reason(), result.reason());
+
+                var replacementErrors = List.of(new FlinkScenarioControl.RestError(
+                        1, "POST", "/jobs/job-1/checkpoints", 503, "checkpoint submission unknown"));
+                var copied = result.withFlinkRestErrors(replacementErrors);
+                for (var retained : List.of(copied,
+                        copied.withCleanupFailure(new IOException("runtime cleanup failed")),
+                        copied.withPreparedArtifactCleanupFailure(new IOException("artifact cleanup failed")))) {
+                    assertEquals(replacementErrors, retained.flinkRestErrors());
+                    assertEquals(result.expectedHa(), retained.expectedHa());
+                    assertEquals(result.tokenEvidence(), retained.tokenEvidence());
+                    assertEquals(result.haObservations(), retained.haObservations());
+                    assertEquals(result.processObservations(), retained.processObservations());
+                    assertEquals(result.phaseEvidence(), retained.phaseEvidence());
+                    assertEquals(result.terminalValidation(), retained.terminalValidation());
+                    assertEquals(result.status(), retained.status());
+                    assertEquals(result.reason(), retained.reason());
+                }
+                assertEquals(List.of(error), result.flinkRestErrors(), "copying cannot mutate the original evidence");
+            }
+        }
+    }
+
+    @Test
+    void aPassResultCannotOmitRequestedRuntimeClassEvidenceWithHealthyProcesses() throws Exception {
         List<String> events = new ArrayList<>();
         try (Fixture fixture = fixture(V1ScenarioExecutorTest::requestRuntimeJar)) {
             V1ScenarioExecutionResult result = executor(events, new FakeRuntime(events),
                     new FakeFlink(events), (bootstrap, topic, ids, timeout) -> passResult())
                     .execute(fixture.bound(), attemptContext());
+            assertEquals(V1ScenarioExecutionResult.Status.PASS, result.status());
 
             IllegalArgumentException failure = assertThrows(IllegalArgumentException.class,
                     () -> new V1ScenarioExecutionResult(result.status(), result.reason(), result.message(),
                             result.inputManifest(), result.phaseEvidence(), result.writeFenceEvidence(),
                             result.processFenceEvidence(), result.finalJobObservation(), result.terminalValidation(),
                             result.sinkTransactions(), result.subjectClassOrigins(), result.flinkProvisioningEvidence(),
-                            result.expectedFlinkRuntime(), result.diagnostics()));
+                            result.expectedFlinkRuntime(), Optional.empty(), result.kafkaTransactionVersion(),
+                            result.expectedHa(), result.tokenEvidence(), result.haObservations(),
+                            result.processObservations(), result.diagnostics()));
 
-            assertTrue(failure.getMessage().contains("runtime JAR provenance"));
+            assertTrue(failure.getMessage().contains("runtime JAR provenance"), failure.getMessage());
         }
     }
 
@@ -737,92 +948,64 @@ class V1ScenarioExecutorTest {
     }
 
     @Test
-    void aPassResultCannotCarryAnUnconfirmedKill() {
-        PhaseExecutionEvidence phases = new PhaseExecutionEvidence(
-                List.of(),
-                List.of(new PhaseExecutionEvidence.TaskManagerKill(
-                        "$/phases/0/steps/0",
-                        List.of(),
-                        "taskmanager-1",
-                        new FlinkJobObservation.Attempt(
-                                Optional.of(job(1_000, FlinkJobState.FINISHED, 1, 0)),
-                                Optional.empty()), OptionalLong.of(1_250), OptionalLong.of(1_500))),
-                List.of());
-        FlinkJobObservation.Attempt atFence = new FlinkJobObservation.Attempt(
-                Optional.of(job(2_000, FlinkJobState.FINISHED, 1, 0)), Optional.empty());
-        FlinkProcessWriteFenceEvidence processFence = new FlinkProcessWriteFenceEvidence(
-                List.of(), Instant.parse("2026-08-26T12:00:00Z"));
+    void aPassResultCannotCarryAnUnconfirmedKill() throws Exception {
+        List<String> events = new ArrayList<>();
+        try (Fixture fixture = fixture(V1ScenarioExecutorTest::killAndRestart)) {
+            FakeFlink flink = new FakeFlink(events);
+            flink.observations.add(job(1_000, FlinkJobState.FINISHED, 2, 0));
+            flink.observations.add(job(9_000, FlinkJobState.FINISHED, 2, 0));
+            V1ScenarioExecutionResult result = executor(events, new FakeRuntime(events), flink,
+                    (bootstrap, topic, count, timeout) -> passResult())
+                    .execute(fixture.bound(), attemptContext());
+            assertEquals(V1ScenarioExecutionResult.Status.INCONCLUSIVE, result.status());
+            assertEquals(ExecutablePhaseExecutor.TASKMANAGER_KILL_EFFECT_UNCONFIRMED, result.reason());
+            assertEquals(FlinkProcessHealth.Outcome.HEALTHY, result.processHealth().outcome());
+            assertEquals(FlinkRuntimeIdentity.Outcome.CONFIRMED, result.flinkRuntimeIdentity().outcome());
+            assertEquals(FlinkHaEvidence.Outcome.CONFIRMED, result.haEvidence().outcome());
 
-        IllegalArgumentException failure = assertThrows(
-                IllegalArgumentException.class,
-                () -> new V1ScenarioExecutionResult(
-                        V1ScenarioExecutionResult.Status.PASS,
-                        "validator.kafka.id-set.match",
-                        "passed",
-                        Optional.empty(),
-                        Optional.of(phases),
-                        Optional.of(new FlinkTerminalWriteFence.Evidence(
-                                FlinkJobState.FINISHED, processFence, atFence)),
-                        Optional.of(processFence),
-                        Optional.of(atFence),
-                        Optional.of(passResult()),
-                        Optional.empty(),
-                        Optional.of(confirmedOrigins()),
-                        List.of(),
-                        FlinkRuntimeIdentityTest.expected(Optional.empty()),
-                Optional.empty(),
-                KafkaTransactionVersion.Selection.notRequested(),
-                List.of(),
-                        List.of()));
+            IllegalArgumentException failure = assertThrows(IllegalArgumentException.class,
+                    () -> new V1ScenarioExecutionResult(V1ScenarioExecutionResult.Status.PASS,
+                            "validator.kafka.id-set.match", "passed", result.inputManifest(),
+                            result.phaseEvidence(), result.writeFenceEvidence(), result.processFenceEvidence(),
+                            result.finalJobObservation(), result.terminalValidation(), result.sinkTransactions(),
+                            result.subjectClassOrigins(), result.flinkProvisioningEvidence(), result.expectedFlinkRuntime(),
+                            result.runtimeClassOrigins(), result.kafkaTransactionVersion(), result.expectedHa(),
+                            result.tokenEvidence(), result.haObservations(), result.processObservations(),
+                            result.diagnostics()));
 
-        assertTrue(failure.getMessage().contains("confirmed effect"));
+            assertTrue(failure.getMessage().contains("confirmed effect"), failure.getMessage());
+        }
     }
 
     @Test
-    void aPassResultCannotCarryANetworkFaultThatMissedItsOccurrences() {
-        PhaseExecutionEvidence phases = new PhaseExecutionEvidence(
-                List.of(),
-                List.of(),
-                List.of(new PhaseExecutionEvidence.NetworkFault(
-                        "$/phases/1/steps/0",
-                        "phases-1-steps-0",
-                        "kafka-proxy",
-                        "test/proxy",
-                        ExecutableScenarioPlan.NetworkFaultAction.DROP_RESPONSE,
-                        1,
-                        Duration.ofMinutes(2),
-                        1_000,
-                        121_000,
-                        List.of(),
-                        List.of())));
-        FlinkJobObservation.Attempt atFence = new FlinkJobObservation.Attempt(
-                Optional.of(job(2_000, FlinkJobState.FINISHED, 1, 0)), Optional.empty());
-        FlinkProcessWriteFenceEvidence processFence = new FlinkProcessWriteFenceEvidence(
-                List.of(), Instant.parse("2026-08-26T12:00:00Z"));
+    void aPassResultCannotCarryANetworkFaultThatMissedItsOccurrences() throws Exception {
+        List<String> events = new ArrayList<>();
+        try (Fixture fixture = fixture(V1ScenarioExecutorTest::networkFault)) {
+            V1ScenarioExecutionResult result = executor(events, new FakeRuntime(events),
+                    new FakeFlink(events), (bootstrap, topic, ids, timeout) -> passResult(),
+                    V1ScenarioExecutor.DEFAULT_ATTEMPT_CLEANUP_TIMEOUT,
+                    (path, fault) -> new PhaseExecutionEvidence.NetworkFault(
+                            path, "fault-1", fault.proxy(), "test/proxy", fault.action(),
+                            fault.occurrences(), fault.triggerDeadline(), 100, 200, List.of(), List.of()))
+                    .execute(fixture.bound(), attemptContext());
+            assertEquals(V1ScenarioExecutionResult.Status.INCONCLUSIVE, result.status());
+            assertEquals(ExecutablePhaseExecutor.NETWORK_FAULT_TRIGGER_MISSED, result.reason());
+            assertEquals(FlinkProcessHealth.Outcome.HEALTHY, result.processHealth().outcome());
+            assertEquals(FlinkRuntimeIdentity.Outcome.CONFIRMED, result.flinkRuntimeIdentity().outcome());
+            assertEquals(FlinkHaEvidence.Outcome.CONFIRMED, result.haEvidence().outcome());
 
-        IllegalArgumentException failure = assertThrows(
-                IllegalArgumentException.class,
-                () -> new V1ScenarioExecutionResult(
-                        V1ScenarioExecutionResult.Status.PASS,
-                        "validator.kafka.id-set.match",
-                        "passed",
-                        Optional.empty(),
-                        Optional.of(phases),
-                        Optional.of(new FlinkTerminalWriteFence.Evidence(
-                                FlinkJobState.FINISHED, processFence, atFence)),
-                        Optional.of(processFence),
-                        Optional.of(atFence),
-                        Optional.of(passResult()),
-                        Optional.empty(),
-                        Optional.of(confirmedOrigins()),
-                        List.of(),
-                        FlinkRuntimeIdentityTest.expected(Optional.empty()),
-                Optional.empty(),
-                KafkaTransactionVersion.Selection.notRequested(),
-                List.of(),
-                        List.of()));
+            IllegalArgumentException failure = assertThrows(IllegalArgumentException.class,
+                    () -> new V1ScenarioExecutionResult(V1ScenarioExecutionResult.Status.PASS,
+                            "validator.kafka.id-set.match", "passed", result.inputManifest(),
+                            result.phaseEvidence(), result.writeFenceEvidence(), result.processFenceEvidence(),
+                            result.finalJobObservation(), result.terminalValidation(), result.sinkTransactions(),
+                            result.subjectClassOrigins(), result.flinkProvisioningEvidence(), result.expectedFlinkRuntime(),
+                            result.runtimeClassOrigins(), result.kafkaTransactionVersion(), result.expectedHa(),
+                            result.tokenEvidence(), result.haObservations(), result.processObservations(),
+                            result.diagnostics()));
 
-        assertTrue(failure.getMessage().contains("network fault"), failure.getMessage());
+            assertTrue(failure.getMessage().contains("network fault"), failure.getMessage());
+        }
     }
 
     @Test
@@ -1791,6 +1974,8 @@ class V1ScenarioExecutorTest {
         private boolean duplicateRuntimeLogPaths;
         private RuntimeException classLoadLogsFailure;
         private boolean fenced;
+        private boolean unexpectedProcessExit;
+        private boolean missingProcessObservations;
         private int taskManagerIncarnations;
         private boolean taskManagerRunning;
         private boolean identityUnavailable;
@@ -1800,6 +1985,9 @@ class V1ScenarioExecutorTest {
         private Exception startFlinkFailure;
         private RuntimeException processFenceFailure;
         private RuntimeException closeFailure;
+        private Optional<TokenServiceControl.Snapshot> tokenSnapshot = Optional.empty();
+        private Optional<FlinkHaControl.Observations> haHistory = Optional.empty();
+
         private IOException killFailure;
         private CountDownLatch closeRelease;
         private final CountDownLatch closeEntered = new CountDownLatch(1);
@@ -1881,6 +2069,36 @@ class V1ScenarioExecutorTest {
             }
             fenced = true;
             return FlinkRuntimeIdentityTest.fence(taskManagerIncarnations);
+        }
+
+        @Override
+        public Optional<FlinkProcessWriteFenceEvidence.Observations> flinkProcessObservations() {
+            if (!fenced || missingProcessObservations) {
+                return Optional.empty();
+            }
+            var snapshot = FlinkRuntimeIdentityTest.healthyProcesses(
+                    FlinkRuntimeIdentityTest.fence(taskManagerIncarnations));
+            if (!unexpectedProcessExit) {
+                return Optional.of(snapshot);
+            }
+            var events = new ArrayList<>(snapshot.observations());
+            var original = events.getFirst();
+            events.set(0, new FlinkProcessWriteFenceEvidence.Observation(original.logicalName(), original.role(),
+                    original.runtimeId(), original.moment(), original.observedAt(), Optional.of(
+                    new org.savonitar.flink.stability.runtime.api.FlinkHaControl.ProcessState(
+                            original.runtimeId().orElseThrow(), false, false, Optional.of(1L),
+                            Optional.of(false), Optional.of("2026-09-27T12:00:00Z"))), false, Optional.empty()));
+            return Optional.of(new FlinkProcessWriteFenceEvidence.Observations(events, snapshot.fenced(), false));
+        }
+
+        @Override
+        public Optional<TokenServiceControl.Snapshot> tokenServiceEvidence() {
+            return tokenSnapshot;
+        }
+
+        @Override
+        public Optional<FlinkHaControl.Observations> haObservations() {
+            return haHistory;
         }
 
         @Override

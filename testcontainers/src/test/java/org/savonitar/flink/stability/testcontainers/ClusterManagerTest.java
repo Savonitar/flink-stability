@@ -16,6 +16,8 @@ import org.testcontainers.containers.Network;
 
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.net.InetAddress;
+import java.net.ServerSocket;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
@@ -23,6 +25,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.concurrent.atomic.AtomicLong;
+import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -37,6 +40,39 @@ class ClusterManagerTest {
 
     @TempDir
     Path temporaryDirectory;
+
+    @Test
+    void failedStartupRetainsOwnedHaServicesAndRejectsRetryUntilAttemptCleanup() throws Exception {
+        AtomicInteger creations = new AtomicInteger();
+        var configuration = new FlinkRuntimeTarget.HighAvailability("zookeeper:3.9.3", Duration.ofSeconds(6));
+        try (var gate = new FlinkHaRuntime.TcpGate("127.0.0.1", 1)) {
+            int ownedPort = gate.port();
+            ClusterManager manager = new ClusterManager(Network.SHARED, false,
+                    (target, network, storage) -> { throw new IllegalStateException("flink-factory-failed"); },
+                    (network, target) -> { throw new AssertionError("Kafka is not needed"); },
+                    temporaryDirectory, System::nanoTime,
+                    (network, target, clock) -> {
+                        creations.incrementAndGet();
+                        return new FlinkHaRuntime(target, clock, unused -> Optional.empty(),
+                                Map.of("jobmanager-1", gate));
+                    });
+            try {
+                assertEquals("flink-factory-failed", assertThrows(IllegalStateException.class,
+                        () -> manager.startFlink(target().withHighAvailability(configuration))).getMessage());
+                assertThrows(IllegalStateException.class,
+                        () -> manager.startFlink(target().withHighAvailability(configuration)));
+                assertThrows(IllegalStateException.class, () -> manager.startFlink(target()));
+                assertEquals(1, creations.get());
+                assertFalse(gate.blocked());
+            } finally {
+                manager.close();
+            }
+            assertTrue(gate.blocked());
+            try (ServerSocket reclaimed = new ServerSocket(ownedPort, 1, InetAddress.getLoopbackAddress())) {
+                assertEquals(ownedPort, reclaimed.getLocalPort());
+            }
+        }
+    }
 
     @Test
     void namedRestartReplacesOnlyItsTaskManagerAndFenceCoversEverySlot() throws Exception {
@@ -106,6 +142,26 @@ class ClusterManagerTest {
                     () -> manager.taskManagerIdentity("taskmanager-1"));
             assertEquals("reading TaskManager identity for taskmanager-1", failure.scope());
             assertTrue(manager.isTaskManagerRunning("taskmanager-1"));
+        }
+    }
+
+    @Test
+    void identityInspectionUsesTheCallerBudgetAndRejectsNonpositiveTimeouts() {
+        AtomicLong clock = new AtomicLong();
+        try (ClusterManager manager = manager(new RecordingFactory(),
+                () -> clock.getAndAdd(Duration.ofMillis(2).toNanos()))) {
+            manager.startFlink(target());
+            ContainerOperationTimeoutException failure = assertThrows(
+                    ContainerOperationTimeoutException.class,
+                    () -> manager.taskManagerIdentity("taskmanager-1", Duration.ofMillis(1)));
+            assertEquals(Duration.ofMillis(1), failure.timeout());
+            assertTrue(manager.isTaskManagerRunning("taskmanager-1"));
+            for (Duration invalid : List.of(Duration.ZERO, Duration.ofNanos(-1))) {
+                assertThrows(IllegalArgumentException.class,
+                        () -> manager.taskManagerIdentity("taskmanager-1", invalid));
+                assertThrows(IllegalArgumentException.class,
+                        () -> manager.taskManagerIdentity("taskmanager-99", invalid));
+            }
         }
     }
 
@@ -319,6 +375,91 @@ class ClusterManagerTest {
     }
 
     @Test
+    void snapshotsAllProcessesBeforeFirstFenceKillAndRetainsPartialOutcomesAfterFailure() {
+        RecordingFactory factory = new RecordingFactory();
+        try (ClusterManager manager = manager(factory)) {
+            manager.startFlink(target());
+            factory.events.clear();
+            factory.handles.get("jobmanager-1").fenceFailure = new IllegalStateException("kill unavailable");
+            assertThrows(IllegalStateException.class,
+                    () -> manager.establishFlinkProcessWriteFence(Duration.ofSeconds(5)));
+            assertEquals(List.of("inspect:taskmanager-1", "inspect:jobmanager-1", "fence-kill:taskmanager-1"),
+                    factory.events.subList(0, 3));
+            var snapshot = manager.processObservations();
+            assertEquals(2, snapshot.observations().stream().filter(observation ->
+                    observation.moment() == FlinkProcessWriteFenceEvidence.Moment.BEFORE_FENCE).count());
+            assertEquals(List.of("taskmanager-1"), snapshot.fenced().stream()
+                    .map(FlinkProcessWriteFenceEvidence.Component::logicalName).toList());
+            manager.close();
+            assertEquals(snapshot, manager.processObservations());
+        }
+    }
+
+    @Test
+    void expiredSharedTelemetryBudgetStillAttemptsPhysicalKillsUnderOriginalFenceDeadline() {
+        RecordingFactory factory = new RecordingFactory();
+        AtomicLong clock = new AtomicLong();
+        try (ClusterManager manager = manager(factory, clock::get)) {
+            manager.startFlink(target());
+            factory.handles.get("taskmanager-1").duringInspection =
+                    () -> clock.set(Duration.ofSeconds(11).toNanos());
+            var fence = manager.establishFlinkProcessWriteFence(Duration.ofMinutes(2));
+            assertEquals(2, fence.components().size());
+            assertEquals(List.of("fence-kill:taskmanager-1", "fence-kill:jobmanager-1"),
+                    factory.events.stream().filter(event -> event.startsWith("fence-kill:")).toList());
+            var snapshots = manager.processObservations().observations().stream()
+                    .filter(item -> item.moment() == FlinkProcessWriteFenceEvidence.Moment.BEFORE_FENCE).toList();
+            assertEquals(2, snapshots.size());
+            assertTrue(snapshots.stream().allMatch(item -> item.state().isEmpty() && item.diagnostic().isPresent()));
+            assertEquals(2, manager.processObservations().observations().stream()
+                    .filter(item -> item.moment() == FlinkProcessWriteFenceEvidence.Moment.AFTER_FENCE_KILL).count());
+        }
+    }
+
+    @Test
+    void observedTerminationIsRetainedWhenLaterFenceConfirmationFails() {
+        RecordingFactory factory = new RecordingFactory();
+        try (ClusterManager manager = manager(factory)) {
+            manager.startFlink(target());
+            factory.handles.get("taskmanager-1").failLivenessAfterKill = true;
+            assertThrows(IllegalStateException.class,
+                    () -> manager.establishFlinkProcessWriteFence(Duration.ofSeconds(5)));
+            assertTrue(manager.processObservations().observations().stream().anyMatch(item ->
+                    item.logicalName().equals("taskmanager-1")
+                            && item.moment() == FlinkProcessWriteFenceEvidence.Moment.AFTER_FENCE_KILL
+                            && item.state().filter(state -> !state.running()).isPresent()));
+            assertEquals(List.of("jobmanager-1"), manager.processObservations().fenced().stream()
+                    .map(FlinkProcessWriteFenceEvidence.Component::logicalName).toList());
+        }
+    }
+
+    @Test
+    void unexpectedExitAndUnavailableInspectionRemainDistinctFromFenceSuccess() {
+        for (boolean stopped : List.of(true, false)) {
+            RecordingFactory factory = new RecordingFactory();
+            try (ClusterManager manager = manager(factory)) {
+                manager.startFlink(target());
+                var handle = factory.handles.get("jobmanager-1");
+                if (stopped) {
+                    handle.running = false;
+                } else {
+                    handle.inspectionFailure = new IllegalStateException("inspect unavailable");
+                }
+                var fence = manager.establishFlinkProcessWriteFence(Duration.ofSeconds(5));
+                var observation = manager.processObservations().observations().stream()
+                        .filter(item -> item.logicalName().equals("jobmanager-1")
+                                && item.moment() == FlinkProcessWriteFenceEvidence.Moment.BEFORE_FENCE)
+                        .findFirst().orElseThrow();
+                assertEquals(stopped, observation.state().isPresent());
+                assertEquals(!stopped, observation.diagnostic().isPresent());
+                assertEquals(stopped ? FlinkProcessWriteFenceEvidence.Outcome.ALREADY_STOPPED
+                                : FlinkProcessWriteFenceEvidence.Outcome.SIGKILLED,
+                        fence.components().getLast().outcome());
+            }
+        }
+    }
+
+    @Test
     void failedStartupCleansAlreadyCreatedComponentsAndAllowsClose() {
         RecordingFactory factory = new RecordingFactory();
         factory.failTaskManagerStart = true;
@@ -376,6 +517,7 @@ class ClusterManagerTest {
     private static final class RecordingFactory implements FlinkComponentFactory {
         private final List<String> events = new ArrayList<>();
         private final Map<String, Integer> generations = new LinkedHashMap<>();
+        private final Map<String, RecordingHandle> handles = new LinkedHashMap<>();
         private FlinkRuntimeTarget target;
         private ClassLoadLogs logs;
         private boolean failTaskManagerStart;
@@ -410,7 +552,7 @@ class ClusterManagerTest {
         private ContainerHandle newHandle(String name, FlinkComponentRole role) {
             int generation = generations.merge(name, 1, Integer::sum);
             logs.register(name);
-            return new RecordingHandle(
+            RecordingHandle handle = new RecordingHandle(
                     name,
                     role,
                     name + "-runtime-" + generation,
@@ -421,6 +563,8 @@ class ClusterManagerTest {
                     (failTaskManagerStart && role == FlinkComponentRole.TASK_MANAGER)
                             || name.equals(failedTaskManagerName),
                     badEvidence);
+            handles.put(name, handle);
+            return handle;
         }
     }
 
@@ -435,6 +579,10 @@ class ClusterManagerTest {
         private final boolean badEvidence;
         private boolean running;
         private boolean removed;
+        private RuntimeException fenceFailure;
+        private RuntimeException inspectionFailure;
+        private Runnable duringInspection = () -> {};
+        private boolean failLivenessAfterKill;
 
         private RecordingHandle(
                 String name,
@@ -478,23 +626,44 @@ class ClusterManagerTest {
         }
 
         @Override
-        public void killAndRemoveWithin(ContainerOperationDeadline deadline) {
+        public org.savonitar.flink.stability.runtime.api.FlinkHaControl.ProcessState killAndRemoveWithin(ContainerOperationDeadline deadline) {
             deadline.remaining("test kill");
             events.add("kill:" + name);
             running = false;
             removed = true;
+            return new org.savonitar.flink.stability.runtime.api.FlinkHaControl.ProcessState(runtimeId, false, false);
         }
 
         @Override
-        public void killProcessForWriteFence(ContainerOperationDeadline deadline) {
+        public org.savonitar.flink.stability.runtime.api.FlinkHaControl.ProcessState killProcessForWriteFence(ContainerOperationDeadline deadline) {
             deadline.remaining("test fence kill");
             events.add("fence-kill:" + name);
+            if (fenceFailure != null) {
+                throw fenceFailure;
+            }
             running = false;
+            return new org.savonitar.flink.stability.runtime.api.FlinkHaControl.ProcessState(runtimeId, false, false);
+        }
+
+        @Override
+        public org.savonitar.flink.stability.runtime.api.FlinkHaControl.ProcessState processState(
+                ContainerOperationDeadline deadline) {
+            deadline.remaining("test state");
+            events.add("inspect:" + name);
+            duringInspection.run();
+            deadline.remaining("completing test state inspection");
+            if (inspectionFailure != null) {
+                throw inspectionFailure;
+            }
+            return new org.savonitar.flink.stability.runtime.api.FlinkHaControl.ProcessState(runtimeId(), running, false);
         }
 
         @Override
         public boolean isRunningWithin(ContainerOperationDeadline deadline) {
             deadline.remaining("test liveness");
+            if (!running && failLivenessAfterKill) {
+                throw new IllegalStateException("post-kill inspection failed");
+            }
             if (removed) {
                 throw new IllegalStateException(
                         "Removed container has no runtime ID: " + name);

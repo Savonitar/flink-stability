@@ -153,6 +153,9 @@ public final class V1ScenarioExecutor {
         FlinkRuntimeIdentity.ExpectedTarget expectedRuntime = new FlinkRuntimeIdentity.ExpectedTarget(
                 plan.flink().expectedImageId(), plan.flink().expectedComponents(),
                 plan.flink().expectedRuntimeJar());
+        FlinkHaEvidence.Expected expectedHa = FlinkHaEvidence.Expected.from(
+                plan.phases(), plan.flink().highAvailability().isPresent(), plan.flink().tokenProvider().isPresent(),
+                plan.flink().taskmanagers());
 
         V1AttemptRuntime runtime = null;
         FlinkScenarioControl flink = null;
@@ -198,6 +201,9 @@ public final class V1ScenarioExecutor {
             String jobManagerRestUrl = runtime.startFlink(prepared.flinkRuntimeTarget());
             flink = flinkControlFactory.open(jobManagerRestUrl);
             resources.flink = flink;
+            if (plan.flink().highAvailability().isPresent() && flink instanceof FlinkRestApiClient client) {
+                client.useEndpointResolver(runtime::currentFlinkRestEndpoint);
+            }
 
             stage = Stage.JOB_SUBMISSION;
             String uploadedJarId = flink.uploadJar(
@@ -228,8 +234,9 @@ public final class V1ScenarioExecutor {
             // Every Flink JVM is dead now, so each class-load log is complete.
             subjectOrigins = subjectOrigins(runtime, prepared);
             if (expectedRuntime.runtimeJar().isPresent()) {
-                runtimeOrigins = runtimeClassOrigins(
-                        runtime, expectedRuntime.runtimeJar().orElseThrow().containerPath());
+                runtimeOrigins = classOrigins(
+                        runtime, FlinkRuntimeIdentity.RUNTIME_CLASSES,
+                        expectedRuntime.runtimeJar().orElseThrow().containerPath());
             }
 
             stage = Stage.TERMINAL_VALIDATION;
@@ -310,6 +317,7 @@ public final class V1ScenarioExecutor {
                     expectedRuntime,
                     runtimeOrigins,
                     transactionVersion,
+                    expectedHa,
                     evidenceDiagnostics);
         } catch (KafkaInputPreparationException failure) {
             inputEvidence = failure.evidence().orElse(inputEvidence);
@@ -329,6 +337,7 @@ public final class V1ScenarioExecutor {
                     expectedRuntime,
                     runtimeOrigins,
                     transactionVersion,
+                    expectedHa,
                     diagnostics(failure));
         } catch (PhaseExecutionException failure) {
             phases = failure.evidence();
@@ -352,6 +361,7 @@ public final class V1ScenarioExecutor {
                     expectedRuntime,
                     runtimeOrigins,
                     transactionVersion,
+                    expectedHa,
                     diagnostics(failure));
         } catch (TerminalWriteFenceException failure) {
             processFence = failure.processFenceEvidence().orElse(null);
@@ -372,6 +382,7 @@ public final class V1ScenarioExecutor {
                     expectedRuntime,
                     runtimeOrigins,
                     transactionVersion,
+                    expectedHa,
                     diagnostics(failure));
         } catch (InterruptedException failure) {
             Thread.currentThread().interrupt();
@@ -391,6 +402,7 @@ public final class V1ScenarioExecutor {
                     expectedRuntime,
                     runtimeOrigins,
                     transactionVersion,
+                    expectedHa,
                     diagnostics(failure));
         } catch (Exception failure) {
             result = result(
@@ -409,6 +421,7 @@ public final class V1ScenarioExecutor {
                     expectedRuntime,
                     runtimeOrigins,
                     transactionVersion,
+                    expectedHa,
                     diagnostics(failure));
         }
 
@@ -432,12 +445,12 @@ public final class V1ScenarioExecutor {
         }
     }
 
-    private static SubjectClassOrigins runtimeClassOrigins(
-            V1AttemptRuntime runtime, String expectedSource) {
+    private static SubjectClassOrigins classOrigins(
+            V1AttemptRuntime runtime, List<String> entryClasses, String expectedSource) {
         try {
             var logs = runtime.flinkClassLoadLogs();
             SubjectClassOrigins origins = SubjectClassOrigins.read(
-                    logs, FlinkRuntimeIdentity.RUNTIME_CLASSES, expectedSource);
+                    logs, entryClasses, expectedSource);
             var names = new java.util.HashSet<String>();
             var paths = new java.util.HashSet<java.nio.file.Path>();
             for (var log : logs) {
@@ -490,6 +503,7 @@ public final class V1ScenarioExecutor {
             FlinkRuntimeIdentity.ExpectedTarget expectedRuntime,
             SubjectClassOrigins runtimeOrigins,
             KafkaTransactionVersion.Selection transactionVersion,
+            FlinkHaEvidence.Expected expectedHa,
             List<String> diagnostics) {
         List<String> retainedDiagnostics = new ArrayList<>(diagnostics);
         List<FlinkComponentProvisioningEvidence> provisioning = List.of();
@@ -499,6 +513,31 @@ public final class V1ScenarioExecutor {
             }
         } catch (RuntimeException unavailable) {
             retainedDiagnostics.add("flink.provisioning-evidence-unavailable: " + unavailable);
+        }
+        Optional<FlinkProcessWriteFenceEvidence.Observations> processObservations = Optional.empty();
+        Optional<org.savonitar.flink.stability.runtime.api.FlinkHaControl.Observations> haObservations = Optional.empty();
+        if (runtime != null) {
+            try {
+                processObservations = runtime.flinkProcessObservations();
+            } catch (RuntimeException unavailable) {
+                retainedDiagnostics.add("flink.process-observations-unavailable: " + unavailable);
+            }
+            try {
+                haObservations = runtime.haObservations();
+            } catch (RuntimeException unavailable) {
+                retainedDiagnostics.add("flink.ha-observations-unavailable: " + unavailable);
+            }
+        }
+        FlinkProcessHealth health = FlinkProcessHealth.evaluate(expectedRuntime,
+                Optional.ofNullable(processFence), processObservations);
+        if (health.outcome() != FlinkProcessHealth.Outcome.HEALTHY) {
+            retainedDiagnostics.add(health.reason() + ": " + health.detail());
+            if (status == V1ScenarioExecutionResult.Status.PASS) {
+                status = health.outcome() == FlinkProcessHealth.Outcome.UNEXPECTED_EXIT
+                        ? V1ScenarioExecutionResult.Status.FAIL : V1ScenarioExecutionResult.Status.INCONCLUSIVE;
+                reason = health.reason();
+                message = "The terminal data oracle passed, but " + health.detail();
+            }
         }
         FlinkRuntimeIdentity identity = FlinkRuntimeIdentity.evaluate(expectedRuntime,
                 provisioning, Optional.ofNullable(processFence), Optional.ofNullable(phases));
@@ -519,6 +558,16 @@ public final class V1ScenarioExecutor {
             message = "The terminal oracle passed, but requested runtime JAR provenance is unconfirmed: "
                     + jar.detail();
         }
+        Optional<FlinkHaEvidence.TokenEvidence> tokens = expectedHa.tokenProviderRequired()
+                ? Optional.of(tokenEvidence(runtime, processFence != null)) : Optional.empty();
+        FlinkHaEvidence ha = FlinkHaEvidence.evaluate(expectedHa, Optional.ofNullable(phases), tokens, provisioning, haObservations);
+        if (status == V1ScenarioExecutionResult.Status.PASS
+                && ha.outcome() != FlinkHaEvidence.Outcome.CONFIRMED) {
+            status = V1ScenarioExecutionResult.Status.INCONCLUSIVE;
+            reason = "flink.ha.effect-unconfirmed";
+            message = "The terminal oracle passed, but leadership or token evidence is unconfirmed: "
+                    + ha.detail();
+        }
         return new V1ScenarioExecutionResult(
                 status,
                 reason,
@@ -535,8 +584,44 @@ public final class V1ScenarioExecutor {
                 expectedRuntime,
                 Optional.ofNullable(runtimeOrigins),
                 transactionVersion,
-                List.of(),
+                expectedHa,
+                tokens,
+                haObservations,
+                processObservations,
                 retainedDiagnostics);
+    }
+
+    private static FlinkHaEvidence.TokenEvidence tokenEvidence(
+            V1AttemptRuntime runtime, boolean fenced) {
+        Optional<String> sha256 = Optional.empty();
+        Optional<SubjectClassOrigins> origins = Optional.empty();
+        Optional<org.savonitar.flink.stability.runtime.api.TokenServiceControl.Snapshot> snapshot = Optional.empty();
+        List<String> errors = new ArrayList<>();
+        if (runtime == null) {
+            errors.add("Runtime was not created");
+        } else {
+            try {
+                sha256 = runtime.tokenPluginSha256();
+            } catch (RuntimeException failure) {
+                errors.addAll(diagnostics(failure));
+            }
+            try {
+                snapshot = runtime.tokenServiceEvidence();
+            } catch (RuntimeException failure) {
+                errors.addAll(diagnostics(failure));
+            }
+            if (fenced) {
+                try {
+                    origins = Optional.of(classOrigins(runtime,
+                            FlinkHaEvidence.TOKEN_CLASSES, FlinkHaEvidence.TOKEN_CONTAINER_PATH));
+                } catch (RuntimeException failure) {
+                    errors.addAll(diagnostics(failure));
+                }
+            } else {
+                errors.add("Token class-load evidence is incomplete before the process fence");
+            }
+        }
+        return new FlinkHaEvidence.TokenEvidence(sha256, origins, snapshot, errors);
     }
 
     static List<String> diagnostics(Throwable failure) {
@@ -647,7 +732,7 @@ public final class V1ScenarioExecutor {
             }
         }
         return new PhaseExecutionEvidence(phases.steps(), phases.taskManagerKills(), completed,
-                phases.taskManagerRestarts());
+                phases.taskManagerRestarts(), phases.leaderFaults());
     }
 
     /** Starts the plan's Kafka proxy, if it has one, and returns how to fault through it. */

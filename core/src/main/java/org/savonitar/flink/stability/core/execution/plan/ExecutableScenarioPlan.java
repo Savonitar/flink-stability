@@ -3,6 +3,7 @@ package org.savonitar.flink.stability.core.execution.plan;
 import org.savonitar.flink.stability.core.spec.resolution.ResolvedScenarioPlan;
 import org.savonitar.flink.stability.runtime.api.FlinkComponentRole;
 import org.savonitar.flink.stability.runtime.api.FlinkRuntimeTarget;
+import org.savonitar.flink.stability.runtime.api.FlinkHaControl;
 import org.savonitar.flink.stability.runtime.api.KafkaBrokerPolicy;
 import org.savonitar.flink.stability.runtime.api.KafkaProxyTarget;
 import org.savonitar.flink.stability.runtime.api.KafkaRuntimeTarget;
@@ -80,6 +81,10 @@ public final class ExecutableScenarioPlan {
         if (job.parallelism() > (long) flink.taskmanagers()
                 * FlinkRuntimeTarget.TASK_SLOTS_PER_TASK_MANAGER) {
             throw new IllegalArgumentException("Job parallelism exceeds the provisioned task slots");
+        }
+        if (flink.highAvailability().isPresent()
+                && job.checkpointing().storage() != CheckpointStorage.FILESYSTEM) {
+            throw new IllegalArgumentException("HA requires shared filesystem checkpoint storage");
         }
         if (!kafka.alias().equals(input.cluster())
                 || !job.source().equals(new TopicReference(input.cluster(), input.topic()))) {
@@ -268,7 +273,15 @@ public final class ExecutableScenarioPlan {
             Optional<String> expectedImageId,
             int jobmanagers,
             int taskmanagers,
-            Optional<FlinkRuntimeTarget.RuntimeJar> expectedRuntimeJar) {
+            Optional<FlinkRuntimeTarget.RuntimeJar> expectedRuntimeJar,
+            Optional<FlinkRuntimeTarget.HighAvailability> highAvailability,
+            Optional<FlinkRuntimeTarget.TokenProvider> tokenProvider) {
+        public FlinkCluster(String imageReference, Optional<String> expectedImageId,
+                            int jobmanagers, int taskmanagers,
+                            Optional<FlinkRuntimeTarget.RuntimeJar> expectedRuntimeJar) {
+            this(imageReference, expectedImageId, jobmanagers, taskmanagers,
+                    expectedRuntimeJar, Optional.empty(), Optional.empty());
+        }
         public FlinkCluster(String imageReference, Optional<String> expectedImageId,
                             int jobmanagers, int taskmanagers) {
             this(imageReference, expectedImageId, jobmanagers, taskmanagers, Optional.empty());
@@ -278,13 +291,15 @@ public final class ExecutableScenarioPlan {
             imageReference = requireNonBlank(imageReference, "imageReference");
             expectedImageId = Objects.requireNonNull(expectedImageId, "expectedImageId");
             expectedRuntimeJar = Objects.requireNonNull(expectedRuntimeJar, "expectedRuntimeJar");
+            highAvailability = Objects.requireNonNull(highAvailability, "highAvailability");
+            tokenProvider = Objects.requireNonNull(tokenProvider, "tokenProvider");
             expectedImageId.ifPresent(id ->
                     org.savonitar.flink.stability.runtime.api.Checks.requireDockerImageId(
                             id, "expectedImageId"));
-            if (jobmanagers != 1 || taskmanagers < 1
+            if (jobmanagers != (highAvailability.isPresent() ? 2 : 1) || taskmanagers < 1
                     || taskmanagers > FlinkRuntimeTarget.MAX_TASK_MANAGERS) {
                 throw new IllegalArgumentException(
-                        "The executable boundary requires one JobManager and 1.."
+                        "The executable boundary requires one JobManager (two with HA) and 1.."
                                 + FlinkRuntimeTarget.MAX_TASK_MANAGERS + " TaskManagers");
             }
         }
@@ -795,7 +810,22 @@ public final class ExecutableScenarioPlan {
     }
 
     public sealed interface Step permits AwaitJobState, AwaitCheckpoints, Wait,
-            KillTaskManager, RestartTaskManager, Loop, EndTxnFault {}
+            KillTaskManager, RestartTaskManager, Loop, EndTxnFault, LeaderFault {}
+
+    /** One bounded fault of the observed leader, including unconditional healing. */
+    public enum RecoveryBarrier { TOKEN_CHECKPOINT }
+
+    public record LeaderFault(FlinkHaControl.LeaderFaultRequest request,
+                              Optional<RecoveryBarrier> recoveryBarrier) implements Step {
+        public LeaderFault {
+            Objects.requireNonNull(request, "request");
+            Objects.requireNonNull(recoveryBarrier, "recoveryBarrier");
+        }
+
+        public LeaderFault(FlinkHaControl.LeaderFaultRequest request) {
+            this(request, Optional.empty());
+        }
+    }
 
     public record AwaitJobState(
             String jobAlias,

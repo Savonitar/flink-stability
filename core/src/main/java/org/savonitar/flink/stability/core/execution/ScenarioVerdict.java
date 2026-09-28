@@ -79,9 +79,19 @@ public record ScenarioVerdict(Status status, String reason, String message, bool
             return unconfirmed(EVIDENCE_UNCONFIRMED,
                     "The expected failure lacks complete phase, fence, or oracle evidence");
         }
+        if (attempt.processHealth().outcome() != FlinkProcessHealth.Outcome.HEALTHY) {
+            return unconfirmed(attempt.processHealth().reason(),
+                    "The expected data failure has incomplete or unexpected process lifecycle evidence: "
+                            + attempt.processHealth().detail());
+        }
         if (!attempt.kafkaTransactionVersion().permitsPass()) {
             return unconfirmed(org.savonitar.flink.stability.core.execution.kafka.KafkaTransactionVersion.UNCONFIRMED,
                     "The expected failure lacks confirmed Kafka transaction.version selection");
+        }
+        if (attempt.haEvidence().outcome() != FlinkHaEvidence.Outcome.CONFIRMED) {
+            return unconfirmed("flink.ha.effect-unconfirmed",
+                    "The expected failure lacks confirmed leadership or token evidence: "
+                            + attempt.haEvidence().detail());
         }
         SubjectClassOrigins.Outcome origins = attempt.subjectClassOrigins()
                 .map(evidence -> evidence.outcome(

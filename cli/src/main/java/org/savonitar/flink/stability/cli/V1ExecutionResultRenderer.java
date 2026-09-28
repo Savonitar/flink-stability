@@ -59,6 +59,8 @@ final class V1ExecutionResultRenderer {
         expectation.put("matched", verdict.matched());
 
         ObjectNode evidence = root.putObject("evidence");
+        FlinkHaEvidenceRenderer.render(evidence.putObject("flinkHa"), result.haEvidence(),
+                result.phaseEvidence().map(PhaseExecutionEvidence::leaderFaults).orElse(List.of()));
         var selection = result.kafkaTransactionVersion();
         ObjectNode transactionVersion = evidence.putObject("kafkaTransactionVersion");
         transactionVersion.put("status", selection.requested().isEmpty() ? "not-requested"
@@ -266,6 +268,43 @@ final class V1ExecutionResultRenderer {
         processFence.put("status", "not-run");
         processFence.put("completed", false);
         processFence.put("processes", 0);
+        ArrayNode fencedComponents = processFence.putArray("components");
+        ArrayNode processObservations = processFence.putArray("observations");
+        processFence.put("observationOverflow", false);
+        ObjectNode health = processFence.putObject("health");
+        health.put("outcome", result.processHealth().outcome().name().toLowerCase(Locale.ROOT).replace('_', '-'));
+        health.put("reason", result.processHealth().reason());
+        health.put("detail", result.processHealth().detail());
+        result.processObservations().ifPresent(snapshot -> {
+            if (!snapshot.fenced().isEmpty() || snapshot.observations().stream().anyMatch(observation ->
+                    observation.moment() != org.savonitar.flink.stability.runtime.api
+                            .FlinkProcessWriteFenceEvidence.Moment.AFTER_DECLARED_KILL)) {
+                processFence.put("status", "partial");
+            }
+            processFence.put("observationOverflow", snapshot.overflow());
+            snapshot.observations().forEach(observation -> {
+                ObjectNode node = processObservations.addObject();
+                node.put("logicalName", observation.logicalName());
+                node.put("role", observation.role().name().toLowerCase(Locale.ROOT).replace('_', '-'));
+                node.put("runtimeId", observation.runtimeId().orElse(null));
+                node.put("moment", observation.moment().name().toLowerCase(Locale.ROOT).replace('_', '-'));
+                node.put("observedAt", observation.observedAt().toString());
+                node.put("missing", observation.missing());
+                node.put("diagnostic", observation.diagnostic().orElse(null));
+                node.putNull("state");
+                observation.state().ifPresent(state ->
+                        FlinkHaEvidenceRenderer.state(node.putObject("state"), state));
+            });
+        });
+        result.processFenceEvidence().map(fence -> fence.components())
+                .orElseGet(() -> result.processObservations().map(snapshot -> snapshot.fenced()).orElse(List.of()))
+                .forEach(component -> {
+                    ObjectNode node = fencedComponents.addObject();
+                    node.put("logicalName", component.logicalName());
+                    node.put("role", component.role().name().toLowerCase(Locale.ROOT).replace('_', '-'));
+                    node.put("runtimeId", component.runtimeId().orElse(null));
+                    node.put("outcome", component.outcome().name().toLowerCase(Locale.ROOT).replace('_', '-'));
+                });
         result.processFenceEvidence().ifPresent(fence -> {
             processFence.put("status", "complete");
             processFence.put("completed", true);

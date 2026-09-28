@@ -25,6 +25,14 @@ public interface TaskManagerControl {
         return Optional.empty();
     }
 
+    /** Legacy adapters delegate; runtime adapters must honor this caller-supplied budget. */
+    default Optional<Identity> taskManagerIdentity(String targetName, Duration timeout) {
+        if (java.util.Objects.requireNonNull(timeout, "timeout").isZero() || timeout.isNegative()) {
+            throw new IllegalArgumentException("timeout must be positive: " + timeout);
+        }
+        return taskManagerIdentity(targetName);
+    }
+
     /** Binds one container incarnation to the ResourceID configured for its Flink process. */
     record Identity(String logicalName, String runtimeId, String resourceId) {
         public Identity {

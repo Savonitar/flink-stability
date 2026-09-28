@@ -3,6 +3,7 @@ package org.savonitar.flink.stability.testcontainers;
 import org.savonitar.flink.stability.runtime.api.FlinkClassLoadLog;
 import org.savonitar.flink.stability.runtime.api.FlinkComponentRole;
 import org.savonitar.flink.stability.runtime.api.FlinkRuntimeTarget;
+import org.savonitar.flink.stability.runtime.api.FlinkHaControl;
 import org.slf4j.LoggerFactory;
 import org.testcontainers.containers.BindMode;
 import org.testcontainers.containers.GenericContainer;
@@ -18,6 +19,7 @@ import java.nio.file.Path;
 import java.nio.file.attribute.PosixFilePermissions;
 import java.time.Duration;
 import java.util.List;
+import java.util.ArrayList;
 import java.util.Objects;
 import java.util.concurrent.atomic.AtomicReference;
 
@@ -35,6 +37,10 @@ final class FlinkContainer implements FlinkComponentFactory {
     private final Path checkpointStorageRoot;
     private final ClassLoadLogs classLoadLogs;
     private final AtomicReference<String> pinnedImageId;
+    private FlinkHaRuntime highAvailability;
+    private SyntheticTokenPlugin tokenPlugin;
+    private int tokenServicePort;
+    private final List<VerifiedFlinkContainer> containers = new ArrayList<>();
 
     /** Creates a factory for one exact image/bundle binding. */
     FlinkContainer(
@@ -71,15 +77,24 @@ final class FlinkContainer implements FlinkComponentFactory {
 
     GenericContainer<?> createJobManager(String logicalName) {
         FlinkClassLoadLog log = classLoadLogs.register(logicalName);
-        return new VerifiedFlinkContainer(flinkImage, runtimeTarget, this::verifyImageId, log)
+        VerifiedFlinkContainer container = new VerifiedFlinkContainer(
+                flinkImage, runtimeTarget, this::verifyImageId, log);
+        container.observeHaSessions(logicalName, FlinkComponentRole.JOB_MANAGER);
+        containers.add(container);
+        configurePlugin(container);
+        return container
                 .withNetwork(network)
-                .withNetworkAliases(logicalName)
+                .withNetworkAliases(highAvailability == null
+                        ? new String[] {logicalName}
+                        : new String[] {logicalName, container.advertisedAlias()})
                 .withLabel(COMPONENT_LABEL, logicalName)
                 .withExposedPorts(JOB_MANAGER_PORT)
                 .withFileSystemBind(
                         checkpointStorageRoot.toString(), CHECKPOINT_PATH, BindMode.READ_WRITE)
-                .withEnv("JOB_MANAGER_RPC_ADDRESS", PRIMARY_JOB_MANAGER_ALIAS)
-                .withEnv("FLINK_PROPERTIES", flinkProperties("jobmanager", log))
+                .withEnv("JOB_MANAGER_RPC_ADDRESS", highAvailability == null
+                        ? PRIMARY_JOB_MANAGER_ALIAS : container.advertisedAlias())
+                .withEnv("FLINK_PROPERTIES", flinkProperties("jobmanager", log, logicalName,
+                        container.advertisedAlias()))
                 .withCommand("jobmanager")
                 .waitingFor(Wait.forHttp("/overview")
                         .forPort(JOB_MANAGER_PORT)
@@ -92,6 +107,9 @@ final class FlinkContainer implements FlinkComponentFactory {
         FlinkClassLoadLog log = classLoadLogs.register(logicalName);
         VerifiedFlinkContainer container = new VerifiedFlinkContainer(
                 flinkImage, runtimeTarget, this::verifyImageId, log);
+        container.observeHaSessions(logicalName, FlinkComponentRole.TASK_MANAGER);
+        containers.add(container);
+        configurePlugin(container);
         container
                 .withNetwork(network)
                 .withNetworkAliases(logicalName)
@@ -99,11 +117,12 @@ final class FlinkContainer implements FlinkComponentFactory {
                 .withFileSystemBind(
                         checkpointStorageRoot.toString(), CHECKPOINT_PATH, BindMode.READ_WRITE)
                 .withEnv("JOB_MANAGER_RPC_ADDRESS", PRIMARY_JOB_MANAGER_ALIAS)
-                .withEnv("FLINK_PROPERTIES", flinkProperties("taskmanager", log)
+                .withEnv("FLINK_PROPERTIES", flinkProperties("taskmanager", log, logicalName,
+                        container.advertisedAlias())
                         + "\ntaskmanager.resource-id: " + container.resourceId())
                 .withCommand("taskmanager")
                 .withLogConsumer(createLogConsumer("TASK_MANAGER_LOGS." + logicalName));
-        if (runtimeTarget.expectedRuntimeJar().isPresent()) {
+        if (runtimeTarget.expectedRuntimeJar().isPresent() || runtimeTarget.tokenProvider().isPresent()) {
             // Docker running alone can precede an entrypoint's JAR replacement. This message
             // comes from TaskManagerRunner, before accepting the second runtime-byte read.
             container.waitingFor(Wait.forLogMessage(".*Starting TaskManager with ResourceID:.*", 1)
@@ -140,13 +159,48 @@ final class FlinkContainer implements FlinkComponentFactory {
      * Every Flink JVM logs each class it loads, with the source JAR, into the attempt's host
      * directory. One file per container incarnation, so a replaced TaskManager keeps its log.
      */
-    private String flinkProperties(String process, FlinkClassLoadLog log) {
+    private String flinkProperties(String process, FlinkClassLoadLog log,
+                                   String logicalName, String incarnationAlias) {
         // The per-process key is appended to env.java.opts.all, which the image uses for its
         // required --add-opens flags. The value stays unquoted: quotes would reach the JVM.
-        return TASK_SLOTS_PROPERTY + "\n"
+        String result = TASK_SLOTS_PROPERTY + "\n"
                 + "env.java.opts." + process + ": -Xlog:class+load=info:file="
                 + CHECKPOINT_PATH + "/" + log.hostPath().getFileName()
                 + "::filecount=0";
+        if (highAvailability != null) {
+            result += highAvailability.properties(process, logicalName, incarnationAlias);
+        }
+        if (tokenPlugin != null) {
+            result += SyntheticTokenPlugin.configuration(tokenServicePort, log.process(), process,
+                            runtimeTarget.tokenProvider().orElseThrow().retryBackoff())
+                    + "\nsecurity.delegation.tokens.renewal.time-ratio: 0.5";
+        }
+        return result;
+    }
+
+    @Override
+    public void configureHighAvailability(FlinkHaRuntime runtime) {
+        highAvailability = Objects.requireNonNull(runtime, "runtime");
+    }
+
+    @Override
+    public List<FlinkHaControl.SessionEvidence> haSessions() {
+        return containers.stream().flatMap(container -> container.haSessionEvidence().stream()).toList();
+    }
+
+    @Override
+    public void configureTokenProvider(SyntheticTokenPlugin plugin, int servicePort) {
+        tokenPlugin = Objects.requireNonNull(plugin, "plugin");
+        tokenServicePort = servicePort;
+    }
+
+    private void configurePlugin(VerifiedFlinkContainer container) {
+        if (highAvailability != null || tokenPlugin != null) {
+            container.withAccessToHost(true);
+        }
+        if (tokenPlugin != null) {
+            container.installTokenPlugin(tokenPlugin);
+        }
     }
 
     @Override

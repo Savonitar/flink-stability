@@ -5,6 +5,8 @@ import org.savonitar.flink.stability.runtime.api.ConnectorClasspathManifest;
 import org.savonitar.flink.stability.runtime.api.Digests;
 import org.savonitar.flink.stability.runtime.api.FlinkClassLoadLog;
 import org.savonitar.flink.stability.runtime.api.FlinkComponentProvisioningEvidence;
+import org.savonitar.flink.stability.runtime.api.FlinkComponentRole;
+import org.savonitar.flink.stability.runtime.api.FlinkHaControl;
 import org.savonitar.flink.stability.runtime.api.FlinkConnectorBundleInstallation;
 import org.savonitar.flink.stability.runtime.api.FlinkRuntimeTarget;
 import org.savonitar.flink.stability.runtime.api.ProvisionedConnectorArtifact;
@@ -37,6 +39,9 @@ final class VerifiedFlinkContainer extends GenericContainer<VerifiedFlinkContain
     private ConnectorBundleVerification verification;
     private String verifiedImageId;
     private String runtimeJarContainerId;
+    private SyntheticTokenPlugin tokenPlugin;
+    private String tokenPluginContainerId;
+    private FlinkSessionLog sessionLog;
 
     VerifiedFlinkContainer(
             DockerImageName image,
@@ -68,15 +73,52 @@ final class VerifiedFlinkContainer extends GenericContainer<VerifiedFlinkContain
         return resourceId;
     }
 
+    String advertisedAlias() {
+        return classLoadLog.process().replace('#', '-');
+    }
+
+    void observeHaSessions(String logicalName, FlinkComponentRole role) {
+        runtimeTarget.highAvailability().ifPresent(ha -> {
+            sessionLog = new FlinkSessionLog(logicalName, role, classLoadLog.process(),
+                    ha.sessionTimeout().toMillis());
+            withLogConsumer(frame -> sessionLog.accept(frame.getUtf8String()));
+        });
+    }
+
+    Optional<FlinkHaControl.SessionEvidence> haSessionEvidence() {
+        return sessionLog == null ? Optional.empty() : sessionLog.snapshot();
+    }
+
+    void installTokenPlugin(SyntheticTokenPlugin plugin) {
+        tokenPlugin = Objects.requireNonNull(plugin, "plugin");
+        withCopyToContainer(Transferable.of(plugin.bytes(), READ_ONLY_FILE_MODE),
+                SyntheticTokenPlugin.CONTAINER_PATH);
+    }
+
+    void verifyTokenPluginAfterStart(String containerId) {
+        if (tokenPlugin != null) {
+            if (!containerId.equals(tokenPluginContainerId)) {
+                throw new IllegalStateException("Token plugin has no stopped-container verification");
+            }
+            tokenPlugin.verify(this::readJarSha256);
+        }
+    }
+
     @Override
     protected void containerIsCreated(String containerId) {
         super.containerIsCreated(containerId);
+        if (sessionLog != null) sessionLog.created(containerId);
         // Testcontainers 1.21 invokes this hook after its configured archive copies and before
         // Docker's startContainer command. A mismatch therefore prevents the Flink entrypoint.
         verifyImageIdentity(containerId, id -> getDockerClient()
                 .inspectContainerCmd(id).exec().getImageId());
         verifyRuntimeJarBeforeStart(containerId, this::readJarSha256);
         verifyCopiedBundle(runtimeTarget.connectorBundle());
+        tokenPluginContainerId = null;
+        if (tokenPlugin != null) {
+            tokenPlugin.verify(this::readJarSha256);
+            tokenPluginContainerId = containerId;
+        }
     }
 
     /** Every create/retry must establish its own stopped-container observation. */

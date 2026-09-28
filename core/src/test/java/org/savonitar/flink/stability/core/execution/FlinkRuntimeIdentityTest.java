@@ -5,10 +5,12 @@ import org.savonitar.flink.stability.core.execution.plan.ExecutableScenarioPlan;
 import org.savonitar.flink.stability.core.flink.FlinkJobObservation;
 import org.savonitar.flink.stability.runtime.api.FlinkComponentProvisioningEvidence;
 import org.savonitar.flink.stability.runtime.api.FlinkComponentRole;
+import org.savonitar.flink.stability.runtime.api.FlinkHaControl;
 import org.savonitar.flink.stability.runtime.api.FlinkProcessWriteFenceEvidence;
 import org.savonitar.flink.stability.runtime.api.TaskManagerControl;
 
 import java.time.Instant;
+import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
@@ -307,6 +309,137 @@ class FlinkRuntimeIdentityTest {
                 evaluate(provisioning(1), Optional.empty(), unknown, noPhases()).outcome());
     }
 
+    @Test
+    void eachKilledJobManagerAddsOneIncarnationToItsOwnLogicalSlot() {
+        var components = haProvisioning();
+        var faults = List.of(haKill(0, "jobmanager-1", "jm-a", "jm-a-new", "jobmanager-2", "jm-b"),
+                haKill(1, "jobmanager-2", "jm-b", "jm-b-new", "jobmanager-1", "jm-a-new"));
+        assertEquals(FlinkRuntimeIdentity.Outcome.CONFIRMED,
+                evaluateHa(components, fenceFor(List.of(components.get(2), components.get(3), components.get(4))),
+                        haPhases(faults)).outcome());
+        assertEquals(FlinkRuntimeIdentity.Outcome.UNCONFIRMED,
+                evaluateHa(components, fenceFor(List.of(components.get(0), components.get(1), components.get(2))),
+                        haPhases(faults)).outcome());
+        assertEquals(FlinkRuntimeIdentity.Outcome.UNCONFIRMED,
+                evaluateHa(components.subList(0, 4), fenceFor(List.of(components.get(2), components.get(3), components.get(4))),
+                        haPhases(faults)).outcome());
+    }
+
+    @Test
+    void leaderReplacementCannotBorrowAnotherSlotOrReuseItsKilledProcess() {
+        var components = haProvisioning().subList(0, 4);
+        var fence = fenceFor(List.of(components.get(1), components.get(2), components.get(3)));
+        for (String replacement : List.of("jm-b", "jm-a", "unobserved")) {
+            assertEquals(FlinkRuntimeIdentity.Outcome.UNCONFIRMED,
+                    evaluateHa(components, fence, haPhases(List.of(haKill(0,
+                            "jobmanager-1", "jm-a", replacement, "jobmanager-2", "jm-b")))).outcome());
+        }
+    }
+
+    @Test
+    void leaderFaultMustMatchSuccessfulPhaseLocationAndOrder() {
+        var components = haProvisioning();
+        var faults = List.of(haKill(0, "jobmanager-1", "jm-a", "jm-a-new", "jobmanager-2", "jm-b"),
+                haKill(1, "jobmanager-2", "jm-b", "jm-b-new", "jobmanager-1", "jm-a-new"));
+        var original = haPhases(faults);
+        var fence = fenceFor(List.of(components.get(2), components.get(3), components.get(4)));
+        for (var incomplete : List.of(
+                new PhaseExecutionEvidence(original.steps()),
+                new PhaseExecutionEvidence(original.steps().reversed(), List.of(), List.of(), List.of(), faults),
+                new PhaseExecutionEvidence(List.of(), List.of(), List.of(), List.of(), faults))) {
+            assertEquals(FlinkRuntimeIdentity.Outcome.UNCONFIRMED,
+                    evaluateHa(components, fence, incomplete).outcome());
+        }
+        var staleSuccessor = haKill(1, "jobmanager-2", "jm-b", "jm-b-new", "jobmanager-1", "jm-a");
+        assertEquals(FlinkRuntimeIdentity.Outcome.UNCONFIRMED,
+                evaluateHa(components, fence, haPhases(List.of(faults.getFirst(), staleSuccessor))).outcome());
+    }
+
+    @Test
+    void failedLeadershipEffectDoesNotInvalidateKnownPhysicalIdentities() {
+        for (var mode : List.of(FlinkHaControl.Mode.PAUSE, FlinkHaControl.Mode.KILL)) {
+            var killed = haKill(0, "jobmanager-1", "jm-a", "jm-a-new", "jobmanager-2", "jm-b");
+            var original = killed.raw();
+            var raw = new FlinkHaControl.LeaderFaultEvidence(new FlinkHaControl.LeaderFaultRequest(
+                    mode, Duration.ofSeconds(1), Duration.ofSeconds(10), Optional.empty()),
+                    original.before(), Optional.empty(), original.target(), true, false,
+                    original.faultState(), mode == FlinkHaControl.Mode.KILL
+                            ? original.healedState() : Optional.empty(),
+                    1_000, 2_000, 0, 0, false, Optional.empty(), Optional.empty(), Optional.empty(),
+                    List.of("New leadership was not confirmed"));
+            var fault = new PhaseExecutionEvidence.LeaderFault(killed.path(), List.of(), "job",
+                    killed.jobBefore(), killed.jobAfter(), raw);
+            var normal = haPhases(List.of(fault));
+            var step = normal.steps().getFirst();
+            var failed = new PhaseExecutionEvidence(List.of(new PhaseExecutionEvidence.StepEvidence(
+                    step.phaseIndex(), step.phaseName(), step.path(), step.loopIterations(), step.kind(),
+                    PhaseExecutionEvidence.StepStatus.FAILED, "HA effect unconfirmed")),
+                    List.of(), List.of(), List.of(), List.of(fault));
+            var components = haProvisioning().subList(0, mode == FlinkHaControl.Mode.KILL ? 4 : 3);
+            var fenced = mode == FlinkHaControl.Mode.KILL
+                    ? List.of(components.get(1), components.get(2), components.get(3)) : components;
+            assertEquals(FlinkRuntimeIdentity.Outcome.CONFIRMED,
+                    evaluateHa(components, fenceFor(fenced), failed).outcome());
+            org.junit.jupiter.api.Assertions.assertTrue(FlinkHaEvidence.faultFailure(raw).isPresent());
+        }
+    }
+
+    @Test
+    void pauseDoesNotAuthorizeAnExtraJobManagerIncarnation() {
+        var killed = haKill(0, "jobmanager-1", "jm-a", "jm-a-new", "jobmanager-2", "jm-b");
+        var raw = killed.raw();
+        var paused = new FlinkHaControl.LeaderFaultEvidence(new FlinkHaControl.LeaderFaultRequest(
+                FlinkHaControl.Mode.PAUSE, Duration.ofSeconds(1), Duration.ofSeconds(10), Optional.empty()),
+                raw.before(), raw.after(), raw.target(), true, true,
+                Optional.of(new FlinkHaControl.ProcessState("jm-a", true, true)),
+                Optional.of(new FlinkHaControl.ProcessState("jm-a", true, false)),
+                1_000, 2_000, 0, 0, false, Optional.empty(), Optional.empty(), Optional.empty(), List.of());
+        var fault = new PhaseExecutionEvidence.LeaderFault(killed.path(), List.of(), "job",
+                killed.jobBefore(), killed.jobAfter(), paused);
+        var initial = haProvisioning().subList(0, 3);
+        assertEquals(FlinkRuntimeIdentity.Outcome.CONFIRMED,
+                evaluateHa(initial, fenceFor(initial), haPhases(List.of(fault))).outcome());
+        assertEquals(FlinkRuntimeIdentity.Outcome.UNCONFIRMED,
+                evaluateHa(haProvisioning().subList(0, 4), fenceFor(initial), haPhases(List.of(fault))).outcome());
+    }
+
+    private static List<FlinkComponentProvisioningEvidence> haProvisioning() {
+        return List.of(component("jobmanager-1", "jm-a", IMAGE_ID),
+                component("jobmanager-2", "jm-b", IMAGE_ID), component("taskmanager-1", "tm", IMAGE_ID),
+                component("jobmanager-1", "jm-a-new", IMAGE_ID), component("jobmanager-2", "jm-b-new", IMAGE_ID));
+    }
+
+    private static FlinkRuntimeIdentity evaluateHa(List<FlinkComponentProvisioningEvidence> components,
+            FlinkProcessWriteFenceEvidence fence, PhaseExecutionEvidence phases) {
+        return FlinkRuntimeIdentity.evaluate(new FlinkRuntimeIdentity.ExpectedTarget(Optional.of(IMAGE_ID), Map.of(
+                "jobmanager-1", FlinkComponentRole.JOB_MANAGER,
+                "jobmanager-2", FlinkComponentRole.JOB_MANAGER,
+                "taskmanager-1", FlinkComponentRole.TASK_MANAGER)), components, Optional.of(fence), Optional.of(phases));
+    }
+
+    private static PhaseExecutionEvidence.LeaderFault haKill(int index, String logical,
+            String oldRuntime, String newRuntime, String otherLogical, String otherRuntime) {
+        var before = FlinkHaEvidenceTest.leadership(logical, oldRuntime, "before-" + index);
+        var after = FlinkHaEvidenceTest.leadership(otherLogical, otherRuntime, "after-" + index);
+        var request = new FlinkHaControl.LeaderFaultRequest(FlinkHaControl.Mode.KILL,
+                Duration.ofSeconds(1), Duration.ofSeconds(10), Optional.empty());
+        var raw = new FlinkHaControl.LeaderFaultEvidence(request, Optional.of(before), Optional.of(after),
+                Optional.of(before.resourceManager()), true, true,
+                Optional.of(new FlinkHaControl.ProcessState(oldRuntime, false, false)),
+                Optional.of(new FlinkHaControl.ProcessState(newRuntime, true, false)),
+                1_000, 2_000, 0, 0, false, Optional.empty(), Optional.empty(), Optional.empty(), List.of());
+        var unsampled = new FlinkJobObservation.Attempt(Optional.empty(), Optional.of("outside identity check"));
+        return new PhaseExecutionEvidence.LeaderFault("$/phases/0/steps/" + index,
+                List.of(), "job", unsampled, unsampled, raw);
+    }
+
+    private static PhaseExecutionEvidence haPhases(List<PhaseExecutionEvidence.LeaderFault> faults) {
+        var steps = faults.stream().map(fault -> new PhaseExecutionEvidence.StepEvidence(0, "ha",
+                fault.path(), fault.loopIterations(), PhaseExecutionEvidence.StepKind.LEADER_FAULT,
+                PhaseExecutionEvidence.StepStatus.SUCCEEDED, "faulted and healed")).toList();
+        return new PhaseExecutionEvidence(steps, List.of(), List.of(), List.of(), faults);
+    }
+
     private static FlinkRuntimeIdentity evaluate(
             List<FlinkComponentProvisioningEvidence> components, Optional<String> expected,
             FlinkProcessWriteFenceEvidence fence, PhaseExecutionEvidence phases) {
@@ -353,6 +486,21 @@ class FlinkRuntimeIdentityTest {
                 "jobmanager-1", FlinkComponentRole.JOB_MANAGER,
                 "taskmanager-1", FlinkComponentRole.TASK_MANAGER,
                 "taskmanager-2", FlinkComponentRole.TASK_MANAGER));
+    }
+
+    static FlinkProcessWriteFenceEvidence.Observations healthyProcesses(FlinkProcessWriteFenceEvidence fence) {
+        var events = new java.util.ArrayList<FlinkProcessWriteFenceEvidence.Observation>();
+        for (var component : fence.components()) {
+            for (var moment : List.of(FlinkProcessWriteFenceEvidence.Moment.BEFORE_FENCE,
+                    FlinkProcessWriteFenceEvidence.Moment.AFTER_FENCE_KILL)) {
+                events.add(new FlinkProcessWriteFenceEvidence.Observation(component.logicalName(),
+                        component.role(), component.runtimeId(), moment, fence.completedAt(),
+                        Optional.of(new FlinkHaControl.ProcessState(component.runtimeId().orElseThrow(),
+                                moment == FlinkProcessWriteFenceEvidence.Moment.BEFORE_FENCE, false)),
+                        false, Optional.empty()));
+            }
+        }
+        return new FlinkProcessWriteFenceEvidence.Observations(events, fence.components(), false);
     }
 
     static FlinkProcessWriteFenceEvidence fence(int incarnation) {

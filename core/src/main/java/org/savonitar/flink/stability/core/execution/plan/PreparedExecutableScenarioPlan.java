@@ -45,6 +45,11 @@ public final class PreparedExecutableScenarioPlan {
         if (flinkRuntimeTarget.taskManagers() != executablePlan.flink().taskmanagers()) {
             throw new IllegalArgumentException("Runtime TaskManager count differs from executable plan");
         }
+        if (flinkRuntimeTarget.jobManagers() != executablePlan.flink().jobmanagers()
+                || !flinkRuntimeTarget.highAvailability().equals(executablePlan.flink().highAvailability())
+                || !flinkRuntimeTarget.tokenProvider().equals(executablePlan.flink().tokenProvider())) {
+            throw new IllegalArgumentException("Runtime HA/token configuration differs from executable plan");
+        }
         if (!flinkRuntimeTarget.expectedImageId().equals(executablePlan.flink().expectedImageId())) {
             throw new IllegalArgumentException("Runtime image ID differs from executable plan");
         }

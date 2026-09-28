@@ -38,6 +38,17 @@ public interface FlinkScenarioControl extends FlinkJobControl, AutoCloseable {
         }
     }
 
+    /** One POST only; an unknown submission outcome must never be replayed. */
+    default String triggerCheckpoint(FlinkJobHandle job, String triggerId, Duration timeout) throws IOException {
+        throw new UnsupportedOperationException("Explicit checkpoint triggering is unsupported");
+    }
+
+    /** Polls the exact previously submitted trigger, never a checkpoint count. */
+    default FlinkCheckpointTrigger.Observation checkpointStatus(
+            FlinkJobHandle job, String triggerId, Duration timeout) throws IOException {
+        throw new UnsupportedOperationException("Explicit checkpoint status is unsupported");
+    }
+
     @Override
     void close();
 }

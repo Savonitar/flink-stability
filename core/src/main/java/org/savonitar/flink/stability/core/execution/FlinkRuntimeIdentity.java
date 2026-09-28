@@ -161,6 +161,67 @@ public record FlinkRuntimeIdentity(Outcome outcome, String detail, String reason
                 return unconfirmed("A killed TaskManager has no matching provisioning identity");
             }
         }
+        List<PhaseExecutionEvidence.StepEvidence> leaderSteps = phase.steps().stream()
+                .filter(step -> step.kind() == PhaseExecutionEvidence.StepKind.LEADER_FAULT)
+                .toList();
+        Set<StepIdentity> leaderLocations = new HashSet<>();
+        int previousLeaderStep = -1;
+        for (var fault : phase.leaderFaults()) {
+            var raw = fault.raw();
+            StepIdentity location = new StepIdentity(fault.path(), fault.loopIterations());
+            int matchingStep = -1;
+            for (int index = 0; index < leaderSteps.size(); index++) {
+                var step = leaderSteps.get(index);
+                if (location.equals(new StepIdentity(step.path(), step.loopIterations()))) {
+                    matchingStep = index;
+                    break;
+                }
+            }
+            if (!leaderLocations.add(location) || matchingStep <= previousLeaderStep) {
+                return unconfirmed("A leader fault has no correlated ordered declared operation");
+            }
+            previousLeaderStep = matchingStep;
+            // Election, recovery, token, and healing success are HA evidence, not image identity.
+            // Only physical incarnation changes belong in this accounting.
+            if (raw.target().isEmpty()) {
+                if (raw.healedState().isPresent()) {
+                    return unconfirmed("A replacement process has no physical fault target");
+                }
+                continue;
+            }
+            var target = raw.target().orElseThrow();
+            FlinkComponentProvisioningEvidence oldProcess = byRuntimeId.get(target.runtimeId());
+            if (expected.components().get(target.logicalName()) != FlinkComponentRole.JOB_MANAGER
+                    || oldProcess == null || !target.logicalName().equals(oldProcess.logicalName())
+                    || !target.runtimeId().equals(latestRuntimeIds.get(target.logicalName()))) {
+                return unconfirmed("Leader fault target does not match the current provisioned JobManager");
+            }
+            if (raw.healedState().isPresent()) {
+                var healed = raw.healedState().orElseThrow();
+                FlinkComponentProvisioningEvidence replacement = byRuntimeId.get(healed.runtimeId());
+                if (replacement == null || !target.logicalName().equals(replacement.logicalName())) {
+                    return unconfirmed("Leader fault replacement has no matching provisioning identity");
+                }
+                if (raw.request().mode()
+                        == org.savonitar.flink.stability.runtime.api.FlinkHaControl.Mode.KILL) {
+                    if (provisionOrder.get(target.runtimeId()) >= provisionOrder.get(healed.runtimeId())
+                            || !replacementIds.add(healed.runtimeId())) {
+                        return unconfirmed("A killed JobManager has no distinct subsequent replacement");
+                    }
+                    latestRuntimeIds.put(target.logicalName(), healed.runtimeId());
+                    restartsBySlot.merge(target.logicalName(), 1L, Long::sum);
+                } else if (!target.runtimeId().equals(healed.runtimeId())) {
+                    return unconfirmed("A non-kill leader fault changed its physical process identity");
+                }
+            }
+            if (raw.after().isPresent()) {
+                var successor = raw.after().orElseThrow().resourceManager();
+                if (expected.components().get(successor.logicalName()) != FlinkComponentRole.JOB_MANAGER
+                        || !successor.runtimeId().equals(latestRuntimeIds.get(successor.logicalName()))) {
+                    return unconfirmed("Observed leader has no current provisioned JobManager identity");
+                }
+            }
+        }
         for (Map.Entry<String, FlinkComponentRole> slot : expected.components().entrySet()) {
             long required = 1 + restartsBySlot.getOrDefault(slot.getKey(), 0L);
             if (incarnations.getOrDefault(slot.getKey(), 0L) != required) {
