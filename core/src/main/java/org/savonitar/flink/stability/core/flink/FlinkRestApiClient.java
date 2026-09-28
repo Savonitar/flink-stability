@@ -26,6 +26,7 @@ import java.util.Objects;
 import java.util.Optional;
 import java.util.concurrent.TimeUnit;
 import java.util.function.LongSupplier;
+import java.util.zip.GZIPInputStream;
 
 /**
  * Typed Flink 2.2 REST boundary used by v1 execution.
@@ -41,14 +42,30 @@ public final class FlinkRestApiClient implements FlinkScenarioControl {
     private static final long POLL_INTERVAL_MILLIS = 250;
     private static final int MAX_ERROR_BODY_CHARS = 4096;
     private static final int MAX_OBSERVED_FAILURES = 20;
-    private static final int MAX_ROOT_CAUSE_CHARS = 300;
 
     private final Transport transport;
     private final ObjectMapper mapper;
     private final LongSupplier nanoTime;
+    private final Sleeper sleeper;
+    private final List<RestError> restErrors = new ArrayList<>();
 
     public FlinkRestApiClient(String jobManagerUrl) {
         this(new OkHttpTransport(normalizeUrl(jobManagerUrl), new OkHttpClient.Builder()
+                // Retry policy belongs to the bounded GET loop, never to hidden HTTP follow-ups.
+                .retryOnConnectionFailure(false)
+                .followRedirects(false)
+                .followSslRedirects(false)
+                .addNetworkInterceptor(chain -> {
+                    Response response = chain.proceed(chain.request());
+                    if (response.isSuccessful()) {
+                        return response;
+                    }
+                    // OkHttp can replay a 503 with Retry-After: 0 even for POST. Surface the
+                    // original status/body before its follow-up interceptor sees the response.
+                    try (response) {
+                        throw new HttpResponseFailure(readHttpResponse(response));
+                    }
+                })
                 .connectTimeout(30, TimeUnit.SECONDS)
                 .readTimeout(60, TimeUnit.SECONDS)
                 .writeTimeout(60, TimeUnit.SECONDS)
@@ -63,9 +80,15 @@ public final class FlinkRestApiClient implements FlinkScenarioControl {
             Transport transport,
             ObjectMapper mapper,
             LongSupplier nanoTime) {
+        this(transport, mapper, nanoTime, Thread::sleep);
+    }
+
+    FlinkRestApiClient(
+            Transport transport, ObjectMapper mapper, LongSupplier nanoTime, Sleeper sleeper) {
         this.transport = Objects.requireNonNull(transport, "transport");
         this.mapper = Objects.requireNonNull(mapper, "mapper");
         this.nanoTime = Objects.requireNonNull(nanoTime, "nanoTime");
+        this.sleeper = Objects.requireNonNull(sleeper, "sleeper");
     }
 
     @Override
@@ -86,8 +109,11 @@ public final class FlinkRestApiClient implements FlinkScenarioControl {
                         "Prepared workload JAR changed before upload; expected SHA-256 "
                                 + expectedSha256 + ", actual " + actualSha256);
             }
-            response = mapper.readTree(
-                    transport.uploadJar(snapshot.path(), DEFAULT_CALL_TIMEOUT));
+            HttpResponse uploaded = transport.uploadJar(snapshot.path(), DEFAULT_CALL_TIMEOUT);
+            if (!uploaded.successful()) {
+                throw httpFailure("POST", "/jars/upload", uploaded);
+            }
+            response = parseResponse(uploaded, "/jars/upload");
         }
         String filename = response.path("filename").asText();
         if (filename.isBlank()) {
@@ -323,9 +349,7 @@ public final class FlinkRestApiClient implements FlinkScenarioControl {
                 rootCause = line.substring("Caused by: ".length());
             }
         }
-        return rootCause.length() <= MAX_ROOT_CAUSE_CHARS
-                ? rootCause
-                : rootCause.substring(0, MAX_ROOT_CAUSE_CHARS) + "…";
+        return rootCause;
     }
 
     @Override
@@ -378,21 +402,51 @@ public final class FlinkRestApiClient implements FlinkScenarioControl {
             String endpoint,
             byte[] requestBody,
             MonotonicDeadline deadline) throws IOException {
-        Duration remaining = deadline == null ? DEFAULT_CALL_TIMEOUT : remaining(deadline);
-        byte[] response;
-        try {
-            response = transport.execute(method, endpoint, requestBody, remaining);
-        } catch (InterruptedIOException timeout) {
-            if (deadline != null) {
-                throw new FlinkRestTimeoutException(
-                        "Timed out waiting for Flink operation completion", timeout);
+        while (true) {
+            Duration remaining = deadline == null ? DEFAULT_CALL_TIMEOUT : remaining(deadline);
+            HttpResponse response;
+            try {
+                response = transport.execute(method, endpoint, requestBody, remaining);
+            } catch (InterruptedIOException timeout) {
+                if (deadline != null) {
+                    throw new FlinkRestTimeoutException(
+                            "Timed out waiting for Flink operation completion", timeout);
+                }
+                throw timeout;
             }
-            throw timeout;
+            if (!response.successful()) {
+                IOException failure = httpFailure(method, endpoint, response);
+                if ("GET".equals(method) && deadline != null && response.status() >= 500) {
+                    pauseBeforeNextPoll(deadline);
+                    continue;
+                }
+                throw failure;
+            }
+            if (deadline != null) {
+                remaining(deadline);
+            }
+            return parseResponse(response, endpoint);
         }
-        if (response == null || response.length == 0) {
+    }
+
+    private JsonNode parseResponse(HttpResponse response, String endpoint) throws IOException {
+        byte[] body = response.body();
+        if (body.length == 0) {
             throw new IOException("Flink REST response body was empty for " + endpoint);
         }
-        return mapper.readTree(response);
+        return mapper.readTree(body);
+    }
+
+    private synchronized IOException httpFailure(String method, String endpoint, HttpResponse response) {
+        String body = new String(response.body(), java.nio.charset.StandardCharsets.UTF_8);
+        restErrors.add(new RestError(restErrors.size() + 1L, method, endpoint, response.status(), body));
+        return new IOException("Flink REST " + method + " " + endpoint
+                + " failed with HTTP " + response.status() + ": " + bounded(body));
+    }
+
+    @Override
+    public synchronized List<RestError> restErrors() {
+        return List.copyOf(restErrors);
     }
 
     private static String pathSegment(String value) {
@@ -423,16 +477,63 @@ public final class FlinkRestApiClient implements FlinkScenarioControl {
                 : jobManagerUrl;
     }
 
+    record HttpResponse(int status, byte[] body) {
+        HttpResponse {
+            if (status < 100 || status > 599) {
+                throw new IllegalArgumentException("Invalid HTTP response status");
+            }
+            body = Objects.requireNonNull(body, "body").clone();
+        }
+
+        @Override
+        public byte[] body() {
+            return body.clone();
+        }
+
+        boolean successful() {
+            return status >= 200 && status < 300;
+        }
+    }
+
+    @FunctionalInterface
+    interface Sleeper {
+        void sleep(Duration duration) throws InterruptedException;
+    }
+
     interface Transport extends AutoCloseable {
-        byte[] execute(String method, String endpoint, byte[] body, Duration timeout)
+        HttpResponse execute(String method, String endpoint, byte[] body, Duration timeout)
                 throws IOException;
 
-        default byte[] uploadJar(Path jar, Duration timeout) throws IOException {
+        default HttpResponse uploadJar(Path jar, Duration timeout) throws IOException {
             throw new IOException("This Flink transport does not support JAR upload");
         }
 
         @Override
         default void close() {}
+    }
+
+    private static HttpResponse readHttpResponse(Response response) throws IOException {
+        if (response.body() == null) {
+            return new HttpResponse(response.code(), new byte[0]);
+        }
+        // Error responses are intercepted before OkHttp's transparent decompression. On its
+        // ordinary success path OkHttp has already removed this header after decompression.
+        if ("gzip".equalsIgnoreCase(response.header("Content-Encoding"))) {
+            try (var decompressed = new GZIPInputStream(response.body().byteStream())) {
+                return new HttpResponse(response.code(), decompressed.readAllBytes());
+            }
+        }
+        return new HttpResponse(response.code(), response.body().bytes());
+    }
+
+    /** Internal transport handoff; callers receive HttpResponse, not this exception. */
+    private static final class HttpResponseFailure extends IOException {
+        private final HttpResponse response;
+
+        private HttpResponseFailure(HttpResponse response) {
+            super("HTTP response requires explicit Flink retry policy");
+            this.response = response;
+        }
     }
 
     private static final class OkHttpTransport implements Transport {
@@ -445,7 +546,7 @@ public final class FlinkRestApiClient implements FlinkScenarioControl {
         }
 
         @Override
-        public byte[] execute(
+        public HttpResponse execute(
                 String method,
                 String endpoint,
                 byte[] body,
@@ -461,22 +562,11 @@ public final class FlinkRestApiClient implements FlinkScenarioControl {
             Request request = builder.build();
             Call call = client.newCall(request);
             call.timeout().timeout(safePositiveNanos(timeout), TimeUnit.NANOSECONDS);
-            try (Response response = call.execute()) {
-                byte[] responseBody = response.body() == null
-                        ? new byte[0]
-                        : response.body().bytes();
-                if (!response.isSuccessful()) {
-                    throw new IOException("Flink REST " + method + " " + endpoint
-                            + " failed with HTTP " + response.code() + ": "
-                            + bounded(new String(
-                                    responseBody, java.nio.charset.StandardCharsets.UTF_8)));
-                }
-                return responseBody;
-            }
+            return execute(call);
         }
 
         @Override
-        public byte[] uploadJar(Path jar, Duration timeout) throws IOException {
+        public HttpResponse uploadJar(Path jar, Duration timeout) throws IOException {
             RequestBody multipart = new MultipartBody.Builder()
                     .setType(MultipartBody.FORM)
                     .addFormDataPart(
@@ -490,20 +580,14 @@ public final class FlinkRestApiClient implements FlinkScenarioControl {
                     .build();
             Call call = client.newCall(request);
             call.timeout().timeout(safePositiveNanos(timeout), TimeUnit.NANOSECONDS);
+            return execute(call);
+        }
+
+        private static HttpResponse execute(Call call) throws IOException {
             try (Response response = call.execute()) {
-                byte[] responseBody = response.body() == null
-                        ? new byte[0]
-                        : response.body().bytes();
-                if (!response.isSuccessful()) {
-                    throw new IOException("Flink REST POST /jars/upload failed with HTTP "
-                            + response.code() + ": " + bounded(new String(
-                                    responseBody,
-                                    java.nio.charset.StandardCharsets.UTF_8)));
-                }
-                if (responseBody.length == 0) {
-                    throw new IOException("Flink REST response body was empty for /jars/upload");
-                }
-                return responseBody;
+                return readHttpResponse(response);
+            } catch (HttpResponseFailure failure) {
+                return failure.response;
             }
         }
 
@@ -526,12 +610,12 @@ public final class FlinkRestApiClient implements FlinkScenarioControl {
                 "Timed out waiting for Flink operation completion"));
     }
 
-    private static void pauseBeforeNextPoll(MonotonicDeadline deadline) throws IOException {
+    private void pauseBeforeNextPoll(MonotonicDeadline deadline) throws IOException {
         long sleepNanos = Math.min(
                 TimeUnit.MILLISECONDS.toNanos(POLL_INTERVAL_MILLIS),
                 remaining(deadline).toNanos());
         try {
-            TimeUnit.NANOSECONDS.sleep(sleepNanos);
+            sleeper.sleep(Duration.ofNanos(sleepNanos));
         } catch (InterruptedException interrupted) {
             Thread.currentThread().interrupt();
             throw new IOException("Interrupted while waiting for Flink", interrupted);

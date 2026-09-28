@@ -267,7 +267,7 @@ class RunScenarioCommandTest {
                     new FlinkRuntimeIdentity.ExpectedTarget(EXPECTED_RUNTIME.imageId(),
                             EXPECTED_RUNTIME.components(), Optional.of(jar)),
                     observed ? Optional.of(origins) : Optional.empty(),
-                    KafkaTransactionVersion.Selection.notRequested(), List.of());
+                    KafkaTransactionVersion.Selection.notRequested(), List.of(), List.of());
             JsonNode runtime = JSON.readTree(new V1ExecutionResultRenderer().render(
                     "bounded-eos", context("1234abcd"), expectation, result)).at("/evidence/flinkRuntime");
             assertEquals(observed ? "confirmed" : "unconfirmed", runtime.at("/runtimeJar/status").textValue());
@@ -338,7 +338,7 @@ class RunScenarioCommandTest {
                 KafkaTransactionVersion.UNCONFIRMED, "feature selection failed",
                 Optional.empty(), Optional.empty(), Optional.empty(), Optional.empty(), Optional.empty(),
                 Optional.empty(), Optional.empty(), Optional.empty(), List.of(), EXPECTED_RUNTIME,
-                Optional.empty(), selection, List.of());
+                Optional.empty(), selection, List.of(), List.of());
         JsonNode output = JSON.readTree(new V1ExecutionResultRenderer().render(
                 "bounded-eos", context("1234abcd"), expectation, result));
         JsonNode evidence = output.at("/evidence/kafkaTransactionVersion");
@@ -348,6 +348,33 @@ class RunScenarioCommandTest {
         assertEquals(0, evidence.at("/observations/0/supported/min").intValue());
         assertEquals(5, evidence.at("/observations/0/metadataEpoch").longValue());
         assertEquals(selection.error().orElseThrow(), evidence.path("error").textValue());
+    }
+
+    @Test
+    void recoveredRestErrorsRenderInOrderWithTheirFullOriginalBodies() throws Exception {
+        String body = "{\"errors\":[\"NullArgumentException: input array\"]}" + "x".repeat(5000);
+        var errors = List.of(
+                new org.savonitar.flink.stability.core.flink.FlinkScenarioControl.RestError(
+                        1, "GET", "/jobs/job-1/checkpoints", 500, body),
+                new org.savonitar.flink.stability.core.flink.FlinkScenarioControl.RestError(
+                        2, "GET", "/jobs/job-1/checkpoints", 500, body));
+        var result = new V1ScenarioExecutionResult(V1ScenarioExecutionResult.Status.INCONCLUSIVE,
+                "infrastructure.example", "example", Optional.empty(), Optional.empty(), Optional.empty(),
+                Optional.empty(), Optional.empty(), Optional.empty(), Optional.empty(), Optional.empty(),
+                List.of(), EXPECTED_RUNTIME, Optional.empty(),
+                KafkaTransactionVersion.Selection.notRequested(), errors, List.of());
+        JsonNode output = JSON.readTree(new V1ExecutionResultRenderer().render(
+                "bounded-eos", context("1234abcd"), expectation, result));
+        assertEquals(2, output.at("/evidence/flinkRest/errorCount").intValue());
+        JsonNode observed = output.at("/evidence/flinkRest/errors");
+        assertEquals(2, observed.size());
+        assertEquals(1, observed.get(0).path("sequence").longValue());
+        assertEquals(2, observed.get(1).path("sequence").longValue());
+        assertEquals("GET", observed.get(0).path("method").textValue());
+        assertEquals("/jobs/job-1/checkpoints", observed.get(0).path("endpoint").textValue());
+        assertEquals(500, observed.get(0).path("httpStatus").intValue());
+        assertEquals(body, observed.get(0).path("body").textValue());
+        assertEquals(body, observed.get(1).path("body").textValue());
     }
 
     @Test
@@ -386,6 +413,7 @@ class RunScenarioCommandTest {
                 EXPECTED_RUNTIME,
                 Optional.empty(),
                 KafkaTransactionVersion.Selection.notRequested(),
+                List.of(),
                 List.of());
 
         JsonNode output = JSON.readTree(new V1ExecutionResultRenderer().render(
@@ -414,18 +442,22 @@ class RunScenarioCommandTest {
     @Test
     void rendersPeerAttributionWithoutReplacingTheReportingTaskManagerIdentity() throws Exception {
         String type = "org.apache.flink.runtime.io.network.netty.exception.RemoteTransportException";
+        String target = "flink-stability-taskmanager-2-1-6fc0d9a9-9fda-4d54-8c99-352bb2f1318b";
+        String peer = "flink-stability-taskmanager-1-1-acd3214c-9d1f-4b07-8d34-7f50ea24f7a0";
         var peerFailure = new FlinkJobObservation.Failure(1_300, type,
-                type + ": Connection unexpectedly closed by remote task manager '172.20.0.5:36917 [ tm-2-old ] '. "
-                        + "This might indicate that the remote task manager was lost.", Optional.of("tm-1"));
+                type + ": Connection unexpectedly closed by remote task manager "
+                        + "'192.168.100.100/192.168.100.100:36917 [ " + target
+                        + " ] '. This might indicate that the remote task manager was lost.", Optional.of(peer));
+        assertEquals(305, peerFailure.rootCause().length());
         var before = new FlinkJobObservation(1_000, FlinkJobState.RUNNING, 2, 0,
                 Optional.empty(), List.of(), List.of(
-                        new FlinkJobObservation.Subtask("Source", 0, 0, "RUNNING", Optional.of("tm-2-old")),
-                        new FlinkJobObservation.Subtask("Sink", 1, 0, "RUNNING", Optional.of("tm-1"))));
+                        new FlinkJobObservation.Subtask("Source", 0, 0, "RUNNING", Optional.of(target)),
+                        new FlinkJobObservation.Subtask("Sink", 1, 0, "RUNNING", Optional.of(peer))));
         var kill = new PhaseExecutionEvidence.TaskManagerKill(
                 "$/phases/1/steps/0", List.of(), "taskmanager-2",
                 new FlinkJobObservation.Attempt(Optional.of(before), Optional.empty()),
                 java.util.OptionalLong.of(1_200), java.util.OptionalLong.of(1_500),
-                Optional.of(new TaskManagerControl.Identity("taskmanager-2", "container-2", "tm-2-old")));
+                Optional.of(new TaskManagerControl.Identity("taskmanager-2", "container-2", target)));
         var after = new FlinkJobObservation(9_000, FlinkJobState.FINISHED, 3, 1,
                 Optional.of(new FlinkJobObservation.Restore(2, 1_400)), List.of(peerFailure), List.of());
         JsonNode rendered = renderEvidence(new PhaseExecutionEvidence(List.of(), List.of(kill), List.of()),
@@ -439,8 +471,8 @@ class RunScenarioCommandTest {
         assertEquals(200, rendered.path("restoredAfterPreInjectionMs").longValue());
         assertEquals(-100, rendered.path("restoredAfterKillObservationMs").longValue());
         assertEquals(1, rendered.path("qualifyingTargetFailures").size());
-        assertEquals("tm-1", rendered.at("/qualifyingTargetFailures/0/taskManagerId").textValue());
-        assertEquals("tm-2-old", rendered.at("/qualifyingTargetFailures/0/targetResourceId").textValue());
+        assertEquals(peer, rendered.at("/qualifyingTargetFailures/0/taskManagerId").textValue());
+        assertEquals(target, rendered.at("/qualifyingTargetFailures/0/targetResourceId").textValue());
         assertEquals("remote-transport", rendered.at("/qualifyingTargetFailures/0/attribution").textValue());
         assertEquals(peerFailure.rootCause(), rendered.at("/qualifyingTargetFailures/0/rootCause").textValue());
     }
@@ -518,6 +550,7 @@ class RunScenarioCommandTest {
                 EXPECTED_RUNTIME,
                 Optional.empty(),
                 KafkaTransactionVersion.Selection.notRequested(),
+                List.of(),
                 List.of());
 
         JsonNode evidence = JSON.readTree(new V1ExecutionResultRenderer().render(
@@ -1007,7 +1040,7 @@ class RunScenarioCommandTest {
                 Optional.empty(), Optional.of(phases), Optional.empty(), Optional.empty(),
                 observation, Optional.empty(), Optional.empty(), Optional.empty(),
                 List.of(), EXPECTED_RUNTIME, Optional.empty(),
-                KafkaTransactionVersion.Selection.notRequested(), List.of());
+                KafkaTransactionVersion.Selection.notRequested(), List.of(), List.of());
         return JSON.readTree(new V1ExecutionResultRenderer().render(
                 "distributed-recovery", context("1234abcd"), expectation, result)).path("evidence");
     }
@@ -1086,6 +1119,7 @@ class RunScenarioCommandTest {
                 EXPECTED_RUNTIME,
                 Optional.empty(),
                 KafkaTransactionVersion.Selection.notRequested(),
+                List.of(),
                 List.of());
     }
 
@@ -1122,6 +1156,7 @@ class RunScenarioCommandTest {
                 EXPECTED_RUNTIME,
                 Optional.empty(),
                 KafkaTransactionVersion.Selection.notRequested(),
+                List.of(),
                 List.of());
     }
 
@@ -1158,6 +1193,7 @@ class RunScenarioCommandTest {
                 EXPECTED_RUNTIME,
                 Optional.empty(),
                 KafkaTransactionVersion.Selection.notRequested(),
+                List.of(),
                 List.of());
     }
 
@@ -1232,6 +1268,7 @@ class RunScenarioCommandTest {
                 new FlinkRuntimeIdentity.ExpectedTarget(Optional.empty(), EXPECTED_RUNTIME.components()),
                 Optional.empty(),
                 KafkaTransactionVersion.Selection.notRequested(),
+                List.of(),
                 List.of("diagnostic"));
     }
 
