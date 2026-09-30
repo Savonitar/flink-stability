@@ -1992,6 +1992,23 @@ Connector pull-request gating is the same mechanism with one axis:
   error path; prepared-owner cleanup must never erase an authoritative
   `verification.*` result or its process-fence evidence.
 
+- **R8.2e** The separate offline `inspect-kafka-log --input FILE` command decodes
+  one retained regular Kafka segment into physical batch, record and transaction
+  marker evidence. Its `kafka-log-segment-v1` JSON includes the captured byte count
+  and SHA-256. `complete: true` means only that every byte and record in that file
+  was decoded; it establishes neither topic/partition coverage nor transaction
+  visibility, an exact-output oracle, or a scenario verdict. An empty file has
+  zero physical records. Version 2 uncompressed batches are supported; legacy or
+  compressed batches, corruption, truncation, unsupported markers and exceeded
+  bounds fail explicitly with `complete: false` and a nonzero exit. No successful
+  partial segment is emitted. Input limits are at most 64 MiB, 100,000 batches and 100,000 records,
+  with at most 1 MiB per batch. File bytes and records can be reduced through
+  `--max-bytes` and `--max-records`. The batch limits also bound empty-batch
+  metadata and transient per-batch record/header allocation. Symbolic-link input
+  paths are rejected. The command reads no broker and modifies no input, scenario,
+  oracle or retained runtime verdict. Missing transaction markers never imply a
+  COMMIT or ABORT outcome.
+
 - **R8.3** A scenario declares `runs: K`, a positive integer; the report gives
   N-of-K. Any clean expectation mismatch is a failure — exactly-once is not a
   statistical property.

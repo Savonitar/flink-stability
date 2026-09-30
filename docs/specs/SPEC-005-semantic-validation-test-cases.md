@@ -481,3 +481,11 @@ expected validation code.
 | SV-199 | Either explicit scope has only pre-submit requests, a rewritten post-submit trace prefix, a missing live TM, an old TM incarnation, a different token, or a mismatched request/outcome/finish/fault ACK context. | Retain the actual post-submit snapshot, require an unchanged prefix and fresh complete request correlation, and prove exact-token delivery to every independently expected live TM; apply the same scope predicate online and in final evaluation. |
 | SV-200 | Registration history reports conflicting aliases, a second job, journal overflow or invalid coverage, followed by later healthy issuance and exact final data. | Retain negative evidence and keep required token proof unconfirmed. Missing proof is INCONCLUSIVE; an existing data FAIL remains FAIL. JSON interning/ranges preserve events that differ only in registration or participant identity. |
 | SV-201 | An explicit-scope healthy control has complete post-submit all-TM proof and no injected fault. | Evaluate it without adding a phase, telemetry worker or checkpoint. A paired comparison starts fault cells only after both healthy controls pass; no callback API or authenticated Kafka-token coverage is implied. |
+
+## 12. Offline Kafka segment evidence
+
+| ID | Case | Expected result |
+| --- | --- | --- |
+| SV-202 | A retained uncompressed v2 segment contains transactional data and COMMIT/ABORT markers, including different producer epochs. | Decode every batch and record with file position, offsets, producer ID/epoch, sequences and marker identity. Preserve null/noncanonical payloads. Report physical facts without joining transaction incarnations or inferring visibility. |
+| SV-203 | A segment is truncated, CRC-corrupt, has an inconsistent record count, unsupported compression/magic/marker, or exceeds a file-byte, batch-byte, batch-count or record bound. | Fail with incomplete evidence and a nonzero CLI exit; never accept a valid prefix as a complete segment or silently skip unsupported bytes. |
+| SV-204 | The CLI reads an empty regular segment, a symbolic link, or an out-of-range budget. | An empty file reports zero physical records and its hash without a scenario verdict. Reject symbolic links and invalid budgets; retain inputs unchanged and never start Kafka or Docker. |

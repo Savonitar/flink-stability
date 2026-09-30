@@ -44,6 +44,37 @@ These tests use controlled clocks, fake runtime boundaries, and Kafka adapter te
 clients where applicable. They do not establish container discovery/reconnection
 behavior or sensitivity to a faulty connector.
 
+## Offline Kafka segment inspection
+
+Inspect a stable local copy of a Kafka partition log segment without starting a
+broker or Docker:
+
+```sh
+mvn -q -o exec:java -pl cli -Dexec.args="inspect-kafka-log --input jobs/evidence/output-0/00000000000000000000.log"
+```
+
+The `kafka-log-segment-v1` JSON binds decoded physical records to the captured
+file's SHA-256. It retains batch producer IDs, epochs, sequences, record offsets,
+raw key/value bytes as Base64, canonical numeric IDs when present, and COMMIT/ABORT
+markers. Producer IDs and epochs alone do not establish a transaction's outcome
+or map it to a transactional ID; absent markers cannot establish a commit.
+
+The current decoder accepts only version 2 uncompressed batches, up to 64 MiB
+and 100,000 records, with at most 100,000 batches and 1 MiB per batch. The latter
+limits bound empty-batch metadata and transient record/header allocation. Reduce
+file bytes and record limits with `--max-bytes` and `--max-records`.
+It rejects symbolic links, changed input metadata, corruption, truncated tails,
+unsupported batches/markers and exceeded limits. A nonzero exit and
+`complete: false` preserve that limitation. `complete: true` describes only this
+file, including an empty file; it is not evidence of complete partition coverage,
+read-committed visibility or data correctness. Retain the original file beside
+the JSON. The command does not collect live broker files or change runtime results.
+
+Decoder regressions use Kafka's actual record builders for transactional data and
+markers. These local tests do not establish broker-copy consistency or historical
+transaction attribution. Live collection must happen before the attempt removes
+its owned Kafka container and must retain independent coverage and identity evidence.
+
 ## Optional real-container runs
 
 These commands start Docker workloads. Run them only when container execution is
