@@ -322,6 +322,8 @@ final class V1ExecutionResultRenderer {
             terminal.put("expected", validation.evidence().expectedCount());
             terminal.put("observed", validation.evidence().observedCount());
             terminal.put("snapshotComplete", validation.evidence().snapshotComplete());
+            ArrayNode missingSamples = terminal.putArray("missingSamples");
+            validation.evidence().missingSamples().forEach(missingSamples::add);
             validation.evidence().defectTotals().ifPresent(totals -> {
                 terminal.put("distinctExpected", totals.distinctExpectedCount());
                 terminal.put("malformed", totals.malformedCount());

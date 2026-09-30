@@ -92,6 +92,16 @@ EndTxn scenarios, and its README records the last results. Historical run counts
 byte-comparison claims without their commands and retained outputs are not substitutes
 for rerunning these checks on the current changes.
 
+The [recovery-mutant recipe](../calibration/recovery-mutant/README.md) adds a separate
+source checkpoint-offset mutation for `bounded-eos`. Its four-cell matrix keeps the
+canonical recovery scenario intact and compares it with an explicitly separate no-kill
+control. The mutant must lose exactly one ID after recovery and remain harmless without
+recovery; the release must pass both sides. The recipe records the completed four-cell
+calibration and its exact artifact/evidence boundary. New builds require their own
+identity checks. The mutation tests source checkpoint restoration,
+not the sink's treatment of pending transactions. The JSON terminal evidence exposes the
+oracle's bounded `missingSamples` so a missing ID can be matched to the corrupted offset.
+
 ## Findings and sensitivity
 
 The harness exists to find defects in Flink, Kafka, and connectors. A failing or odd run

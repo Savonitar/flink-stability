@@ -1944,7 +1944,11 @@ Connector pull-request gating is the same mechanism with one axis:
   evidence names `complete` or `partial` status and reconciliation completion
   explicitly; a stage that never started remains present as `not-started` or
   `not-run` with `completed: false`, and terminal `snapshotComplete: false`;
-  terminal defect totals appear only for a complete snapshot. This is
+  terminal defect totals appear only for a complete snapshot. When terminal validation
+  ran, `missingSamples` exposes its existing bounded sample of at most 100 missing IDs
+  in ascending order. An incomplete snapshot has an empty array; a stage that never ran
+  omits it. This sample is not the complete missing-ID set when the count exceeds 100.
+  This is
   useful executable evidence but is **not** the complete replay-grade R8.2 run
   report. Environment-health sampling, independently resolved OCI digests, and
   the full resolved/artifact/configuration/provenance report remain roadmap work;
