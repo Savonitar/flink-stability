@@ -4,17 +4,80 @@ import com.sun.net.httpserver.HttpServer;
 import org.junit.jupiter.api.Test;
 
 import java.io.IOException;
+import java.io.InterruptedIOException;
 import java.net.InetSocketAddress;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.TimeoutException;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 
 import static org.junit.jupiter.api.Assertions.*;
 
 class FlinkHaEndpointTest {
+    @Test
+    void explicitResolverBudgetExpiryPreservesItsCauseAndDoesNotRetry() {
+        TimeoutException expired = new TimeoutException("owned leader budget expired");
+        expired.initCause(new IllegalStateException("retained runtime deadline evidence"));
+        AtomicInteger discoveries = new AtomicInteger();
+        try (FlinkRestApiClient client = new FlinkRestApiClient("http://127.0.0.1:1")) {
+            client.useEndpointResolver(timeout -> {
+                assertTrue(timeout.isPositive());
+                assertTrue(timeout.compareTo(Duration.ofSeconds(1)) <= 0);
+                discoveries.incrementAndGet();
+                throw expired;
+            });
+
+            FlinkRestTimeoutException failure = assertThrows(FlinkRestTimeoutException.class,
+                    () -> client.awaitFinished(new FlinkJobHandle("job"), Duration.ofSeconds(1)));
+
+            assertSame(expired, failure.getCause());
+            assertTrue(failure.getMessage().contains("resolving the owned Flink REST leader"));
+            assertEquals(1, discoveries.get());
+            assertTrue(client.restErrors().isEmpty());
+        }
+    }
+
+    @Test
+    void resolverErrorsRemainErrorsEvenWhenTheyContainANestedTimeout() {
+        for (Exception original : List.of(new IOException("invalid leader record"),
+                new IllegalStateException("observer disconnected"),
+                new IOException("failed leader lookup", new TimeoutException("inner operation")),
+                new IllegalStateException("failed leader lookup", new TimeoutException("inner operation")))) {
+            AtomicInteger discoveries = new AtomicInteger();
+            try (FlinkRestApiClient client = new FlinkRestApiClient("http://127.0.0.1:1")) {
+                client.useEndpointResolver(timeout -> {
+                    discoveries.incrementAndGet();
+                    if (original instanceof IOException io) throw io;
+                    throw (RuntimeException) original;
+                });
+
+                IOException failure = assertThrows(IOException.class,
+                        () -> client.awaitFinished(new FlinkJobHandle("job"), Duration.ofSeconds(1)));
+
+                assertFalse(failure instanceof FlinkRestTimeoutException);
+                assertSame(original, original instanceof IOException ? failure : failure.getCause());
+                assertEquals(1, discoveries.get());
+            }
+        }
+    }
+
+    @Test
+    void interruptedIoKeepsTheExistingBoundedVersusUnboundedRestClassification() {
+        InterruptedIOException original = new InterruptedIOException("interrupted resolver IO");
+        try (FlinkRestApiClient client = new FlinkRestApiClient("http://127.0.0.1:1")) {
+            client.useEndpointResolver(timeout -> { throw original; });
+
+            assertSame(original, assertThrows(InterruptedIOException.class,
+                    () -> client.jobState(new FlinkJobHandle("job"))));
+            FlinkRestTimeoutException bounded = assertThrows(FlinkRestTimeoutException.class,
+                    () -> client.awaitFinished(new FlinkJobHandle("job"), Duration.ofSeconds(1)));
+            assertSame(original, bounded.getCause());
+        }
+    }
+
     @Test
     void resolvesTheCurrentOwnedLeaderForEachRequest() throws Exception {
         HttpServer first = server("RUNNING");

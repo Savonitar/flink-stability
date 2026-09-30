@@ -5,6 +5,7 @@ import org.savonitar.flink.stability.core.flink.FlinkJobControl;
 import org.savonitar.flink.stability.core.flink.FlinkJobHandle;
 import org.savonitar.flink.stability.core.flink.FlinkJobObservation;
 import org.savonitar.flink.stability.core.flink.FlinkJobState;
+import org.savonitar.flink.stability.core.flink.FlinkRestApiClient;
 import org.savonitar.flink.stability.core.flink.FlinkRestTimeoutException;
 import org.savonitar.flink.stability.runtime.api.FlinkComponentRole;
 import org.savonitar.flink.stability.runtime.api.FlinkProcessWriteFenceEvidence;
@@ -15,13 +16,50 @@ import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
+import java.util.concurrent.TimeoutException;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertInstanceOf;
+import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class FlinkTerminalWriteFenceTest {
     private static final FlinkJobHandle JOB = new FlinkJobHandle("job-1");
+
+    @Test
+    void realEndpointAdapterDistinguishesDeadlineExpiryFromResolverFailureBeforeForceFencing() {
+        TimeoutException expired = new TimeoutException("owned endpoint deadline expired");
+        IllegalStateException unavailable = new IllegalStateException("invalid leader record", expired);
+        for (boolean deadlineExpired : List.of(true, false)) {
+            List<String> events = new ArrayList<>();
+            try (FlinkRestApiClient client = new FlinkRestApiClient("http://127.0.0.1:1")) {
+                client.useEndpointResolver(timeout -> {
+                    events.add("resolve-leader");
+                    if (deadlineExpired) throw expired;
+                    throw unavailable;
+                });
+                FlinkTerminalWriteFence fence = new FlinkTerminalWriteFence(
+                        client, timeout -> recordProcessFence(events, timeout));
+
+                TerminalWriteFenceException failure = assertThrows(TerminalWriteFenceException.class,
+                        () -> fence.awaitBoundedCompletion(JOB, Duration.ofSeconds(1)));
+
+                assertEquals(deadlineExpired ? "verification.flink.job-completion-timeout"
+                        : "verification.flink.job-terminalization-failed", failure.reason());
+                if (deadlineExpired) {
+                    assertInstanceOf(FlinkRestTimeoutException.class, failure.getCause());
+                } else {
+                    assertInstanceOf(IOException.class, failure.getCause());
+                }
+                assertSame(deadlineExpired ? expired : unavailable, failure.getCause().getCause());
+                assertEquals(List.of("resolve-leader", "resolve-leader", "fence-processes"), events);
+                assertEquals(Optional.of(processFenceEvidence()), failure.processFenceEvidence());
+                assertTrue(failure.jobBeforeFence().observation().isEmpty());
+                assertTrue(failure.jobBeforeFence().failure().isPresent());
+            }
+        }
+    }
 
     @Test
     void boundedJobFinishesBeforeEveryFlinkProcessIsFenced() throws Exception {

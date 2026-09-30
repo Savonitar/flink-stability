@@ -25,6 +25,7 @@ import java.util.Locale;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.TimeoutException;
 import java.util.function.LongSupplier;
 import java.util.zip.GZIPInputStream;
 
@@ -75,7 +76,7 @@ public final class FlinkRestApiClient implements FlinkScenarioControl {
     /** Resolves an owned leader endpoint under the request's existing total deadline. */
     @FunctionalInterface
     public interface EndpointResolver {
-        String resolve(Duration timeout) throws IOException;
+        String resolve(Duration timeout) throws IOException, TimeoutException;
     }
 
     /** Installed before submission for HA; leader discovery never retries a mutation. */
@@ -633,6 +634,9 @@ public final class FlinkRestApiClient implements FlinkScenarioControl {
             EndpointResolver resolver = endpointResolver;
             try {
                 return resolver == null ? jobManagerUrl : normalizeUrl(resolver.resolve(remaining(deadline)));
+            } catch (TimeoutException expired) {
+                throw new FlinkRestTimeoutException(
+                        "Timed out resolving the owned Flink REST leader", expired);
             } catch (RuntimeException unavailable) {
                 throw new IOException("Cannot resolve the owned Flink REST leader", unavailable);
             }

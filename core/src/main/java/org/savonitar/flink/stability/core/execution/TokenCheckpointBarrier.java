@@ -19,6 +19,7 @@ import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.UUID;
+import java.util.concurrent.TimeoutException;
 
 /** Opt-in synchronization; incomplete proof stops later phase actions, never changes the data oracle. */
 public final class TokenCheckpointBarrier {
@@ -227,7 +228,7 @@ public final class TokenCheckpointBarrier {
     }
 
     private static FlinkHaControl.LeadershipObservation sampleLeader(V1AttemptRuntime runtime, Duration timeout)
-            throws IOException {
+            throws IOException, TimeoutException {
         long previous = runtime.haObservations().map(TokenCheckpointBarrier::lastSequence).orElse(0L);
         runtime.currentFlinkRestEndpoint(timeout);
         var history = runtime.haObservations().orElseThrow(() -> new IOException("HA sample history unavailable"));

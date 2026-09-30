@@ -1608,6 +1608,10 @@ Connector pull-request gating is the same mechanism with one axis:
   `verification.flink.process-fence-failed`. A non-timeout failure while querying
   or waiting for terminal job state similarly fails with
   `verification.flink.job-terminalization-failed` before any oracle can match.
+  An explicit HA endpoint-resolution deadline expiry preserves the caller's
+  timeout classification and original cause through the runtime/REST adapters.
+  Other resolver failures remain non-timeout failures even when their cause chain
+  contains an unrelated timeout; resolution and retry receive no fresh budget.
 
   After the terminal validators finish, the first runner lists the Kafka
   transactions whose transactional ID starts with the sink's
