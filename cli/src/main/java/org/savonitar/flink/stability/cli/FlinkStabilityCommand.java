@@ -7,7 +7,8 @@ import java.util.concurrent.Callable;
 @CommandLine.Command(name = "flink-stability", mixinStandardHelpOptions = true, version = "0.1",
         subcommands = {
                 RunScenarioCommand.class,
-                ValidateSpecificationsCommand.class
+                ValidateSpecificationsCommand.class,
+                InspectKafkaLogCommand.class
         })
 public class FlinkStabilityCommand implements Callable<Integer> {
     @CommandLine.Spec

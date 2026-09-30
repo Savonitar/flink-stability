@@ -18,6 +18,7 @@ import java.time.Duration;
 import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
+import java.util.concurrent.TimeoutException;
 
 /** Testcontainers implementation for one v1 run attempt. */
 public final class DockerV1AttemptRuntime implements V1AttemptRuntime {
@@ -50,8 +51,14 @@ public final class DockerV1AttemptRuntime implements V1AttemptRuntime {
     }
 
     @Override
-    public String currentFlinkRestEndpoint(Duration timeout) {
-        return clusters.currentFlinkRestEndpoint(timeout);
+    public String currentFlinkRestEndpoint(Duration timeout) throws TimeoutException {
+        try {
+            return clusters.currentFlinkRestEndpoint(timeout);
+        } catch (ContainerOperationTimeoutException failure) {
+            TimeoutException expired = new TimeoutException(failure.getMessage());
+            expired.initCause(failure);
+            throw expired;
+        }
     }
 
     @Override

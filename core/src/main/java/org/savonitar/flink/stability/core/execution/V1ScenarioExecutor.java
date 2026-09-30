@@ -20,6 +20,7 @@ import org.savonitar.flink.stability.runtime.api.FlinkComponentProvisioningEvide
 import org.savonitar.flink.stability.runtime.api.FlinkProcessWriteFenceEvidence;
 import org.savonitar.flink.stability.runtime.api.KafkaRuntimeEndpoints;
 import org.savonitar.flink.stability.runtime.api.KafkaProxyEndpoint;
+import org.savonitar.flink.stability.runtime.api.MonotonicDeadline;
 import org.savonitar.flink.stability.runtime.api.V1AttemptRuntime;
 import org.savonitar.flink.stability.runtime.api.V1AttemptRuntimeFactory;
 
@@ -155,7 +156,8 @@ public final class V1ScenarioExecutor {
                 plan.flink().expectedRuntimeJar());
         FlinkHaEvidence.Expected expectedHa = FlinkHaEvidence.Expected.from(
                 plan.phases(), plan.flink().highAvailability().isPresent(), plan.flink().tokenProvider().isPresent(),
-                plan.flink().taskmanagers());
+                plan.flink().taskmanagers()).withTokenProof(plan.flink().tokenProvider()
+                        .flatMap(provider -> provider.proofScope()).map(TokenScopeProof.Requirement::new));
 
         V1AttemptRuntime runtime = null;
         FlinkScenarioControl flink = null;
@@ -219,10 +221,30 @@ public final class V1ScenarioExecutor {
                     plan.job().parallelism(),
                     configuration,
                     plan.job().programArguments().values()));
+            if (expectedHa.tokenProof().isPresent()) {
+                try {
+                    var trace = runtime.tokenServiceEvidence().filter(FlinkHaEvidence::completeTrace)
+                            .orElseThrow(() -> new IOException("Post-submit token trace is unavailable or incomplete"));
+                    expectedHa = expectedHa.withTokenProof(Optional.of(expectedHa.tokenProof().orElseThrow()
+                            .submitted(job.jobId(), plan.job().alias(), trace)));
+                } catch (IOException | RuntimeException unavailable) {
+                    evidenceDiagnostics.addAll(diagnostics(unavailable));
+                }
+            }
             stage = Stage.PHASES;
             phases = new ExecutablePhaseExecutor(flink, runtime, networkFaults)
-                    .execute(plan, job);
+                    .execute(plan, job, expectedHa.tokenProof());
 
+            if (expectedHa.tokenProof().isPresent()) {
+                try {
+                    var receivers = TokenCheckpointBarrier.receivers(runtime, plan.flink().taskmanagers(),
+                            MonotonicDeadline.start(plan.jobCompletionTimeout(), System::nanoTime));
+                    expectedHa = expectedHa.withTokenProof(Optional.of(expectedHa.tokenProof().orElseThrow()
+                            .withReceivers(receivers)));
+                } catch (IOException | RuntimeException unavailable) {
+                    evidenceDiagnostics.addAll(diagnostics(unavailable));
+                }
+            }
             stage = Stage.WRITE_FENCE;
             fence = new FlinkTerminalWriteFence(
                     flink, runtime::stopAllFlinkProcesses)

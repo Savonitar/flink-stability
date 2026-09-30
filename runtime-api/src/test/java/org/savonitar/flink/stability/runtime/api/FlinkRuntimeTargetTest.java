@@ -19,7 +19,8 @@ class FlinkRuntimeTargetTest {
     void haAndTokenConfigurationSurviveEveryTargetWither() {
         var ha = new FlinkRuntimeTarget.HighAvailability("zookeeper:3.9.3", Duration.ofSeconds(6));
         var tokens = new FlinkRuntimeTarget.TokenProvider(
-                Duration.ofSeconds(2), Optional.of(Duration.ofSeconds(3)));
+                Duration.ofSeconds(2), Optional.of(Duration.ofSeconds(3)),
+                Optional.of(FlinkRuntimeTarget.TokenProofScope.SUBMITTED_JOB));
         var jar = new FlinkRuntimeTarget.RuntimeJar("/opt/flink/lib/flink-dist-2.4-SNAPSHOT.jar", "d".repeat(64));
         FlinkRuntimeTarget configured = target().withHighAvailability(ha).withTokenProvider(tokens)
                 .withTaskManagers(2).withExpectedImageId(IMAGE_ID).withExpectedRuntimeJar(jar);
@@ -48,6 +49,23 @@ class FlinkRuntimeTargetTest {
         }
         assertThrows(NullPointerException.class,
                 () -> new FlinkRuntimeTarget.TokenProvider(Duration.ofSeconds(2), null));
+    }
+
+    @Test
+    void explicitTokenProofScopeChangesTargetIdentityWhileOmissionKeepsLegacyConstructorsEqual() {
+        var legacy = new FlinkRuntimeTarget.TokenProvider(Duration.ofSeconds(2));
+        assertTrue(legacy.proofScope().isEmpty());
+        assertEquals(legacy, new FlinkRuntimeTarget.TokenProvider(Duration.ofSeconds(2), Optional.empty()));
+        assertEquals(legacy, new FlinkRuntimeTarget.TokenProvider(
+                Duration.ofSeconds(2), Optional.empty(), Optional.empty()));
+        var bootstrap = new FlinkRuntimeTarget.TokenProvider(Duration.ofSeconds(2), Optional.empty(),
+                Optional.of(FlinkRuntimeTarget.TokenProofScope.BOOTSTRAP));
+        var submitted = new FlinkRuntimeTarget.TokenProvider(Duration.ofSeconds(2), Optional.empty(),
+                Optional.of(FlinkRuntimeTarget.TokenProofScope.SUBMITTED_JOB));
+        assertNotEquals(target().withTokenProvider(legacy), target().withTokenProvider(bootstrap));
+        assertNotEquals(target().withTokenProvider(bootstrap), target().withTokenProvider(submitted));
+        assertThrows(NullPointerException.class, () -> new FlinkRuntimeTarget.TokenProvider(
+                Duration.ofSeconds(2), Optional.empty(), null));
     }
 
     @Test

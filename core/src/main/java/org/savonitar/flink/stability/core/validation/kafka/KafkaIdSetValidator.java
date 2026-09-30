@@ -169,7 +169,7 @@ public final class KafkaIdSetValidator {
                 KafkaIdSetValidationResult.Status.FAIL, reason, message, evidence);
     }
 
-    private static Long parseCanonicalId(String raw) {
+    static Long parseCanonicalId(String raw) {
         if (raw == null || raw.isEmpty()) {
             return null;
         }

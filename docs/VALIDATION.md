@@ -44,6 +44,48 @@ These tests use controlled clocks, fake runtime boundaries, and Kafka adapter te
 clients where applicable. They do not establish container discovery/reconnection
 behavior or sensitivity to a faulty connector.
 
+## Offline Kafka segment inspection
+
+Inspect a stable local copy of a Kafka partition log segment without starting a
+broker or Docker:
+
+```sh
+mvn -q -o exec:java -pl cli -Dexec.args="inspect-kafka-log --input jobs/evidence/output-0/00000000000000000000.log"
+```
+
+The `kafka-log-segment-v1` JSON binds decoded physical records to the captured
+file's SHA-256. It retains batch producer IDs, epochs, sequences, record offsets,
+raw key/value bytes as Base64, canonical numeric IDs when present, and COMMIT/ABORT
+markers. Producer IDs and epochs alone do not establish a transaction's outcome
+or map it to a transactional ID; absent markers cannot establish a commit.
+
+The current decoder accepts only version 2 uncompressed batches, up to 64 MiB
+and 100,000 records, with at most 100,000 batches and 1 MiB per batch. The latter
+limits bound empty-batch metadata and transient record/header allocation. Reduce
+file bytes and record limits with `--max-bytes` and `--max-records`.
+It rejects symbolic links, changed input metadata, corruption, truncated tails,
+unsupported batches/markers and exceeded limits. A nonzero exit and
+`complete: false` preserve that limitation. `complete: true` describes only this
+file, including an empty file; it is not evidence of complete partition coverage,
+read-committed visibility or data correctness. Retain the original file beside
+the JSON. The command does not collect live broker files or change runtime results.
+
+Decoder regressions use Kafka's actual record builders for transactional data and
+markers. These local tests do not establish broker-copy consistency or historical
+transaction attribution. Live collection must happen before the attempt removes
+its owned Kafka container and must retain independent coverage and identity evidence.
+
+The adapter also has an internal, opt-in archive capability for an attempt's retained
+Kafka owner. It requires an observed startup identity, an explicit approved log root
+and the caller's shared deadline; normal scenario execution does not invoke it.
+The caller must bind the requested partition directory to fresh Kafka Admin metadata.
+Only completed transport carries a hash, and even that does not establish valid tar,
+an atomic broker snapshot or transaction visibility. Copying never holds a lock
+needed by container cleanup. A canceled worker can leave a changing `.part` file,
+which remains abandoned and cannot become complete evidence after the caller returns.
+The raw archive ceiling is 128 MiB; a collecting driver must additionally cap the
+whole experiment and validate the archive offline before drawing conclusions.
+
 ## Optional real-container runs
 
 These commands start Docker workloads. Run them only when container execution is
@@ -91,6 +133,16 @@ healthy control and two wrong-decision variants of the released connector agains
 EndTxn scenarios, and its README records the last results. Historical run counts and CLI
 byte-comparison claims without their commands and retained outputs are not substitutes
 for rerunning these checks on the current changes.
+
+The [recovery-mutant recipe](../calibration/recovery-mutant/README.md) adds a separate
+source checkpoint-offset mutation for `bounded-eos`. Its four-cell matrix keeps the
+canonical recovery scenario intact and compares it with an explicitly separate no-kill
+control. The mutant must lose exactly one ID after recovery and remain harmless without
+recovery; the release must pass both sides. The recipe records the completed four-cell
+calibration and its exact artifact/evidence boundary. New builds require their own
+identity checks. The mutation tests source checkpoint restoration,
+not the sink's treatment of pending transactions. The JSON terminal evidence exposes the
+oracle's bounded `missingSamples` so a missing ID can be matched to the corrupted offset.
 
 ## Findings and sensitivity
 

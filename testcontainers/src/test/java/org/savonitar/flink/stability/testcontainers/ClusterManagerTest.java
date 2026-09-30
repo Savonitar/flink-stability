@@ -8,6 +8,7 @@ import org.savonitar.flink.stability.runtime.api.FlinkClassLoadLog;
 import org.savonitar.flink.stability.runtime.api.FlinkComponentProvisioningEvidence;
 import org.savonitar.flink.stability.runtime.api.FlinkComponentRole;
 import org.savonitar.flink.stability.runtime.api.FlinkConnectorBundleInstallation;
+import org.savonitar.flink.stability.runtime.api.FlinkHaControl;
 import org.savonitar.flink.stability.runtime.api.FlinkProcessWriteFenceEvidence;
 import org.savonitar.flink.stability.runtime.api.FlinkRuntimeTarget;
 import org.savonitar.flink.stability.runtime.api.ProvisionedConnectorArtifact;
@@ -24,12 +25,17 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.concurrent.TimeoutException;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicReference;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
+import static org.junit.jupiter.api.Assertions.assertInstanceOf;
+import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -40,6 +46,60 @@ class ClusterManagerTest {
 
     @TempDir
     Path temporaryDirectory;
+
+    @Test
+    void endpointAdapterPreservesTypedBudgetExpiryAndDoesNotUnwrapOtherResolverFailures() throws Exception {
+        RecordingFactory factory = new RecordingFactory();
+        AtomicLong nanos = new AtomicLong();
+        AtomicBoolean expire = new AtomicBoolean();
+        AtomicReference<RuntimeException> resolverFailure = new AtomicReference<>();
+        AtomicReference<ContainerOperationTimeoutException> expired = new AtomicReference<>();
+        var configuration = new FlinkRuntimeTarget.HighAvailability("zookeeper:3.9.3", Duration.ofSeconds(6));
+        try (ClusterManager manager = new ClusterManager(Network.SHARED, false,
+                (target, network, storage) -> factory.bind(target, storage),
+                (network, target) -> { throw new AssertionError("Kafka must not be started"); },
+                temporaryDirectory.resolve("endpoint-timeout"), nanos::get,
+                (network, target, clock) -> new FlinkHaRuntime(target, clock, deadline -> {
+                    if (expire.get()) {
+                        nanos.addAndGet(deadline.remaining("reading ZooKeeper leader records").toNanos());
+                        try {
+                            deadline.remaining("reading ZooKeeper leader records");
+                            throw new AssertionError("The supplied deadline must have expired");
+                        } catch (ContainerOperationTimeoutException timeout) {
+                            expired.set(timeout);
+                            throw timeout;
+                        }
+                    }
+                    if (resolverFailure.get() != null) throw resolverFailure.get();
+                    var handle = factory.handles.get("jobmanager-1");
+                    var leader = new FlinkHaControl.LeaderIdentity("jobmanager-1", handle.runtimeId(),
+                            "http://" + handle.advertisedAlias() + ":8081", "session-1");
+                    return Optional.of(new FlinkHaControl.Leadership(leader, leader, leader));
+                }, Map.of()))) {
+            DockerV1AttemptRuntime runtime = new DockerV1AttemptRuntime(manager);
+            runtime.startFlink(target().withHighAvailability(configuration));
+            assertEquals("http://localhost:18081", runtime.currentFlinkRestEndpoint(Duration.ofSeconds(1)));
+
+            expire.set(true);
+            TimeoutException timeout = assertThrows(TimeoutException.class,
+                    () -> runtime.currentFlinkRestEndpoint(Duration.ofNanos(17)));
+            assertSame(expired.get(), timeout.getCause());
+            var original = assertInstanceOf(ContainerOperationTimeoutException.class, timeout.getCause());
+            assertEquals(Duration.ofNanos(17), original.timeout());
+            assertEquals("reading ZooKeeper leader records", original.operation());
+            assertEquals(original.getMessage(), timeout.getMessage());
+            assertTrue(runtime.haObservations().orElseThrow().leadership().getLast().error()
+                    .orElseThrow().contains("ContainerOperationTimeoutException"));
+
+            expire.set(false);
+            for (RuntimeException failure : List.of(new IllegalStateException("observer disconnected"),
+                    new IllegalStateException("resolver failure", new TimeoutException("unrelated inner timeout")))) {
+                resolverFailure.set(failure);
+                assertSame(failure, assertThrows(IllegalStateException.class,
+                        () -> runtime.currentFlinkRestEndpoint(Duration.ofSeconds(1))));
+            }
+        }
+    }
 
     @Test
     void failedStartupRetainsOwnedHaServicesAndRejectsRetryUntilAttemptCleanup() throws Exception {
@@ -526,6 +586,11 @@ class ClusterManagerTest {
         private String imageId = IMAGE_ID;
         private String taskManagerImageId;
 
+        @Override
+        public void configureHighAvailability(FlinkHaRuntime runtime) {
+            // Recorded handles need no container configuration; routing still uses the real HA adapter.
+        }
+
         private RecordingFactory bind(FlinkRuntimeTarget target, Path checkpointRoot) {
             this.target = target;
             if (logs == null) {
@@ -679,6 +744,11 @@ class ClusterManagerTest {
         @Override
         public int mappedPort(int containerPort) {
             return 18081;
+        }
+
+        @Override
+        public String advertisedAlias() {
+            return runtimeId;
         }
 
         @Override

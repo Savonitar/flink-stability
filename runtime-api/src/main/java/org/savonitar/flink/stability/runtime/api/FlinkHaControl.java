@@ -4,6 +4,7 @@ import java.time.Duration;
 import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
+import java.util.concurrent.TimeoutException;
 
 import static org.savonitar.flink.stability.runtime.api.Checks.requireNonBlank;
 
@@ -12,7 +13,12 @@ public interface FlinkHaControl {
     Duration TOKEN_HEAL_TIMEOUT = Duration.ofSeconds(5);
     Duration PROCESS_HEAL_TIMEOUT = Duration.ofSeconds(30);
 
-    default String currentFlinkRestEndpoint(Duration timeout) {
+    /**
+     * Resolves an owned endpoint within the caller's remaining operation budget.
+     * Only expiration of that budget is a {@link TimeoutException}; other discovery
+     * failures must retain their original classification and cause.
+     */
+    default String currentFlinkRestEndpoint(Duration timeout) throws TimeoutException {
         throw new UnsupportedOperationException("Dynamic Flink REST routing is unsupported");
     }
 

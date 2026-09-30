@@ -622,7 +622,8 @@
           "required": ["renewal_interval"],
           "properties": {
             "renewal_interval": {"$ref": "#/$defs/nonEmptyString"},
-            "retry_backoff": {"$ref": "#/$defs/nonEmptyString"}
+            "retry_backoff": {"$ref": "#/$defs/nonEmptyString"},
+            "proof_scope": {"type": "string", "enum": ["bootstrap", "submitted-job"]}
           }
         },
         "config": {

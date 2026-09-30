@@ -25,6 +25,12 @@ final class ContainerOperationDeadline {
                 MonotonicDeadline.start(timeout, monotonicNanos));
     }
 
+    /** Adapts an existing caller budget without restarting or extending its clock. */
+    static ContainerOperationDeadline shared(String scope, MonotonicDeadline budget) {
+        return new ContainerOperationDeadline(
+                Objects.requireNonNull(scope, "scope"), Objects.requireNonNull(budget, "budget"));
+    }
+
     Duration remaining(String operation) {
         return budget.remainingOrThrow(() -> timedOut(operation, null));
     }

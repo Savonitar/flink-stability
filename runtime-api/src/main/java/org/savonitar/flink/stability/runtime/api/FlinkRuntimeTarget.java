@@ -114,12 +114,21 @@ public final class FlinkRuntimeTarget {
         }
     }
 
-    public record TokenProvider(Duration renewalInterval, Optional<Duration> retryBackoff) {
+    /** Explicit proof requirements; omission preserves the existing service-wide evidence contract. */
+    public enum TokenProofScope { BOOTSTRAP, SUBMITTED_JOB }
+
+    public record TokenProvider(Duration renewalInterval, Optional<Duration> retryBackoff,
+                                Optional<TokenProofScope> proofScope) {
         public TokenProvider(Duration renewalInterval) {
-            this(renewalInterval, Optional.empty());
+            this(renewalInterval, Optional.empty(), Optional.empty());
+        }
+
+        public TokenProvider(Duration renewalInterval, Optional<Duration> retryBackoff) {
+            this(renewalInterval, retryBackoff, Optional.empty());
         }
 
         public TokenProvider {
+            Objects.requireNonNull(proofScope, "proofScope");
             requirePositive(renewalInterval, "renewalInterval");
             if (renewalInterval.compareTo(Duration.ofMillis(50)) < 0
                     || renewalInterval.compareTo(Duration.ofMinutes(30)) > 0) {

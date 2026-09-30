@@ -436,7 +436,33 @@ class RunScenarioCommandTest {
                 () -> assertFalse(validation.has("malformed")),
                 () -> assertFalse(validation.has("unexpected")),
                 () -> assertFalse(validation.has("duplicates")),
-                () -> assertFalse(validation.has("missing")));
+                () -> assertFalse(validation.has("missing")),
+                () -> assertTrue(validation.path("missingSamples").isArray()),
+                () -> assertTrue(validation.path("missingSamples").isEmpty()));
+    }
+
+    @Test
+    void completeMissingIdSamplesSurviveRenderingWithoutChangingTheFailure() throws Exception {
+        KafkaIdSetValidationResult terminal = new KafkaIdSetValidationResult(
+                KafkaIdSetValidationResult.Status.FAIL,
+                "validator.kafka.id-set.missing-ids", "One ID is missing",
+                new KafkaIdSetValidationResult.Evidence(
+                        3, 2, Optional.of(new KafkaIdSetValidationResult.DefectTotals(2, 0, 0, 0, 1)),
+                        List.of(), List.of(), List.of(), List.of(), List.of(1L),
+                        Map.of(0, 0L), Map.of(0, 2L), true));
+        V1ScenarioExecutionResult result = new V1ScenarioExecutionResult(
+                V1ScenarioExecutionResult.Status.FAIL, terminal.reason(), terminal.message(),
+                Optional.empty(), Optional.empty(), Optional.empty(), Optional.of(runtimeFence()),
+                Optional.empty(), Optional.of(terminal), Optional.empty(), SUBJECT_ORIGINS,
+                runtimeComponents(), EXPECTED_RUNTIME, List.of());
+
+        JsonNode output = JSON.readTree(new V1ExecutionResultRenderer().render(
+                "bounded-eos", context("1234abcd"), expectation, result));
+
+        assertEquals("fail", output.path("status").textValue());
+        assertEquals(terminal.reason(), output.at("/attempt/reason").textValue());
+        assertEquals(JSON.readTree("[1]"), output.at("/evidence/terminalValidation/missingSamples"));
+        assertEquals(1, output.at("/evidence/terminalValidation/missing").intValue());
     }
 
     @Test

@@ -102,9 +102,21 @@ public final class ExecutablePhaseExecutor {
     public PhaseExecutionEvidence execute(
             ExecutableScenarioPlan plan,
             FlinkJobHandle job) throws PhaseExecutionException {
+        return execute(plan, job, plan.flink().tokenProvider().flatMap(provider -> provider.proofScope())
+                .map(TokenScopeProof.Requirement::new));
+    }
+
+    PhaseExecutionEvidence execute(ExecutableScenarioPlan plan, FlinkJobHandle job,
+                                   Optional<TokenScopeProof.Requirement> tokenProof) throws PhaseExecutionException {
         Objects.requireNonNull(plan, "plan");
         Objects.requireNonNull(job, "job");
-        Recorder evidence = new Recorder(plan.flink().taskmanagers());
+        if (!tokenProof.map(TokenScopeProof.Requirement::scope)
+                .equals(plan.flink().tokenProvider().flatMap(provider -> provider.proofScope()))
+                || tokenProof.flatMap(TokenScopeProof.Requirement::submission).filter(binding ->
+                    !binding.jobId().equals(job.jobId()) || !binding.jobAlias().equals(plan.job().alias())).isPresent()) {
+            throw new IllegalArgumentException("Token proof does not match the declared scope and submitted job");
+        }
+        Recorder evidence = new Recorder(plan.flink().taskmanagers(), tokenProof);
         for (int phaseIndex = 0; phaseIndex < plan.phases().size(); phaseIndex++) {
             if (evidence.stopFurtherSteps) break;
             ExecutableScenarioPlan.Phase phase = plan.phases().get(phaseIndex);
@@ -495,7 +507,7 @@ public final class ExecutablePhaseExecutor {
         TokenCheckpointBarrier.Operation barrier = fault.recoveryBarrier().isPresent()
                 && taskManagers instanceof V1AttemptRuntime runtime
                 ? new TokenCheckpointBarrier.Operation(runtime, flink, job,
-                    evidence.expectedTaskManagers, deadline, sleeper) : null;
+                    evidence.expectedTaskManagers, deadline, sleeper, evidence.tokenProof) : null;
         try {
             if (fault.recoveryBarrier().isPresent() && (barrier == null || !barrier.beforeFault())) {
                 throw new IllegalStateException("Pre-fault token-checkpoint readiness is unconfirmed");
@@ -678,10 +690,12 @@ public final class ExecutablePhaseExecutor {
         private final List<PhaseExecutionEvidence.TaskManagerRestart> restarts = new ArrayList<>();
         private final List<PhaseExecutionEvidence.LeaderFault> leaderFaults = new ArrayList<>();
         private final int expectedTaskManagers;
+        private final Optional<TokenScopeProof.Requirement> tokenProof;
         private boolean stopFurtherSteps;
 
-        private Recorder(int expectedTaskManagers) {
+        private Recorder(int expectedTaskManagers, Optional<TokenScopeProof.Requirement> tokenProof) {
             this.expectedTaskManagers = expectedTaskManagers;
+            this.tokenProof = tokenProof;
         }
 
         private PhaseExecutionEvidence snapshot() {

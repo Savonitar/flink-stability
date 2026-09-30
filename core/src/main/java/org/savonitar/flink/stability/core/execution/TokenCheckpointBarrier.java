@@ -19,6 +19,7 @@ import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.UUID;
+import java.util.concurrent.TimeoutException;
 
 /** Opt-in synchronization; incomplete proof stops later phase actions, never changes the data oracle. */
 public final class TokenCheckpointBarrier {
@@ -79,6 +80,7 @@ public final class TokenCheckpointBarrier {
         private final int expectedTaskManagers;
         private final MonotonicDeadline deadline;
         private final PhaseSleeper sleeper;
+        private final Optional<TokenScopeProof.Requirement> tokenProof;
         private Optional<Ready> before = Optional.empty(), after = Optional.empty();
         private Optional<FlinkHaControl.LeadershipObservation> checkpointBefore = Optional.empty(), checkpointAfter = Optional.empty();
         private Optional<Checkpoint> checkpoint = Optional.empty();
@@ -87,12 +89,19 @@ public final class TokenCheckpointBarrier {
 
         Operation(V1AttemptRuntime runtime, FlinkScenarioControl flink, FlinkJobHandle job,
                   int expectedTaskManagers, MonotonicDeadline deadline, PhaseSleeper sleeper) {
+            this(runtime, flink, job, expectedTaskManagers, deadline, sleeper, Optional.empty());
+        }
+
+        Operation(V1AttemptRuntime runtime, FlinkScenarioControl flink, FlinkJobHandle job,
+                  int expectedTaskManagers, MonotonicDeadline deadline, PhaseSleeper sleeper,
+                  Optional<TokenScopeProof.Requirement> tokenProof) {
             this.runtime = runtime;
             this.flink = flink;
             this.job = job;
             this.expectedTaskManagers = expectedTaskManagers;
             this.deadline = deadline;
             this.sleeper = sleeper;
+            this.tokenProof = tokenProof;
         }
 
         boolean beforeFault() {
@@ -121,7 +130,7 @@ public final class TokenCheckpointBarrier {
                 long boundary = healBoundary(raw);
                 after = Optional.of(awaitReady(Optional.of(leader), boundary));
                 Optional<String> effect = FlinkHaEvidence.tokenFaultEffectFailure(raw,
-                        after.orElseThrow().snapshot(), after.orElseThrow().issuerProcess());
+                        after.orElseThrow().snapshot(), after.orElseThrow().issuerProcess(), tokenProof);
                 if (effect.isPresent()) throw new IOException(effect.orElseThrow());
                 checkpointBefore = Optional.of(sampleLeader(runtime, remaining()));
                 requireLeader(checkpointBefore.orElseThrow(), leader);
@@ -183,7 +192,7 @@ public final class TokenCheckpointBarrier {
                 remaining();
                 var trace = runtime.tokenServiceEvidence().orElseThrow(() -> new IOException("Token trace unavailable"));
                 if (!FlinkHaEvidence.completeTrace(trace)) throw new IOException("Token trace is incomplete or saturated");
-                Optional<TokenServiceControl.Event> issued = issuance(trace, issuer, targets, minimumSequence);
+                Optional<TokenServiceControl.Event> issued = TokenScopeProof.issuance(trace, issuer, targets, minimumSequence, tokenProof, true);
                 if (issued.isPresent()) {
                     var last = sampleLeader(runtime, remaining());
                     requireLeader(last, leader);
@@ -227,7 +236,7 @@ public final class TokenCheckpointBarrier {
     }
 
     private static FlinkHaControl.LeadershipObservation sampleLeader(V1AttemptRuntime runtime, Duration timeout)
-            throws IOException {
+            throws IOException, TimeoutException {
         long previous = runtime.haObservations().map(TokenCheckpointBarrier::lastSequence).orElse(0L);
         runtime.currentFlinkRestEndpoint(timeout);
         var history = runtime.haObservations().orElseThrow(() -> new IOException("HA sample history unavailable"));
@@ -256,7 +265,7 @@ public final class TokenCheckpointBarrier {
                 || !FlinkHaEvidence.coherent(expected)) throw new IOException("HA leadership changed across recovery barrier");
     }
 
-    private static List<Receiver> receivers(V1AttemptRuntime runtime, int count, MonotonicDeadline deadline)
+    static List<Receiver> receivers(V1AttemptRuntime runtime, int count, MonotonicDeadline deadline)
             throws IOException {
         if (count < 1) throw new IOException("Expected TaskManager topology is absent");
         List<Receiver> result = new ArrayList<>();
@@ -294,34 +303,19 @@ public final class TokenCheckpointBarrier {
 
     static Optional<TokenServiceControl.Event> issuance(TokenServiceControl.Snapshot snapshot, String issuer,
                                                        List<Receiver> receivers, long boundary) {
-        if (receivers.isEmpty() || !FlinkHaEvidence.completeTrace(snapshot)) return Optional.empty();
-        var events = snapshot.events();
-        long currentRevision = events.stream().filter(event -> event.kind() == TokenServiceControl.Kind.MODE_CHANGED)
-                .mapToLong(TokenServiceControl.Event::revision).max().orElse(0);
-        return events.stream().filter(issued -> issued.sequence() > boundary
-                && issued.kind() == TokenServiceControl.Kind.ISSUED && issuer.equals(issued.process())
-                && "jobmanager".equals(issued.role()) && issued.mode() == TokenServiceControl.Mode.HEALTHY
-                && issued.revision() == currentRevision && issued.tokenSequence().isPresent()
-                && events.stream().anyMatch(start -> FlinkHaEvidence.sameRequest(start, issued)
-                    && start.kind() == TokenServiceControl.Kind.REQUEST_STARTED && start.sequence() > boundary
-                    && start.sequence() < issued.sequence()
-                    && FlinkHaEvidence.initialized(events, start, TokenServiceControl.Kind.PROVIDER_INITIALIZED))
-                && events.stream().noneMatch(event -> FlinkHaEvidence.sameRequest(issued, event)
-                    && event.kind() == TokenServiceControl.Kind.FAILED)
-                && events.stream().anyMatch(event -> FlinkHaEvidence.sameRequest(issued, event)
-                    && event.kind() == TokenServiceControl.Kind.REQUEST_FINISHED && event.sequence() > issued.sequence())
-                && receivers.stream().allMatch(receiver -> events.stream().anyMatch(received ->
-                    received.sequence() > issued.sequence() && received.kind() == TokenServiceControl.Kind.RECEIVED
-                    && "taskmanager".equals(received.role()) && receiver.classLoadProcess().equals(received.process())
-                    && received.tokenSequence().equals(issued.tokenSequence())
-                    && FlinkHaEvidence.initialized(events, received, TokenServiceControl.Kind.RECEIVER_INITIALIZED))))
-                .findFirst();
+        return TokenScopeProof.issuance(snapshot, issuer, receivers, boundary, Optional.empty());
     }
 
     static Optional<String> failure(Evidence evidence, FlinkHaControl.LeaderFaultEvidence raw, int count,
                                     FlinkHaEvidence.TokenEvidence tokens,
                                     List<FlinkComponentProvisioningEvidence> provisioning,
                                     Optional<FlinkHaControl.Observations> history) {
+        return failure(evidence, raw, count, tokens, provisioning, history, Optional.empty());
+    }
+
+    static Optional<String> failure(Evidence evidence, FlinkHaControl.LeaderFaultEvidence raw, int count,
+            FlinkHaEvidence.TokenEvidence tokens, List<FlinkComponentProvisioningEvidence> provisioning,
+            Optional<FlinkHaControl.Observations> history, Optional<TokenScopeProof.Requirement> tokenProof) {
         if (!evidence.errors().isEmpty() || evidence.beforeFault().isEmpty() || evidence.afterHeal().isEmpty()
                 || evidence.beforeCheckpoint().isEmpty() || evidence.afterCheckpoint().isEmpty()
                 || evidence.checkpoint().isEmpty() || raw.before().isEmpty() || raw.after().isEmpty()
@@ -331,8 +325,8 @@ public final class TokenCheckpointBarrier {
         }
         var before = evidence.beforeFault().orElseThrow();
         var after = evidence.afterHeal().orElseThrow();
-        if (!ready(before, raw.before().orElseThrow(), count, tokens, provisioning, history.orElseThrow())
-                || !ready(after, raw.after().orElseThrow(), count, tokens, provisioning, history.orElseThrow())
+        if (!ready(before, raw.before().orElseThrow(), count, tokens, provisioning, history.orElseThrow(), tokenProof)
+                || !ready(after, raw.after().orElseThrow(), count, tokens, provisioning, history.orElseThrow(), tokenProof)
                 || before.afterSequence() != before.entrySnapshot().events().size()
                 || !FlinkHaEvidence.prefix(before.snapshot(), raw.tokensBefore().orElseThrow())
                 || !preFaultStable(before, raw, history.orElseThrow())
@@ -387,7 +381,7 @@ public final class TokenCheckpointBarrier {
     private static boolean ready(Ready value, FlinkHaControl.Leadership leader, int count,
                                  FlinkHaEvidence.TokenEvidence tokens,
                                  List<FlinkComponentProvisioningEvidence> components,
-                                 FlinkHaControl.Observations history) {
+                                 FlinkHaControl.Observations history, Optional<TokenScopeProof.Requirement> tokenProof) {
         if (count < 1 || value.receivers().size() != count
                 || !sample(value.beforeTokens(), leader, history) || !sample(value.afterTokens(), leader, history)
                 || endSequence(value.afterTokens()) <= endSequence(value.beforeTokens())
@@ -397,17 +391,25 @@ public final class TokenCheckpointBarrier {
                 || !FlinkHaEvidence.processLabel(components, leader.resourceManager()).equals(Optional.of(value.issuerProcess()))
                 || !hasOrigin(tokens, value.issuerProcess(), FlinkHaEvidence.TOKEN_PROVIDER)
                 || !hasOrigin(tokens, value.issuerProcess(), FlinkHaEvidence.TOKEN_RECEIVER)) return false;
+        return validReceivers(value.receivers(), count, tokens, components)
+                && TokenScopeProof.issuance(value.snapshot(), value.issuerProcess(), value.receivers(),
+                        value.afterSequence(), tokenProof, true)
+                        .filter(event -> event.sequence() == value.issuedSequence()).isPresent();
+    }
+
+    static boolean validReceivers(List<Receiver> receivers, int count, FlinkHaEvidence.TokenEvidence tokens,
+                                  List<FlinkComponentProvisioningEvidence> components) {
+        if (count < 1 || receivers.size() != count || tokens.origins().isEmpty()) return false;
         HashSet<String> physical = new HashSet<>();
         for (int index = 0; index < count; index++) {
-            var receiver = value.receivers().get(index);
+            var receiver = receivers.get(index);
             var identity = receiver.identity();
             if (!identity.logicalName().equals("taskmanager-" + (index + 1)) || !physical.add(identity.runtimeId())
                     || !process(components, identity.runtimeId(), identity.logicalName(), FlinkComponentRole.TASK_MANAGER)
                         .equals(Optional.of(receiver.classLoadProcess()))
                     || !hasOrigin(tokens, receiver.classLoadProcess(), FlinkHaEvidence.TOKEN_RECEIVER)) return false;
         }
-        return issuance(value.snapshot(), value.issuerProcess(), value.receivers(), value.afterSequence())
-                .filter(event -> event.sequence() == value.issuedSequence()).isPresent();
+        return true;
     }
 
     private static boolean hasOrigin(FlinkHaEvidence.TokenEvidence tokens, String process, String type) {
