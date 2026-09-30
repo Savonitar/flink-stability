@@ -34,6 +34,7 @@ import org.savonitar.flink.stability.core.validation.kafka.KafkaTransactionListi
 import org.savonitar.flink.stability.runtime.api.FlinkClassLoadLog;
 import org.savonitar.flink.stability.runtime.api.FlinkHaControl;
 import org.savonitar.flink.stability.runtime.api.TokenServiceControl;
+import org.savonitar.flink.stability.runtime.api.TaskManagerControl;
 import org.savonitar.flink.stability.runtime.api.FlinkComponentProvisioningEvidence;
 import org.savonitar.flink.stability.runtime.api.FlinkProcessWriteFenceEvidence;
 import org.savonitar.flink.stability.runtime.api.FlinkRuntimeTarget;
@@ -260,6 +261,199 @@ class V1ScenarioExecutorTest {
                         result.expectedHa(), result.tokenEvidence(), result.diagnostics()));
             }
         }
+    }
+
+    @Test
+    void explicitTokenScopesBindActualSubmissionAndCaptureEveryLiveReceiverBeforeFencing() throws Exception {
+        for (String scope : List.of("", "bootstrap", "submitted-job")) {
+            List<String> events = new ArrayList<>();
+            try (Fixture fixture = fixture(document -> scopedTokenSetup(document, scope))) {
+                var returnedJob = new FlinkJobHandle("1234567890abcdef1234567890abcdef");
+                String alias = fixture.bound().executablePlan().job().alias();
+                var trace = scopedTokenTrace(scope.equals("submitted-job"), returnedJob.jobId(), alias,
+                        !scope.isEmpty());
+                var postSubmit = tokenPrefix(trace, 3);
+                FakeRuntime runtime = tokenRuntime(events, fixture, trace);
+                if (!scope.isEmpty()) runtime.tokenSnapshots.add(Optional.of(postSubmit));
+                FakeFlink flink = new FakeFlink(events);
+                flink.submittedHandle = returnedJob;
+
+                var result = executor(events, runtime, flink,
+                        (bootstrap, topic, ids, timeout) -> passResult()).execute(fixture.bound(), attemptContext());
+
+                assertEquals(V1ScenarioExecutionResult.Status.PASS, result.status(), result.message());
+                assertEquals(alias, flink.submission.flinkConfiguration().get("flink-stability.workload.v1.job-alias"));
+                if (scope.isEmpty()) {
+                    assertTrue(result.expectedHa().tokenProof().isEmpty());
+                    assertEquals(1, events.stream().filter("token-snapshot"::equals).count());
+                    assertTrue(events.indexOf("token-snapshot") > events.indexOf("process-fence"));
+                    assertTrue(runtime.identityRequests.isEmpty(), "legacy control does not acquire the opt-in all-TM gate");
+                } else {
+                    var proof = result.expectedHa().tokenProof().orElseThrow();
+                    assertEquals(scope.equals("bootstrap") ? FlinkRuntimeTarget.TokenProofScope.BOOTSTRAP
+                            : FlinkRuntimeTarget.TokenProofScope.SUBMITTED_JOB, proof.scope());
+                    var submitted = proof.submission().orElseThrow();
+                    assertEquals(returnedJob.jobId(), submitted.jobId());
+                    assertEquals(alias, submitted.jobAlias());
+                    assertEquals(3, submitted.afterSequence());
+                    assertEquals(postSubmit, submitted.snapshot());
+                    assertEquals(List.of("taskmanager-1", "taskmanager-2"), runtime.identityRequests);
+                    assertEquals(List.of("live-tm-1", "live-tm-2"), proof.receivers().stream()
+                            .map(receiver -> receiver.identity().runtimeId()).toList());
+                    assertEquals(List.of("taskmanager-1#1", "taskmanager-2#1"), proof.receivers().stream()
+                            .map(TokenCheckpointBarrier.Receiver::classLoadProcess).toList());
+                    assertTrue(events.indexOf("token-snapshot") > events.indexOf("job-submit"));
+                    assertTrue(events.indexOf("token-snapshot") < events.indexOf("await-running"));
+                    assertTrue(events.indexOf("identity:taskmanager-2") < events.indexOf("process-fence"));
+                }
+            }
+        }
+    }
+
+    @Test
+    void submittedJobProofRejectsWrongIdentityStaleRequestsMissingReceiptsAndRewrittenTrace() throws Exception {
+        for (String invalid : List.of("job", "alias", "bootstrap", "in-flight", "missing-tm", "rewritten-prefix")) {
+            List<String> events = new ArrayList<>();
+            try (Fixture fixture = fixture(document -> scopedTokenSetup(document, "submitted-job"))) {
+                var returnedJob = new FlinkJobHandle("1234567890abcdef1234567890abcdef");
+                String alias = fixture.bound().executablePlan().job().alias();
+                var trace = scopedTokenTrace(!invalid.equals("bootstrap"),
+                        invalid.equals("job") ? "ffffffffffffffffffffffffffffffff" : returnedJob.jobId(),
+                        invalid.equals("alias") ? "provider-claimed-alias" : alias, !invalid.equals("missing-tm"));
+                var postSubmit = tokenPrefix(trace, invalid.equals("in-flight") ? 4 : 3);
+                if (invalid.equals("rewritten-prefix")) {
+                    var changed = new ArrayList<>(trace.events());
+                    var old = changed.getFirst();
+                    changed.set(0, new TokenServiceControl.Event(old.sequence(), old.kind(), old.process(), old.role(),
+                            old.timestampMillis(), old.monotonicNanos(), old.requestId(), old.revision(), old.mode(),
+                            old.tokenSequence(), "rewritten observed initialization", old.registration(), old.participantInstance()));
+                    trace = new TokenServiceControl.Snapshot(changed, false, false, 0, 1);
+                }
+                FakeRuntime runtime = tokenRuntime(events, fixture, trace);
+                runtime.tokenSnapshots.add(Optional.of(postSubmit));
+                FakeFlink flink = new FakeFlink(events);
+                flink.submittedHandle = returnedJob;
+
+                var result = executor(events, runtime, flink,
+                        (bootstrap, topic, ids, timeout) -> passResult()).execute(fixture.bound(), attemptContext());
+
+                assertEquals(V1ScenarioExecutionResult.Status.INCONCLUSIVE, result.status(), invalid);
+                assertEquals("flink.ha.effect-unconfirmed", result.reason(), invalid);
+                assertEquals(FlinkHaEvidence.Outcome.UNCONFIRMED, result.haEvidence().outcome(), invalid);
+                assertEquals(returnedJob.jobId(), result.expectedHa().tokenProof().orElseThrow()
+                        .submission().orElseThrow().jobId(), "provider evidence cannot choose the expected job");
+                assertEquals(Optional.of(trace), result.tokenEvidence().orElseThrow().snapshot());
+                assertTrue(result.terminalValidation().isPresent(), invalid);
+                assertTrue(runtime.fenced, invalid);
+            }
+        }
+    }
+
+    @Test
+    void missingScopedSubmissionOrLiveReceiverProofCannotOverwriteADataFailure() throws Exception {
+        for (String scope : List.of("bootstrap", "submitted-job")) {
+            for (boolean missingSubmission : List.of(true, false)) {
+                for (boolean oraclePasses : List.of(true, false)) {
+                    List<String> events = new ArrayList<>();
+                    try (Fixture fixture = fixture(document -> scopedTokenSetup(document, scope))) {
+                        var returnedJob = new FlinkJobHandle("1234567890abcdef1234567890abcdef");
+                        var trace = scopedTokenTrace(scope.equals("submitted-job"), returnedJob.jobId(),
+                                fixture.bound().executablePlan().job().alias(), true);
+                        FakeRuntime runtime = tokenRuntime(events, fixture, trace);
+                        runtime.tokenSnapshots.add(missingSubmission ? Optional.empty() : Optional.of(tokenPrefix(trace, 3)));
+                        if (!missingSubmission) runtime.identitiesOverride.remove("taskmanager-2");
+                        FakeFlink flink = new FakeFlink(events);
+                        flink.submittedHandle = returnedJob;
+
+                        var result = executor(events, runtime, flink,
+                                (bootstrap, topic, ids, timeout) -> oraclePasses ? passResult() : missingResult())
+                                .execute(fixture.bound(), attemptContext());
+
+                        assertEquals(oraclePasses ? V1ScenarioExecutionResult.Status.INCONCLUSIVE
+                                : V1ScenarioExecutionResult.Status.FAIL, result.status());
+                        assertEquals(oraclePasses ? "flink.ha.effect-unconfirmed" : missingResult().reason(), result.reason());
+                        var proof = result.expectedHa().tokenProof().orElseThrow();
+                        assertEquals(missingSubmission, proof.submission().isEmpty());
+                        if (!missingSubmission) assertTrue(proof.receivers().isEmpty());
+                        assertEquals(Optional.of(trace), result.tokenEvidence().orElseThrow().snapshot());
+                        assertTrue(result.terminalValidation().isPresent());
+                        assertTrue(runtime.fenced);
+                        assertEquals(result.expectedHa(), result.withCleanupFailure(new IOException("cleanup")).expectedHa());
+                    }
+                }
+            }
+        }
+    }
+
+    private static void scopedTokenSetup(ObjectNode document, String scope) {
+        var flink = (ObjectNode) document.at("/setup/flink");
+        flink.put("taskmanagers", 2);
+        var provider = flink.putObject("token_provider").put("renewal_interval", "2s");
+        if (!scope.isEmpty()) provider.put("proof_scope", scope);
+        ((ObjectNode) document.at("/workload/jobs/0")).put("alias", "compiled-token-job");
+        ((ObjectNode) document.at("/phases/0/steps/0/await/condition")).put("job", "compiled-token-job");
+    }
+
+    private FakeRuntime tokenRuntime(List<String> events, Fixture fixture, TokenServiceControl.Snapshot trace)
+            throws IOException {
+        FakeRuntime runtime = new FakeRuntime(events);
+        runtime.tokenSnapshot = Optional.of(trace);
+        runtime.pluginSha256 = Optional.of("d".repeat(64));
+        runtime.provisioningOverride = List.of(
+                FlinkRuntimeIdentityTest.component("jobmanager-1", "jm", FlinkRuntimeIdentityTest.IMAGE_ID),
+                FlinkRuntimeIdentityTest.component("taskmanager-1", "live-tm-1", FlinkRuntimeIdentityTest.IMAGE_ID),
+                FlinkRuntimeIdentityTest.component("taskmanager-2", "live-tm-2", FlinkRuntimeIdentityTest.IMAGE_ID));
+        runtime.identitiesOverride = new java.util.HashMap<>();
+        runtime.classLoadLogsOverride = new ArrayList<>();
+        String connector = fixture.bound().connectorBundle().entries().getFirst().containerPath();
+        for (var component : runtime.provisioningOverride) {
+            if (component.logicalName().startsWith("taskmanager-")) runtime.identitiesOverride.put(component.logicalName(),
+                    new TaskManagerControl.Identity(component.logicalName(), component.runtimeId(), "resource-" + component.runtimeId()));
+            Path log = Files.createTempFile(temporaryDirectory, "scoped-token-origin-", ".log");
+            List<String> lines = new ArrayList<>();
+            for (String type : FlinkHaEvidence.TOKEN_CLASSES) lines.add("[1s][info][class,load] " + type
+                    + " source: file:" + FlinkHaEvidence.TOKEN_CONTAINER_PATH);
+            for (String type : ExecutableScenarioPlan.PROTOCOL_V1_SUBJECT_ENTRY_CLASSES) lines.add(
+                    "[1s][info][class,load] " + type + " source: file:" + connector);
+            Files.writeString(log, String.join("\n", lines));
+            runtime.classLoadLogsOverride.add(new FlinkClassLoadLog(component.logicalName() + "#1", log));
+        }
+        runtime.fenceOverride = new FlinkProcessWriteFenceEvidence(runtime.provisioningOverride.stream().map(component ->
+                new FlinkProcessWriteFenceEvidence.Component(component.logicalName(), component.role(),
+                        Optional.of(component.runtimeId()), FlinkProcessWriteFenceEvidence.Outcome.SIGKILLED)).toList(), Instant.EPOCH);
+        return runtime;
+    }
+
+    private static TokenServiceControl.Snapshot scopedTokenTrace(boolean job, String jobId, String alias, boolean allReceivers) {
+        String provider = "00000000-0000-0000-0000-000000000001";
+        var context = new TokenServiceControl.RegistrationSnapshot(provider, job ? "JOB" : "BOOTSTRAP", job ? 1 : 0,
+                job ? jobId : "-", job ? alias : "-", false, 0, job
+                ? List.of(new TokenServiceControl.Lifecycle(1, "REGISTER", 1, jobId, alias)) : List.of());
+        List<TokenServiceControl.Event> trace = new ArrayList<>();
+        trace.add(tokenEvent(1, TokenServiceControl.Kind.PROVIDER_INITIALIZED, "jobmanager-1#1", 0,
+                OptionalLong.empty(), Optional.empty(), provider));
+        for (int index = 1; index <= 2; index++) trace.add(tokenEvent(trace.size() + 1,
+                TokenServiceControl.Kind.RECEIVER_INITIALIZED, "taskmanager-" + index + "#1", 0,
+                OptionalLong.empty(), Optional.empty(), "receiver-" + index));
+        for (var kind : List.of(TokenServiceControl.Kind.REQUEST_STARTED, TokenServiceControl.Kind.ISSUED,
+                TokenServiceControl.Kind.REQUEST_FINISHED)) trace.add(tokenEvent(trace.size() + 1, kind,
+                "jobmanager-1#1", 1, kind == TokenServiceControl.Kind.REQUEST_STARTED
+                        ? OptionalLong.empty() : OptionalLong.of(1), Optional.of(context), provider));
+        for (int index = 1; index <= (allReceivers ? 2 : 1); index++) trace.add(tokenEvent(trace.size() + 1,
+                TokenServiceControl.Kind.RECEIVED, "taskmanager-" + index + "#1", 0,
+                OptionalLong.of(1), Optional.of(context), "receiver-" + index));
+        return new TokenServiceControl.Snapshot(trace, false, false, 0, 1);
+    }
+
+    private static TokenServiceControl.Event tokenEvent(long sequence, TokenServiceControl.Kind kind, String process,
+            long request, OptionalLong token, Optional<TokenServiceControl.RegistrationSnapshot> registration, String participant) {
+        return new TokenServiceControl.Event(sequence, kind, process,
+                process.startsWith("jobmanager-") ? "jobmanager" : "taskmanager", sequence, sequence, request, 0,
+                TokenServiceControl.Mode.HEALTHY, token, "fixture", registration, Optional.of(participant));
+    }
+
+    private static TokenServiceControl.Snapshot tokenPrefix(TokenServiceControl.Snapshot trace, int size) {
+        return new TokenServiceControl.Snapshot(trace.events().subList(0, size), false, false, size == 4 ? 1 : 0, size == 4 ? 1 : 0);
     }
 
     @Test
@@ -1986,6 +2180,12 @@ class V1ScenarioExecutorTest {
         private RuntimeException processFenceFailure;
         private RuntimeException closeFailure;
         private Optional<TokenServiceControl.Snapshot> tokenSnapshot = Optional.empty();
+        private final java.util.Deque<Optional<TokenServiceControl.Snapshot>> tokenSnapshots = new java.util.ArrayDeque<>();
+        private Optional<String> pluginSha256 = Optional.empty();
+        private Map<String, TaskManagerControl.Identity> identitiesOverride;
+        private final List<String> identityRequests = new ArrayList<>();
+        private List<FlinkClassLoadLog> classLoadLogsOverride;
+        private FlinkProcessWriteFenceEvidence fenceOverride;
         private Optional<FlinkHaControl.Observations> haHistory = Optional.empty();
 
         private IOException killFailure;
@@ -2032,6 +2232,12 @@ class V1ScenarioExecutorTest {
         @Override
         public Optional<org.savonitar.flink.stability.runtime.api.TaskManagerControl.Identity>
                 taskManagerIdentity(String targetName) {
+            if (identitiesOverride != null) {
+                assertFalse(fenced, "live token receiver identities must be captured before the process fence");
+                identityRequests.add(targetName);
+                events.add("identity:" + targetName);
+                return Optional.ofNullable(identitiesOverride.get(targetName));
+            }
             if (identityFailure != null) {
                 throw identityFailure;
             }
@@ -2068,7 +2274,7 @@ class V1ScenarioExecutorTest {
                 throw processFenceFailure;
             }
             fenced = true;
-            return FlinkRuntimeIdentityTest.fence(taskManagerIncarnations);
+            return fenceOverride != null ? fenceOverride : FlinkRuntimeIdentityTest.fence(taskManagerIncarnations);
         }
 
         @Override
@@ -2077,7 +2283,7 @@ class V1ScenarioExecutorTest {
                 return Optional.empty();
             }
             var snapshot = FlinkRuntimeIdentityTest.healthyProcesses(
-                    FlinkRuntimeIdentityTest.fence(taskManagerIncarnations));
+                    fenceOverride != null ? fenceOverride : FlinkRuntimeIdentityTest.fence(taskManagerIncarnations));
             if (!unexpectedProcessExit) {
                 return Optional.of(snapshot);
             }
@@ -2093,7 +2299,13 @@ class V1ScenarioExecutorTest {
 
         @Override
         public Optional<TokenServiceControl.Snapshot> tokenServiceEvidence() {
-            return tokenSnapshot;
+            if (pluginSha256.isPresent()) events.add("token-snapshot");
+            return tokenSnapshots.isEmpty() ? tokenSnapshot : tokenSnapshots.removeFirst();
+        }
+
+        @Override
+        public Optional<String> tokenPluginSha256() {
+            return pluginSha256;
         }
 
         @Override
@@ -2121,6 +2333,7 @@ class V1ScenarioExecutorTest {
         /** Runtime provenance requests retain a separately registered log for every incarnation. */
         @Override
         public List<FlinkClassLoadLog> flinkClassLoadLogs() {
+            if (classLoadLogsOverride != null) return classLoadLogsOverride;
             if (classLoadLogsFailure != null) {
                 throw classLoadLogsFailure;
             }
@@ -2200,6 +2413,7 @@ class V1ScenarioExecutorTest {
         private final java.util.Deque<FlinkJobObservation> observations =
                 new java.util.ArrayDeque<>();
         private FlinkJobSubmission submission;
+        private FlinkJobHandle submittedHandle = JOB;
         private String uploadedJarSha256;
         private IOException awaitFinishedFailure;
         private IOException awaitStateFailure;
@@ -2226,7 +2440,7 @@ class V1ScenarioExecutorTest {
         public FlinkJobHandle submit(FlinkJobSubmission submission) {
             events.add("job-submit");
             this.submission = submission;
-            return JOB;
+            return submittedHandle;
         }
 
         @Override

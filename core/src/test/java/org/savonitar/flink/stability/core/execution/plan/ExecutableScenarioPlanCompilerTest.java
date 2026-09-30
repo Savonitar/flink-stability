@@ -22,6 +22,7 @@ import org.junit.jupiter.api.io.TempDir;
 import org.savonitar.flink.stability.core.execution.plan.ExecutableScenarioPlan;
 import org.savonitar.flink.stability.core.execution.plan.ExecutableScenarioPlanCompiler;
 import org.savonitar.flink.stability.core.execution.plan.PreparedExecutableScenarioPlan;
+import org.savonitar.flink.stability.runtime.api.FlinkRuntimeTarget;
 
 import java.io.IOException;
 import java.net.URISyntaxException;
@@ -70,6 +71,7 @@ class ExecutableScenarioPlanCompilerTest {
         assertEquals(2, plan.flink().jobmanagers());
         assertEquals(Optional.of(Duration.ofSeconds(3)),
                 plan.flink().tokenProvider().orElseThrow().retryBackoff());
+        assertTrue(plan.flink().tokenProvider().orElseThrow().proofScope().isEmpty());
         assertEquals(3, plan.flink().expectedComponents().size());
         var step = (ExecutableScenarioPlan.LeaderFault) plan.phases().getFirst().steps().getFirst();
         assertEquals(org.savonitar.flink.stability.runtime.api.FlinkHaControl.Mode.ISOLATE_ZOOKEEPER,
@@ -82,6 +84,43 @@ class ExecutableScenarioPlanCompilerTest {
             assertEquals(plan.flink().highAvailability(), bound.flinkRuntimeTarget().highAvailability());
             assertEquals(plan.flink().tokenProvider(), bound.flinkRuntimeTarget().tokenProvider());
             assertEquals(2, bound.flinkRuntimeTarget().jobManagers());
+        }
+    }
+
+    @Test
+    void tokenProofScopeSurvivesBindingWithoutInferringItFromTheRuntimeVersion() throws IOException {
+        createJar(artifactRoot.resolve("connector.jar"), false, null);
+        createJar(artifactRoot.resolve("job.jar"), true, "v1");
+        for (String scope : List.of("", "bootstrap", "submitted-job")) {
+            ResolvedScenarioPlan resolved = resolved(document -> {
+                useLocalArtifacts(document);
+                ObjectNode flink = (ObjectNode) document.at("/setup/flink");
+                flink.put("image", "flink:2.4-SNAPSHOT").put("image_id", "sha256:" + "a".repeat(64));
+                flink.putObject("runtime_jar")
+                        .put("container_path", "/opt/flink/lib/flink-dist-2.4-SNAPSHOT.jar")
+                        .put("sha256", "b".repeat(64));
+                ObjectNode provider = flink.putObject("token_provider").put("renewal_interval", "2s");
+                if (!scope.isEmpty()) provider.put("proof_scope", scope);
+            });
+            Optional<FlinkRuntimeTarget.TokenProofScope> expected = switch (scope) {
+                case "bootstrap" -> Optional.of(FlinkRuntimeTarget.TokenProofScope.BOOTSTRAP);
+                case "submitted-job" -> Optional.of(FlinkRuntimeTarget.TokenProofScope.SUBMITTED_JOB);
+                default -> Optional.empty();
+            };
+            ExecutableScenarioPlan plan = compiler.compile(resolved);
+            assertEquals(expected, plan.flink().tokenProvider().orElseThrow().proofScope());
+            try (PreparedScenarioPlan prepared = new ArtifactPlanResolver().resolve(resolved,
+                    new ArtifactResolutionOptions(artifactRoot, true))) {
+                PreparedExecutableScenarioPlan bound = compiler.bind(prepared, plan);
+                assertEquals(expected, bound.flinkRuntimeTarget().tokenProvider().orElseThrow().proofScope());
+                var differentScope = expected.isPresent()
+                        ? Optional.<FlinkRuntimeTarget.TokenProofScope>empty()
+                        : Optional.of(FlinkRuntimeTarget.TokenProofScope.BOOTSTRAP);
+                var mismatch = bound.flinkRuntimeTarget().withTokenProvider(
+                        new FlinkRuntimeTarget.TokenProvider(Duration.ofSeconds(2), Optional.empty(), differentScope));
+                assertThrows(IllegalArgumentException.class, () -> new PreparedExecutableScenarioPlan(
+                        prepared, plan, bound.workloadArtifact(), bound.connectorBundle(), mismatch));
+            }
         }
     }
 

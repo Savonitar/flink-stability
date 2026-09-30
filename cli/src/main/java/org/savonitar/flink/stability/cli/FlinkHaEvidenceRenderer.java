@@ -28,6 +28,17 @@ final class FlinkHaEvidenceRenderer {
         node.put("haRequired", evidence.expected().haRequired());
         node.put("tokenProviderRequired", evidence.expected().tokenProviderRequired());
         node.put("expectedTaskManagers", evidence.expected().expectedTaskManagers());
+        evidence.expected().tokenProof().ifPresent(proof -> {
+            ObjectNode requested = node.putObject("tokenProof");
+            requested.put("scope", proof.scope().name().toLowerCase(Locale.ROOT).replace('_', '-'));
+            proof.submission().ifPresent(submission -> {
+                ObjectNode bound = requested.putObject("submission")
+                        .put("jobId", submission.jobId()).put("jobAlias", submission.jobAlias())
+                        .put("afterSequence", submission.afterSequence());
+                trace.snapshot(bound.putObject("postSubmitSnapshot"), submission.snapshot());
+            });
+            receivers(requested.putArray("receivers"), proof.receivers());
+        });
         evidence.observations().ifPresent(value -> observations(node.putObject("observations"), value));
         ArrayNode requests = node.putArray("requestedFaults");
         evidence.expected().faults().forEach(fault -> {
@@ -277,6 +288,23 @@ final class FlinkHaEvidenceRenderer {
             item.put("mode", event.mode().name().toLowerCase(Locale.ROOT));
             event.tokenSequence().ifPresent(value -> item.put("tokenSequence", value));
             item.put("detail", event.detail());
+            event.participantInstance().ifPresent(value -> item.put("participantInstance", value));
+            event.registration().ifPresent(value -> registration(item.putObject("registration"), value));
+        }
+
+        private static void registration(ObjectNode node, TokenServiceControl.RegistrationSnapshot value) {
+            node.put("providerInstance", value.providerInstance());
+            node.put("scope", value.scope());
+            node.put("generation", value.generation());
+            node.put("jobId", value.jobId());
+            node.put("jobAlias", value.jobAlias());
+            node.put("coverageInvalid", value.coverageInvalid());
+            node.put("acknowledgedSequence", value.acknowledgedSequence());
+            ArrayNode journal = node.putArray("journal");
+            value.journal().forEach(record -> journal.addObject()
+                    .put("sequence", record.sequence()).put("kind", record.kind())
+                    .put("generation", record.generation()).put("jobId", record.jobId())
+                    .put("jobAlias", record.jobAlias()));
         }
     }
 }

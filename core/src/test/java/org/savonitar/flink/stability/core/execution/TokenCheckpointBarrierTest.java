@@ -213,6 +213,79 @@ class TokenCheckpointBarrierTest {
         assertTrue(operation.evidence().errors().stream().anyMatch(error -> error.contains("observation limit")));
     }
 
+    @Test
+    void explicitScopesUseTheSamePredicateOnlineAndDuringFinalBarrierEvaluation() {
+        for (var scope : FlinkRuntimeTarget.TokenProofScope.values()) {
+            Fixture f = new Fixture(true);
+            f.bootstrap = scope == FlinkRuntimeTarget.TokenProofScope.BOOTSTRAP;
+            var requirement = new TokenScopeProof.Requirement(scope,
+                    Optional.of(new TokenScopeProof.Submission(JOB.jobId(), "copy", f.snapshot())), List.of());
+            var operation = f.operation(Optional.of(requirement));
+            assertTrue(operation.beforeFault());
+            var raw = f.transfer();
+            operation.afterHeal(raw);
+            assertEquals(List.of(), operation.evidence().errors());
+            assertEquals(1, f.submissions);
+            assertEquals(Optional.empty(), TokenCheckpointBarrier.failure(operation.evidence(), raw, 2,
+                    f.tokens(), f.components, Optional.of(f.history()), Optional.of(requirement)));
+            var otherScope = new TokenScopeProof.Requirement(f.bootstrap
+                    ? FlinkRuntimeTarget.TokenProofScope.SUBMITTED_JOB : FlinkRuntimeTarget.TokenProofScope.BOOTSTRAP,
+                    requirement.submission(), List.of());
+            assertTrue(TokenCheckpointBarrier.failure(operation.evidence(), raw, 2,
+                    f.tokens(), f.components, Optional.of(f.history()), Optional.of(otherScope)).isPresent());
+        }
+    }
+
+    @Test
+    void submittedJobBarrierRejectsWrongJobBeforeAnyFaultOrCheckpoint() {
+        Fixture f = new Fixture(true);
+        f.tokenJobId = "f".repeat(32);
+        var requirement = new TokenScopeProof.Requirement(FlinkRuntimeTarget.TokenProofScope.SUBMITTED_JOB,
+                Optional.of(new TokenScopeProof.Submission(JOB.jobId(), "copy", f.snapshot())), List.of());
+        var operation = f.operation(Optional.of(requirement));
+        assertFalse(operation.beforeFault());
+        assertEquals(0, f.submissions);
+    }
+
+    @Test
+    void bootstrapFaultCannotBeExcusedByLaterHealthySubmittedJobTokens() {
+        Fixture f = new Fixture(true);
+        f.bootstrapFault = true;
+        var requirement = new TokenScopeProof.Requirement(FlinkRuntimeTarget.TokenProofScope.SUBMITTED_JOB,
+                Optional.of(new TokenScopeProof.Submission(JOB.jobId(), "copy", f.snapshot())), List.of());
+        var operation = f.operation(Optional.of(requirement));
+        assertTrue(operation.beforeFault());
+        operation.afterHeal(f.transfer());
+        assertTrue(operation.evidence().afterHeal().isPresent());
+        assertTrue(operation.evidence().errors().stream().anyMatch(error -> error.contains("No actual acquisition")));
+        assertEquals(0, f.submissions);
+    }
+
+    @Test
+    void controlEvaluationRequiresTheActualBindingAndEveryLiveReceiver() {
+        Fixture f = new Fixture(true);
+        var submission = new TokenScopeProof.Submission(JOB.jobId(), "copy", f.snapshot());
+        f.issue("jobmanager-1#1", 0);
+        var receivers = List.of(new TokenCheckpointBarrier.Receiver(
+                        new TaskManagerControl.Identity("taskmanager-1", "tm-1", "resource-tm-1"), "taskmanager-1#1"),
+                new TokenCheckpointBarrier.Receiver(
+                        new TaskManagerControl.Identity("taskmanager-2", "tm-2", "resource-tm-2"), "taskmanager-2#1"));
+        var requirement = new TokenScopeProof.Requirement(FlinkRuntimeTarget.TokenProofScope.SUBMITTED_JOB,
+                Optional.of(submission), receivers);
+        var expected = new FlinkHaEvidence.Expected(List.of(), false, true, 2, Optional.of(requirement));
+        assertEquals(FlinkHaEvidence.Outcome.CONFIRMED, FlinkHaEvidence.evaluate(expected,
+                Optional.of(new PhaseExecutionEvidence(List.of())), Optional.of(f.tokens()), f.components).outcome());
+        for (var incomplete : List.of(new TokenScopeProof.Requirement(requirement.scope(), Optional.empty(), receivers),
+                new TokenScopeProof.Requirement(requirement.scope(), Optional.of(submission), receivers.subList(0, 1)))) {
+            assertEquals(FlinkHaEvidence.Outcome.UNCONFIRMED, FlinkHaEvidence.evaluate(
+                    expected.withTokenProof(Optional.of(incomplete)), Optional.of(new PhaseExecutionEvidence(List.of())),
+                    Optional.of(f.tokens()), f.components).outcome());
+        }
+        f.events.removeLast();
+        assertEquals(FlinkHaEvidence.Outcome.UNCONFIRMED, FlinkHaEvidence.evaluate(expected,
+                Optional.of(new PhaseExecutionEvidence(List.of())), Optional.of(f.tokens()), f.components).outcome());
+    }
+
     private static FlinkHaControl.Leadership leader(int number) {
         var identity = new FlinkHaControl.LeaderIdentity("jobmanager-" + number, "jm-" + number,
                 "http://jm-" + number, "session-" + number);
@@ -232,6 +305,9 @@ class TokenCheckpointBarrierTest {
         String secondReceiver = "taskmanager-2#1";
         int traceReads, submissions, checkpointPolls;
         long requestId, revision;
+        final boolean scoped;
+        boolean bootstrap, bootstrapFault;
+        String tokenJobId = JOB.jobId();
 
         final V1AttemptRuntime runtime = (V1AttemptRuntime) Proxy.newProxyInstance(
                 V1AttemptRuntime.class.getClassLoader(), new Class<?>[]{V1AttemptRuntime.class}, (proxy, method, args) -> {
@@ -276,7 +352,10 @@ class TokenCheckpointBarrierTest {
                     }
                 });
 
-        Fixture() {
+        Fixture() { this(false); }
+
+        Fixture(boolean scoped) {
+            this.scoped = scoped;
             for (int n = 1; n <= 2; n++) {
                 components.add(component("jobmanager-" + n, "jm-" + n, FlinkComponentRole.JOB_MANAGER));
                 components.add(component("taskmanager-" + n, "tm-" + n, FlinkComponentRole.TASK_MANAGER));
@@ -287,9 +366,12 @@ class TokenCheckpointBarrierTest {
             }
         }
 
-        TokenCheckpointBarrier.Operation operation() {
+        TokenCheckpointBarrier.Operation operation() { return operation(Optional.empty()); }
+
+        TokenCheckpointBarrier.Operation operation(Optional<TokenScopeProof.Requirement> proof) {
             return new TokenCheckpointBarrier.Operation(runtime, flink, JOB, 2,
-                    MonotonicDeadline.start(Duration.ofSeconds(2), clock::get), delay -> clock.addAndGet(delay.toNanos()));
+                    MonotonicDeadline.start(Duration.ofSeconds(2), clock::get),
+                    delay -> clock.addAndGet(delay.toNanos()), proof);
         }
 
         FlinkHaControl.LeaderFaultEvidence transfer() {
@@ -349,7 +431,24 @@ class TokenCheckpointBarrierTest {
         void event(TokenServiceControl.Kind kind, String process, String role, long request, long rev,
                    TokenServiceControl.Mode mode, OptionalLong token, String detail) {
             long seq = events.size() + 1;
-            events.add(new TokenServiceControl.Event(seq, kind, process, role, seq, seq, request, rev, mode, token, detail));
+            Optional<TokenServiceControl.RegistrationSnapshot> registration = Optional.empty();
+            Optional<String> participant = Optional.empty();
+            if (scoped && !"service".equals(role)) {
+                participant = Optional.of(java.util.UUID.nameUUIDFromBytes(
+                        process.getBytes(java.nio.charset.StandardCharsets.UTF_8)).toString());
+                if (kind == TokenServiceControl.Kind.RECEIVED) {
+                    registration = events.stream().filter(event -> event.kind() == TokenServiceControl.Kind.ISSUED
+                            && event.tokenSequence().equals(token)).findFirst().orElseThrow().registration();
+                } else if (kind != TokenServiceControl.Kind.PROVIDER_INITIALIZED
+                        && kind != TokenServiceControl.Kind.RECEIVER_INITIALIZED) {
+                    boolean boot = bootstrap || bootstrapFault && rev == 1;
+                    registration = Optional.of(new TokenServiceControl.RegistrationSnapshot(participant.orElseThrow(),
+                            boot ? "BOOTSTRAP" : "JOB", boot ? 0 : 1, boot ? "-" : tokenJobId, boot ? "-" : "copy", false, 0,
+                            boot ? List.of() : List.of(new TokenServiceControl.Lifecycle(1, "REGISTER", 1, tokenJobId, "copy"))));
+                }
+            }
+            events.add(new TokenServiceControl.Event(seq, kind, process, role, seq, seq, request, rev, mode, token, detail,
+                    registration, participant));
         }
 
         TokenServiceControl.Snapshot snapshot() {

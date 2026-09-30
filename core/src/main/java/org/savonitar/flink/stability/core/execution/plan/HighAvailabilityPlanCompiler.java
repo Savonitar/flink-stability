@@ -155,7 +155,10 @@ final class HighAvailabilityPlanCompiler {
         return Optional.ofNullable(flink.get("token_provider")).map(value ->
                 new FlinkRuntimeTarget.TokenProvider(parseDuration(value.path("renewal_interval").asText()),
                         Optional.ofNullable(value.get("retry_backoff"))
-                                .map(backoff -> parseDuration(backoff.asText()))));
+                                .map(backoff -> parseDuration(backoff.asText())),
+                        Optional.ofNullable(value.get("proof_scope"))
+                                .map(scope -> FlinkRuntimeTarget.TokenProofScope.valueOf(
+                                        scope.asText().replace('-', '_').toUpperCase(Locale.ROOT)))));
     }
 
     static ExecutableScenarioPlan.LeaderFault fault(JsonNode value) {

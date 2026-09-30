@@ -43,9 +43,22 @@ public record FlinkHaEvidence(
 
     /** Retained independently of observations, including faults not reached by execution. */
     public record Expected(List<DeclaredFault> faults, boolean haRequired, boolean tokenProviderRequired,
-                           int expectedTaskManagers) {
+                           int expectedTaskManagers, Optional<TokenScopeProof.Requirement> tokenProof) {
         public Expected {
             faults = List.copyOf(Objects.requireNonNull(faults, "faults"));
+            Objects.requireNonNull(tokenProof, "tokenProof");
+            if (tokenProof.isPresent() && !tokenProviderRequired) {
+                throw new IllegalArgumentException("Scoped token proof requires a token provider");
+            }
+        }
+
+        public Expected(List<DeclaredFault> faults, boolean haRequired, boolean tokenProviderRequired,
+                        int expectedTaskManagers) {
+            this(faults, haRequired, tokenProviderRequired, expectedTaskManagers, Optional.empty());
+        }
+
+        Expected withTokenProof(Optional<TokenScopeProof.Requirement> proof) {
+            return new Expected(faults, haRequired, tokenProviderRequired, expectedTaskManagers, proof);
         }
 
         public Expected(List<DeclaredFault> faults, boolean haRequired, boolean tokenProviderRequired) {
@@ -262,7 +275,10 @@ public record FlinkHaEvidence(
                 return Optional.of("Leader faults overlap or reuse an earlier leadership transfer");
             }
             lastHealedAtMillis = observed.raw().healedAtMillis();
-            if (observed.jobId().isBlank() || (jobId != null && !jobId.equals(observed.jobId()))
+            if (observed.jobId().isBlank()
+                    || expected.tokenProof().flatMap(TokenScopeProof.Requirement::submission)
+                            .filter(binding -> !binding.jobId().equals(observed.jobId())).isPresent()
+                    || (jobId != null && !jobId.equals(observed.jobId()))
                     || observed.jobBefore().observation().isEmpty()
                     || observed.jobAfter().observation().isEmpty()) {
                 return Optional.of("Leader fault lacks observations of the same retained job");
@@ -299,7 +315,7 @@ public record FlinkHaEvidence(
                     return Optional.of("Declared recovery barrier is missing");
                 }
                 invalid = TokenCheckpointBarrier.failure(observed.recoveryBarrier().orElseThrow(), observed.raw(),
-                        expected.expectedTaskManagers(), tokens.orElseThrow(), provisioning, history);
+                        expected.expectedTaskManagers(), tokens.orElseThrow(), provisioning, history, expected.tokenProof());
                 if (invalid.isPresent()) return invalid;
                 String trigger = observed.recoveryBarrier().orElseThrow().checkpoint().orElseThrow().triggerId();
                 if (!checkpointTriggers.add(trigger)) return Optional.of("Recovery barriers replayed a checkpoint trigger");
@@ -323,7 +339,7 @@ public record FlinkHaEvidence(
                 }
                 Optional<TokenServiceControl.Snapshot> nextTokens = index + 1 < phase.leaderFaults().size()
                         ? phase.leaderFaults().get(index + 1).raw().tokensBefore() : Optional.empty();
-                invalid = tokenFaultFailure(observed.raw(), tokens.orElseThrow(), provisioning, nextTokens);
+                invalid = tokenFaultFailure(observed.raw(), tokens.orElseThrow(), provisioning, nextTokens, expected);
                 if (invalid.isPresent()) return invalid;
             }
         }
@@ -333,7 +349,7 @@ public record FlinkHaEvidence(
                 return Optional.of("Final token trace does not retain the last leader operation's observations");
             }
             return tokens.isEmpty() ? Optional.of("Required token-provider evidence is missing")
-                    : tokenFailure(tokens.orElseThrow(), provisioning);
+                    : tokenFailure(tokens.orElseThrow(), provisioning, expected);
         }
         return Optional.empty();
     }
@@ -390,7 +406,7 @@ public record FlinkHaEvidence(
     }
 
     private static Optional<String> tokenFailure(TokenEvidence tokens,
-                                                  List<FlinkComponentProvisioningEvidence> provisioning) {
+                                                  List<FlinkComponentProvisioningEvidence> provisioning, Expected expected) {
         if (!tokens.errors().isEmpty() || tokens.pluginSha256().isEmpty()
                 || !tokens.pluginSha256().orElseThrow().matches("[0-9a-f]{64}")
                 || tokens.origins().isEmpty() || tokens.snapshot().isEmpty()) {
@@ -421,6 +437,18 @@ public record FlinkHaEvidence(
         if (!completeTrace(snapshot) || snapshot.activeRequests() != 0) {
             return Optional.of("Token trace overflowed, saturated, has gaps or retains unfinished requests");
         }
+        if (expected.tokenProof().isPresent()) {
+            var proof = expected.tokenProof().orElseThrow();
+            if (proof.submission().isEmpty() || !TokenScopeProof.coverageValid(snapshot)
+                    || !TokenCheckpointBarrier.validReceivers(proof.receivers(), expected.expectedTaskManagers(),
+                            tokens, provisioning)) {
+                return Optional.of("Scoped token proof lacks submitted-job binding, valid coverage or all live receiver identities");
+            }
+            return participants(tokens, provisioning).issuers().stream().anyMatch(issuer ->
+                    TokenScopeProof.issuance(snapshot, issuer, proof.receivers(),
+                            proof.submission().orElseThrow().afterSequence(), expected.tokenProof()).isPresent())
+                    ? Optional.empty() : Optional.of("No fresh scoped token reached every expected live TaskManager");
+        }
         return healthyDelivery(snapshot.events(), 0, Optional.empty(), participants(tokens, provisioning))
                 ? Optional.empty()
                 : Optional.of("No healthy JobManager issuance was acknowledged by a TaskManager");
@@ -429,7 +457,7 @@ public record FlinkHaEvidence(
     private static Optional<String> tokenFaultFailure(FlinkHaControl.LeaderFaultEvidence raw,
                                                        TokenEvidence tokens,
                                                        List<FlinkComponentProvisioningEvidence> provisioning,
-                                                       Optional<TokenServiceControl.Snapshot> nextTokens) {
+                                                       Optional<TokenServiceControl.Snapshot> nextTokens, Expected expected) {
         if (raw.tokensBefore().isEmpty() || raw.tokensDuring().isEmpty() || raw.tokensAfter().isEmpty()) {
             return Optional.of("Token fault lacks before, during or healed trace snapshots");
         }
@@ -451,12 +479,19 @@ public record FlinkHaEvidence(
             return Optional.of("New ResourceManager token acquisition has no provisioned process and plugin origin binding");
         }
         var finalWindow = nextTokens.orElse(finalSnapshot);
-        Optional<String> effect = tokenFaultEffectFailure(raw, finalWindow, process.orElseThrow());
+        Optional<String> effect = tokenFaultEffectFailure(raw, finalWindow, process.orElseThrow(), expected.tokenProof());
         if (effect.isPresent()) return effect;
         long healed = after.events().stream().filter(event -> event.sequence() > before.events().size()
                 && event.kind() == TokenServiceControl.Kind.MODE_CHANGED
                 && event.mode() == TokenServiceControl.Mode.HEALTHY).mapToLong(TokenServiceControl.Event::sequence)
                 .max().orElseThrow();
+        if (expected.tokenProof().isPresent()) {
+            var proof = expected.tokenProof().orElseThrow();
+            return TokenCheckpointBarrier.validReceivers(proof.receivers(), expected.expectedTaskManagers(), tokens, provisioning)
+                    && TokenScopeProof.issuance(finalWindow, process.orElseThrow(), proof.receivers(), healed,
+                            expected.tokenProof()).isPresent()
+                    ? Optional.empty() : Optional.of("No fresh scoped all-TaskManager delivery followed token fault healing");
+        }
         return healthyDelivery(finalWindow.events(), healed, process, participants(tokens, provisioning))
                 ? Optional.empty() : Optional.of("No healthy token delivery followed token fault healing");
     }
@@ -464,7 +499,16 @@ public record FlinkHaEvidence(
     /** The actual fault trace predicate is also required before an opt-in barrier can advance. */
     static Optional<String> tokenFaultEffectFailure(FlinkHaControl.LeaderFaultEvidence raw,
                                                     TokenServiceControl.Snapshot finalSnapshot, String process) {
+        return tokenFaultEffectFailure(raw, finalSnapshot, process, Optional.empty());
+    }
+
+    static Optional<String> tokenFaultEffectFailure(FlinkHaControl.LeaderFaultEvidence raw,
+            TokenServiceControl.Snapshot finalSnapshot, String process,
+            Optional<TokenScopeProof.Requirement> requirement) {
         if (raw.request().tokenFault().isEmpty()) return Optional.empty();
+        if (requirement.isPresent() && !TokenScopeProof.coverageValid(finalSnapshot)) {
+            return Optional.of("Token fault trace contains invalid scoped coverage");
+        }
         if (raw.tokensBefore().isEmpty() || raw.tokensDuring().isEmpty() || raw.tokensAfter().isEmpty()) {
             return Optional.of("Token fault snapshots are missing");
         }
@@ -494,6 +538,7 @@ public record FlinkHaEvidence(
                 && event.revision() == revision.revision() && event.mode() == requested.mode()
                 && "jobmanager".equals(event.role())
                 && process.equals(event.process())
+                && TokenScopeProof.request(events, event, requirement)
                 && initialized(events, event, TokenServiceControl.Kind.PROVIDER_INITIALIZED)).toList();
         boolean completed = starts.stream().anyMatch(start -> events.stream().anyMatch(outcome ->
                 sameRequest(start, outcome) && outcome.sequence() > start.sequence()
@@ -551,9 +596,7 @@ public record FlinkHaEvidence(
     }
 
     static boolean sameRequest(TokenServiceControl.Event start, TokenServiceControl.Event event) {
-        return start.requestId() > 0 && start.requestId() == event.requestId()
-                && start.revision() == event.revision() && start.mode() == event.mode()
-                && start.process().equals(event.process()) && start.role().equals(event.role());
+        return TokenScopeProof.sameRequest(start, event);
     }
 
     private static boolean healthyDelivery(List<TokenServiceControl.Event> events, long afterSequence,
@@ -586,7 +629,10 @@ public record FlinkHaEvidence(
                                        TokenServiceControl.Event operation, TokenServiceControl.Kind kind) {
         return events.stream().anyMatch(event -> event.kind() == kind
                 && event.sequence() < operation.sequence()
-                && event.process().equals(operation.process()) && event.role().equals(operation.role()));
+                && event.process().equals(operation.process()) && event.role().equals(operation.role())
+                && (operation.registration().isEmpty() && operation.participantInstance().isEmpty()
+                    || operation.participantInstance().isPresent()
+                        && event.participantInstance().equals(operation.participantInstance())));
     }
 
     private record TokenParticipants(Set<String> issuers, Set<String> receivers) {}

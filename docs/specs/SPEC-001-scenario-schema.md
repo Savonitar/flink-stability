@@ -829,6 +829,41 @@ Connector pull-request gating is the same mechanism with one axis:
   Concatenating the ranges reconstructs the exact snapshot, including its order and
   repeated entries. Interning compares the entire event, so contradictory events
   with the same sequence number remain distinct and available for diagnosis.
+- **R4.13i** Optional `setup.flink.token_provider.proof_scope` is exactly `bootstrap`
+  or `submitted-job`. Omission preserves the existing token evidence contract;
+  it does not select a scope based on the Flink version or available events.
+  The compiled scope is retained through artifact binding and runtime execution.
+  Neither expected JobID nor expected job alias is supplied in `token_provider`:
+  the executor takes them from the actual submitted `FlinkJobHandle` and compiled
+  workload job, respectively.
+  Both explicit scopes require a fresh healthy request beyond the post-submission
+  trace watermark, its correlated completed issuance, and exact-token receipts
+  from every expected live TaskManager incarnation. Retain the exact post-submit
+  snapshot and require subsequent traces to extend that prefix unchanged; retaining
+  its sequence number alone cannot detect rewritten evidence. `bootstrap` requires a valid
+  BOOTSTRAP request context. `submitted-job` requires an immutable JOB context
+  matching the submitted JobID and alias, provider instance and generation, with
+  a matching REGISTER occurrence in its acknowledged lifecycle history. A declared
+  JOB string alone is insufficient; BOOTSTRAP evidence cannot satisfy this scope.
+  Acknowledgements must reference a reconstructible journal prefix. Repeated
+  identical REGISTER occurrences may keep the same generation; missing history,
+  a contradictory lifecycle transition or a closed provider cannot qualify.
+  Request, outcome, finish, fault ACK where applicable, issuance and receipt
+  correlation include the registration context. Receiver participant identity is
+  distinct from the issuing provider; distribution remains service-wide.
+  One scope-aware predicate applies to healthy controls, token-fault qualification,
+  and online and final token-checkpoint barriers. Existing leader brackets,
+  successor identity, healing revisions and checkpoint uniqueness still apply.
+  Conflicting aliases, a second job, journal overflow, invalid coverage or missing
+  required participants prevent confirmation; later healthy tokens or exact data
+  do not erase this negative evidence. Missing proof yields INCONCLUSIVE while an
+  existing data FAIL remains FAIL. Explicit healthy controls require no artificial
+  checkpoint or new phase kind. A comparison batch must gate its fault cells on
+  both healthy controls passing.
+  Token events retain typed optional registration context and participant identity;
+  JSON event interning compares these fields too, preserving conflicting variants.
+  Registration hooks are observed through the common legacy-SPI plugin; this scope
+  does not add version-specific callback coverage or authenticate Kafka tokens.
 
 ## 5. Workload / job configuration
 
@@ -1494,10 +1529,14 @@ Connector pull-request gating is the same mechanism with one axis:
   response attempt is not enough. Repeated faults require ordered, distinct transfer
   and restore observations and append-only token traces. Missing proof prevents PASS and cannot hide a data
   FAIL. Internal job restart count is evidence, not a maximum-one-restore guarantee.
+  When an explicit token `proof_scope` is selected, the same request and fault ACK
+  must also satisfy R4.13i; healthy delivery with another scope cannot replace it.
 - **R6.12c** Optional `leader_fault.recovery_barrier: token-checkpoint` requires
   `setup.flink.token_provider`; omission preserves the existing operation. This
   opt-in protocol shares the original fault deadline. When requested, every leader
   fault in the scenario must declare it; mixed implicit ordering is unsupported.
+  An explicit token `proof_scope` additionally applies R4.13i to readiness, fault
+  qualification, recovery delivery and final barrier re-evaluation.
   Each completed barrier must precede the next readiness sample in the retained
   sequence, including coalesced sample counts. Before injection, sample the
   coherent current leader, retain a token trace watermark, and require a new healthy

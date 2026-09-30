@@ -178,12 +178,47 @@ Repeated operations need independent sessions and restore observations in execut
 order, with append-only token traces. Missing proof stays inconclusive. Component errors and
 unexpected recovery amplification remain findings even when the exact-ID oracle passes.
 
-The generic healthy-token evidence gate proves healthy JobManager issuance followed
+When `proof_scope` is omitted, the generic healthy-token evidence gate proves healthy JobManager issuance followed
 by a matching receipt on at least one verified, provisioned TaskManager. With two
 TMs, one valid receipt can satisfy this gate; it does not establish delivery to both.
 The opt-in recovery barriers below and the independent twelve-case comparison runner
 require fresh delivery to every declared TM. Their all-TM coverage is stronger than
 the generic control gate and must be reported separately.
+
+Separately named experiments can opt into a stronger, explicit token expectation:
+
+```yaml
+token_provider:
+  renewal_interval: 2s
+  retry_backoff: 2s
+  proof_scope: submitted-job  # alternatively: bootstrap
+```
+
+Omission keeps the existing catalogs' behavior. Neither scope is inferred from the
+Flink version, and `legacy` is not a schema value. Both explicit scopes require a
+fresh completed request after the post-submit trace watermark and exact-token
+receipt by every expected live TM incarnation. The exact post-submit snapshot is
+retained, and later traces must preserve that observed prefix. `bootstrap` requires BOOTSTRAP
+context. `submitted-job` requires JOB context matching the JobID returned by actual
+submission and the compiled workload alias, together with the issuing provider's
+generation and matching acknowledged REGISTER history. The provider cannot choose
+the expected JobID. A BOOTSTRAP token cannot satisfy submitted-job proof.
+
+The common plugin stays compiled against the Flink 2.2 SPI and exposes registration
+hooks for runtimes that dispatch them. Its bounded lifecycle journal and immutable
+request context are recorded as typed evidence; the receiver has a separate
+participant identity. Requests, outcomes, finishes, fault acknowledgements,
+issuance and receipts must correlate in the selected scope. The same predicate
+governs healthy controls and online/final checkpoint barriers. Conflicting aliases,
+unexpected second jobs, overflow, invalid coverage or missing TM receipts remain
+negative evidence even if later tokens are healthy. Missing proof is INCONCLUSIVE;
+an existing exact-ID or completion FAIL keeps its result.
+
+Explicit healthy controls add no checkpoint or phase. A paired experiment must run
+and pass both healthy controls before starting fault cells. These checks do not
+establish callback-API behavior, authentication by Kafka, or absence of stale queued
+work inside one provider process. A release runtime that never dispatches job
+registration hooks cannot satisfy submitted-job proof merely by issuing tokens.
 
 The new `ha-token-repeat-control`, `ha-token-repeat-delay`,
 `ha-token-repeat-failure` and `ha-token-repeat-linkage` catalogs keep the released

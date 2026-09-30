@@ -89,6 +89,40 @@ class SpecificationLoaderTest {
     }
 
     @Test
+    void preservesExplicitTokenProofScopesAndOmissionInRawAndResolvedDocuments() {
+        Path source = resource("minimal.yaml");
+        for (String scope : List.of("", "bootstrap", "submitted-job")) {
+            ObjectNode document = loader.loadScenario(source).document();
+            ObjectNode provider = ((ObjectNode) document.at("/setup/flink"))
+                    .putObject("token_provider").put("renewal_interval", "2s");
+            if (!scope.isEmpty()) provider.put("proof_scope", scope);
+
+            for (ScenarioSpecification validated : List.of(
+                    loader.validateScenarioDocument(source, document),
+                    loader.validateResolvedScenario(source, document))) {
+                JsonNode value = validated.at("/setup/flink/token_provider/proof_scope");
+                if (scope.isEmpty()) assertTrue(value.isMissingNode());
+                else assertEquals(scope, value.textValue());
+            }
+        }
+    }
+
+    @Test
+    void rejectsUnknownOrNonStringTokenProofScopes() {
+        Path source = resource("minimal.yaml");
+        JsonNodeFactory nodes = JsonNodeFactory.instance;
+        for (JsonNode scope : List.of(nodes.textNode(""), nodes.textNode("legacy"),
+                nodes.textNode("BOOTSTRAP"), nodes.textNode("job"), nodes.textNode("submitted_job"),
+                nodes.numberNode(1), nodes.booleanNode(true), nodes.nullNode(), nodes.objectNode())) {
+            ObjectNode document = loader.loadScenario(source).document();
+            ((ObjectNode) document.at("/setup/flink")).putObject("token_provider")
+                    .put("renewal_interval", "2s").set("proof_scope", scope);
+            assertFailsAt(Stage.DOCUMENT, () -> loader.validateScenarioDocument(source, document));
+            assertFailsAt(Stage.DOCUMENT, () -> loader.validateResolvedScenario(source, document));
+        }
+    }
+
+    @Test
     void acceptsOnlyTheImplementedExplicitRecoveryBarrier() {
         Path source = resource("minimal.yaml");
         for (String value : List.of("token-checkpoint", "checkpoint", "true")) {

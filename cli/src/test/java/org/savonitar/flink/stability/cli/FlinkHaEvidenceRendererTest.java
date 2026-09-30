@@ -6,10 +6,13 @@ import org.savonitar.flink.stability.core.execution.FlinkHaEvidence;
 import org.savonitar.flink.stability.core.execution.PhaseExecutionEvidence;
 import org.savonitar.flink.stability.core.execution.SubjectClassOrigins;
 import org.savonitar.flink.stability.core.execution.TokenCheckpointBarrier;
+import org.savonitar.flink.stability.core.execution.TokenScopeProof;
 import org.savonitar.flink.stability.core.flink.FlinkJobObservation;
 import org.savonitar.flink.stability.core.flink.FlinkJobState;
 import org.savonitar.flink.stability.runtime.api.FlinkHaControl;
 import org.savonitar.flink.stability.runtime.api.FlinkComponentRole;
+import org.savonitar.flink.stability.runtime.api.FlinkRuntimeTarget;
+import org.savonitar.flink.stability.runtime.api.TaskManagerControl;
 import org.savonitar.flink.stability.runtime.api.TokenServiceControl;
 
 import java.time.Duration;
@@ -46,6 +49,7 @@ class FlinkHaEvidenceRendererTest {
 
         assertEquals("unconfirmed", node.path("status").asText());
         assertTrue(node.path("haRequired").asBoolean());
+        assertFalse(node.has("tokenProof"));
         assertEquals("sampled", node.at("/observations/coverage").asText());
         assertEquals(7, node.at("/observations/leadership/1/sampleCount").asInt());
         assertEquals(20, node.at("/observations/leadership/1/firstObservedAtMillis").asInt());
@@ -72,6 +76,63 @@ class FlinkHaEvidenceRendererTest {
         assertFalse(unknown.has("exitCode"));
         assertFalse(unknown.has("oomKilled"));
         assertFalse(unknown.has("finishedAt"));
+    }
+
+    @Test
+    void retainsExplicitProofScopeActualSubmissionAndReceiverIncarnations() {
+        var postSubmit = new TokenServiceControl.Snapshot(List.of(new TokenServiceControl.Event(
+                1, TokenServiceControl.Kind.PROVIDER_INITIALIZED, "jobmanager-1#1", "jobmanager",
+                4_294_967_297L, 1, 0, 0, TokenServiceControl.Mode.HEALTHY, OptionalLong.empty(), "initialized")),
+                false, false, 0, 0);
+        var proof = new TokenScopeProof.Requirement(FlinkRuntimeTarget.TokenProofScope.SUBMITTED_JOB,
+                Optional.of(new TokenScopeProof.Submission("a".repeat(32), "submitted-job", postSubmit)),
+                List.of(new TokenCheckpointBarrier.Receiver(
+                                new TaskManagerControl.Identity("taskmanager-1", "container-1", "resource-1"),
+                                "taskmanager-1#2"),
+                        new TokenCheckpointBarrier.Receiver(
+                                new TaskManagerControl.Identity("taskmanager-2", "container-2", "resource-2"),
+                                "taskmanager-2#1")));
+        var expected = new FlinkHaEvidence.Expected(List.of(), true, true, 2, Optional.of(proof));
+        var evidence = new FlinkHaEvidence(expected, Optional.empty(), Optional.empty(),
+                FlinkHaEvidence.Outcome.UNCONFIRMED, "Required delivery evidence is missing");
+        var node = new ObjectMapper().createObjectNode();
+
+        FlinkHaEvidenceRenderer.render(node, evidence, List.of());
+
+        assertEquals("unconfirmed", node.path("status").asText());
+        assertEquals("submitted-job", node.at("/tokenProof/scope").asText());
+        assertEquals("a".repeat(32), node.at("/tokenProof/submission/jobId").asText());
+        assertEquals("submitted-job", node.at("/tokenProof/submission/jobAlias").asText());
+        assertEquals(1, node.at("/tokenProof/submission/afterSequence").asInt());
+        assertEquals(1, node.at("/tokenProof/submission/postSubmitSnapshot/eventCount").asInt());
+        assertEquals("[[0,1]]", node.at("/tokenProof/submission/postSubmitSnapshot/eventRanges").toString());
+        assertEquals(4_294_967_297L, node.at("/tokenEvents/0/timestampMillis").asLong());
+        assertEquals(2, node.at("/tokenProof/receivers").size());
+        assertEquals("taskmanager-1", node.at("/tokenProof/receivers/0/logicalName").asText());
+        assertEquals("container-1", node.at("/tokenProof/receivers/0/runtimeId").asText());
+        assertEquals("resource-1", node.at("/tokenProof/receivers/0/resourceId").asText());
+        assertEquals("taskmanager-1#2", node.at("/tokenProof/receivers/0/classLoadProcess").asText());
+        assertEquals("taskmanager-2#1", node.at("/tokenProof/receivers/1/classLoadProcess").asText());
+    }
+
+    @Test
+    void keepsMissingProofBindingVisibleWithoutInventingObservedJobOrReceivers() {
+        for (var scope : FlinkRuntimeTarget.TokenProofScope.values()) {
+            var expected = new FlinkHaEvidence.Expected(List.of(), true, true, 2,
+                    Optional.of(new TokenScopeProof.Requirement(scope, Optional.empty(), List.of())));
+            var evidence = new FlinkHaEvidence(expected, Optional.empty(), Optional.empty(),
+                    FlinkHaEvidence.Outcome.UNCONFIRMED, "Submission and receivers were not observed");
+            var node = new ObjectMapper().createObjectNode();
+
+            FlinkHaEvidenceRenderer.render(node, evidence, List.of());
+
+            assertEquals("unconfirmed", node.path("status").asText());
+            assertEquals(scope == FlinkRuntimeTarget.TokenProofScope.SUBMITTED_JOB
+                    ? "submitted-job" : "bootstrap", node.at("/tokenProof/scope").asText());
+            assertFalse(node.path("tokenProof").has("submission"));
+            assertTrue(node.at("/tokenProof/receivers").isArray());
+            assertEquals(0, node.at("/tokenProof/receivers").size());
+        }
     }
 
     @Test
