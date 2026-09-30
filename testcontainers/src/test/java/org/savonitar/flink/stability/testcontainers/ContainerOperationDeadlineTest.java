@@ -11,6 +11,18 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 class ContainerOperationDeadlineTest {
 
     @Test
+    void sharedAdapterKeepsTheOriginalElapsedBudget() {
+        long[] now = {100L};
+        var caller = org.savonitar.flink.stability.runtime.api.MonotonicDeadline.start(
+                Duration.ofNanos(10), () -> now[0]);
+        now[0] = 107;
+        var deadline = ContainerOperationDeadline.shared("owned capture", caller);
+        assertEquals(Duration.ofNanos(3), deadline.remaining("copy"));
+        now[0] = 110;
+        assertThrows(ContainerOperationTimeoutException.class, () -> deadline.remaining("copy"));
+    }
+
+    @Test
     void anExpiredDeadlineNamesTheScopeTimeoutAndOperation() {
         long[] now = {100L};
         ContainerOperationDeadline deadline = ContainerOperationDeadline.start(

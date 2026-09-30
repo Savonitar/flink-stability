@@ -75,6 +75,17 @@ markers. These local tests do not establish broker-copy consistency or historica
 transaction attribution. Live collection must happen before the attempt removes
 its owned Kafka container and must retain independent coverage and identity evidence.
 
+The adapter also has an internal, opt-in archive capability for an attempt's retained
+Kafka owner. It requires an observed startup identity, an explicit approved log root
+and the caller's shared deadline; normal scenario execution does not invoke it.
+The caller must bind the requested partition directory to fresh Kafka Admin metadata.
+Only completed transport carries a hash, and even that does not establish valid tar,
+an atomic broker snapshot or transaction visibility. Copying never holds a lock
+needed by container cleanup. A canceled worker can leave a changing `.part` file,
+which remains abandoned and cannot become complete evidence after the caller returns.
+The raw archive ceiling is 128 MiB; a collecting driver must additionally cap the
+whole experiment and validate the archive offline before drawing conclusions.
+
 ## Optional real-container runs
 
 These commands start Docker workloads. Run them only when container execution is
