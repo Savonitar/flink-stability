@@ -83,6 +83,9 @@ A successful retry does not close an unexplained component finding.
 The adapter uses [Testcontainers 1.21.4](https://github.com/testcontainers/testcontainers-java/releases/tag/1.21.4),
 whose upstream release includes Docker Engine 29 compatibility. A regression checks that configured copies finish before
 the pre-start verification hook and that a failed hook prevents container start.
+This update also changes the default helper images: Ryuk 0.11.0 to 0.12.0 and
+sshd 1.2.0 to 1.3.0. The host-port tunnel carries HA ZooKeeper-gate and token-service
+traffic, so compatibility checks must include a live HA token control.
 Live compatibility still depends on the Docker engine and images used for a run.
 
 `validate` is Docker-free. It checks the broad v1 document, semantic, and artifact
