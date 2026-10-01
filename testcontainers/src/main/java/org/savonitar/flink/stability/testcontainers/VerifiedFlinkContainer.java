@@ -71,6 +71,20 @@ final class VerifiedFlinkContainer extends GenericContainer<VerifiedFlinkContain
         configuredBundleTargets.add(ConnectorClasspathManifest.CONTAINER_MANIFEST_PATH);
     }
 
+    @Override public void start() {
+        try { super.start(); }
+        catch (RuntimeException | Error failure) {
+            retainedLog.close();
+            throw failure;
+        }
+    }
+
+    @Override public void stop() {
+        // Release the local descriptor even if Docker cleanup blocks or fails.
+        retainedLog.close();
+        super.stop();
+    }
+
     /** Unique for this handle, including replacements and separate run attempts. */
     String resourceId() {
         return resourceId;

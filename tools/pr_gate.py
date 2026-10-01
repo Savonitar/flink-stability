@@ -135,11 +135,11 @@ def render(manifest, rows):
         lines.append(f"| {row['scenario']} | {row['side']} | {row['run']} | {row['verdict']} | "
                      f"{row['reason']} | {row['missing']} | {row['duplicates']} | {subject} | "
                      f"{row['exitCode']} |")
-    lines += ["", "Component error observations (diagnostic only; counts cover retained log prefixes):",
-              "", "| Side | Unique events per run, summed | Kinds | Partial / unavailable runs |",
-              "| --- | --- | --- | --- |"]
+    lines += ["", "Component log observations (diagnostic only; counts cover retained log prefixes):",
+              "", "| Side | KafkaCommitter ERROR | Other classified observations | Unclassified observations | KafkaCommitter ERROR kinds | Partial / unavailable runs |",
+              "| --- | --- | --- | --- | --- | --- |"]
     for side in ("baseline", "candidate"):
-        kinds, total, partial = Counter(), 0, 0
+        kinds, committer, other, unclassified, partial = Counter(), 0, 0, 0, 0
         for row in rows:
             if row["side"] != side:
                 continue
@@ -147,12 +147,18 @@ def render(manifest, rows):
             if errors is None:
                 partial += 1
                 continue
-            total += len(errors.get("events", []))
             partial += errors.get("coverage") != "captured-prefix"
             for event in errors.get("events", []):
-                kinds.update(set(event.get("kinds", [])))
+                if not event.get("level") or not event.get("logger"):
+                    unclassified += 1
+                elif (event["level"] == "ERROR" and event["logger"] ==
+                      "org.apache.flink.connector.kafka.sink.internal.KafkaCommitter"):
+                    committer += 1
+                    kinds.update(set(event.get("kinds", [])))
+                else:
+                    other += 1
         counts = ", ".join(f"{kind}: {count}" for kind, count in sorted(kinds.items())) or "none observed"
-        lines.append(f"| {side} | {total} | {counts} | {partial} |")
+        lines.append(f"| {side} | {committer} | {other} | {unclassified} | {counts} | {partial} |")
     outcomes = {}
     for row in rows:
         sides = outcomes.setdefault(row["scenario"], {"baseline": Counter(), "candidate": Counter()})

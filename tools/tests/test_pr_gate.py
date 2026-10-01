@@ -44,7 +44,13 @@ class SubjectEvidenceTest(unittest.TestCase):
     def test_component_errors_are_reported_by_side_without_changing_gate(self):
         result = run_result()
         result["evidence"]["componentErrors"] = {
-            "coverage": "partial", "events": [{"kinds": ["producer-fenced"]}],
+            "coverage": "partial", "events": [
+                {"level": "ERROR", "logger": "org.apache.flink.connector.kafka.sink.internal.KafkaCommitter",
+                 "kinds": ["producer-fenced"]},
+                {"level": "ERROR", "logger": "org.apache.flink.connector.kafka.sink.internal.KafkaCommitter",
+                 "kinds": ["producer-fenced"]},
+                {"level": "INFO", "logger": "org.apache.kafka.clients.producer.internals.TransactionManager",
+                 "kinds": ["producer-fenced"]}],
             "diagnostics": ["read limit"],
         }
         row = self.summarize(result)
@@ -52,8 +58,26 @@ class SubjectEvidenceTest(unittest.TestCase):
         manifest = {"connector": "candidate.jar", "connectorSha256": CANDIDATE_HASH,
                     "runtimeDependencySha256": {}}
         report = pr_gate.render(manifest, [row])
-        self.assertIn("| candidate | 1 | producer-fenced: 1 | 1 |", report)
+        self.assertIn("| candidate | 2 | 1 | 0 | producer-fenced: 2 | 1 |", report)
         self.assertIn("diagnostic only", report)
+
+    def test_legacy_and_other_logger_events_do_not_inflate_committer_count(self):
+        result = run_result()
+        result["evidence"]["componentErrors"] = {
+            "coverage": "captured-prefix", "events": [
+                {"kinds": ["producer-fenced"]},
+                {"level": "ERROR", "logger": "org.apache.kafka.clients.producer.internals.TransactionManager",
+                 "kinds": ["producer-fenced"]},
+                {"level": "WARN", "logger": "org.apache.flink.connector.kafka.sink.internal.KafkaCommitter",
+                 "kinds": ["producer-fenced"]}]}
+        row = self.summarize(result)
+        baseline = dict(row, side="baseline")
+        manifest = {"connector": "candidate.jar", "connectorSha256": CANDIDATE_HASH,
+                    "runtimeDependencySha256": {}}
+        report = pr_gate.render(manifest, [baseline, row])
+        for side in ("baseline", "candidate"):
+            self.assertIn(f"| {side} | 0 | 2 | 1 | none observed | 0 |", report)
+        self.assertEqual(0, pr_gate.gate_exit_code([baseline, row]))
 
     def test_expected_source_alone_cannot_confirm_the_subject(self):
         for status in ("confirmed", "mismatch", "unconfirmed"):

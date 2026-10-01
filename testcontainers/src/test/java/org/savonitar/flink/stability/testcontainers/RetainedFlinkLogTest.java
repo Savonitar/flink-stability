@@ -22,6 +22,22 @@ class RetainedFlinkLogTest {
         log.created("container-2");
         assertTrue(log.snapshot().error().isPresent());
     }
+    @Test void snapshotFlushesAndCloseRetainsFinalBytesWithoutReopening() throws Exception {
+        var log = new RetainedFlinkLog(new FlinkClassLoadLog("tm#1", directory.resolve("classes.log")));
+        log.created("id");
+        log.accept("before".getBytes());
+        Path path = log.snapshot().path();
+        assertEquals("before", Files.readString(path));
+        log.accept(" after".getBytes());
+        log.close();
+        assertEquals("before after", Files.readString(path));
+        log.accept(" ignored".getBytes());
+        log.close();
+        assertEquals("before after", Files.readString(path));
+        assertTrue(log.snapshot().error().isEmpty());
+        log.created("replacement");
+        assertTrue(log.snapshot().error().isPresent(), "A closed collector cannot silently label replacement output");
+    }
     @Test void captureErrorsAreDiagnosticsAndNeverEscape() {
         var log = new RetainedFlinkLog(new FlinkClassLoadLog("tm#1", directory.resolve("missing/classes.log")));
         assertDoesNotThrow(() -> log.created("id"));

@@ -26,11 +26,11 @@ public record ComponentErrorEvidence(List<Event> events, List<String> diagnostic
     private static final Pattern EPOCH = Pattern.compile("\\b(?:producerEpoch|epoch)[= :]+(-?\\d+)");
     private static final Pattern TRANSACTION = Pattern.compile("\\btransactionalId[= :]+(?:'([^']*)'|\\\"([^\\\"]*)\\\"|([^,}\\]\\s]+))");
 
-    public record Event(String process, String timestamp, Optional<String> producerId,
+    public record Event(String process, String timestamp, String level, String logger, Optional<String> producerId,
                         Optional<String> epoch, Optional<String> transactionalId, List<String> kinds) {
         public Event { kinds = List.copyOf(kinds); }
     }
-    private record Key(String process, String timestamp, Optional<String> producerId,
+    private record Key(String process, String timestamp, String level, String logger, Optional<String> producerId,
                        Optional<String> epoch, Optional<String> transactionalId) {}
 
     public ComponentErrorEvidence {
@@ -77,7 +77,7 @@ public record ComponentErrorEvidence(List<Event> events, List<String> diagnostic
                         var tx = TRANSACTION.matcher(message);
                         Optional<String> transaction = Optional.empty();
                         if (tx.find()) for (int i = 1; i <= 3; i++) if (tx.group(i) != null) transaction = Optional.of(tx.group(i));
-                        var key = new Key(log.process(), match.group(1).replace('.', ','), field(PRODUCER, message),
+                        var key = new Key(log.process(), match.group(1).replace('.', ','), match.group(2), logger, field(PRODUCER, message),
                                 field(EPOCH, message), transaction);
                         if (!found.containsKey(key) && found.size() == MAX_EVENTS) {
                             issues.add("Component event retention limit exceeded");
@@ -92,7 +92,7 @@ public record ComponentErrorEvidence(List<Event> events, List<String> diagnostic
         }
         return new ComponentErrorEvidence(found.entrySet().stream().map(entry -> {
             var key = entry.getKey();
-            return new Event(key.process(), key.timestamp(), key.producerId(), key.epoch(), key.transactionalId(),
+            return new Event(key.process(), key.timestamp(), key.level(), key.logger(), key.producerId(), key.epoch(), key.transactionalId(),
                     List.copyOf(entry.getValue()));
         }).toList(), List.copyOf(issues));
     }

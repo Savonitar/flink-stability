@@ -26,6 +26,10 @@ class ComponentErrorEvidenceTest {
         var replacement = log("taskmanager-2#2", fixture);
         var evidence = ComponentErrorEvidence.collect(List.of(first, first, replacement));
         assertEquals(6, evidence.events().size());
+        assertEquals(4, evidence.events().stream().filter(e -> e.level().equals("ERROR")
+                && e.logger().equals("org.apache.flink.connector.kafka.sink.internal.KafkaCommitter")).count());
+        assertEquals(2, evidence.events().stream().filter(e -> e.level().equals("INFO")
+                && e.logger().equals("org.apache.kafka.clients.producer.internals.TransactionManager")).count());
         assertTrue(evidence.diagnostics().isEmpty());
         var event = evidence.events().getFirst();
         assertEquals("2026-10-01 19:43:38,488", event.timestamp());
@@ -44,6 +48,16 @@ class ComponentErrorEvidenceTest {
                 + header.replace("org.apache.kafka", "org.example") + "transaction expired\n")));
         assertEquals(1, evidence.events().size());
         assertEquals(List.of("invalid-pid-mapping", "invalid-txn-state", "transaction-aborted", "transaction-expired"), evidence.events().getFirst().kinds());
+    }
+
+    @Test void identicalTransactionKeysPreserveSeverityAndLoggerWithoutCountingCopies() throws Exception {
+        String line = "2026-10-01 19:43:38,488 ERROR org.apache.flink.connector.kafka.sink.internal.KafkaCommitter [] - "
+                + "ProducerFencedException producerId=12 epoch=0 transactionalId=tx\n";
+        String info = line.replace("ERROR", "INFO").replace("org.apache.flink.connector.kafka.sink.internal.KafkaCommitter",
+                "org.apache.kafka.clients.producer.internals.TransactionManager");
+        var evidence = ComponentErrorEvidence.collect(List.of(log("tm#1", info + line + info + line)));
+        assertEquals(2, evidence.events().size());
+        assertEquals(List.of("INFO", "ERROR"), evidence.events().stream().map(ComponentErrorEvidence.Event::level).toList());
     }
 
     @Test void capsUniqueEventsAndReportsIncompleteSourcesWithoutInventingEvents() throws Exception {

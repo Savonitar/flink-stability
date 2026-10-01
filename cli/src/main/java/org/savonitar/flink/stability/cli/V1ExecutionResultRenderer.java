@@ -96,7 +96,8 @@ final class V1ExecutionResultRenderer {
         componentErrorsNode.put("coverage", result.componentErrors().diagnostics().isEmpty() ? "captured-prefix" : "partial");
         var componentEvents = componentErrorsNode.putArray("events");
         result.componentErrors().events().forEach(event -> {
-            var item = componentEvents.addObject().put("process", event.process()).put("timestamp", event.timestamp());
+            var item = componentEvents.addObject().put("process", event.process()).put("timestamp", event.timestamp())
+                    .put("level", event.level()).put("logger", event.logger());
             event.producerId().ifPresent(value -> item.put("producerId", value));
             event.epoch().ifPresent(value -> item.put("epoch", value));
             event.transactionalId().ifPresent(value -> item.put("transactionalId", value));
