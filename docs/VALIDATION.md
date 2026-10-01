@@ -86,22 +86,6 @@ which remains abandoned and cannot become complete evidence after the caller ret
 The raw archive ceiling is 128 MiB; a collecting driver must additionally cap the
 whole experiment and validate the archive offline before drawing conclusions.
 
-The opt-in adapter can also inventory an exact partition and copy only an observed
-`[0-9]{20}.log` member. It uses fixed, shell-free `/usr/bin/find` and `/bin/stat`
-commands supported by the pinned Kafka image: NUL-delimited names are validated
-before metadata requests. Inventories retain bounded command output, exit status,
-owner identity and file size/mtime/inode. Links, foreign/duplicate names and malformed
-metadata reject; rollover suffixes mark unstable coverage. Each inventory is limited
-to 64 KiB, 64 entries and 32 logs; one log payload is at most 16 MiB, with 64 KiB extra allowance
-for archive framing. Names, root/file stats and two identity checks cost at most 68
-calls per inventory. The collecting driver must share its overall byte/call/deadline
-budgets across inventories and copies and stop on unfinished work.
-
-A file copy remains raw transport evidence until a separate strict single-file TAR
-reader verifies its one expected regular member and framing. Compare before/after
-inventories and copied member metadata; equal metadata does not prove an atomic
-snapshot. This adapter capability is opt-in and has no ordinary scenario verdict effect.
-
 ## Optional real-container runs
 
 These commands start Docker workloads. Run them only when container execution is

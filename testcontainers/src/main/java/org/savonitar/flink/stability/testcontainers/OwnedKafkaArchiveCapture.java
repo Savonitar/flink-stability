@@ -29,14 +29,6 @@ final class OwnedKafkaArchiveCapture {
     interface Driver {
         Inspection inspect();
         InputStream openArchive(String partitionDirectory) throws IOException;
-        default KafkaLogInventory.Command listFileNames(String directory, int maximumBytes,
-                ContainerOperationDeadline deadline, Runnable checkActive) throws IOException {
-            throw new IOException("Owned file inventory is unavailable");
-        }
-        default KafkaLogInventory.Command fileMetadata(String path, int maximumBytes,
-                ContainerOperationDeadline deadline, Runnable checkActive) throws IOException {
-            throw new IOException("Owned file metadata is unavailable");
-        }
     }
 
     record Binding(String containerId, String networkId, String networkAlias, String clusterAlias,
@@ -102,30 +94,7 @@ final class OwnedKafkaArchiveCapture {
     static Receipt copy(Binding binding, Driver driver, Identity startup, Partition partition,
                         Path evidenceDirectory, String partialName, long maximumBytes,
                         MonotonicDeadline budget) {
-        Objects.requireNonNull(partition);
-        return copyPath(binding, driver, startup, partition.directory(), evidenceDirectory,
-                partialName, maximumBytes, budget);
-    }
-
-    static Receipt copyLog(Binding binding, Driver driver, Identity startup,
-                          KafkaLogInventory inventory, String basename,
-                          Path evidenceDirectory, String partialName, long maximumBytes,
-                          MonotonicDeadline budget) {
-        var entry = inventory.requireLog(startup, basename);
-        if (entry.size() > KafkaLogInventory.MAX_LOG_BYTES) {
-            throw new IllegalArgumentException("Listed log exceeds the 16 MiB payload limit");
-        }
-        if (maximumBytes > KafkaLogInventory.MAX_LOG_BYTES + 64 * 1024) {
-            throw new IllegalArgumentException("Single-file transfer exceeds payload plus framing allowance");
-        }
-        return copyPath(binding, driver, startup, inventory.partition().directory() + "/" + basename,
-                evidenceDirectory, partialName, maximumBytes, budget);
-    }
-
-    private static Receipt copyPath(Binding binding, Driver driver, Identity startup, String sourcePath,
-                        Path evidenceDirectory, String partialName, long maximumBytes,
-                        MonotonicDeadline budget) {
-        Objects.requireNonNull(driver); Objects.requireNonNull(startup);
+        Objects.requireNonNull(driver); Objects.requireNonNull(startup); Objects.requireNonNull(partition);
         Objects.requireNonNull(budget);
         if (!binding.equals(startup.owner())) throw new IllegalArgumentException("Startup owner identity changed");
         if (maximumBytes < 1 || maximumBytes > MAX_ARCHIVE_BYTES) {
@@ -137,7 +106,7 @@ final class OwnedKafkaArchiveCapture {
         try {
             check(deadline, session);
             Receipt receipt = ContainerDriverCallBoundary.call(deadline, "copying declared Kafka partition", () ->
-                    transfer(binding, driver, startup, sourcePath, maximumBytes, deadline, session));
+                    transfer(binding, driver, startup, partition, maximumBytes, deadline, session));
             check(deadline, session);
             return receipt;
         } catch (ContainerOperationTimeoutException failure) {
@@ -155,7 +124,7 @@ final class OwnedKafkaArchiveCapture {
     }
 
     private static Receipt transfer(Binding binding, Driver driver, Identity startup,
-            String sourcePath, long maximumBytes, ContainerOperationDeadline deadline, Session session) {
+            Partition partition, long maximumBytes, ContainerOperationDeadline deadline, Session session) {
         try {
             check(deadline, session);
             Identity before = verified(binding, driver.inspect());
@@ -166,9 +135,8 @@ final class OwnedKafkaArchiveCapture {
             try (OutputStream out = Files.newOutputStream(session.path,
                     StandardOpenOption.CREATE_NEW, StandardOpenOption.WRITE, LinkOption.NOFOLLOW_LINKS)) {
                 check(deadline, session);
-                InputStream stream = Objects.requireNonNull(driver.openArchive(sourcePath));
+                InputStream stream = Objects.requireNonNull(driver.openArchive(partition.directory()));
                 session.stream.set(stream);
-                Throwable primary = null;
                 try {
                     check(deadline, session);
                     MessageDigest digest = sha256();
@@ -206,18 +174,8 @@ final class OwnedKafkaArchiveCapture {
                     return session.receipt(Status.TRANSPORT_EOF, true,
                             "Transport EOF only; live archive is neither atomic nor tar-validated",
                             Optional.of(HexFormat.of().formatHex(digest.digest())));
-                } catch (IOException | RuntimeException | Error failure) {
-                    primary = failure;
-                    throw failure;
                 } finally {
-                    if (primary == null) {
-                        session.closeStream();
-                    } else {
-                        try { session.closeStream(); }
-                        catch (IOException | RuntimeException | Error closeFailure) {
-                            if (closeFailure != primary) primary.addSuppressed(closeFailure);
-                        }
-                    }
+                    session.closeStream();
                 }
             }
         } catch (IdentityMismatch failure) {
@@ -234,7 +192,7 @@ final class OwnedKafkaArchiveCapture {
         }
     }
 
-    static Identity verified(Binding binding, Inspection inspection) {
+    private static Identity verified(Binding binding, Inspection inspection) {
         if (inspection == null || !inspection.running()
                 || !binding.containerId().equals(inspection.containerId())
                 || !binding.networkId().equals(inspection.networkId())
