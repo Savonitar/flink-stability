@@ -41,6 +41,20 @@ class SubjectEvidenceTest(unittest.TestCase):
     def summarize(self, result, exit_code=0):
         return pr_gate.summarize("bounded-eos", "candidate", 1, result, CANDIDATE_HASH, exit_code)
 
+    def test_component_errors_are_reported_by_side_without_changing_gate(self):
+        result = run_result()
+        result["evidence"]["componentErrors"] = {
+            "coverage": "partial", "events": [{"kinds": ["producer-fenced"]}],
+            "diagnostics": ["read limit"],
+        }
+        row = self.summarize(result)
+        self.assertEqual(0, pr_gate.gate_exit_code([row]))
+        manifest = {"connector": "candidate.jar", "connectorSha256": CANDIDATE_HASH,
+                    "runtimeDependencySha256": {}}
+        report = pr_gate.render(manifest, [row])
+        self.assertIn("| candidate | 1 | producer-fenced: 1 | 1 |", report)
+        self.assertIn("diagnostic only", report)
+
     def test_expected_source_alone_cannot_confirm_the_subject(self):
         for status in ("confirmed", "mismatch", "unconfirmed"):
             with self.subTest(status=status):

@@ -1985,6 +1985,19 @@ Connector pull-request gating is the same mechanism with one axis:
   every expected slot. Missing or inconsistent evidence prevents both ordinary and
   expected-failure PASS, while a real data failure remains recorded.
 
+- **R8.2f** `evidence.componentErrors` retains Kafka committer/transaction log
+  observations independently of the verdict. Before cleanup, read retained per-incarnation
+  Flink stdout/stderr prefixes (at most 4 MiB each, 32 MiB and 128 files per attempt).
+  Keep at most 512 distinct events keyed by process incarnation, component timestamp,
+  producer ID, epoch and transactional ID; absent fields stay absent. Merge categories
+  for the same key. Recognize producer fencing, invalid PID mapping/transaction state,
+  and transaction abort/expiry in timestamped Kafka logger headers; stack continuations
+  and copied lines are not extra events. Bound lines to 8192 characters and omit unfinished
+  lines. Report truncation, missing files and read/capture failures as diagnostic coverage
+  limitations. Counts describe observed log events, not unique broker failures or a
+  complete absence proof. Preserve them through cleanup and summarize by side in
+  `tools/pr_gate.py`; neither observations nor collection failure ever changes a verdict.
+
 - **R8.2c** After the attempt result is decided, the first runner starts physical
   resource cleanup exactly once and waits under one fixed internal `2m` wall
   deadline. Cleanup runs on a daemon boundary so an interrupt-ignoring Docker

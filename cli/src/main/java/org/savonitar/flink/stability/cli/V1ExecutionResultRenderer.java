@@ -91,6 +91,20 @@ final class V1ExecutionResultRenderer {
             observation.supported().ifPresent(range -> observed.putObject("supported")
                     .put("min", range.minimum()).put("max", range.maximum()));
         });
+        ObjectNode componentErrorsNode = evidence.putObject("componentErrors");
+        componentErrorsNode.put("eventCount", result.componentErrors().events().size());
+        componentErrorsNode.put("coverage", result.componentErrors().diagnostics().isEmpty() ? "captured-prefix" : "partial");
+        var componentEvents = componentErrorsNode.putArray("events");
+        result.componentErrors().events().forEach(event -> {
+            var item = componentEvents.addObject().put("process", event.process()).put("timestamp", event.timestamp());
+            event.producerId().ifPresent(value -> item.put("producerId", value));
+            event.epoch().ifPresent(value -> item.put("epoch", value));
+            event.transactionalId().ifPresent(value -> item.put("transactionalId", value));
+            var kinds = item.putArray("kinds");
+            event.kinds().forEach(kinds::add);
+        });
+        var componentDiagnostics = componentErrorsNode.putArray("diagnostics");
+        result.componentErrors().diagnostics().forEach(componentDiagnostics::add);
         ObjectNode rest = evidence.putObject("flinkRest");
         rest.put("errorCount", result.flinkRestErrors().size());
         ArrayNode restErrors = rest.putArray("errors");

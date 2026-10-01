@@ -419,6 +419,10 @@ public final class ClusterManager implements AutoCloseable {
         }
     }
 
+    synchronized java.util.List<org.savonitar.flink.stability.runtime.api.FlinkComponentLog> componentLogs() {
+        return flinkFactories.stream().flatMap(factory -> factory.componentLogs().stream()).toList();
+    }
+
     synchronized List<FlinkClassLoadLog> classLoadLogs() {
         return flinkFactories.stream().flatMap(factory -> factory.classLoadLogs().stream())
                 .distinct()

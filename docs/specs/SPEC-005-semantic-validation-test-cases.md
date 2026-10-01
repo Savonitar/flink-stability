@@ -500,3 +500,10 @@ expected validation code.
 | SV-205 | Unscoped healthy token evidence covers one of multiple current TMs, an old incarnation, or separate token identities. | Require one exact issued token on all declared latest TMs with verified origins; missing proof makes exact data INCONCLUSIVE while an existing data FAIL remains primary. |
 | SV-206 | An application line exceeds 8192 characters; an own ClientCnxn marker appears in the discarded suffix or a relevant session message is malformed/unfinished. | Ignore unrelated oversized output with bounded memory; retain unconfirmed evidence when the own session logger may have lost relevant information. |
 | SV-207 | Leader samples change or become unavailable between a completed token-checkpoint barrier and the next readiness boundary, then return to the same leader. | Reject barrier order/stability confirmation; coalesced stable samples remain valid without claiming continuous coverage or exact election counts. |
+
+## 14. Component error observations
+
+| ID | Case | Expected result |
+| --- | --- | --- |
+| SV-210 | Retained real-format KafkaCommitter output contains copied headers, stack traces and different process incarnations/producer epochs. | Deduplicate the exact process/time/producer/epoch/transaction key, merge categories, exclude stack continuations, and preserve distinct keys and missing fields. |
+| SV-211 | Capture/read/event/line bounds are exceeded, a log is missing, or cleanup fails after collection. | Retain bounded events and coverage diagnostics through JSON and cleanup; neither data verdict nor PR gate exit code changes. Report observed counts separately for baseline and candidate. |

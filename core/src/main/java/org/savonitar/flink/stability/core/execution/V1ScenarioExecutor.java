@@ -610,7 +610,16 @@ public final class V1ScenarioExecutor {
                 tokens,
                 haObservations,
                 processObservations,
-                retainedDiagnostics);
+                retainedDiagnostics).withComponentErrors(componentErrors(runtime));
+    }
+
+    private static ComponentErrorEvidence componentErrors(V1AttemptRuntime runtime) {
+        if (runtime == null) return ComponentErrorEvidence.empty();
+        try {
+            return ComponentErrorEvidence.collect(runtime.flinkComponentLogs());
+        } catch (RuntimeException failure) {
+            return new ComponentErrorEvidence(List.of(), List.of("Component logs unavailable: " + failure));
+        }
     }
 
     private static FlinkHaEvidence.TokenEvidence tokenEvidence(
