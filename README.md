@@ -68,6 +68,11 @@ declaring the setting is not proof that a transition is supported by that broker
 - Maven 3.8+
 - Docker Desktop or another Docker daemon reachable by Testcontainers for `run`
 
+The adapter uses [Testcontainers 1.21.4](https://github.com/testcontainers/testcontainers-java/releases/tag/1.21.4),
+whose upstream release includes Docker Engine 29 compatibility. A regression checks that configured copies finish before
+the pre-start verification hook and that a failed hook prevents container start.
+Live compatibility still depends on the Docker engine and images used for a run.
+
 `validate` is Docker-free. It checks the broad v1 document, semantic, and artifact
 contract. `run` additionally checks the narrower capabilities implemented by the current
 prototype, so a valid broad-v1 scenario may still be rejected as not yet executable. The

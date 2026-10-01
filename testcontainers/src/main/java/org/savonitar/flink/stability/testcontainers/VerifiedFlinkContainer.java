@@ -108,7 +108,7 @@ final class VerifiedFlinkContainer extends GenericContainer<VerifiedFlinkContain
     protected void containerIsCreated(String containerId) {
         super.containerIsCreated(containerId);
         if (sessionLog != null) sessionLog.created(containerId);
-        // Testcontainers 1.21 invokes this hook after its configured archive copies and before
+        // Testcontainers 1.21.4 invokes this hook after its configured archive copies and before
         // Docker's startContainer command. A mismatch therefore prevents the Flink entrypoint.
         verifyImageIdentity(containerId, id -> getDockerClient()
                 .inspectContainerCmd(id).exec().getImageId());
