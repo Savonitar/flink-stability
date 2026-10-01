@@ -11,7 +11,7 @@ subject connector. `tools/pr_gate.py` runs each chosen scenario on both sides:
 
 ## What the scenarios cover
 
-The default scenarios exercise the exactly-once sink within the first runner's limits:
+The three default scenarios exercise bounded recovery and the exactly-once sink with:
 one Kafka 4.0 broker, one Flink 2.2 JobManager and TaskManager, parallelism 1, and
 bounded input.
 
@@ -21,13 +21,53 @@ bounded input.
 - `commit-response-lost`: the broker commits, and the proxy drops its successful response.
 
 They suit a change to the commit, recovery, or transactional-producer code, such as
-`KafkaCommitter`, `KafkaWriter`, `FlinkKafkaInternalProducer`, or transaction naming. They
-say nothing about sources, partitioning, parallelism above 1, or broker failover. The
-build under test must run on Flink 2.2 with Kafka 4.0.
+`KafkaCommitter`, `KafkaWriter`, `FlinkKafkaInternalProducer`, or transaction naming.
+`bounded-eos` also exercises bounded source checkpoint restoration. These defaults
+do not cover multiple partitions, parallelism above 1, JobManager failover or broker
+failover. The build under test must run on Flink 2.2 with Kafka 4.0.
 
 The [connector-mutant calibration](../calibration/connector-mutants/README.md) shows that
-these scenarios catch two wrong commit decisions. A passing candidate shows only that
-these faults did not break exactly-once in these runs.
+the EndTxn scenarios catch two wrong commit decisions. The
+[recovery-mutant calibration](../calibration/recovery-mutant/README.md) separately
+checks a source checkpoint-offset error across TaskManager recovery. A passing
+candidate shows only that the selected faults did not break the checked guarantees
+in those runs.
+
+## Choose coverage for the change
+
+The engine also executes the following separate catalogs. Select their canonical
+names with repeated `--scenario` options when comparing connector artifacts:
+
+| Change under test | Scenarios and evidence |
+| --- | --- |
+| Recovery across workers and partitions | `distributed-eos` and `distributed-eos-no-fault`: two TaskManagers, parallelism four, four Kafka partitions and a named worker kill/restart. See [distributed recovery](DISTRIBUTED-RECOVERY.md). |
+| Recovery after a JobManager leadership change | `ha-eos-control`, `ha-eos-kill`, `ha-eos-pause`, `ha-eos-isolate`: a ZooKeeper-backed pair, matched process identities, leader sessions and recovery of the submitted job. See [HA scenarios](HA-TOKEN-TESTING.md). |
+| Token acquisition/distribution during HA recovery | `ha-token-control`, `ha-token-delay`, `ha-token-failure`, `ha-token-linkage`; the `ha-token-repeat-*` catalogs add token/checkpoint barriers around repeated transfers. See [token faults and proof](HA-TOKEN-TESTING.md). |
+
+These are executable capabilities, not promises that the released connector passes
+every catalog. The HA guide retains observed bounded-completion failures. The
+distributed recovery run also observed repeated restores after one worker kill.
+Neither a passing exact-ID oracle nor a later green run closes those findings.
+The default calibration matrices do not establish sensitivity of these additional
+catalogs, and none exercises a multi-broker topology or a state-sensitive oracle.
+
+For a Flink runtime PR, prepare separate image/runtime-JAR pins and compatible
+connector/workload artifacts as described in [runtime build testing](FLINK-RUNTIME-TESTING.md).
+`pr_gate.py` swaps connector artifacts only; it does not construct a runtime pair,
+change token proof scope, or gate fault cells on both healthy controls passing.
+
+Per-job token experiments must explicitly select
+`setup.flink.token_provider.proof_scope: submitted-job` in separately named catalogs.
+The engine binds the expected JobID to the actual submit response and the alias to
+the compiled workload. Proof requires registration history, a fresh completed
+request after the retained post-submit trace, and exact-token receipt by every
+expected live TaskManager. `bootstrap` is a separate explicit scope; omission keeps
+the existing service-wide check and does not infer per-job support from a runtime
+version. Run and pass both healthy controls before starting paired fault cells.
+A baseline without registration hooks cannot pass submitted-job proof; report that
+capability boundary separately from a regression. This fixture does not establish
+callback behavior, authenticated token use, multi-job isolation or complete shutdown
+journal delivery. Direct API tests do not replace real runtime propagation evidence.
 
 ## Procedure
 
@@ -56,7 +96,8 @@ because the harness reads local artifacts only from inside its artifact root.
    Copy the module's main JAR, not its `-tests` or `-sources` JARs, from
    `jobs/pr/$N/src/flink-connector-kafka/target/` to `jobs/pr/$N/`.
 
-3. Run the gate. Each run starts fresh containers and takes about a minute.
+3. Run the gate. Each run starts fresh containers; HA and repeated-recovery catalogs
+   can take several minutes.
 
    ```bash
    python3 tools/pr_gate.py \
@@ -91,6 +132,14 @@ Then compare the verdicts:
   for example because a fault missed its window. Inspect the raw attempt and its
   diagnostics: a recorded data failure remains a finding to investigate even when
   missing evidence prevents attribution.
+
+Keep completion failures separate from data conclusions. After a confirmed physical
+fence, an explicit HA leader-resolution deadline expiry during completion reports
+`verification.flink.job-completion-timeout`; an ordinary resolver failure reports
+`verification.flink.job-terminalization-failed`. An unconfirmed fence reports
+`verification.flink.process-fence-failed`. Correct timeout classification does not show
+that recovery completed or that final output was complete. Missing HA/token proof
+cannot turn a recorded data or completion FAIL into a successful result.
 
 The summary compares the counts of each `(verdict, reason)` pair between baseline
 and candidate, and reports variability within each side separately. Matching

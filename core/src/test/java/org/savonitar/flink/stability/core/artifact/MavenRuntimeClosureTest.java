@@ -25,6 +25,25 @@ class MavenRuntimeClosureTest {
     Path root;
 
     @Test
+    void rejectsChecksumFailureInDescriptorsAndTransitiveJarDownloads() throws Exception {
+        for (String failedExtension : List.of("pom", "jar")) {
+            Path remote = Files.createDirectories(root.resolve("remote-" + failedExtension));
+            install(remote, "org.example", "child", "1.0", "");
+            install(remote, "org.example", "parent", "1.0", dependencies(
+                    dependency("org.example", "child", "1.0", "runtime", "")));
+            Path artifact = artifactPath(remote, "org.example", "child", "1.0", failedExtension);
+            Files.writeString(artifact.resolveSibling(artifact.getFileName() + ".sha1"), "0".repeat(40));
+
+            var failure = assertThrows(MavenArtifactLookupException.class, () -> lookup(remote, "local-" + failedExtension)
+                    .resolveRuntimeClosure(List.of(root(0, "parent", "1.0")), false));
+
+            assertEquals(MavenArtifactLookupException.Kind.CHECKSUM_MISMATCH, failure.kind(), failedExtension);
+            assertFalse(Files.exists(artifactPath(root.resolve("local-" + failedExtension),
+                    "org.example", "child", "1.0", failedExtension)));
+        }
+    }
+
+    @Test
     void selectsStrictRuntimeScopesAndExclusionsInBreadthFirstOrder() throws Exception {
         Path remote = Files.createDirectories(root.resolve("remote"));
         Path systemJar = root.resolve("system-only.jar");
@@ -648,6 +667,7 @@ class MavenRuntimeClosureTest {
         Path pom = artifactPath(repository, groupId, artifactId, version, "pom");
         Files.createDirectories(pom.getParent());
         Files.writeString(pom, content);
+        MavenRepositoryFixture.checksum(pom);
     }
 
     private static void writeMetadata(
@@ -679,6 +699,7 @@ class MavenRuntimeClosureTest {
                 versions.getLast(),
                 versions.getLast(),
                 versionElements));
+        MavenRepositoryFixture.checksum(metadata);
     }
 
     private static Path artifactPath(
@@ -701,6 +722,7 @@ class MavenRuntimeClosureTest {
                 Files.newOutputStream(path), manifest)) {
             // A valid empty test JAR is sufficient for artifact resolution.
         }
+        MavenRepositoryFixture.checksum(path);
     }
 
     private static String fixedRepositoryId(URI uri, int index) {

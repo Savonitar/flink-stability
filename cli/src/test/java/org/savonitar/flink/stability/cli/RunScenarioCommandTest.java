@@ -1,6 +1,8 @@
 package org.savonitar.flink.stability.cli;
 
 import org.savonitar.flink.stability.core.execution.kafka.KafkaTransactionVersion;
+import org.savonitar.flink.stability.core.artifact.PreparedScenarioPlan;
+import org.savonitar.flink.stability.core.spec.resolution.ScenarioSide;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.Test;
@@ -53,6 +55,36 @@ class RunScenarioCommandTest {
 
     @TempDir
     Path temporaryDirectory;
+
+    @Test
+    void rendersDeclaredAndObservedConnectorHashesAfterPreparedCleanup() throws Exception {
+        var pins = List.of(
+                new PreparedScenarioPlan.ConnectorPrimaryEvidence(ScenarioSide.SINGLE, "pinned", "connector.jar",
+                        Optional.of("a".repeat(64)), "a".repeat(64)),
+                new PreparedScenarioPlan.ConnectorPrimaryEvidence(ScenarioSide.SINGLE, "unpinned", "other.jar",
+                        Optional.empty(), "b".repeat(64)));
+        List<String> events = new ArrayList<>();
+        var command = new RunScenarioCommand((root, name, overrides, options) -> new RunScenarioCommand.PreparedExecution() {
+            @Override public V1ScenarioExecutionResult execute(V1AttemptContext context) { return passResult(); }
+            @Override public ExecutableScenarioPlan.ExpectedOutcome expectedOutcome() { return expectation; }
+            @Override public List<PreparedScenarioPlan.ConnectorPrimaryEvidence> connectorPrimaries() {
+                assertEquals(List.of("closed"), events);
+                return pins;
+            }
+            @Override public void close() { events.add("closed"); }
+        }, () -> context("1234abcd"), new V1ExecutionResultRenderer(), new ValidationDiagnosticRenderer());
+
+        var invocation = execute(command, "--catalog-root", temporaryDirectory.toString(), "--scenario", "bounded-eos");
+        var output = JSON.readTree(invocation.stdout());
+
+        assertEquals(0, invocation.exitCode(), invocation.stderr());
+        assertEquals("pass", output.path("status").asText());
+        assertEquals("a".repeat(64), output.at("/evidence/connectorPrimaries/0/declaredSha256").asText());
+        assertEquals("a".repeat(64), output.at("/evidence/connectorPrimaries/0/observedSha256").asText());
+        assertEquals("connector.jar", output.at("/evidence/connectorPrimaries/0/artifact").asText());
+        assertEquals("b".repeat(64), output.at("/evidence/connectorPrimaries/1/observedSha256").asText());
+        assertFalse(output.at("/evidence/connectorPrimaries/1").has("declaredSha256"));
+    }
 
     private ExecutableScenarioPlan.ExpectedOutcome expectation =
             ExecutableScenarioPlan.ExpectedOutcome.pass();

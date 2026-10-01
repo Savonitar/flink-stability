@@ -3,6 +3,15 @@ package org.savonitar.flink.stability.core.execution;
 import org.savonitar.flink.stability.runtime.api.TaskManagerActionTimeoutException;
 import org.savonitar.flink.stability.runtime.api.TaskManagerControl;
 import org.savonitar.flink.stability.runtime.api.FlinkHaControl;
+import org.savonitar.flink.stability.runtime.api.V1AttemptRuntime;
+import org.savonitar.flink.stability.runtime.api.FlinkClassLoadLog;
+import org.savonitar.flink.stability.runtime.api.FlinkComponentProvisioningEvidence;
+import org.savonitar.flink.stability.runtime.api.FlinkProcessWriteFenceEvidence;
+import org.savonitar.flink.stability.runtime.api.FlinkRuntimeTarget;
+import org.savonitar.flink.stability.runtime.api.KafkaProxyEndpoint;
+import org.savonitar.flink.stability.runtime.api.KafkaProxyTarget;
+import org.savonitar.flink.stability.runtime.api.KafkaRuntimeEndpoints;
+import org.savonitar.flink.stability.runtime.api.KafkaRuntimeTarget;
 
 import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
@@ -697,7 +706,7 @@ class ExecutablePhaseExecutorTest {
         }
     }
 
-    private static final class FakeTaskManagers implements TaskManagerControl, FlinkHaControl {
+    private static final class FakeTaskManagers implements V1AttemptRuntime {
         private final List<String> events;
         private IOException killFailure;
         private IOException restartFailure;
@@ -712,6 +721,24 @@ class ExecutablePhaseExecutorTest {
         private FakeTaskManagers(List<String> events) {
             this.events = events;
         }
+
+        @Override public KafkaRuntimeEndpoints startKafka(KafkaRuntimeTarget target) {
+            throw new AssertionError("Phase execution cannot start Kafka");
+        }
+        @Override public KafkaProxyEndpoint startKafkaProxy(KafkaProxyTarget target) {
+            throw new AssertionError("Phase execution cannot start a proxy");
+        }
+        @Override public String startFlink(FlinkRuntimeTarget target) {
+            throw new AssertionError("Phase execution cannot start Flink");
+        }
+        @Override public FlinkProcessWriteFenceEvidence stopAllFlinkProcesses(Duration timeout) {
+            throw new AssertionError("The terminal fence belongs to the scenario executor");
+        }
+        @Override public List<FlinkComponentProvisioningEvidence> flinkProvisioningEvidence() {
+            return List.of();
+        }
+        @Override public List<FlinkClassLoadLog> flinkClassLoadLogs() { return List.of(); }
+        @Override public void close() { throw new AssertionError("Phase execution cannot close the runtime"); }
 
         @Override
         public LeaderFaultEvidence faultLeader(LeaderFaultRequest request, Duration remainingBudget) {

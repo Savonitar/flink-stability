@@ -543,7 +543,10 @@ Connector pull-request gating is the same mechanism with one axis:
     snapshots are rejected. Online preparation checks the local Maven cache and
     then the fixed HTTPS Maven Central repository; offline preparation reports an
     explicit cache miss. It never shells out to Maven or reads Maven
-    settings/credentials.
+    settings/credentials. Remote release transfers use checksum policy `FAIL`: a missing
+    or mismatched repository checksum rejects with `artifact.maven.checksum-mismatch`,
+    including POMs and transitive JARs. Remote snapshots are disabled. Existing/offline
+    cache entries are not retroactively authenticated by this transfer policy.
 - **R4.13a** A Maven subject connector with no `runtime_dependencies` uses
   **auto mode**: preparation resolves its primary JAR and a locked runtime closure
   from its effective Maven model. In **explicit mode**—the field is present for
@@ -792,7 +795,10 @@ Connector pull-request gating is the same mechanism with one axis:
   boundaries and rejects any observed intervening leadership change or gap.
   Retention is bounded to 4,096 leadership entries after coalescing, 128 negotiated
   session messages per incarnation and 8,192 characters per collected log line.
-  Exceeding a bound prevents confirmed HA evidence; truncation cannot imply success.
+  Exceeding a relevant-evidence bound prevents confirmed HA evidence; truncation cannot
+  imply success. Oversized unrelated application lines are discarded with bounded memory.
+  Oversized, malformed or unfinished messages from the own shaded ClientCnxn session
+  logger remain unconfirmed, including when its marker occurs after the retained prefix.
   Each JobManager reaches ZooKeeper through its own controllable TCP gate. Closing
   a gate terminates existing connections and rejects new ones; token-service traffic
   uses a separate path. Leader observations read ZooKeeper's published RM, dispatcher
@@ -820,6 +826,10 @@ Connector pull-request gating is the same mechanism with one axis:
   default or exponential-backoff behavior.
   The local service records ordered initialization, request, issue, failure and
   receipt events with process incarnation, mode/revision, token identity and clocks.
+  The unscoped final healthy-delivery gate requires one exact issued token on every
+  latest provisioned TaskManager incarnation, matching the declared participant count
+  and each process's initialization and verified plugin origin. Older incarnations or
+  different tokens cannot fill a missing receipt.
   Event overflow or request saturation makes evidence incomplete. This fixture
   exercises acquisition/distribution; it does not authenticate Kafka or implement
   version-specific callback extensions to Flink's token SPI.
@@ -830,7 +840,7 @@ Connector pull-request gating is the same mechanism with one axis:
   repeated entries. Interning compares the entire event, so contradictory events
   with the same sequence number remain distinct and available for diagnosis.
 - **R4.13i** Optional `setup.flink.token_provider.proof_scope` is exactly `bootstrap`
-  or `submitted-job`. Omission preserves the existing token evidence contract;
+  or `submitted-job`. Omission uses the unscoped all-TM contract in R4.13h;
   it does not select a scope based on the Flink version or available events.
   The compiled scope is retained through artifact binding and runtime execution.
   Neither expected JobID nor expected job alias is supplied in `token_provider`:
@@ -974,7 +984,13 @@ Connector pull-request gating is the same mechanism with one axis:
   from the workload job JAR. For connector scenarios, `subject.connectors` is a
   non-empty map keyed by scenario-local aliases; each connector declares
   `artifact` (canonical `maven:<groupId>:<artifactId>:<release-version>`, exact
-  local JAR, or final-filename build output pattern per R4.13).
+  local JAR, or final-filename build output pattern per R4.13). Optional `sha256`
+  declares exactly 64 lowercase hexadecimal characters after parameter resolution.
+  Preparation compares the pin with the staged primary for each effective side,
+  for both local and Maven artifacts; a mismatch rejects before provisioning with
+  `artifact.connector.pin-mismatch`. Run JSON retains `evidence.connectorPrimaries`
+  entries containing `side`, `alias`, `artifact`, `observedSha256` and, when declared,
+  `declaredSha256`. The pin covers the primary; closure hashes retain dependency identity.
   - If `runtime_dependencies` is absent, the literal or resolved primary must be
     Maven and preparation uses auto mode: its POM supplies the locked closure
     under R4.13a–R4.13c. An absent list is invalid for a local primary.
@@ -1538,7 +1554,10 @@ Connector pull-request gating is the same mechanism with one axis:
   An explicit token `proof_scope` additionally applies R4.13i to readiness, fault
   qualification, recovery delivery and final barrier re-evaluation.
   Each completed barrier must precede the next readiness sample in the retained
-  sequence, including coalesced sample counts. Before injection, sample the
+  sequence, including coalesced sample counts. Retained observations between a
+  completed checkpoint and the next readiness boundary must keep the same coherent
+  leader; changed or missing samples reject even when the leader later returns.
+  This does not establish continuous observation between samples. Before injection, sample the
   coherent current leader, retain a token trace watermark, and require a new healthy
   request/issuance after it, followed by the same token's receipt on every expected
   live TaskManager incarnation. A request from a different RM process cannot qualify.

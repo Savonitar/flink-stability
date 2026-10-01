@@ -66,6 +66,26 @@ class CentralMavenArtifactLookupTest {
     }
 
     @Test
+    void rejectsWrongAndMissingRemoteChecksumsWithoutInstallingTheJar() throws IOException {
+        for (boolean missing : List.of(false, true)) {
+            Path remote = root.resolve("remote-" + missing);
+            Path jar = remote.resolve("org/example/connector/1.0/connector-1.0.jar");
+            createJar(jar);
+            Path checksum = jar.resolveSibling(jar.getFileName() + ".sha1");
+            if (missing) Files.delete(checksum);
+            else Files.writeString(checksum, "0".repeat(40));
+            Path local = root.resolve("local-" + missing);
+            var lookup = new CentralMavenArtifactLookup(local, List.of(remote.toUri()));
+
+            var failure = assertThrows(MavenArtifactLookupException.class, () -> lookup.resolve(
+                    MavenCoordinate.parse("maven:org.example:connector:1.0"), false));
+
+            assertEquals(MavenArtifactLookupException.Kind.CHECKSUM_MISMATCH, failure.kind());
+            assertFalse(Files.exists(local.resolve("org/example/connector/1.0/connector-1.0.jar")));
+        }
+    }
+
+    @Test
     void reusesAConventionalMavenCentralCacheEntryOffline() throws Exception {
         Path local = root.resolve("local");
         Path cached = local.resolve(
@@ -145,5 +165,6 @@ class CentralMavenArtifactLookupTest {
                 Files.newOutputStream(path), manifest)) {
             // The connector role requires a valid primary JAR, not a Main-Class.
         }
+        MavenRepositoryFixture.checksum(path);
     }
 }

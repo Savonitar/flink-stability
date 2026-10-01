@@ -366,16 +366,25 @@ public final class TokenCheckpointBarrier {
         return Optional.empty();
     }
 
-    /** Independent ordering for two adjacent opt-in operations, including coalesced samples. */
-    static Optional<String> orderFailure(Evidence previous, Optional<Evidence> next) {
+    /** Adjacent opt-in operations require order and stability of the retained samples, not continuous observation. */
+    static Optional<String> orderFailure(Evidence previous, Optional<Evidence> next,
+                                         Optional<FlinkHaControl.Observations> history) {
         if (previous.afterCheckpoint().isEmpty() || next.isEmpty()
                 || next.orElseThrow().beforeFault().isEmpty()) {
             return Optional.of("Adjacent recovery barriers lack explicit sampled ordering boundaries");
         }
-        long completed = endSequence(previous.afterCheckpoint().orElseThrow());
-        long nextReadiness = endSequence(next.orElseThrow().beforeFault().orElseThrow().beforeTokens());
-        return completed < nextReadiness ? Optional.empty()
-                : Optional.of("A later leader fault began readiness before the previous checkpoint barrier completed");
+        var completed = previous.afterCheckpoint().orElseThrow();
+        var nextReadiness = next.orElseThrow().beforeFault().orElseThrow().beforeTokens();
+        if (endSequence(completed) >= endSequence(nextReadiness)) {
+            return Optional.of("A later leader fault began readiness before the previous checkpoint barrier completed");
+        }
+        if (history.isEmpty() || completed.leadership().isEmpty()
+                || !sample(completed, completed.leadership().orElseThrow(), history.orElseThrow())
+                || !sample(nextReadiness, completed.leadership().orElseThrow(), history.orElseThrow())
+                || !stable(history.orElseThrow(), completed, nextReadiness, completed.leadership().orElseThrow())) {
+            return Optional.of("Sampled leadership changed or became unavailable between recovery barriers");
+        }
+        return Optional.empty();
     }
 
     private static boolean ready(Ready value, FlinkHaControl.Leadership leader, int count,

@@ -271,7 +271,7 @@ class V1ScenarioExecutorTest {
                 var returnedJob = new FlinkJobHandle("1234567890abcdef1234567890abcdef");
                 String alias = fixture.bound().executablePlan().job().alias();
                 var trace = scopedTokenTrace(scope.equals("submitted-job"), returnedJob.jobId(), alias,
-                        !scope.isEmpty());
+                        true);
                 var postSubmit = tokenPrefix(trace, 3);
                 FakeRuntime runtime = tokenRuntime(events, fixture, trace);
                 if (!scope.isEmpty()) runtime.tokenSnapshots.add(Optional.of(postSubmit));
@@ -287,7 +287,7 @@ class V1ScenarioExecutorTest {
                     assertTrue(result.expectedHa().tokenProof().isEmpty());
                     assertEquals(1, events.stream().filter("token-snapshot"::equals).count());
                     assertTrue(events.indexOf("token-snapshot") > events.indexOf("process-fence"));
-                    assertTrue(runtime.identityRequests.isEmpty(), "legacy control does not acquire the opt-in all-TM gate");
+                    assertTrue(runtime.identityRequests.isEmpty(), "unscoped proof uses retained provisioning, without live scope capture");
                 } else {
                     var proof = result.expectedHa().tokenProof().orElseThrow();
                     assertEquals(scope.equals("bootstrap") ? FlinkRuntimeTarget.TokenProofScope.BOOTSTRAP
@@ -306,6 +306,30 @@ class V1ScenarioExecutorTest {
                     assertTrue(events.indexOf("token-snapshot") < events.indexOf("await-running"));
                     assertTrue(events.indexOf("identity:taskmanager-2") < events.indexOf("process-fence"));
                 }
+            }
+        }
+    }
+
+    @Test
+    void unscopedPartialTokenDeliveryCannotPassAndNeverMasksDataLoss() throws Exception {
+        for (boolean oraclePasses : List.of(true, false)) {
+            List<String> events = new ArrayList<>();
+            try (Fixture fixture = fixture(document -> scopedTokenSetup(document, ""))) {
+                var returnedJob = new FlinkJobHandle("1234567890abcdef1234567890abcdef");
+                var trace = scopedTokenTrace(false, returnedJob.jobId(),
+                        fixture.bound().executablePlan().job().alias(), false);
+                FakeRuntime runtime = tokenRuntime(events, fixture, trace);
+                FakeFlink flink = new FakeFlink(events);
+                flink.submittedHandle = returnedJob;
+                var oracle = oraclePasses ? passResult() : missingResult();
+                var result = executor(events, runtime, flink,
+                        (bootstrap, topic, ids, timeout) -> oracle).execute(fixture.bound(), attemptContext());
+                assertEquals(oraclePasses ? V1ScenarioExecutionResult.Status.INCONCLUSIVE
+                        : V1ScenarioExecutionResult.Status.FAIL, result.status());
+                assertEquals(oraclePasses ? "flink.ha.effect-unconfirmed" : oracle.reason(), result.reason());
+                assertEquals(oracle, result.terminalValidation().orElseThrow());
+                assertTrue(result.expectedHa().tokenProof().isEmpty());
+                assertTrue(runtime.identityRequests.isEmpty());
             }
         }
     }

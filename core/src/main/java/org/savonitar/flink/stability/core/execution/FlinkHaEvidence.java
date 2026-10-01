@@ -321,7 +321,7 @@ public record FlinkHaEvidence(
                 if (!checkpointTriggers.add(trigger)) return Optional.of("Recovery barriers replayed a checkpoint trigger");
                 if (index + 1 < phase.leaderFaults().size()) {
                     invalid = TokenCheckpointBarrier.orderFailure(observed.recoveryBarrier().orElseThrow(),
-                            phase.leaderFaults().get(index + 1).recoveryBarrier());
+                            phase.leaderFaults().get(index + 1).recoveryBarrier(), history);
                     if (invalid.isPresent()) return invalid;
                     var settled = observed.recoveryBarrier().orElseThrow().afterHeal().orElseThrow().snapshot();
                     if (phase.leaderFaults().get(index + 1).raw().tokensBefore()
@@ -449,9 +449,14 @@ public record FlinkHaEvidence(
                             proof.submission().orElseThrow().afterSequence(), expected.tokenProof()).isPresent())
                     ? Optional.empty() : Optional.of("No fresh scoped token reached every expected live TaskManager");
         }
-        return healthyDelivery(snapshot.events(), 0, Optional.empty(), participants(tokens, provisioning))
+        var participants = participants(tokens, provisioning, true);
+        if (participants.receivers().isEmpty() || expected.expectedTaskManagers() > 0
+                && participants.receivers().size() != expected.expectedTaskManagers()) {
+            return Optional.of("Healthy token control lacks every expected current TaskManager origin");
+        }
+        return healthyDelivery(snapshot.events(), 0, Optional.empty(), participants, true)
                 ? Optional.empty()
-                : Optional.of("No healthy JobManager issuance was acknowledged by a TaskManager");
+                : Optional.of("No single healthy JobManager token was acknowledged by every current TaskManager");
     }
 
     private static Optional<String> tokenFaultFailure(FlinkHaControl.LeaderFaultEvidence raw,
@@ -601,6 +606,12 @@ public record FlinkHaEvidence(
 
     private static boolean healthyDelivery(List<TokenServiceControl.Event> events, long afterSequence,
                                             Optional<String> process, TokenParticipants participants) {
+        return healthyDelivery(events, afterSequence, process, participants, false);
+    }
+
+    private static boolean healthyDelivery(List<TokenServiceControl.Event> events, long afterSequence,
+                                            Optional<String> process, TokenParticipants participants,
+                                            boolean everyReceiver) {
         return events.stream().filter(event -> event.sequence() > afterSequence
                 && event.kind() == TokenServiceControl.Kind.ISSUED
                 && event.mode() == TokenServiceControl.Mode.HEALTHY
@@ -617,12 +628,19 @@ public record FlinkHaEvidence(
                         && events.stream().anyMatch(finished -> sameRequest(issued, finished)
                         && finished.kind() == TokenServiceControl.Kind.REQUEST_FINISHED
                         && finished.sequence() > issued.sequence())
-                        && events.stream().anyMatch(received -> received.sequence() > issued.sequence()
-                        && received.kind() == TokenServiceControl.Kind.RECEIVED
-                        && "taskmanager".equals(received.role())
-                        && participants.receivers().contains(received.process())
-                        && received.tokenSequence().equals(issued.tokenSequence())
-                        && initialized(events, received, TokenServiceControl.Kind.RECEIVER_INITIALIZED)));
+                        && (everyReceiver
+                            ? !participants.receivers().isEmpty() && participants.receivers().stream()
+                                .allMatch(receiver -> received(events, issued, receiver))
+                            : participants.receivers().stream().anyMatch(receiver -> received(events, issued, receiver))));
+    }
+
+    private static boolean received(List<TokenServiceControl.Event> events,
+                                    TokenServiceControl.Event issued, String receiver) {
+        return events.stream().anyMatch(received -> received.sequence() > issued.sequence()
+                && received.kind() == TokenServiceControl.Kind.RECEIVED
+                && "taskmanager".equals(received.role()) && receiver.equals(received.process())
+                && received.tokenSequence().equals(issued.tokenSequence())
+                && initialized(events, received, TokenServiceControl.Kind.RECEIVER_INITIALIZED));
     }
 
     static boolean initialized(List<TokenServiceControl.Event> events,
@@ -639,10 +657,16 @@ public record FlinkHaEvidence(
 
     private static TokenParticipants participants(TokenEvidence tokens,
             List<FlinkComponentProvisioningEvidence> provisioning) {
+        return participants(tokens, provisioning, false);
+    }
+
+    private static TokenParticipants participants(TokenEvidence tokens,
+            List<FlinkComponentProvisioningEvidence> provisioning, boolean currentReceiversOnly) {
         TokenParticipants missing = new TokenParticipants(Set.of(), Set.of());
         if (tokens.origins().isEmpty()) return missing;
         Map<String, Integer> incarnations = new HashMap<>();
         Map<String, FlinkComponentRole> roles = new HashMap<>();
+        Map<String, String> currentReceivers = new HashMap<>();
         Set<String> runtimeIds = new HashSet<>();
         for (var component : provisioning) {
             if (!runtimeIds.add(component.runtimeId())) return missing;
@@ -651,6 +675,9 @@ public record FlinkHaEvidence(
             if (component.runtimeJarEvidence().isPresent()
                     && !label.equals(component.runtimeJarEvidence().orElseThrow().classLoadProcess())) return missing;
             roles.put(label, component.role());
+            if (component.role() == FlinkComponentRole.TASK_MANAGER) {
+                currentReceivers.put(component.logicalName(), label);
+            }
         }
         Set<String> issuers = new HashSet<>();
         Set<String> receivers = new HashSet<>();
@@ -661,6 +688,11 @@ public record FlinkHaEvidence(
                     && origin.sources().getOrDefault(TOKEN_PROVIDER, List.of()).contains(TOKEN_CONTAINER_PATH)) {
                 issuers.add(origin.process());
             }
+        }
+        if (currentReceiversOnly) {
+            var required = Set.copyOf(currentReceivers.values());
+            if (!receivers.containsAll(required)) return missing;
+            receivers.retainAll(required);
         }
         return new TokenParticipants(Set.copyOf(issuers), Set.copyOf(receivers));
     }

@@ -7,9 +7,10 @@ It starts a real Flink cluster and Apache Kafka broker in Docker, executes a typ
 scenario, prevents Flink from writing any more output, and then validates the final
 Kafka state for missing, duplicate, unexpected, or malformed record IDs.
 
-The current prototype intentionally supports one narrow but real vertical: a bounded
-Flink 2.2 exactly-once job using Kafka 4.0 and Kafka connector 5.0.0-2.2. Unsupported
-topologies and scenario features fail before Docker starts.
+The current prototype supports bounded Flink 2.2 jobs using Kafka 4.0 and Kafka
+connector 5.0.0-2.2, including distributed TaskManager recovery, ZooKeeper-backed
+JobManager HA, and synthetic delegation-token acquisition and distribution faults.
+Unsupported topologies and scenario features fail before Docker starts.
 Experimental Flink 2.4 builds require explicit image/JAR pins and a local connector
 closure; see [runtime build testing](docs/FLINK-RUNTIME-TESTING.md) for the compatibility
 and build-evidence requirements.
@@ -53,20 +54,39 @@ Important properties of this boundary:
 - timeouts, partial evidence, cleanup failures, and validation failures have stable reason codes;
 - operational logs use stderr and the command result is emitted as one JSON document on stdout.
 
-The [HA and token fault guide](docs/HA-TOKEN-TESTING.md) describes the optional
-ZooKeeper-backed JobManager pair, current-leader kill/pause/isolation and the bundled
-synthetic delegation-token plugin. These have separate catalogs and evidence gates;
-they do not change the canonical recovery scenarios.
+The [distributed recovery guide](docs/DISTRIBUTED-RECOVERY.md) and
+[HA and token fault guide](docs/HA-TOKEN-TESTING.md) describe their separate catalogs,
+evidence gates and observed results. These capabilities retain the same exact-ID
+oracle. A passing data check does not dismiss component errors or establish that
+every recovery or token path was exercised.
 
-Transaction feature selection is covered by Docker-free policy tests. Acceptance of
-the `1`/`2` transitions on a real Kafka 4.0 broker still requires container validation;
-declaring the setting is not proof that a transition is supported by that broker.
+Kafka transaction feature selection must be confirmed by the broker before the
+workload starts. A declared version alone does not prove that the broker accepted
+the transition or that a transaction behaved correctly.
+
+The Flink REST client retains non-success HTTP response status and full error bodies
+in `evidence.flinkRest`, including errors recovered by deadline-bound GET retries.
+Retries share the existing deadline; submission/upload POSTs are never replayed.
+After a confirmed physical fence, expiry of the HA leader-resolution budget during
+bounded completion retains `verification.flink.job-completion-timeout`; other
+resolver failures retain `verification.flink.job-terminalization-failed`. An
+unconfirmed fence reports `verification.flink.process-fence-failed`. Correct timeout
+classification does not repair a stalled job or establish final data completeness.
+A successful retry does not close an unexplained component finding.
 
 ## Requirements
 
 - JDK 21 (the build fails in the `validate` phase on an older JDK)
 - Maven 3.8+
 - Docker Desktop or another Docker daemon reachable by Testcontainers for `run`
+
+The adapter uses [Testcontainers 1.21.4](https://github.com/testcontainers/testcontainers-java/releases/tag/1.21.4),
+whose upstream release includes Docker Engine 29 compatibility. A regression checks that configured copies finish before
+the pre-start verification hook and that a failed hook prevents container start.
+This update also changes the default helper images: Ryuk 0.11.0 to 0.12.0 and
+sshd 1.2.0 to 1.3.0. The host-port tunnel carries HA ZooKeeper-gate and token-service
+traffic, so compatibility checks must include a live HA token control.
+Live compatibility still depends on the Docker engine and images used for a run.
 
 `validate` is Docker-free. It checks the broad v1 document, semantic, and artifact
 contract. `run` additionally checks the narrower capabilities implemented by the current
@@ -86,7 +106,11 @@ optional container runs, and the no-match control. Unit tests alone do not show 
 the scenarios catch real connector defects. The
 [connector-mutant calibration](calibration/connector-mutants/README.md) checks this in
 real containers: two deliberately wrong commit decisions must fail the EndTxn scenarios,
-and a healthy control must pass them.
+and a healthy control must pass them. The separate
+[recovery-mutant calibration](calibration/recovery-mutant/README.md) checks that
+`bounded-eos` detects a source checkpoint-offset error after recovery while the
+uninterrupted control remains exact. These calibrations do not establish sensitivity
+of every distributed or HA scenario.
 
 The workload artifact is written directly to:
 
@@ -183,16 +207,21 @@ does not establish coverage of a PR's changed behavior.
 
 ## Current executable subset
 
-The first runner supports:
+The runner supports:
 
 - one plain scenario, one run, and no health retry;
 - one Apache Kafka 4.0 broker with the input and sink topics;
-- one Flink 2.2 or explicitly pinned experimental 2.4 JobManager and 1–16 TaskManagers;
+- Flink 2.2 or explicitly pinned experimental 2.4, with one JobManager or a
+  ZooKeeper-backed HA pair, and 1–16 TaskManagers;
 - one auto-started protocol-v1 job with positive parallelism up to the provisioned
   capacity (two slots per TaskManager), and an `EXACTLY_ONCE` or `AT_LEAST_ONCE` Kafka sink;
 - one verified connector closure;
 - bounded generated integer input, capped at 1,000,000 records for the in-memory runner;
 - the currently registered wait/await, loop, and named TaskManager kill/restart phase operations;
+- HA current-leader kill, pause and ZooKeeper isolation, with per-fault leadership
+  and same-job recovery evidence;
+- a synthetic token plugin with delayed, HTTP-failing or LinkageError acquisition,
+  optional explicit bootstrap/submitted-job proof, and token/checkpoint recovery barriers;
 - an optional Kroxylicious proxy in front of the job sink, with counted `drop-request` and
   `drop-response` faults on transaction commits and aborts (`end-txn`)
   ([SPEC-004 §11](docs/specs/SPEC-004-kroxylicious-fault-model.md));
@@ -211,6 +240,17 @@ unresolved Kafka transactions after the fence under `evidence.sinkTransactions`.
 The separate [distributed recovery scenarios](docs/DISTRIBUTED-RECOVERY.md) use two
 TaskManagers, parallelism four, four Kafka partitions and a named kill/restart.
 They retain the same exact-ID oracle; existing canonical scenarios keep their parameters.
+
+Token proof is explicit: `setup.flink.token_provider.proof_scope` accepts `bootstrap`
+or `submitted-job`; omission preserves the existing service-wide evidence check.
+Both explicit scopes require a fresh completed request after submission and matching token
+receipts from every expected live TaskManager incarnation. Submitted-job proof also
+binds the actual returned JobID, workload alias and acknowledged provider registration
+history. A runtime that does not dispatch the registration hooks cannot satisfy it
+merely by issuing tokens. Missing proof prevents PASS while a recorded data or
+completion failure remains FAIL. See the [token guide](docs/HA-TOKEN-TESTING.md) for
+the complete contract and healthy-control prerequisites. This fixture does not
+test callback-triggered acquisition, Kafka authentication or isolation between jobs.
 
 A network fault counts only if the proxy dropped every requested message before the
 step's `trigger_deadline`. Otherwise a passing oracle becomes `inconclusive` with
@@ -248,6 +288,7 @@ validation cases.
 | `runtime-api` | JDK-only runtime targets, lifecycle contracts, and immutable runtime evidence shared across orchestration and providers |
 | `testcontainers` | Kafka/Flink/proxy process lifecycle, connector installation, fencing, and cleanup |
 | `kroxylicious-fault-filter` | the Kroxylicious filter plugin that drops the messages a network fault selects |
+| `synthetic-token-plugin` | a thin Flink provider/receiver fixture for synthetic token acquisition, registration and delivery evidence |
 | `flink-job-generator` | thin Flink 2.2 protocol-v1 workload used by the executable example |
 
 The `core` module keeps its pre-execution stages in explicit package boundaries:
@@ -266,9 +307,11 @@ validation as the package boundary.
 ## Not implemented yet
 
 - controlled-unbounded cutoff plus drain/stop;
-- executable suites and baseline/candidate experiments;
+- native execution of schema-defined suites and baseline/candidate experiments
+  (`tools/pr_gate.py` separately repeats selected scenarios with two connector artifacts);
 - multi-broker or multi-job execution;
-- network faults other than counted EndTxn drops, and proxies for other clients;
+- general network fault injection beyond counted EndTxn drops and the HA
+  ZooKeeper-isolation fixture, and proxies for other clients;
 - savepoint/restore and upgrade execution;
 - broader state-backend and topology support;
 - health retries, OCI digest capture, and the complete replay-grade report;
@@ -290,8 +333,3 @@ Licensed under the [Apache License 2.0](LICENSE).
 
 This is an independent personal project. It is not affiliated with or endorsed by the
 Apache Software Foundation; Apache Flink and Apache Kafka are trademarks of the ASF.
-
-The Flink REST client retains non-success HTTP response status and full error bodies
-in `evidence.flinkRest`, including errors recovered by deadline-bound GET retries.
-Retries share the existing deadline; submission/upload POSTs are never replayed.
-A successful retry does not close an unexplained component finding.

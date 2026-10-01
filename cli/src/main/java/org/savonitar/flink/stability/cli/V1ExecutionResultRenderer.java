@@ -5,6 +5,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import org.savonitar.flink.stability.core.execution.PhaseExecutionEvidence;
+import org.savonitar.flink.stability.core.artifact.PreparedScenarioPlan;
 import org.savonitar.flink.stability.core.execution.ScenarioVerdict;
 import org.savonitar.flink.stability.core.execution.TaskManagerKillEffect;
 import org.savonitar.flink.stability.core.execution.V1AttemptContext;
@@ -34,6 +35,12 @@ final class V1ExecutionResultRenderer {
             V1AttemptContext context,
             ExecutableScenarioPlan.ExpectedOutcome expected,
             V1ScenarioExecutionResult result) {
+        return render(scenarioName, context, expected, result, List.of());
+    }
+
+    String render(String scenarioName, V1AttemptContext context,
+                  ExecutableScenarioPlan.ExpectedOutcome expected, V1ScenarioExecutionResult result,
+                  List<PreparedScenarioPlan.ConnectorPrimaryEvidence> connectorPrimaries) {
         Objects.requireNonNull(scenarioName, "scenarioName");
         Objects.requireNonNull(context, "context");
         Objects.requireNonNull(expected, "expected");
@@ -59,6 +66,14 @@ final class V1ExecutionResultRenderer {
         expectation.put("matched", verdict.matched());
 
         ObjectNode evidence = root.putObject("evidence");
+        ArrayNode primaries = evidence.putArray("connectorPrimaries");
+        connectorPrimaries.forEach(primary -> {
+            ObjectNode item = primaries.addObject()
+                    .put("side", primary.side().name().toLowerCase(Locale.ROOT))
+                    .put("alias", primary.alias()).put("artifact", primary.artifact())
+                    .put("observedSha256", primary.observedSha256());
+            primary.declaredSha256().ifPresent(pin -> item.put("declaredSha256", pin));
+        });
         FlinkHaEvidenceRenderer.render(evidence.putObject("flinkHa"), result.haEvidence(),
                 result.phaseEvidence().map(PhaseExecutionEvidence::leaderFaults).orElse(List.of()));
         var selection = result.kafkaTransactionVersion();

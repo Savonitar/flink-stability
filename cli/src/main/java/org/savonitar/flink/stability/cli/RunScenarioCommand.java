@@ -6,6 +6,7 @@ import org.savonitar.flink.stability.core.execution.V1AttemptContext;
 import org.savonitar.flink.stability.core.execution.V1ScenarioExecutionResult;
 import org.savonitar.flink.stability.core.execution.V1ScenarioExecutor;
 import org.savonitar.flink.stability.core.artifact.ArtifactResolutionOptions;
+import org.savonitar.flink.stability.core.artifact.PreparedScenarioPlan;
 import org.savonitar.flink.stability.core.execution.plan.ExecutableScenarioPlan;
 import org.savonitar.flink.stability.core.spec.document.SpecificationException;
 import org.savonitar.flink.stability.testcontainers.DockerV1AttemptRuntime;
@@ -122,7 +123,7 @@ public final class RunScenarioCommand implements Callable<Integer> {
             // the selected expectation; a negative control passes by failing as pinned.
             ScenarioVerdict verdict = ScenarioVerdict.of(prepared.expectedOutcome(), result);
             specification.commandLine().getOut().println(resultRenderer.render(
-                    scenario, context, prepared.expectedOutcome(), result));
+                    scenario, context, prepared.expectedOutcome(), result, prepared.connectorPrimaries()));
             return verdict.status() == ScenarioVerdict.Status.PASS
                     ? CommandLine.ExitCode.OK
                     : CommandLine.ExitCode.SOFTWARE;
@@ -169,6 +170,11 @@ public final class RunScenarioCommand implements Callable<Integer> {
                 }
 
                 @Override
+                public List<PreparedScenarioPlan.ConnectorPrimaryEvidence> connectorPrimaries() {
+                    return target.executionPlan().preparedScenarioPlan().connectorPrimaries();
+                }
+
+                @Override
                 public void close() {
                     target.close();
                 }
@@ -189,6 +195,10 @@ public final class RunScenarioCommand implements Callable<Integer> {
         V1ScenarioExecutionResult execute(V1AttemptContext context);
 
         ExecutableScenarioPlan.ExpectedOutcome expectedOutcome();
+
+        default List<PreparedScenarioPlan.ConnectorPrimaryEvidence> connectorPrimaries() {
+            return List.of();
+        }
 
         @Override
         void close();

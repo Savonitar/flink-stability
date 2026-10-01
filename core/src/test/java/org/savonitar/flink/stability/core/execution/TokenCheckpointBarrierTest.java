@@ -149,8 +149,8 @@ class TokenCheckpointBarrierTest {
         assertEquals(List.of(), complete.errors());
         // Reusing a complete individually valid proof retains its entire token prefix,
         // but its readiness precedes its own checkpoint completion.
-        assertTrue(TokenCheckpointBarrier.orderFailure(complete, Optional.of(complete)).isPresent());
-        assertTrue(TokenCheckpointBarrier.orderFailure(complete, Optional.empty()).isPresent());
+        assertTrue(TokenCheckpointBarrier.orderFailure(complete, Optional.of(complete), Optional.of(f.history())).isPresent());
+        assertTrue(TokenCheckpointBarrier.orderFailure(complete, Optional.empty(), Optional.of(f.history())).isPresent());
         var oldReady = complete.afterHeal().orElseThrow();
         var completed = complete.afterCheckpoint().orElseThrow();
         var laterSample = new FlinkHaControl.LeadershipObservation(completed.sequence(),
@@ -161,8 +161,48 @@ class TokenCheckpointBarrierTest {
                 oldReady.afterSequence(), oldReady.issuedSequence());
         var later = new TokenCheckpointBarrier.Evidence(Optional.of(laterReady), Optional.empty(),
                 Optional.empty(), Optional.empty(), Optional.empty(), List.of(), List.of());
-        assertEquals(Optional.empty(), TokenCheckpointBarrier.orderFailure(complete, Optional.of(later)),
+        var samples = new ArrayList<>(f.history().leadership());
+        samples.set(samples.size() - 1, laterSample);
+        var history = new FlinkHaControl.Observations(samples, List.of(), false);
+        assertEquals(Optional.empty(), TokenCheckpointBarrier.orderFailure(complete, Optional.of(later), Optional.of(history)),
                 "a genuinely later observation within the same coalesced routing entry establishes order");
+    }
+
+    @Test
+    void sampledElectionOrUnavailableObservationBetweenRecoveryBarriersCannotPass() {
+        for (boolean unavailable : new boolean[] {false, true}) {
+            Fixture f = new Fixture();
+            var operation = f.operation();
+            assertTrue(operation.beforeFault());
+            operation.afterHeal(f.transfer());
+            var complete = operation.evidence();
+            var completed = complete.afterCheckpoint().orElseThrow();
+            var samples = new ArrayList<>(f.history().leadership());
+            long sequence = completed.sequence() + completed.sampleCount();
+            samples.add(new FlinkHaControl.LeadershipObservation(sequence, 1,
+                    completed.lastObservedAtMillis() + 1, completed.lastObservedAtMillis() + 1,
+                    FlinkHaControl.ObservationMoment.ROUTING,
+                    unavailable ? Optional.empty() : Optional.of(leader(1)),
+                    unavailable ? Optional.of("transient discovery failure") : Optional.empty()));
+            var resumed = new FlinkHaControl.LeadershipObservation(sequence + 1, 1,
+                    completed.lastObservedAtMillis() + 2, completed.lastObservedAtMillis() + 2,
+                    FlinkHaControl.ObservationMoment.ROUTING, completed.leadership(), Optional.empty());
+            samples.add(resumed);
+            var oldReady = complete.afterHeal().orElseThrow();
+            var ready = new TokenCheckpointBarrier.Ready(resumed, resumed, oldReady.receivers(),
+                    oldReady.issuerProcess(), oldReady.entrySnapshot(), oldReady.snapshot(),
+                    oldReady.afterSequence(), oldReady.issuedSequence());
+            var next = new TokenCheckpointBarrier.Evidence(Optional.of(ready), Optional.empty(),
+                    Optional.empty(), Optional.empty(), Optional.empty(), List.of(), List.of());
+            assertTrue(TokenCheckpointBarrier.orderFailure(complete, Optional.of(next),
+                    Optional.of(new FlinkHaControl.Observations(samples, List.of(), false))).orElseThrow()
+                    .contains("between recovery barriers"));
+            samples.set(samples.size() - 2, new FlinkHaControl.LeadershipObservation(sequence, 1,
+                    completed.lastObservedAtMillis() + 1, completed.lastObservedAtMillis() + 1,
+                    FlinkHaControl.ObservationMoment.ROUTING, completed.leadership(), Optional.empty()));
+            assertEquals(Optional.empty(), TokenCheckpointBarrier.orderFailure(complete, Optional.of(next),
+                    Optional.of(new FlinkHaControl.Observations(samples, List.of(), false))));
+        }
     }
 
     @Test

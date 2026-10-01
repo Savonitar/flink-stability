@@ -59,6 +59,88 @@ class ArtifactPlanResolverConnectorClosureTest {
     Path artifactRoot;
 
     @Test
+    void checksLocalAndMavenPrimaryPinsAgainstStagedBytesInAutoAndExplicitModes() throws Exception {
+        Path primary = createJar(artifactRoot.resolve("connector.jar"), false, "connector");
+        createJar(artifactRoot.resolve("job.jar"), true, "job");
+        String hash = Digests.sha256(primary);
+        MavenCoordinate coordinate = MavenCoordinate.parse(KAFKA_COORDINATE);
+        var identity = identity(coordinate);
+        var closure = new MavenRuntimeClosure(
+                List.of(jar(identity, 0, 0, List.of(identity), primary)), List.of(), List.of());
+        var lookup = new RecordingLookup(Map.of(coordinate, primary), (roots, offline) -> closure);
+        for (String mode : List.of("local", "maven-auto", "maven-explicit")) {
+            for (boolean match : List.of(true, false)) {
+                var plan = plainPlan("pinned-" + mode, document -> {
+                    setCoreArtifacts(document, mode.equals("local") ? "connector.jar" : KAFKA_COORDINATE, "job.jar");
+                    if (mode.equals("maven-explicit")) connector(document).putArray("runtime_dependencies");
+                    connector(document).put("sha256", match ? hash : "0".repeat(64));
+                });
+                if (match) {
+                    try (var prepared = new ArtifactPlanResolver(lookup).resolve(plan, ArtifactResolutionOptions.online(artifactRoot))) {
+                        var evidence = prepared.connectorPrimaries().getFirst();
+                        assertEquals(hash, evidence.declaredSha256().orElseThrow());
+                        assertEquals(hash, evidence.observedSha256());
+                        assertEquals(hash, Digests.sha256(prepared.connectorClosure(ScenarioSide.SINGLE, "kafka")
+                                .orElseThrow().primary().preparedPath()));
+                    }
+                } else {
+                    var failure = assertThrows(SpecificationException.class, () -> new ArtifactPlanResolver(lookup)
+                            .resolve(plan, ArtifactResolutionOptions.online(artifactRoot)));
+                    assertEquals(Stage.ARTIFACT, failure.stage());
+                    assertEquals("artifact.connector.pin-mismatch", failure.diagnostics().getFirst().code());
+                    assertEquals("$/subject/connectors/kafka/sha256", failure.diagnostics().getFirst().path());
+                }
+            }
+        }
+    }
+
+    @Test
+    void parameterPinsRemainSideSpecificWhenThePreparedPrimaryIsShared() throws Exception {
+        Path primary = createJar(artifactRoot.resolve("connector.jar"), false, "connector");
+        createJar(artifactRoot.resolve("job.jar"), true, "job");
+        String hash = Digests.sha256(primary);
+        var plan = experimentPlan("side-specific-pins", document -> {
+            setCoreArtifacts(document, "connector.jar", "job.jar");
+            connector(document).put("sha256", "${connector_hash}");
+            parameter(document, "connector_hash", hash);
+            var experiment = document.putObject("experiment");
+            experiment.put("claim", "A different declared pin cannot borrow common primary evidence.");
+            experiment.putArray("varies").add("connector_hash");
+            experiment.putObject("baseline").put("connector_hash", hash);
+            experiment.putObject("candidate").put("connector_hash", "0".repeat(64));
+        });
+
+        var failure = assertThrows(SpecificationException.class, () -> new ArtifactPlanResolver()
+                .resolve(plan, ArtifactResolutionOptions.online(artifactRoot)));
+
+        assertEquals(1, failure.diagnostics().size());
+        assertEquals(ResolutionScope.CANDIDATE, failure.diagnostics().getFirst().scope());
+        assertEquals("artifact.connector.pin-mismatch", failure.diagnostics().getFirst().code());
+    }
+
+    @Test
+    void resolvedParameterPinIsRetainedAfterSourceMutationAndWorkspaceCleanup() throws Exception {
+        Path primary = createJar(artifactRoot.resolve("connector.jar"), false, "connector");
+        createJar(artifactRoot.resolve("job.jar"), true, "job");
+        String hash = Digests.sha256(primary);
+        var plan = plainPlan("parameter-pin", document -> {
+            setCoreArtifacts(document, "connector.jar", "job.jar");
+            parameter(document, "connector_hash", hash);
+            connector(document).put("sha256", "${connector_hash}");
+        });
+        List<PreparedScenarioPlan.ConnectorPrimaryEvidence> evidence;
+        try (var prepared = new ArtifactPlanResolver().resolve(plan, ArtifactResolutionOptions.online(artifactRoot))) {
+            Files.writeString(primary, "changed source after preparation");
+            evidence = prepared.connectorPrimaries();
+            assertEquals(hash, Digests.sha256(prepared.connectorClosure(ScenarioSide.SINGLE, "kafka")
+                    .orElseThrow().primary().preparedPath()));
+        }
+        assertEquals(hash, evidence.getFirst().declaredSha256().orElseThrow());
+        assertEquals(hash, evidence.getFirst().observedSha256());
+        assertThrows(UnsupportedOperationException.class, evidence::clear);
+    }
+
+    @Test
     void autoModeStagesTheFullMavenClosureAndPreservesImmutableEvidence()
             throws IOException {
         Path primaryJar = createJar(artifactRoot.resolve("maven/primary.jar"), false, "same");
