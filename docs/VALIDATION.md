@@ -39,6 +39,7 @@ Full clean builds remain the release check.
 | Proxy isolation and healing | `EndTxnFaultFilterTest`, `FaultRuleBookTest`, `ProxyFaultInjectorTest` | Connections steal correlation IDs, concurrent claims exceed the count, or a missing heal acknowledgement succeeds. |
 | Schema and capabilities | `SpecificationLoaderTest`, `ExecutableScenarioPlanCompilerTest` | Invalid timing fields or unsupported routes/topologies reach execution. |
 | Flink runtime image identity | Runtime target, container provisioning, execution, verdict and renderer tests | A different image behind the same tag starts, a replacement loses its identity, or missing/mixed image evidence yields a passing verdict. |
+| Unset ZooKeeper leader records | `FlinkHaRuntimeTest` | Null or empty leader data aborts election observation, creates false leadership evidence, or extends its existing deadline; nonempty malformed records must still fail. |
 
 These tests use controlled clocks, fake runtime boundaries, and Kafka adapter test
 clients where applicable. They do not establish container discovery/reconnection

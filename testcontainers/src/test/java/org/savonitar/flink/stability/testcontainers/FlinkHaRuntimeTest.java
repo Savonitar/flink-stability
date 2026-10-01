@@ -107,13 +107,69 @@ class FlinkHaRuntimeTest {
     void decodesFlinksActualLeaderFormatAndRejectsOtherSerializedTypes() throws Exception {
         UUID session = UUID.randomUUID();
         String address = "pekko.tcp://flink@jobmanager-2-3:6123/user/rpc/resourcemanager_0";
-        assertEquals(new FlinkHaRuntime.AddressSession(address, session.toString()),
+        assertEquals(Optional.of(new FlinkHaRuntime.AddressSession(address, session.toString())),
                 FlinkHaRuntime.decodeLeader(encoded(address, session)));
         assertThrows(IOException.class,
                 () -> FlinkHaRuntime.decodeLeader(encoded(address, new HashMap<>())));
         assertThrows(IOException.class,
                 () -> FlinkHaRuntime.decodeLeader(encoded(address, "not-a-session")));
         assertThrows(IOException.class, () -> FlinkHaRuntime.decodeLeader(new byte[16_385]));
+        assertThrows(IOException.class, () -> FlinkHaRuntime.decodeLeader(new byte[] {1}));
+    }
+
+    @Test
+    void unsetLeaderRecordsKeepPollingUntilAnActualLeaderIsPublished() throws Exception {
+        FakeHandle leader = new FakeHandle("jobmanager-1-1", "leader");
+        UUID session = UUID.randomUUID();
+        byte[] published = encoded("pekko.tcp://flink@jobmanager-1-1:6123/user/rpc/resourcemanager_0", session);
+        AtomicInteger reads = new AtomicInteger();
+        try (FlinkHaRuntime runtime = new FlinkHaRuntime(CONFIGURATION, System::nanoTime, ignored -> {
+            byte[] data = switch (reads.getAndIncrement()) {
+                case 0 -> null;
+                case 1 -> new byte[0];
+                default -> published;
+            };
+            try {
+                return FlinkHaRuntime.decodeLeader(data).map(record -> {
+                    assertEquals(session.toString(), record.sessionId());
+                    return leadership(leader);
+                });
+            } catch (IOException | ClassNotFoundException failure) {
+                throw new AssertionError(failure);
+            }
+        }, Map.of())) {
+            runtime.register("jobmanager-1", leader);
+            assertEquals("http://localhost:8081", runtime.initialRestEndpoint(Duration.ofSeconds(2)));
+            assertEquals(3, reads.get());
+            var observations = runtime.observations(List.of()).leadership();
+            assertEquals(3, observations.size());
+            assertTrue(observations.get(0).leadership().isEmpty());
+            assertTrue(observations.get(1).leadership().isEmpty());
+            assertTrue(observations.stream().allMatch(sample -> sample.error().isEmpty()));
+            assertEquals("leader", observations.getLast().leadership().orElseThrow().resourceManager().runtimeId());
+        }
+    }
+
+    @Test
+    void anUnsetLeaderRecordCannotExtendTheObservationDeadline() throws Exception {
+        AtomicLong clock = new AtomicLong();
+        try (FlinkHaRuntime runtime = new FlinkHaRuntime(CONFIGURATION, clock::get, ignored -> {
+            clock.set(Duration.ofSeconds(1).toNanos());
+            try {
+                return FlinkHaRuntime.decodeLeader(null).map(record -> {
+                    throw new AssertionError("An unset record cannot identify a leader");
+                });
+            } catch (IOException | ClassNotFoundException failure) {
+                throw new AssertionError(failure);
+            }
+        }, Map.of())) {
+            assertThrows(ContainerOperationTimeoutException.class,
+                    () -> runtime.initialRestEndpoint(Duration.ofMillis(100)));
+            var observations = runtime.observations(List.of()).leadership();
+            assertEquals(1, observations.size());
+            assertTrue(observations.getFirst().leadership().isEmpty());
+            assertTrue(observations.getFirst().error().isEmpty());
+        }
     }
 
     @Test

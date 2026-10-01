@@ -252,10 +252,11 @@ final class FlinkHaRuntime implements AutoCloseable {
                 } catch (KeeperException.NoNodeException | KeeperException.ConnectionLossException missing) {
                     return Optional.empty();
                 }
-                if (data.length == 0) {
+                var record = decodeLeader(data);
+                if (record.isEmpty()) {
                     return Optional.empty();
                 }
-                AddressSession decoded = decodeLeader(data);
+                AddressSession decoded = record.orElseThrow();
                 String alias = URI.create(decoded.address()).getHost();
                 Process registered = incarnations.get(alias);
                 if (registered == null) {
@@ -276,7 +277,11 @@ final class FlinkHaRuntime implements AutoCloseable {
         });
     }
 
-    static AddressSession decodeLeader(byte[] data) throws IOException, ClassNotFoundException {
+    static Optional<AddressSession> decodeLeader(byte[] data) throws IOException, ClassNotFoundException {
+        // Flink clears leader information by writing null to the existing ZooKeeper node.
+        if (data == null || data.length == 0) {
+            return Optional.empty();
+        }
         if (data.length > 16_384) {
             throw new IOException("ZooKeeper leader record exceeds the bounded protocol size");
         }
@@ -294,7 +299,7 @@ final class FlinkHaRuntime implements AutoCloseable {
             if (!(session instanceof UUID id) || address.isBlank()) {
                 throw new IOException("ZooKeeper leader record has no address and UUID session");
             }
-            return new AddressSession(address, id.toString());
+            return Optional.of(new AddressSession(address, id.toString()));
         }
     }
 
