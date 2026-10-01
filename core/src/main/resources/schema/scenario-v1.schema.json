@@ -719,6 +719,13 @@
         "artifact": {
           "$ref": "#/$defs/nonEmptyString"
         },
+        "sha256": {
+          "anyOf": [
+            { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+            { "$ref": "#/$defs/templatedString" }
+          ],
+          "description": "Optional SHA-256 of the staged connector primary; checked independently on each resolved side before provisioning."
+        },
         "runtime_dependencies": {
           "type": "array",
           "items": {

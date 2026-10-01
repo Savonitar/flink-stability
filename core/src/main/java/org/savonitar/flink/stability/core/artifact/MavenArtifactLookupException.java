@@ -5,7 +5,8 @@ final class MavenArtifactLookupException extends Exception {
         NOT_FOUND,
         REPOSITORY_UNAVAILABLE,
         OFFLINE_MISS,
-        INVALID_CLOSURE
+        INVALID_CLOSURE,
+        CHECKSUM_MISMATCH
     }
 
     private final Kind kind;

@@ -531,6 +531,7 @@ class ArtifactPlanResolverTest {
     void mapsEveryMavenLookupFailureKindToAStableIssueCode() throws IOException {
         createJar(artifactRoot.resolve("job.jar"), true);
         Map<MavenArtifactLookupException.Kind, String> expectations = Map.of(
+                MavenArtifactLookupException.Kind.CHECKSUM_MISMATCH, "artifact.maven.checksum-mismatch",
                 MavenArtifactLookupException.Kind.NOT_FOUND, "artifact.maven.not-found",
                 MavenArtifactLookupException.Kind.REPOSITORY_UNAVAILABLE,
                 "artifact.maven.repository-unavailable",

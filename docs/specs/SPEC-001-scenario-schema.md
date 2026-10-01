@@ -543,7 +543,10 @@ Connector pull-request gating is the same mechanism with one axis:
     snapshots are rejected. Online preparation checks the local Maven cache and
     then the fixed HTTPS Maven Central repository; offline preparation reports an
     explicit cache miss. It never shells out to Maven or reads Maven
-    settings/credentials.
+    settings/credentials. Remote release transfers use checksum policy `FAIL`: a missing
+    or mismatched repository checksum rejects with `artifact.maven.checksum-mismatch`,
+    including POMs and transitive JARs. Remote snapshots are disabled. Existing/offline
+    cache entries are not retroactively authenticated by this transfer policy.
 - **R4.13a** A Maven subject connector with no `runtime_dependencies` uses
   **auto mode**: preparation resolves its primary JAR and a locked runtime closure
   from its effective Maven model. In **explicit mode**—the field is present for
@@ -974,7 +977,13 @@ Connector pull-request gating is the same mechanism with one axis:
   from the workload job JAR. For connector scenarios, `subject.connectors` is a
   non-empty map keyed by scenario-local aliases; each connector declares
   `artifact` (canonical `maven:<groupId>:<artifactId>:<release-version>`, exact
-  local JAR, or final-filename build output pattern per R4.13).
+  local JAR, or final-filename build output pattern per R4.13). Optional `sha256`
+  declares exactly 64 lowercase hexadecimal characters after parameter resolution.
+  Preparation compares the pin with the staged primary for each effective side,
+  for both local and Maven artifacts; a mismatch rejects before provisioning with
+  `artifact.connector.pin-mismatch`. Run JSON retains `evidence.connectorPrimaries`
+  entries containing `side`, `alias`, `artifact`, `observedSha256` and, when declared,
+  `declaredSha256`. The pin covers the primary; closure hashes retain dependency identity.
   - If `runtime_dependencies` is absent, the literal or resolved primary must be
     Maven and preparation uses auto mode: its POM supplies the locked closure
     under R4.13a–R4.13c. An absent list is invalid for a local primary.

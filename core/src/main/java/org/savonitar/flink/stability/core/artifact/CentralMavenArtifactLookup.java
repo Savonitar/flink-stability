@@ -17,6 +17,7 @@ import org.eclipse.aether.graph.Dependency;
 import org.eclipse.aether.graph.DependencyNode;
 import org.eclipse.aether.repository.LocalRepository;
 import org.eclipse.aether.repository.RemoteRepository;
+import org.eclipse.aether.repository.RepositoryPolicy;
 import org.eclipse.aether.resolution.ArtifactDescriptorException;
 import org.eclipse.aether.resolution.ArtifactRequest;
 import org.eclipse.aether.resolution.ArtifactResolutionException;
@@ -27,6 +28,7 @@ import org.eclipse.aether.resolution.DependencyResult;
 import org.eclipse.aether.supplier.RepositorySystemSupplier;
 import org.eclipse.aether.transfer.ArtifactNotFoundException;
 import org.eclipse.aether.transfer.ArtifactTransferException;
+import org.eclipse.aether.transfer.ChecksumFailureException;
 import org.eclipse.aether.transfer.RepositoryOfflineException;
 import org.eclipse.aether.util.graph.selector.AndDependencySelector;
 import org.eclipse.aether.util.graph.transformer.ChainedDependencyGraphTransformer;
@@ -96,7 +98,12 @@ final class CentralMavenArtifactLookup implements MavenArtifactLookup {
                     ? "central"
                     : "v1-repository-" + index + "-" + Digests.sha256(uri.toASCIIString());
             fixedRepositories.add(new RemoteRepository.Builder(
-                    repositoryId, "default", uri.toString()).build());
+                    repositoryId, "default", uri.toString())
+                    .setReleasePolicy(new RepositoryPolicy(true,
+                            RepositoryPolicy.UPDATE_POLICY_DAILY, RepositoryPolicy.CHECKSUM_POLICY_FAIL))
+                    .setSnapshotPolicy(new RepositoryPolicy(false,
+                            RepositoryPolicy.UPDATE_POLICY_NEVER, RepositoryPolicy.CHECKSUM_POLICY_FAIL))
+                    .build());
         }
         return List.copyOf(fixedRepositories);
     }
@@ -668,6 +675,7 @@ final class CentralMavenArtifactLookup implements MavenArtifactLookup {
         private boolean repositoryOffline;
         private boolean transferFailure;
         private boolean invalidDescriptor;
+        private boolean checksumFailure;
         private final Set<String> failedArtifacts = new TreeSet<>();
 
         private static FailureFacts inspect(Throwable failure) {
@@ -694,6 +702,9 @@ final class CentralMavenArtifactLookup implements MavenArtifactLookup {
                 }
                 if (current instanceof RepositoryOfflineException) {
                     facts.repositoryOffline = true;
+                }
+                if (current instanceof ChecksumFailureException) {
+                    facts.checksumFailure = true;
                 }
                 if (current instanceof ArtifactResolutionException resolution) {
                     for (ArtifactResult result : resolution.getResults()) {
@@ -733,6 +744,9 @@ final class CentralMavenArtifactLookup implements MavenArtifactLookup {
         }
 
         private MavenArtifactLookupException.Kind kind(boolean offline) {
+            if (checksumFailure) {
+                return MavenArtifactLookupException.Kind.CHECKSUM_MISMATCH;
+            }
             if (offline && !transferFailure && (notFound || repositoryOffline)) {
                 return MavenArtifactLookupException.Kind.OFFLINE_MISS;
             }

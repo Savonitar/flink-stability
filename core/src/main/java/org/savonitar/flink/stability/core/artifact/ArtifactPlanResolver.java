@@ -1221,6 +1221,7 @@ public final class ArtifactPlanResolver {
             case REPOSITORY_UNAVAILABLE -> "artifact.maven.repository-unavailable";
             case OFFLINE_MISS -> "artifact.maven.offline-miss";
             case INVALID_CLOSURE -> "artifact.maven.invalid-closure";
+            case CHECKSUM_MISMATCH -> "artifact.maven.checksum-mismatch";
         };
         return issue(source, reference, code, exception.getMessage());
     }

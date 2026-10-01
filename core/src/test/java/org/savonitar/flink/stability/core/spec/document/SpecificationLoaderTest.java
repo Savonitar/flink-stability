@@ -26,6 +26,31 @@ class SpecificationLoaderTest {
     Path temporaryDirectory;
 
     @Test
+    void connectorPinsRequireLowercaseSha256AfterParameterResolution() {
+        Path source = resource("minimal.yaml");
+        for (var pin : List.of(JsonNodeFactory.instance.textNode("a".repeat(64)),
+                JsonNodeFactory.instance.textNode("0".repeat(64)))) {
+            var document = loader.loadScenario(source).document();
+            ((ObjectNode) document.at("/subject/connectors/kafka")).set("sha256", pin);
+            loader.validateScenarioDocument(source, document);
+            loader.validateResolvedScenario(source, document);
+        }
+        for (var pin : List.of(JsonNodeFactory.instance.textNode("A".repeat(64)),
+                JsonNodeFactory.instance.textNode("a".repeat(63)), JsonNodeFactory.instance.textNode("g".repeat(64)),
+                JsonNodeFactory.instance.textNode(""), JsonNodeFactory.instance.numberNode(123),
+                JsonNodeFactory.instance.nullNode())) {
+            var document = loader.loadScenario(source).document();
+            ((ObjectNode) document.at("/subject/connectors/kafka")).set("sha256", pin);
+            assertFailsAt(Stage.DOCUMENT, () -> loader.validateScenarioDocument(source, document));
+            assertFailsAt(Stage.DOCUMENT, () -> loader.validateResolvedScenario(source, document));
+        }
+        var parameterized = loader.loadScenario(source).document();
+        ((ObjectNode) parameterized.at("/subject/connectors/kafka")).put("sha256", "${connector_hash}");
+        loader.validateScenarioDocument(source, parameterized);
+        assertFailsAt(Stage.DOCUMENT, () -> loader.validateResolvedScenario(source, parameterized));
+    }
+
+    @Test
     void dispatchesAndValidatesEveryV1DocumentKind() {
         LoadedSpecification scenario = loader.load(resource("minimal.yaml"));
         LoadedSpecification expectedResult = loader.load(resource("minimal.expected.yaml"));

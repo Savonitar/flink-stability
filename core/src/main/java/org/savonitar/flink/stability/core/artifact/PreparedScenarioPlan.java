@@ -17,6 +17,7 @@ public final class PreparedScenarioPlan implements AutoCloseable {
     private final List<ResolvedArtifact> artifacts;
     private final List<PreparedConnectorClosure> connectorClosures;
     private final boolean ownsWorkspace;
+    private final List<ConnectorPrimaryEvidence> connectorPrimaries;
 
     PreparedScenarioPlan(
             ResolvedScenarioPlan scenarioPlan,
@@ -70,6 +71,23 @@ public final class PreparedScenarioPlan implements AutoCloseable {
                         "Connector closure primary must match a declared prepared artifact");
             }
         }
+        this.connectorPrimaries = ConnectorPrimaryPins.verify(this);
+    }
+
+    /** Declared pins and the observed hashes of the exact staged primary artifacts. */
+    public record ConnectorPrimaryEvidence(ScenarioSide side, String alias, String artifact,
+                                          Optional<String> declaredSha256, String observedSha256) {
+        public ConnectorPrimaryEvidence {
+            Objects.requireNonNull(side, "side");
+            Objects.requireNonNull(alias, "alias");
+            Objects.requireNonNull(artifact, "artifact");
+            Objects.requireNonNull(declaredSha256, "declaredSha256");
+            Objects.requireNonNull(observedSha256, "observedSha256");
+        }
+    }
+
+    public List<ConnectorPrimaryEvidence> connectorPrimaries() {
+        return connectorPrimaries;
     }
 
     public ResolvedScenarioPlan scenarioPlan() {

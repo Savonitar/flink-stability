@@ -152,6 +152,8 @@ expected validation code.
 | SV-092 | `subject.connectors` is empty. | Reject structurally. |
 | SV-093 | A subject connector omits `artifact`. | Reject structurally. |
 | SV-094 | Declared connector artifact cannot be resolved or checksummed. | Reject unresolved artifact before execution. |
+| SV-094ba | A remote primary, POM or transitive JAR has a wrong or missing repository checksum. | Reject with `artifact.maven.checksum-mismatch`; correct checksums resolve. Remote snapshots are disabled; existing offline-cache bytes are outside this transfer check. |
+| SV-094bb | A local or Maven connector primary declares a SHA-256 pin, including through a parameter or separate experiment-side values. | Validate lowercase 64-hex syntax after resolution; compare each side's staged primary before provisioning, reject mismatches even when the sides share bytes, and retain declared/observed evidence after cleanup. |
 | SV-094a | Exact local connector or workload JAR resolves under the explicit artifact root. | Copy it into private content-addressed staging; record declared reference, staged real path, and lowercase SHA-256 before provisioning. Mutating the source afterward does not mutate the prepared bytes. |
 | SV-094b | Final-filename build glob matches exactly one regular JAR. | Resolve that JAR deterministically. |
 | SV-094c | Build glob matches zero or more than one regular JAR. | Reject not-found or ambiguous artifact; never pick one. |
