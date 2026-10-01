@@ -42,6 +42,7 @@ final class VerifiedFlinkContainer extends GenericContainer<VerifiedFlinkContain
     private SyntheticTokenPlugin tokenPlugin;
     private String tokenPluginContainerId;
     private FlinkSessionLog sessionLog;
+    private final RetainedFlinkLog retainedLog;
 
     VerifiedFlinkContainer(
             DockerImageName image,
@@ -52,6 +53,8 @@ final class VerifiedFlinkContainer extends GenericContainer<VerifiedFlinkContain
         this.runtimeTarget = Objects.requireNonNull(runtimeTarget, "runtimeTarget");
         this.imageIdVerifier = Objects.requireNonNull(imageIdVerifier, "imageIdVerifier");
         this.classLoadLog = Objects.requireNonNull(classLoadLog, "classLoadLog");
+        retainedLog = new RetainedFlinkLog(classLoadLog);
+        withLogConsumer(frame -> retainedLog.accept(frame.getBytes()));
         this.resourceId = "flink-stability-" + classLoadLog.process().replaceAll("[^A-Za-z0-9-]", "-")
                 + "-" + UUID.randomUUID();
         ConnectorClasspathManifest manifest = runtimeTarget.connectorBundle().classpathManifest();
@@ -68,6 +71,20 @@ final class VerifiedFlinkContainer extends GenericContainer<VerifiedFlinkContain
         configuredBundleTargets.add(ConnectorClasspathManifest.CONTAINER_MANIFEST_PATH);
     }
 
+    @Override public void start() {
+        try { super.start(); }
+        catch (RuntimeException | Error failure) {
+            retainedLog.close();
+            throw failure;
+        }
+    }
+
+    @Override public void stop() {
+        // Release the local descriptor even if Docker cleanup blocks or fails.
+        retainedLog.close();
+        super.stop();
+    }
+
     /** Unique for this handle, including replacements and separate run attempts. */
     String resourceId() {
         return resourceId;
@@ -75,6 +92,10 @@ final class VerifiedFlinkContainer extends GenericContainer<VerifiedFlinkContain
 
     String advertisedAlias() {
         return classLoadLog.process().replace('#', '-');
+    }
+
+    org.savonitar.flink.stability.runtime.api.FlinkComponentLog componentLog() {
+        return retainedLog.snapshot();
     }
 
     void observeHaSessions(String logicalName, FlinkComponentRole role) {
@@ -108,6 +129,7 @@ final class VerifiedFlinkContainer extends GenericContainer<VerifiedFlinkContain
     protected void containerIsCreated(String containerId) {
         super.containerIsCreated(containerId);
         if (sessionLog != null) sessionLog.created(containerId);
+        retainedLog.created(containerId);
         // Testcontainers 1.21.4 invokes this hook after its configured archive copies and before
         // Docker's startContainer command. A mismatch therefore prevents the Flink entrypoint.
         verifyImageIdentity(containerId, id -> getDockerClient()

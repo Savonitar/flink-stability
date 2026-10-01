@@ -73,6 +73,11 @@ public final class DockerV1AttemptRuntime implements V1AttemptRuntime {
     }
 
     @Override
+    public java.util.List<org.savonitar.flink.stability.runtime.api.FlinkComponentLog> flinkComponentLogs() {
+        return clusters.componentLogs();
+    }
+
+    @Override
     public FlinkHaControl.LeaderFaultEvidence faultLeader(
             FlinkHaControl.LeaderFaultRequest request, Duration remainingBudget,
             TokenServiceControl.JobTarget target) {
