@@ -492,10 +492,13 @@ expected validation code.
 | SV-203 | A segment is truncated, CRC-corrupt, has an inconsistent record count, unsupported compression/magic/marker, or exceeds a file-byte, batch-byte, batch-count or record bound. | Fail with incomplete evidence and a nonzero CLI exit; never accept a valid prefix as a complete segment or silently skip unsupported bytes. |
 | SV-204 | The CLI reads an empty regular segment, a symbolic link, or an out-of-range budget. | An empty file reports zero physical records and its hash without a scenario verdict. Reject symbolic links and invalid budgets; retain inputs unchanged and never start Kafka or Docker. |
 
-## 13. Additional token evidence
+## 13. Additional token and owned Kafka inventory evidence
 
 | ID | Case | Expected result |
 | --- | --- | --- |
 | SV-205 | Unscoped healthy token evidence covers one of multiple current TMs, an old incarnation, or separate token identities. | Require one exact issued token on all declared latest TMs with verified origins; missing proof makes exact data INCONCLUSIVE while an existing data FAIL remains primary. |
 | SV-206 | An application line exceeds 8192 characters; an own ClientCnxn marker appears in the discarded suffix or a relevant session message is malformed/unfinished. | Ignore unrelated oversized output with bounded memory; retain unconfirmed evidence when the own session logger may have lost relevant information. |
 | SV-207 | Leader samples change or become unavailable between a completed token-checkpoint barrier and the next readiness boundary, then return to the same leader. | Reject barrier order/stability confirmation; coalesced stable samples remain valid without claiming continuous coverage or exact election counts. |
+| SV-208 | An opt-in owned-partition inventory lists exact log/index files, unsafe or duplicate names, links, rollover entries, command failure or exceeded bounds. | Retain bounded raw metadata with owner and partition binding; only complete stable inventories authorize their exact regular log members. Index payloads are not copied. Unconfirmed command termination stops collection. |
+| SV-209 | Before/after inventory observes append, removal, rename, replacement or a missing observation. | Report changed/unavailable metadata coverage. Equal metadata never proves atomic capture or complete transaction history. |
+| SV-210 | Inventory/copy blocks after cancellation or archive close fails after a primary failure. | Owner cleanup remains callable; abandoned work cannot start later metadata calls or publish successful evidence, and close failure cannot mask the primary error. |

@@ -136,6 +136,30 @@ final class ApacheKafkaRuntime implements KafkaRuntimeCluster {
                 target.clusterAlias(), target.imageReference(), generation);
     }
 
+    KafkaLogInventory listPartitionFiles(OwnedKafkaArchiveCapture.Identity expected,
+            OwnedKafkaArchiveCapture.Partition partition, int maximumBytes, MonotonicDeadline deadline) {
+        var binding = expectedOwner(expected);
+        return KafkaLogInventory.capture(binding,
+                archiveDriverFactory.apply(binding.containerId(), binding.networkId()),
+                expected, partition, maximumBytes, deadline);
+    }
+
+    OwnedKafkaArchiveCapture.Receipt copyLogFile(OwnedKafkaArchiveCapture.Identity expected,
+            KafkaLogInventory inventory, String basename, Path evidenceDirectory, String partialName,
+            long maximumBytes, MonotonicDeadline deadline) {
+        var binding = expectedOwner(expected);
+        return OwnedKafkaArchiveCapture.copyLog(binding,
+                archiveDriverFactory.apply(binding.containerId(), binding.networkId()), expected,
+                inventory, basename, evidenceDirectory, partialName, maximumBytes, deadline);
+    }
+
+    private synchronized OwnedKafkaArchiveCapture.Binding expectedOwner(OwnedKafkaArchiveCapture.Identity expected) {
+        if (startupIdentity == null || startupIdentity != expected) {
+            throw new IllegalArgumentException("Exact observed startup identity required");
+        }
+        return ownedBinding();
+    }
+
     private static OwnedKafkaArchiveCapture.Driver archiveDriver(
             DockerClient client, String capturedId, String ownedNetworkId) {
         return new OwnedKafkaArchiveCapture.Driver() {
@@ -169,6 +193,18 @@ final class ApacheKafkaRuntime implements KafkaRuntimeCluster {
                     catch (RuntimeException closeFailure) { failure.addSuppressed(closeFailure); }
                     throw failure;
                 }
+            }
+
+            @Override public KafkaLogInventory.Command listFileNames(String directory, int maximumBytes,
+                    ContainerOperationDeadline deadline, Runnable checkActive) throws IOException {
+                return KafkaInventoryCommand.run(client, capturedId, maximumBytes, deadline, checkActive,
+                        "/usr/bin/find", directory, "-maxdepth", "1", "-print0");
+            }
+
+            @Override public KafkaLogInventory.Command fileMetadata(String path, int maximumBytes,
+                    ContainerOperationDeadline deadline, Runnable checkActive) throws IOException {
+                return KafkaInventoryCommand.run(client, capturedId, maximumBytes, deadline, checkActive,
+                        "/bin/stat", "-c", "%f %s %Y %i", path);
             }
         };
     }
