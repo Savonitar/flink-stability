@@ -67,7 +67,10 @@ public final class SyntheticDelegationTokenProvider implements DelegationTokenPr
         return new ObtainedDelegationTokens(bytes, Optional.of(token.expiresAt()));
     }
 
-    /** Compatible with the candidate API; deliberately compiled against the released SPI. */
+    /**
+     * Hook for runtimes whose provider SPI adds job registration hooks;
+     * compiled against the Flink 2.2 SPI.
+     */
     public void registerJob(JobID suppliedId, Configuration configuration) {
         // Parse only the bounded synthetic alias, never retain/serialize the supplied configuration.
         final String alias;

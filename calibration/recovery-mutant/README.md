@@ -125,9 +125,9 @@ to obtain a preferred count.
 
 ## Validation status
 
-The four-cell Docker calibration completed on 2026-09-27 with a frozen engine
-built from `98c3684` plus the renderer/specification changes later committed in
-`2b3b3c9`. It was not a clean-checkout build of that commit or of current main.
+The four-cell Docker calibration completed on 2026-09-27 using engine revision
+`98c3684` with additional renderer and specification changes. It was not a
+clean-checkout build of that revision or of current main.
 The release and mutant no-kill controls passed all 3,000 records; release-kill
 also passed. Mutant-kill retained its raw FAIL and exactly one missing ID, 19.
 Checkpoint 1 saved source offset 19 as 20, and the replacement reader restored
@@ -137,8 +137,8 @@ The tested release SHA-256 was
 `6bb63f7b09930d99745325393b481c092b0c26d626e738b7a1fd6fd8d7d4f1da`;
 the tested mutant SHA-256 was
 `5e58c26c9553f5f14a7b7ffac8f2d8bf3594c6c9e4a8b3c0ecd416fbd6046a4c`.
-Only `KafkaSourceReader.class` differed. The retained local evidence directory is
-`jobs/validation/roadmap-20260927/fu24-docker-20260927T130221Z-ojkotb6_/`.
+Only `KafkaSourceReader.class` differed. The original catalogs, command outputs,
+recovery logs and cleanup evidence were retained for this historical result.
 Both kill cases also logged a KafkaCommitter fenced-commit error. This calibration
 does not classify those component errors or validate sink transaction recovery.
 
