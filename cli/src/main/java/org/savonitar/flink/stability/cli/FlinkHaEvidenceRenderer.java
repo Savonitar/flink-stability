@@ -163,9 +163,12 @@ final class FlinkHaEvidenceRenderer {
         node.put("mode", request.mode().name().toLowerCase(Locale.ROOT));
         node.put("duration", request.duration().toString());
         node.put("timeout", request.timeout().toString());
-        request.tokenFault().ifPresent(fault -> node.putObject("tokenFault")
-                .put("mode", fault.mode().name().toLowerCase(Locale.ROOT))
-                .put("delay", fault.delay().toString()));
+        request.tokenFault().ifPresent(fault -> {
+            var token = node.putObject("tokenFault")
+                    .put("mode", fault.mode().name().toLowerCase(Locale.ROOT))
+                    .put("delay", fault.delay().toString());
+            if (fault.submittedJob()) token.put("target", "submitted-job");
+        });
     }
 
     private static void leadership(ObjectNode node, FlinkHaControl.Leadership leadership) {

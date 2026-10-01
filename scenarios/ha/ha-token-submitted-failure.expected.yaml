@@ -1,0 +1,9 @@
+format: v1
+kind: expected-result
+
+meta:
+  name: ha-token-submitted-failure.expected
+  scenario: ha-token-submitted-failure
+
+default:
+  outcome: pass

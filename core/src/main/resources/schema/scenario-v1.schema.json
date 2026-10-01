@@ -1367,6 +1367,7 @@
               "required": ["mode"],
               "properties": {
                 "mode": {"enum": ["delay", "fail", "linkage-error"]},
+                "target": {"enum": ["submitted-job"]},
                 "delay": {"$ref": "#/$defs/nonEmptyString"}
               }
             }
