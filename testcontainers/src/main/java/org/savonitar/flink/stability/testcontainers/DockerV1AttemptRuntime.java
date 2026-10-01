@@ -1,5 +1,7 @@
 package org.savonitar.flink.stability.testcontainers;
 
+import org.savonitar.flink.stability.runtime.api.MonotonicDeadline;
+import org.savonitar.flink.stability.runtime.api.KafkaLogCapture;
 import org.savonitar.flink.stability.runtime.api.FlinkClassLoadLog;
 import org.savonitar.flink.stability.runtime.api.FlinkComponentProvisioningEvidence;
 import org.savonitar.flink.stability.runtime.api.FlinkProcessWriteFenceEvidence;
@@ -155,5 +157,10 @@ public final class DockerV1AttemptRuntime implements V1AttemptRuntime {
     @Override
     public void close() {
         clusters.close();
+    }
+    public KafkaLogCapture captureKafkaLogs(
+            List<KafkaLogCapture.Partition> partitions,
+            Path directory, MonotonicDeadline deadline) {
+        return clusters.captureKafkaLogs(partitions, directory, deadline);
     }
 }

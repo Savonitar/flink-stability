@@ -2055,6 +2055,33 @@ Connector pull-request gating is the same mechanism with one axis:
   oracle or retained runtime verdict. Missing transaction markers never imply a
   COMMIT or ABORT outcome.
 
+- **R8.2g** Optional `run --kafka-log-output DIR` collects diagnostic Kafka segment
+  evidence after terminal data verification (including a data FAIL), before owner
+  cleanup. Omission performs no collection. DIR must be new, have an existing
+  parent and contain no symlink ancestors; earlier evidence is never overwritten.
+  Only source/sink partitions declared by this attempt are inventoried on its owned
+  Kafka container and network. The registered Apache Kafka runtime uses the fixed
+  `/tmp/kafka-logs` root; an absent or unsupported layout is diagnostic failure,
+  with no search of alternative roots. Identity is observed at collection time and
+  checked around each inventory/copy; this is not a startup or atomic-snapshot proof.
+  Only exact regular `[0-9]{20}.log` inventory members may be copied, never indexes.
+  A shared monotonic 60s deadline covers inventory, transport, strict TAR validation
+  and decoding. Aggregate limits are 128 partitions, 512 reserved Docker requests,
+  64 MiB of inventory/transport bytes, another 64 MiB of decoded JSON, and 100,000
+  decoded records and batches. Each inventory is at most 64 KiB/64 entries/32 logs;
+  each segment is at most 16 MiB plus 64 KiB of TAR framing. Unfinished work stops
+  collection. The synchronous bounded decoder checks the deadline before/after;
+  this does not claim hard preemption of local filesystem or decoder operations.
+  Only a finished EOF receipt with matching size/SHA-256 permits strict single-file
+  POSIX USTAR inspection: exact basename, regular member, checksum, zero padding
+  and two end blocks; reject extensions, links, traversal and extra members.
+  Reuse the offline decoder from R8.2e. Run JSON `evidence.kafkaLogs` retains
+  inventory metadata, owner identity, archive/decode paths, hashes, counters and
+  incomplete-coverage diagnostics. Physical decoded facts live in separate JSON
+  files. Neither success, failure, unsupported bytes nor timeout changes any oracle
+  result or scenario verdict. Missing captures are not absence-of-record evidence;
+  transaction visibility and completeness remain unproven.
+
 - **R8.3** A scenario declares `runs: K`, a positive integer; the report gives
   N-of-K. Any clean expectation mismatch is a failure — exactly-once is not a
   statistical property.

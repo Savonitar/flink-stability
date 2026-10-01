@@ -132,7 +132,7 @@ public final class V1ScenarioExecutor {
         Objects.requireNonNull(prepared, "prepared");
         Objects.requireNonNull(context, "context");
         AttemptResources resources = new AttemptResources();
-        final V1ScenarioExecutionResult result;
+        V1ScenarioExecutionResult result;
         try {
             result = executeAttempt(prepared, context, resources);
         } catch (RuntimeException | Error fatal) {
@@ -141,6 +141,12 @@ public final class V1ScenarioExecutor {
                 fatal.addSuppressed(cleanupFailure);
             }
             throw fatal;
+        }
+        if (context.kafkaLogOutput().isPresent()) {
+            var logs = result.terminalValidation().isPresent() && resources.runtime != null
+                    ? KafkaLogEvidence.collect(resources.runtime, prepared.executablePlan(), context.kafkaLogOutput().orElseThrow())
+                    : KafkaLogEvidence.notRun();
+            result = result.withKafkaLogs(logs);
         }
         RuntimeException cleanupFailure = resources.cleanup(cleanupBoundary);
         return cleanupFailure == null ? result : result.withCleanupFailure(cleanupFailure);

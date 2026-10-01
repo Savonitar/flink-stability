@@ -77,15 +77,39 @@ transaction attribution. Live collection must happen before the attempt removes
 its owned Kafka container and must retain independent coverage and identity evidence.
 
 The adapter also has an internal, opt-in archive capability for an attempt's retained
-Kafka owner. It requires an observed startup identity, an explicit approved log root
-and the caller's shared deadline; normal scenario execution does not invoke it.
-The caller must bind the requested partition directory to fresh Kafka Admin metadata.
+Kafka owner. It requires an observed owner identity, an explicit approved log root
+and the caller's shared deadline; collection is opt-in through `run --kafka-log-output DIR`.
+The runner binds declared source/sink partitions to its owned broker and the registered
+Apache Kafka `/tmp/kafka-logs` layout; it never searches alternative roots.
 Only completed transport carries a hash, and even that does not establish valid tar,
 an atomic broker snapshot or transaction visibility. Copying never holds a lock
 needed by container cleanup. A canceled worker can leave a changing `.part` file,
 which remains abandoned and cannot become complete evidence after the caller returns.
 The raw archive ceiling is 128 MiB; a collecting driver must additionally cap the
 whole experiment and validate the archive offline before drawing conclusions.
+
+The opt-in adapter can also inventory an exact partition and copy only an observed
+`[0-9]{20}.log` member. It uses fixed, shell-free `/usr/bin/find` and `/bin/stat`
+commands supported by the pinned Kafka image: NUL-delimited names are validated
+before metadata requests. Inventories retain bounded command output, exit status,
+owner identity and file size/mtime/inode. Links, foreign/duplicate names and malformed
+metadata reject; rollover suffixes mark unstable coverage. Each inventory is limited
+to 64 KiB, 64 entries and 32 logs; one log payload is at most 16 MiB, with 64 KiB extra allowance
+for archive framing. Names, root/file stats and two identity checks cost at most 68
+logical operations per inventory (find/stat each reserve three Docker requests). The collecting driver must share its overall byte/call/deadline
+budgets across inventories and copies and stop on unfinished work.
+
+A file copy remains raw transport evidence until a separate strict single-file TAR
+reader verifies its one expected regular member and framing. Metadata comparison helpers can expose changes; the runner does not claim an atomic
+snapshot or complete partition coverage. `run --kafka-log-output DIR` invokes inventory, selective copy, strict USTAR reading
+and `KafkaLogSegmentDecoder` after the data oracle and before cleanup. It shares a
+60s deadline, 512 Docker requests and 64 MiB raw-byte budget across partitions, plus
+64 MiB decoded JSON and 100,000 record/batch limits. DIR must be new with an existing
+parent. Receipts and partial diagnostics appear under `evidence.kafkaLogs`; decoded
+physical facts remain separate hashed JSON files. Collection never changes verdicts.
+Fake-driver coverage is in `SelectiveKafkaLogCaptureTest`, strict archive cases in
+`KafkaLogArchiveReaderTest`, and caller/cleanup/CLI cases in `V1ScenarioExecutorTest`
+and `RunScenarioCommandTest`. Actual Docker TAR compatibility still needs a live run.
 
 ## Optional real-container runs
 

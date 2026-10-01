@@ -1,5 +1,6 @@
 package org.savonitar.flink.stability.runtime.api;
 
+import java.nio.file.Path;
 import java.time.Duration;
 import java.util.List;
 import java.util.Optional;
@@ -49,4 +50,9 @@ public interface V1AttemptRuntime extends TaskManagerControl, FlinkHaControl, Au
      */
     @Override
     void close();
+    default KafkaLogCapture captureKafkaLogs(
+            List<KafkaLogCapture.Partition> partitions,
+            Path directory, MonotonicDeadline deadline) {
+        throw new UnsupportedOperationException("Owned Kafka log collection is unavailable");
+    }
 }

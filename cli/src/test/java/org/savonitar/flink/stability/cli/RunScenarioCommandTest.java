@@ -57,6 +57,29 @@ class RunScenarioCommandTest {
     Path temporaryDirectory;
 
     @Test
+    void explicitKafkaOutputIsPassedToAttemptAndDiagnosticStatusIsRendered() throws Exception {
+        var seen = new AtomicReference<V1AttemptContext>();
+        var command = new RunScenarioCommand((root, name, overrides, options) -> new RunScenarioCommand.PreparedExecution() {
+            @Override public V1ScenarioExecutionResult execute(V1AttemptContext context) {
+                seen.set(context);
+                return passResult().withKafkaLogs(new org.savonitar.flink.stability.core.execution.KafkaLogEvidence(
+                        "partial", Optional.empty(), List.of(), List.of("transport failure")));
+            }
+            @Override public ExecutableScenarioPlan.ExpectedOutcome expectedOutcome() { return expectation; }
+            @Override public void close() {}
+        }, () -> context("1234abcd"), new V1ExecutionResultRenderer(), new ValidationDiagnosticRenderer());
+        var directory = temporaryDirectory.resolve("capture");
+        var invocation = execute(command, "--catalog-root", temporaryDirectory.toString(), "--scenario", "bounded-eos",
+                "--kafka-log-output", directory.toString());
+        assertEquals(0, invocation.exitCode(), invocation.stderr());
+        assertEquals(directory, seen.get().kafkaLogOutput().orElseThrow());
+        var json = JSON.readTree(invocation.stdout());
+        assertEquals("pass", json.path("status").asText());
+        assertEquals("partial", json.at("/evidence/kafkaLogs/status").asText());
+        assertEquals("transport failure", json.at("/evidence/kafkaLogs/diagnostics/0").asText());
+    }
+
+    @Test
     void componentObservationJsonRetainsLevelAndLogger() throws Exception {
         var event = new org.savonitar.flink.stability.core.execution.ComponentErrorEvidence.Event(
                 "tm#1", "2026-10-01 19:43:38,489", "INFO",
@@ -65,7 +88,9 @@ class RunScenarioCommandTest {
         var command = new RunScenarioCommand((root, name, overrides, options) -> new RunScenarioCommand.PreparedExecution() {
             @Override public V1ScenarioExecutionResult execute(V1AttemptContext context) {
                 return passResult().withComponentErrors(new org.savonitar.flink.stability.core.execution.ComponentErrorEvidence(
-                        List.of(event), List.of()));
+                        List.of(event), List.of())).withKafkaLogs(
+                                new org.savonitar.flink.stability.core.execution.KafkaLogEvidence(
+                                        "partial", Optional.empty(), List.of(), List.of("capture unavailable")));
             }
             @Override public ExecutableScenarioPlan.ExpectedOutcome expectedOutcome() { return expectation; }
             @Override public void close() {}
@@ -75,6 +100,7 @@ class RunScenarioCommandTest {
         var observed = JSON.readTree(invocation.stdout()).at("/evidence/componentErrors/events/0");
         assertEquals(event.level(), observed.path("level").asText());
         assertEquals(event.logger(), observed.path("logger").asText());
+        assertEquals("partial", JSON.readTree(invocation.stdout()).at("/evidence/kafkaLogs/status").asText());
     }
 
     @Test

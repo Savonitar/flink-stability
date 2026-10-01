@@ -91,6 +91,7 @@ final class V1ExecutionResultRenderer {
             observation.supported().ifPresent(range -> observed.putObject("supported")
                     .put("min", range.minimum()).put("max", range.maximum()));
         });
+        KafkaLogEvidenceRenderer.render(evidence.putObject("kafkaLogs"), result.kafkaLogs());
         ObjectNode componentErrorsNode = evidence.putObject("componentErrors");
         componentErrorsNode.put("eventCount", result.componentErrors().events().size());
         componentErrorsNode.put("coverage", result.componentErrors().diagnostics().isEmpty() ? "captured-prefix" : "partial");

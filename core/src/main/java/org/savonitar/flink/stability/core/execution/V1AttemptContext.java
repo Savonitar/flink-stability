@@ -2,16 +2,25 @@ package org.savonitar.flink.stability.core.execution;
 
 import java.nio.file.Path;
 import java.util.Objects;
+import java.util.Optional;
 import java.util.regex.Pattern;
 
 /** Identity and retained checkpoint location for one isolated scenario attempt. */
 public record V1AttemptContext(
         int attemptOrdinal,
         String attemptNonce8,
-        Path checkpointStorageRoot) {
+        Path checkpointStorageRoot, Optional<Path> kafkaLogOutput) {
+    public V1AttemptContext(int attemptOrdinal, String attemptNonce8, Path checkpointStorageRoot) {
+        this(attemptOrdinal, attemptNonce8, checkpointStorageRoot, Optional.empty());
+    }
+    public V1AttemptContext withKafkaLogOutput(Path output) {
+        return new V1AttemptContext(attemptOrdinal, attemptNonce8, checkpointStorageRoot,
+                Optional.of(output.toAbsolutePath().normalize()));
+    }
     private static final Pattern NONCE = Pattern.compile("^[a-z0-9]{8}$");
 
     public V1AttemptContext {
+        Objects.requireNonNull(kafkaLogOutput, "kafkaLogOutput");
         if (attemptOrdinal < 1) {
             throw new IllegalArgumentException("attemptOrdinal must be positive");
         }
