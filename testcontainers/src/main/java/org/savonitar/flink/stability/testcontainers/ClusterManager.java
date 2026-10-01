@@ -1,5 +1,7 @@
 package org.savonitar.flink.stability.testcontainers;
 
+import org.savonitar.flink.stability.runtime.api.MonotonicDeadline;
+import org.savonitar.flink.stability.runtime.api.KafkaLogCapture;
 import org.savonitar.flink.stability.runtime.api.ConnectorBundleProvisioningException;
 import org.savonitar.flink.stability.runtime.api.FlinkClassLoadLog;
 import org.savonitar.flink.stability.runtime.api.FlinkComponentProvisioningEvidence;
@@ -1097,5 +1099,11 @@ public final class ClusterManager implements AutoCloseable {
             }
             handle = null;
         }
+    }
+    public KafkaLogCapture captureKafkaLogs(
+            List<KafkaLogCapture.Partition> partitions,
+            Path directory, MonotonicDeadline deadline) {
+        if (kafkaRuntime == null) throw new IllegalStateException("Kafka owner unavailable");
+        return kafkaRuntime.captureKafkaLogs(partitions, directory, deadline);
     }
 }

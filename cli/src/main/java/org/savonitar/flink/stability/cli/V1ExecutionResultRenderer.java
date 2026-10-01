@@ -91,6 +91,7 @@ final class V1ExecutionResultRenderer {
             observation.supported().ifPresent(range -> observed.putObject("supported")
                     .put("min", range.minimum()).put("max", range.maximum()));
         });
+        KafkaLogEvidenceRenderer.render(evidence.putObject("kafkaLogs"), result.kafkaLogs());
         ObjectNode rest = evidence.putObject("flinkRest");
         rest.put("errorCount", result.flinkRestErrors().size());
         ArrayNode restErrors = rest.putArray("errors");

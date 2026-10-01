@@ -92,6 +92,56 @@ class V1ScenarioExecutorTest {
                             prefix + "-0-1", "CompleteCommit", 7, 0, List.of())));
 
     @Test
+    void kafkaCaptureDecodesAndRetainsReceiptsWithoutOverwritingEarlierEvidence() throws Exception {
+        var events = new ArrayList<String>();
+        try (Fixture fixture = fixture()) {
+            var runtime = new FakeRuntime(events);
+            runtime.captureArchive = true;
+            Path output = temporaryDirectory.resolve("successful-capture");
+            var result = executor(events, runtime, new FakeFlink(events),
+                    (bootstrap, topic, ids, timeout) -> passResult())
+                    .execute(fixture.bound(), attemptContext().withKafkaLogOutput(output));
+            assertEquals(V1ScenarioExecutionResult.Status.PASS, result.status());
+            assertEquals("collected", result.kafkaLogs().status(), result.kafkaLogs().diagnostics().toString());
+            var decoded = result.kafkaLogs().decoded().getFirst();
+            assertEquals("PARSED_AND_DECODED", decoded.status());
+            byte[] retained = Files.readAllBytes(decoded.evidence().orElseThrow());
+            assertEquals(org.savonitar.flink.stability.runtime.api.Digests.sha256(retained), decoded.sha256().orElseThrow());
+            var retry = KafkaLogEvidence.collect(runtime, fixture.bound().executablePlan(), output);
+            assertEquals("partial", retry.status());
+            assertEquals(1, events.stream().filter("capture"::equals).count());
+            assertArrayEquals(retained, Files.readAllBytes(decoded.evidence().orElseThrow()));
+        }
+    }
+
+    @Test
+    void optionalKafkaCollectionRunsAfterOracleBeforeCleanupAndNeverChangesVerdict() throws Exception {
+        for (boolean enabled : List.of(false, true)) {
+            for (boolean passes : List.of(false, true)) {
+                List<String> events = new ArrayList<>();
+                try (Fixture fixture = fixture()) {
+                    FakeRuntime runtime = new FakeRuntime(events);
+                    var context = attemptContext();
+                    if (enabled) context = context.withKafkaLogOutput(
+                            temporaryDirectory.resolve("capture-" + passes));
+                    var result = executor(events, runtime, new FakeFlink(events), (bootstrap, topic, ids, timeout) -> {
+                        events.add("oracle");
+                        return passes ? passResult() : missingResult();
+                    }).execute(fixture.bound(), context);
+                    assertEquals(passes ? V1ScenarioExecutionResult.Status.PASS : V1ScenarioExecutionResult.Status.FAIL, result.status());
+                    assertEquals(enabled ? "partial" : "not-requested", result.kafkaLogs().status());
+                    assertEquals(enabled, events.contains("capture"));
+                    if (enabled) {
+                        assertTrue(events.indexOf("oracle") < events.indexOf("capture"));
+                        assertTrue(events.indexOf("capture") < events.indexOf("runtime-close"));
+                        assertEquals(result.kafkaLogs(), result.withCleanupFailure(new IOException("cleanup")).kafkaLogs());
+                    }
+                }
+            }
+        }
+    }
+
+    @Test
     void processHealthCannotHideDataFailureOrPermitCleanPassAndSurvivesCleanup() throws Exception {
         for (boolean oraclePasses : List.of(true, false)) {
             for (boolean exited : List.of(true, false)) {
@@ -2216,6 +2266,37 @@ class V1ScenarioExecutorTest {
         private CountDownLatch closeRelease;
         private final CountDownLatch closeEntered = new CountDownLatch(1);
         private final AtomicInteger closeCalls = new AtomicInteger();
+
+        private boolean captureArchive;
+        @Override
+        public org.savonitar.flink.stability.runtime.api.KafkaLogCapture captureKafkaLogs(
+                List<org.savonitar.flink.stability.runtime.api.KafkaLogCapture.Partition> partitions,
+                Path output, org.savonitar.flink.stability.runtime.api.MonotonicDeadline deadline) {
+            events.add("capture");
+            assertEquals(2, partitions.size());
+            assertTrue(Files.isDirectory(output));
+            if (!captureArchive) throw new IllegalStateException("fake archive transport failure");
+            try {
+                String name = "00000000000000000000.log";
+                byte[] tar = new byte[1536];
+                System.arraycopy(name.getBytes(java.nio.charset.StandardCharsets.US_ASCII), 0, tar, 0, name.length());
+                tar[156] = '0';
+                System.arraycopy("ustar\0".getBytes(java.nio.charset.StandardCharsets.US_ASCII), 0, tar, 257, 6);
+                tar[263] = '0'; tar[264] = '0';
+                java.util.Arrays.fill(tar, 148, 156, (byte) ' ');
+                long checksum = 0; for (byte value : tar) checksum += value & 255;
+                byte[] field = String.format(java.util.Locale.ROOT, "%06o\0 ", checksum)
+                        .getBytes(java.nio.charset.StandardCharsets.US_ASCII);
+                System.arraycopy(field, 0, tar, 148, field.length);
+                Path file = output.resolve("segment.tar.part"); Files.write(file, tar);
+                var archive = new org.savonitar.flink.stability.runtime.api.KafkaLogCapture.Archive(
+                        partitions.getFirst(), name, "container", "image", "network", 1, file,
+                        "TRANSPORT_EOF", tar.length, Optional.of(org.savonitar.flink.stability.runtime.api.Digests.sha256(tar)),
+                        true, "fake finished transport");
+                return new org.savonitar.flink.stability.runtime.api.KafkaLogCapture(
+                        List.of(), List.of(archive), tar.length, 3, List.of());
+            } catch (IOException failure) { throw new java.io.UncheckedIOException(failure); }
+        }
 
         private FakeRuntime(List<String> events) {
             this.events = events;

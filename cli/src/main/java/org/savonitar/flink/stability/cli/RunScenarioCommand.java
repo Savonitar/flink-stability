@@ -67,6 +67,10 @@ public final class RunScenarioCommand implements Callable<Integer> {
             description = "Resolve Maven artifacts from the local cache only.")
     private boolean offline;
 
+    @CommandLine.Option(names = "--kafka-log-output", paramLabel = "DIR",
+            description = "Retain selective owned Kafka .log diagnostics in a new directory after data verification.")
+    private Path kafkaLogOutput;
+
     public RunScenarioCommand() {
         this(
                 productionPreparation(),
@@ -104,6 +108,7 @@ public final class RunScenarioCommand implements Callable<Integer> {
                 // Preparation (including capability and artifact checks) is complete before this
                 // context can be handed to the Docker-backed executor.
                 context = attemptContexts.create();
+                if (kafkaLogOutput != null) context = context.withKafkaLogOutput(kafkaLogOutput);
                 result = Objects.requireNonNull(
                         prepared.execute(context), "scenario execution returned null");
             } catch (IOException | RuntimeException | Error failure) {

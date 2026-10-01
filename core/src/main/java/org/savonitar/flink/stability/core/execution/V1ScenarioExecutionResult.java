@@ -38,9 +38,11 @@ public record V1ScenarioExecutionResult(
         Optional<FlinkHaEvidence.TokenEvidence> tokenEvidence,
         Optional<org.savonitar.flink.stability.runtime.api.FlinkHaControl.Observations> haObservations,
         Optional<FlinkProcessWriteFenceEvidence.Observations> processObservations,
+        KafkaLogEvidence kafkaLogs,
         List<String> diagnostics) {
 
     public V1ScenarioExecutionResult {
+        Objects.requireNonNull(kafkaLogs, "kafkaLogs");
         Objects.requireNonNull(status, "status");
         reason = requireNonBlank(reason, "reason");
         message = requireNonBlank(message, "message");
@@ -142,6 +144,35 @@ public record V1ScenarioExecutionResult(
             throw new IllegalArgumentException(
                     "Terminal validation requires confirmed process-fence evidence");
         }
+    }
+
+    public V1ScenarioExecutionResult(
+        Status status,
+        String reason,
+        String message,
+        Optional<KafkaInputManifest> inputManifest,
+        Optional<PhaseExecutionEvidence> phaseEvidence,
+        Optional<FlinkTerminalWriteFence.Evidence> writeFenceEvidence,
+        Optional<FlinkProcessWriteFenceEvidence> processFenceEvidence,
+        Optional<FlinkJobObservation.Attempt> finalJobObservation,
+        Optional<KafkaIdSetValidationResult> terminalValidation,
+        Optional<KafkaTransactionListing> sinkTransactions,
+        Optional<SubjectClassOrigins> subjectClassOrigins,
+        List<FlinkComponentProvisioningEvidence> flinkProvisioningEvidence,
+        FlinkRuntimeIdentity.ExpectedTarget expectedFlinkRuntime,
+        Optional<SubjectClassOrigins> runtimeClassOrigins,
+        KafkaTransactionVersion.Selection kafkaTransactionVersion,
+        List<FlinkScenarioControl.RestError> flinkRestErrors,
+        FlinkHaEvidence.Expected expectedHa,
+        Optional<FlinkHaEvidence.TokenEvidence> tokenEvidence,
+        Optional<org.savonitar.flink.stability.runtime.api.FlinkHaControl.Observations> haObservations,
+        Optional<FlinkProcessWriteFenceEvidence.Observations> processObservations,
+        List<String> diagnostics) {
+        this(status, reason, message, inputManifest, phaseEvidence, writeFenceEvidence, processFenceEvidence,
+                finalJobObservation, terminalValidation, sinkTransactions, subjectClassOrigins,
+                flinkProvisioningEvidence, expectedFlinkRuntime, runtimeClassOrigins, kafkaTransactionVersion,
+                flinkRestErrors, expectedHa, tokenEvidence, haObservations, processObservations,
+                KafkaLogEvidence.notRequested(), diagnostics);
     }
 
     /** Existing callers that have no REST error snapshot retain their other evidence. */
@@ -272,13 +303,21 @@ public record V1ScenarioExecutionResult(
         return FlinkProcessHealth.evaluate(expectedFlinkRuntime, processFenceEvidence, processObservations);
     }
 
+    public V1ScenarioExecutionResult withKafkaLogs(KafkaLogEvidence evidence) {
+        return new V1ScenarioExecutionResult(status, reason, message, inputManifest, phaseEvidence,
+                writeFenceEvidence, processFenceEvidence, finalJobObservation, terminalValidation,
+                sinkTransactions, subjectClassOrigins, flinkProvisioningEvidence, expectedFlinkRuntime,
+                runtimeClassOrigins, kafkaTransactionVersion, flinkRestErrors, expectedHa, tokenEvidence,
+                haObservations, processObservations, evidence, diagnostics);
+    }
+
     /** Snapshot recovered HTTP failures before the client and runtime are closed. */
     public V1ScenarioExecutionResult withFlinkRestErrors(List<FlinkScenarioControl.RestError> errors) {
         return new V1ScenarioExecutionResult(status, reason, message, inputManifest, phaseEvidence,
                 writeFenceEvidence, processFenceEvidence, finalJobObservation, terminalValidation,
                 sinkTransactions, subjectClassOrigins, flinkProvisioningEvidence, expectedFlinkRuntime,
                 runtimeClassOrigins, kafkaTransactionVersion, errors, expectedHa, tokenEvidence,
-                haObservations, processObservations, diagnostics);
+                haObservations, processObservations, kafkaLogs, diagnostics);
     }
 
     public V1ScenarioExecutionResult withCleanupFailure(Throwable failure) {
@@ -331,7 +370,7 @@ public record V1ScenarioExecutionResult(
                     tokenEvidence,
                     haObservations,
                     processObservations,
-                    updated);
+                    kafkaLogs, updated);
         }
         return new V1ScenarioExecutionResult(
                 status,
@@ -354,6 +393,6 @@ public record V1ScenarioExecutionResult(
                 tokenEvidence,
                 haObservations,
                 processObservations,
-                updated);
+                kafkaLogs, updated);
     }
 }
