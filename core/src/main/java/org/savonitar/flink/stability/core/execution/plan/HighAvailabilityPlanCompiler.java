@@ -57,7 +57,7 @@ final class HighAvailabilityPlanCompiler {
         }
         for (int index = 0; index < document.path("phases").size(); index++) {
             validateSteps(source, document.path("phases").get(index).path("steps"),
-                    "$/phases/" + index + "/steps", ha, flink.has("token_provider"), issues);
+                    "$/phases/" + index + "/steps", ha, flink.path("token_provider"), issues);
         }
         boolean barrier = false;
         boolean ordinary = false;
@@ -94,7 +94,7 @@ final class HighAvailabilityPlanCompiler {
     }
 
     private static void validateSteps(Path source, JsonNode steps, String path, boolean ha,
-                                      boolean tokens, List<Diagnostic> issues) {
+                                      JsonNode provider, List<Diagnostic> issues) {
         for (int index = 0; index < steps.size(); index++) {
             JsonNode step = steps.get(index);
             String stepPath = path + "/" + index;
@@ -111,14 +111,19 @@ final class HighAvailabilityPlanCompiler {
                     issues.add(issue(source, "runner.phase.ha-timeout-invalid", field + "/timeout",
                             "The action timeout must exceed its fault hold duration"));
                 }
-                if (fault.has("recovery_barrier") && !tokens) {
+                if (fault.has("recovery_barrier") && provider.isMissingNode()) {
                     issues.add(issue(source, "runner.phase.token-provider-required", field,
                             "The token-checkpoint recovery barrier requires setup.flink.token_provider"));
                 }
                 if (fault.has("token_fault")) {
-                    if (!tokens) issues.add(issue(source, "runner.phase.token-provider-required", field,
+                    if (provider.isMissingNode()) issues.add(issue(source, "runner.phase.token-provider-required", field,
                             "A token fault requires setup.flink.token_provider"));
                     JsonNode token = fault.path("token_fault");
+                    if (token.has("target") && (!"submitted-job".equals(provider.path("proof_scope").asText())
+                            || "linkage-error".equals(token.path("mode").asText()))) {
+                        issues.add(issue(source, "runner.phase.token-target-invalid", field + "/token_fault/target",
+                                "Submitted-job targeting requires submitted-job proof and delay or fail mode"));
+                    }
                     boolean delay = "delay".equals(token.path("mode").asText());
                     if (delay != token.has("delay")) issues.add(issue(source,
                             "runner.phase.token-delay-invalid", field + "/token_fault",
@@ -127,7 +132,7 @@ final class HighAvailabilityPlanCompiler {
                             field + "/token_fault/delay", Duration.ofMillis(1), Duration.ofSeconds(30), issues);
                 }
             } else if (step.has("loop")) {
-                validateSteps(source, step.at("/loop/steps"), stepPath + "/loop/steps", ha, tokens, issues);
+                validateSteps(source, step.at("/loop/steps"), stepPath + "/loop/steps", ha, provider, issues);
             }
         }
     }
@@ -165,7 +170,7 @@ final class HighAvailabilityPlanCompiler {
         Optional<FlinkHaControl.TokenFault> token = Optional.ofNullable(value.get("token_fault"))
                 .map(node -> new FlinkHaControl.TokenFault(TokenServiceControl.Mode.valueOf(
                         node.path("mode").asText().replace('-', '_').toUpperCase(Locale.ROOT)),
-                        node.has("delay") ? parseDuration(node.path("delay").asText()) : Duration.ZERO));
+                        node.has("delay") ? parseDuration(node.path("delay").asText()) : Duration.ZERO, node.has("target")));
         return new ExecutableScenarioPlan.LeaderFault(new FlinkHaControl.LeaderFaultRequest(
                 FlinkHaControl.Mode.valueOf(value.path("mode").asText().replace('-', '_').toUpperCase(Locale.ROOT)),
                 parseDuration(value.path("duration").asText()),

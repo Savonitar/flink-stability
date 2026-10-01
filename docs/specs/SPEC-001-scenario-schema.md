@@ -1518,7 +1518,15 @@ Connector pull-request gating is the same mechanism with one axis:
   than the hold duration and at most 5 minutes. An optional `token_fault` has mode
   `delay`, `fail`, or `linkage-error`; only `delay` requires a delay of 1 ms–30 s.
   The token fault is armed before disrupting the leader and healed after the hold
-  interval, including failure paths. A token fault requires the declared fixture.
+  interval, including failure paths. Optional `token_fault.target: submitted-job`
+  supports only `delay` and `fail`, and requires explicit `proof_scope: submitted-job`.
+  Bind the filter from the actual submitted JobID and compiled alias; BOOTSTRAP
+  and other-job requests remain healthy. Keep the physical fault hold unchanged,
+  but retain the token fault until a matching new-leader JOB request completes its
+  full requested delay or receives an error with a matching plugin ACK and request
+  finish. Both completion and ACK must precede healing. Waiting shares the original
+  operation deadline; on timeout or failure, always safety-heal and retain unconfirmed
+  exposure. Omission preserves the existing service-wide fault behavior. A token fault requires the declared fixture.
   A kill recreates its logical slot, a pause resumes it, and isolation reopens its
   ZooKeeper gate. All physical incarnations remain covered by runtime identity and
   the final process fence.

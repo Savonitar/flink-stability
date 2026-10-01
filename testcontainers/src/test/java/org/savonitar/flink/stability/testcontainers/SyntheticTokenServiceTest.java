@@ -21,6 +21,44 @@ import static org.junit.jupiter.api.Assertions.*;
 
 class SyntheticTokenServiceTest {
     @Test
+    void submittedJobTargetLeavesBootstrapAndOtherJobsHealthyAndRequiresFullOutcome() throws Exception {
+        for (var mode : List.of(TokenServiceControl.Mode.DELAY, TokenServiceControl.Mode.FAIL)) {
+            try (var service = SyntheticTokenService.start(Duration.ofSeconds(2));
+                 var client = HttpClient.newHttpClient()) {
+                String job = "a".repeat(32);
+                var target = new TokenServiceControl.JobTarget(job, "eos-job");
+                Duration delay = mode == TokenServiceControl.Mode.DELAY ? Duration.ofMillis(150) : Duration.ZERO;
+                long revision = service.configure(mode, delay, target);
+                assertEquals(200, request(client, service, "/token", "jobmanager-1#1", new byte[0]).get().statusCode());
+                String other = "b".repeat(32);
+                assertEquals(200, request(client, service, "/token", "jobmanager-1#2",
+                        snapshot("jobmanager-1#2", "JOB", 1, other, "eos-job", 0,
+                                lifecycle(1, "REGISTER", 1, other, "eos-job"))).get().statusCode());
+                assertTrue(service.snapshot().events().stream().filter(e -> e.kind() == TokenServiceControl.Kind.REQUEST_STARTED)
+                        .allMatch(e -> e.mode() == TokenServiceControl.Mode.HEALTHY));
+                String process = "jobmanager-2#1";
+                var future = request(client, service, "/token", process,
+                        snapshot(process, "JOB", 1, job, "eos-job", 0,
+                                lifecycle(1, "REGISTER", 1, job, "eos-job")));
+                var response = future.get(2, TimeUnit.SECONDS);
+                var start = service.snapshot().events().stream().filter(e -> e.kind() == TokenServiceControl.Kind.REQUEST_STARTED
+                        && target.matches(e)).findFirst().orElseThrow();
+                assertEquals(mode, start.mode());
+                assertEquals(revision, start.revision());
+                if (mode == TokenServiceControl.Mode.FAIL) {
+                    assertEquals(503, response.statusCode());
+                    assertFalse(TokenServiceControl.completedFault(service.snapshot().events(), start, mode, delay));
+                    byte[] ack = (start.requestId() + "\n" + revision + "\n503\n").getBytes(StandardCharsets.UTF_8);
+                    assertEquals(200, request(client, service, "/fault-observed", process, ack).get().statusCode());
+                } else assertEquals(200, response.statusCode());
+                await(() -> TokenServiceControl.completedFault(service.snapshot().events(), start, mode, delay));
+                service.configure(TokenServiceControl.Mode.HEALTHY, Duration.ZERO);
+                assertTrue(TokenServiceControl.completedFault(service.snapshot().events(), start, mode, delay));
+            }
+        }
+    }
+
+    @Test
     void reportsInitializationIssuanceAndExactReceiptWithImmutableOrderedEvidence() throws Exception {
         try (var service = SyntheticTokenService.start(Duration.ofSeconds(2));
              var client = HttpClient.newHttpClient()) {

@@ -500,6 +500,8 @@ expected validation code.
 | SV-205 | Unscoped healthy token evidence covers one of multiple current TMs, an old incarnation, or separate token identities. | Require one exact issued token on all declared latest TMs with verified origins; missing proof makes exact data INCONCLUSIVE while an existing data FAIL remains primary. |
 | SV-206 | An application line exceeds 8192 characters; an own ClientCnxn marker appears in the discarded suffix or a relevant session message is malformed/unfinished. | Ignore unrelated oversized output with bounded memory; retain unconfirmed evidence when the own session logger may have lost relevant information. |
 | SV-207 | Leader samples change or become unavailable between a completed token-checkpoint barrier and the next readiness boundary, then return to the same leader. | Reject barrier order/stability confirmation; coalesced stable samples remain valid without claiming continuous coverage or exact election counts. |
+| SV-208 | `token_fault.target: submitted-job` selects delay or fail with explicit submitted-job proof. | Bind the actual submit JobID/alias; BOOTSTRAP and other-job requests remain healthy. Preserve the process hold and wait for full new-leader JOB delay or error with ACK and finish before token healing, inside the original deadline. |
+| SV-209 | Targeted token fault lacks submitted-job proof, uses linkage-error, names another target, has only a partial delay/missing ACK, or never receives the actual job request. | Reject unsupported declarations before provisioning; otherwise keep exposure unconfirmed and always safety-heal at the existing deadline. Existing untargeted catalogs remain unchanged. |
 
 ## 14. Component error observations
 

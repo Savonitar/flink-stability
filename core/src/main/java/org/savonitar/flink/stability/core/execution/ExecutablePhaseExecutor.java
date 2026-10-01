@@ -12,6 +12,8 @@ import org.savonitar.flink.stability.runtime.api.FlinkHaControl;
 import org.savonitar.flink.stability.runtime.api.MonotonicDeadline;
 import org.savonitar.flink.stability.runtime.api.V1AttemptRuntime;
 
+import org.savonitar.flink.stability.runtime.api.TokenServiceControl;
+
 import java.io.IOException;
 import java.time.Duration;
 import java.util.ArrayList;
@@ -519,7 +521,10 @@ public final class ExecutablePhaseExecutor {
             }
             Duration remainingBudget = deadline.remainingOrThrow(() -> new IllegalStateException(
                     "Leader fault exhausted its deadline during the pre-fault job observation"));
-            raw = Objects.requireNonNull(runtime.faultLeader(request, remainingBudget), "leader fault evidence");
+            raw = Objects.requireNonNull(request.tokenFault().filter(FlinkHaControl.TokenFault::submittedJob).isPresent()
+                    ? runtime.faultLeader(request, remainingBudget, new TokenServiceControl.JobTarget(job.jobId(),
+                        evidence.tokenProof.orElseThrow().submission().orElseThrow().jobAlias()))
+                    : runtime.faultLeader(request, remainingBudget), "leader fault evidence");
         } catch (RuntimeException failure) {
             raw = new FlinkHaControl.LeaderFaultEvidence(request,
                     Optional.empty(), Optional.empty(), Optional.empty(), false, false,

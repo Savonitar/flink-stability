@@ -312,6 +312,16 @@ final class FlinkHaRuntime implements AutoCloseable {
     FlinkHaControl.LeaderFaultEvidence fault(
             FlinkHaControl.LeaderFaultRequest request, Duration remainingBudget,
             JobManagerActions actions, Optional<? extends TokenServiceControl> tokenService) {
+        return fault(request, remainingBudget, actions, tokenService, Optional.empty());
+    }
+
+    FlinkHaControl.LeaderFaultEvidence fault(
+            FlinkHaControl.LeaderFaultRequest request, Duration remainingBudget,
+            JobManagerActions actions, Optional<? extends TokenServiceControl> tokenService,
+            Optional<TokenServiceControl.JobTarget> jobTarget) {
+        if (request.tokenFault().filter(FlinkHaControl.TokenFault::submittedJob).isPresent() != jobTarget.isPresent()) {
+            throw new IllegalArgumentException("Submitted-job fault must bind the actual job identity");
+        }
         if (remainingBudget.isZero() || remainingBudget.isNegative()
                 || remainingBudget.compareTo(request.timeout()) > 0) {
             throw new IllegalArgumentException("Remaining fault budget must be positive and no greater than timeout");
@@ -324,7 +334,7 @@ final class FlinkHaRuntime implements AutoCloseable {
         Optional<TokenServiceControl.Snapshot> tokensBefore = tokenSnapshot(tokenService, "before", errors);
         Optional<TokenServiceControl.Snapshot> tokensDuring = Optional.empty(), tokensAfter = Optional.empty();
         boolean applied = false, healed = false, healingRequired = false;
-        long armedAt = 0, healedAt = 0, closed = 0, rejectedBefore = 0;
+        long armedAt = 0, healedAt = 0, closed = 0, rejectedBefore = 0, tokenRevision = 0;
         Process original = null;
         TcpGate gate = null;
         try {
@@ -338,8 +348,10 @@ final class FlinkHaRuntime implements AutoCloseable {
             }
             if (request.tokenFault().isPresent()) {
                 FlinkHaControl.TokenFault fault = request.tokenFault().orElseThrow();
-                tokenService.orElseThrow(() -> new IllegalStateException("Token fixture is not enabled"))
-                        .configure(fault.mode(), fault.delay());
+                var service = tokenService.orElseThrow(() -> new IllegalStateException("Token fixture is not enabled"));
+                tokenRevision = jobTarget.isPresent()
+                        ? service.configure(fault.mode(), fault.delay(), jobTarget.orElseThrow())
+                        : service.configure(fault.mode(), fault.delay());
             }
             healingRequired = true;
             armedAt = System.currentTimeMillis();
@@ -361,6 +373,25 @@ final class FlinkHaRuntime implements AutoCloseable {
             while (nanoTime.getAsLong() - start < request.duration().toNanos()) {
                 pause(deadline, Duration.ofNanos(Math.min(POLL_INTERVAL.toNanos(),
                         request.duration().toNanos() - (nanoTime.getAsLong() - start))));
+            }
+            if (jobTarget.isPresent()) {
+                // Keep the declared process hold unchanged; only the token fault awaits exposure.
+                healedState = Optional.of(healProcess(request.mode(), original, gate, actions));
+                var previous = before.orElseThrow().resourceManager();
+                var successor = awaitLeadership(deadline, current ->
+                        !current.resourceManager().logicalName().equals(previous.logicalName())
+                                && !current.resourceManager().runtimeId().equals(previous.runtimeId())
+                                && !current.resourceManager().sessionId().equals(previous.sessionId()),
+                        FlinkHaControl.ObservationMoment.FAULT);
+                var successorProcess = process(successor.resourceManager());
+                String alias = successorProcess.alias();
+                if (!alias.matches(successorProcess.logicalName() + "-[1-9][0-9]*")) {
+                    throw new IllegalStateException("Token issuer incarnation is unavailable");
+                }
+                String process = successorProcess.logicalName() + "#"
+                        + alias.substring(successorProcess.logicalName().length() + 1);
+                awaitTokenExposure(tokenService.orElseThrow(), request.tokenFault().orElseThrow(),
+                        jobTarget.orElseThrow(), process, tokenRevision, deadline);
             }
             tokensDuring = tokenSnapshot(tokenService, "during", errors);
         } catch (RuntimeException failure) {
@@ -386,21 +417,9 @@ final class FlinkHaRuntime implements AutoCloseable {
             restoreInterrupt |= Thread.interrupted();
             try {
                 if (healingRequired && original != null) {
-                    ContainerOperationDeadline healingDeadline = deadline(FlinkHaControl.PROCESS_HEAL_TIMEOUT);
-                    ContainerHandle resumed = original.handle();
-                    switch (request.mode()) {
-                        case KILL -> {
-                            resumed = actions.restart(original.logicalName(), healingDeadline);
-                            register(original.logicalName(), resumed);
-                        }
-                        case PAUSE -> resumed.resumeWithin(healingDeadline);
-                        case ISOLATE_ZOOKEEPER -> {
-                            TcpGate heldGate = gate;
-                            ContainerDriverCallBoundary.run(healingDeadline,
-                                    "healing the ZooKeeper gate", heldGate::unblock);
-                        }
+                    if (healedState.isEmpty()) {
+                        healedState = Optional.of(healProcess(request.mode(), original, gate, actions));
                     }
-                    healedState = Optional.of(resumed.processState(healingDeadline));
                     healed = tokenHealed && healedState.orElseThrow().running() && !healedState.orElseThrow().paused()
                             && !gate.blocked();
                     healedAt = System.currentTimeMillis();
@@ -430,6 +449,39 @@ final class FlinkHaRuntime implements AutoCloseable {
                 faultState, healedState, armedAt, healedAt, closed,
                 gate == null ? 0 : gate.rejected() - rejectedBefore, gate != null && gate.blocked(),
                 tokensBefore, tokensDuring, tokensAfter, errors);
+    }
+
+    private FlinkHaControl.ProcessState healProcess(FlinkHaControl.Mode mode, Process original,
+                                                    TcpGate gate, JobManagerActions actions) {
+        ContainerOperationDeadline healingDeadline = deadline(FlinkHaControl.PROCESS_HEAL_TIMEOUT);
+        ContainerHandle resumed = original.handle();
+        switch (mode) {
+            case KILL -> {
+                resumed = actions.restart(original.logicalName(), healingDeadline);
+                register(original.logicalName(), resumed);
+            }
+            case PAUSE -> resumed.resumeWithin(healingDeadline);
+            case ISOLATE_ZOOKEEPER -> ContainerDriverCallBoundary.run(healingDeadline,
+                    "healing the ZooKeeper gate", gate::unblock);
+        }
+        return resumed.processState(healingDeadline);
+    }
+
+    private void awaitTokenExposure(TokenServiceControl service, FlinkHaControl.TokenFault fault,
+            TokenServiceControl.JobTarget target, String process, long revision,
+            ContainerOperationDeadline deadline) {
+        while (true) {
+            deadline.remaining("waiting for complete submitted-job token fault exposure");
+            var snapshot = service.snapshot();
+            if (snapshot.overflow() || snapshot.saturated()) {
+                throw new IllegalStateException("Submitted-job token exposure trace is incomplete");
+            }
+            if (snapshot.events().stream().anyMatch(start -> start.kind() == TokenServiceControl.Kind.REQUEST_STARTED
+                    && start.revision() == revision && start.mode() == fault.mode()
+                    && process.equals(start.process()) && target.matches(start)
+                    && TokenServiceControl.completedFault(snapshot.events(), start, fault.mode(), fault.delay()))) return;
+            pause(deadline, POLL_INTERVAL);
+        }
     }
 
     private static Optional<TokenServiceControl.Snapshot> tokenSnapshot(

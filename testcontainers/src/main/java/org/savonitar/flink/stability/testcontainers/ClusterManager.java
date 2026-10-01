@@ -270,6 +270,12 @@ public final class ClusterManager implements AutoCloseable {
 
     public synchronized FlinkHaControl.LeaderFaultEvidence faultLeader(
             FlinkHaControl.LeaderFaultRequest request, Duration remainingBudget) {
+        return faultLeader(request, remainingBudget, Optional.empty());
+    }
+
+    public synchronized FlinkHaControl.LeaderFaultEvidence faultLeader(
+            FlinkHaControl.LeaderFaultRequest request, Duration remainingBudget,
+            Optional<TokenServiceControl.JobTarget> target) {
         ensureOpen();
         ensureFlinkProcessStartAllowed();
         if (highAvailability == null) {
@@ -287,7 +293,7 @@ public final class ClusterManager implements AutoCloseable {
                 record(slot.startWithin(deadline));
                 return slot.handle;
             }
-        }, Optional.ofNullable(tokenService));
+        }, Optional.ofNullable(tokenService), target);
     }
 
     public synchronized Optional<String> tokenPluginSha256() {
