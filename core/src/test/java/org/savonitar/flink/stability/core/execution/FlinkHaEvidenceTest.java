@@ -335,6 +335,56 @@ class FlinkHaEvidenceTest {
     }
 
     @Test
+    void healthyControlRequiresTheSameTokenOnEveryDeclaredCurrentTaskManager() {
+        var components = new ArrayList<>(provisioning());
+        components.add(FlinkRuntimeIdentityTest.component("taskmanager-2", "tm-2", FlinkRuntimeIdentityTest.IMAGE_ID));
+        var events = new ArrayList<>(healthyEvents());
+        var expected = new FlinkHaEvidence.Expected(List.of(), false, true, 2);
+        assertEquals(FlinkHaEvidence.Outcome.UNCONFIRMED,
+                evaluateTokens(expected, tokensWithReceiver(events, "taskmanager-2#1"), components).outcome());
+        events.add(event(8, TokenServiceControl.Kind.RECEIVER_INITIALIZED, "taskmanager-2#1", "taskmanager",
+                0, 0, TokenServiceControl.Mode.HEALTHY, 0, ""));
+        events.add(event(9, TokenServiceControl.Kind.RECEIVED, "taskmanager-2#1", "taskmanager",
+                0, 0, TokenServiceControl.Mode.HEALTHY, 1, ""));
+        assertEquals(FlinkHaEvidence.Outcome.CONFIRMED,
+                evaluateTokens(expected, tokensWithReceiver(events, "taskmanager-2#1"), components).outcome());
+        assertEquals(FlinkHaEvidence.Outcome.UNCONFIRMED,
+                evaluateTokens(expected, tokens(snapshot(events)), components).outcome(), "missing second origin");
+        assertEquals(FlinkHaEvidence.Outcome.UNCONFIRMED,
+                evaluateTokens(new FlinkHaEvidence.Expected(List.of(), false, true, 3),
+                        tokensWithReceiver(events, "taskmanager-2#1"), components).outcome());
+
+        events.removeLast();
+        events.add(event(9, TokenServiceControl.Kind.REQUEST_STARTED, "jobmanager-1#1", "jobmanager",
+                2, 0, TokenServiceControl.Mode.HEALTHY, 0, ""));
+        events.add(event(10, TokenServiceControl.Kind.ISSUED, "jobmanager-1#1", "jobmanager",
+                2, 0, TokenServiceControl.Mode.HEALTHY, 2, ""));
+        events.add(event(11, TokenServiceControl.Kind.REQUEST_FINISHED, "jobmanager-1#1", "jobmanager",
+                2, 0, TokenServiceControl.Mode.HEALTHY, 0, ""));
+        events.add(event(12, TokenServiceControl.Kind.RECEIVED, "taskmanager-2#1", "taskmanager",
+                0, 0, TokenServiceControl.Mode.HEALTHY, 2, ""));
+        assertEquals(FlinkHaEvidence.Outcome.UNCONFIRMED,
+                evaluateTokens(expected, tokensWithReceiver(events, "taskmanager-2#1"), components).outcome(),
+                "different tokens on different receivers do not prove one all-TM delivery");
+    }
+
+    @Test
+    void retiredTaskManagerReceiptsCannotSupplyTheCurrentIncarnationsDelivery() {
+        var components = new ArrayList<>(provisioning());
+        components.add(FlinkRuntimeIdentityTest.component("taskmanager-1", "tm-replacement", FlinkRuntimeIdentityTest.IMAGE_ID));
+        var expected = new FlinkHaEvidence.Expected(List.of(), false, true, 1);
+        var events = new ArrayList<>(healthyEvents());
+        assertEquals(FlinkHaEvidence.Outcome.UNCONFIRMED,
+                evaluateTokens(expected, tokensWithReceiver(events, "taskmanager-1#2"), components).outcome());
+        events.add(event(8, TokenServiceControl.Kind.RECEIVER_INITIALIZED, "taskmanager-1#2", "taskmanager",
+                0, 0, TokenServiceControl.Mode.HEALTHY, 0, ""));
+        events.add(event(9, TokenServiceControl.Kind.RECEIVED, "taskmanager-1#2", "taskmanager",
+                0, 0, TokenServiceControl.Mode.HEALTHY, 1, ""));
+        assertEquals(FlinkHaEvidence.Outcome.CONFIRMED,
+                evaluateTokens(expected, tokensWithReceiver(events, "taskmanager-1#2"), components).outcome());
+    }
+
+    @Test
     void healthyDeliveryRequiresProviderAndReceiverInitializationOnTheAttributedProcesses() {
         for (var kind : List.of(TokenServiceControl.Kind.PROVIDER_INITIALIZED,
                 TokenServiceControl.Kind.RECEIVER_INITIALIZED)) {
@@ -512,6 +562,23 @@ class FlinkHaEvidenceTest {
     private static FlinkHaEvidence evaluateTokens(FlinkHaEvidence.TokenEvidence tokens) {
         return FlinkHaEvidence.evaluate(new FlinkHaEvidence.Expected(List.of(), false, true),
                 Optional.of(new PhaseExecutionEvidence(List.of())), Optional.of(tokens), provisioning());
+    }
+
+    private static FlinkHaEvidence evaluateTokens(FlinkHaEvidence.Expected expected,
+            FlinkHaEvidence.TokenEvidence tokens,
+            List<org.savonitar.flink.stability.runtime.api.FlinkComponentProvisioningEvidence> components) {
+        return FlinkHaEvidence.evaluate(expected, Optional.of(new PhaseExecutionEvidence(List.of())),
+                Optional.of(tokens), components);
+    }
+
+    private static FlinkHaEvidence.TokenEvidence tokensWithReceiver(List<TokenServiceControl.Event> events,
+                                                                    String process) {
+        var base = tokens(snapshot(events));
+        var origins = new ArrayList<>(base.origins().orElseThrow().processes());
+        origins.add(new SubjectClassOrigins.ProcessOrigin(process, Map.of(
+                FlinkHaEvidence.TOKEN_RECEIVER, List.of(FlinkHaEvidence.TOKEN_CONTAINER_PATH))));
+        return new FlinkHaEvidence.TokenEvidence(base.pluginSha256(), Optional.of(new SubjectClassOrigins(
+                FlinkHaEvidence.TOKEN_CONTAINER_PATH, origins, Optional.empty())), base.snapshot(), List.of());
     }
 
     private static List<org.savonitar.flink.stability.runtime.api.FlinkComponentProvisioningEvidence> provisioning() {

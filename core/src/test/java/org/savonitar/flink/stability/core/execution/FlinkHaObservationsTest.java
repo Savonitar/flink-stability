@@ -95,7 +95,7 @@ class FlinkHaObservationsTest {
     }
 
     @Test
-    void genericHealthyTokenControlConfirmsOneValidReceiptAmongTwoProvisionedTaskManagers() {
+    void genericHealthyTokenControlRequiresReceiptsOnBothProvisionedTaskManagers() {
         var components = new ArrayList<>(COMPONENTS);
         components.add(FlinkRuntimeIdentityTest.component("taskmanager-2", "tm-2", FlinkRuntimeIdentityTest.IMAGE_ID));
         var observations = new FlinkHaControl.Observations(List.of(
@@ -118,13 +118,14 @@ class FlinkHaObservationsTest {
                 healthyEvent(5, TokenServiceControl.Kind.REQUEST_STARTED, "jobmanager-1", 1, 0),
                 healthyEvent(6, TokenServiceControl.Kind.ISSUED, "jobmanager-1", 1, 1),
                 healthyEvent(7, TokenServiceControl.Kind.REQUEST_FINISHED, "jobmanager-1", 1, 0),
-                healthyEvent(8, TokenServiceControl.Kind.RECEIVED, "taskmanager-1", 0, 1));
-        for (boolean retainReceipt : List.of(true, false)) {
+                healthyEvent(8, TokenServiceControl.Kind.RECEIVED, "taskmanager-1", 0, 1),
+                healthyEvent(9, TokenServiceControl.Kind.RECEIVED, "taskmanager-2", 0, 1));
+        for (int receiptCount : List.of(0, 1, 2)) {
             var snapshot = new TokenServiceControl.Snapshot(
-                    retainReceipt ? events : events.subList(0, events.size() - 1), false, false, 0, 1);
+                    events.subList(0, events.size() - 2 + receiptCount), false, false, 0, 1);
             var tokens = new FlinkHaEvidence.TokenEvidence(Optional.of("a".repeat(64)), Optional.of(origins),
                     Optional.of(snapshot), List.of());
-            assertEquals(retainReceipt ? FlinkHaEvidence.Outcome.CONFIRMED : FlinkHaEvidence.Outcome.UNCONFIRMED,
+            assertEquals(receiptCount == 2 ? FlinkHaEvidence.Outcome.CONFIRMED : FlinkHaEvidence.Outcome.UNCONFIRMED,
                     FlinkHaEvidence.evaluate(new FlinkHaEvidence.Expected(List.of(), true, true, 2),
                             Optional.of(new PhaseExecutionEvidence(List.of())), Optional.of(tokens), components,
                             Optional.of(observations)).outcome());

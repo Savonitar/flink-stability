@@ -795,7 +795,10 @@ Connector pull-request gating is the same mechanism with one axis:
   boundaries and rejects any observed intervening leadership change or gap.
   Retention is bounded to 4,096 leadership entries after coalescing, 128 negotiated
   session messages per incarnation and 8,192 characters per collected log line.
-  Exceeding a bound prevents confirmed HA evidence; truncation cannot imply success.
+  Exceeding a relevant-evidence bound prevents confirmed HA evidence; truncation cannot
+  imply success. Oversized unrelated application lines are discarded with bounded memory.
+  Oversized, malformed or unfinished messages from the own shaded ClientCnxn session
+  logger remain unconfirmed, including when its marker occurs after the retained prefix.
   Each JobManager reaches ZooKeeper through its own controllable TCP gate. Closing
   a gate terminates existing connections and rejects new ones; token-service traffic
   uses a separate path. Leader observations read ZooKeeper's published RM, dispatcher
@@ -823,6 +826,10 @@ Connector pull-request gating is the same mechanism with one axis:
   default or exponential-backoff behavior.
   The local service records ordered initialization, request, issue, failure and
   receipt events with process incarnation, mode/revision, token identity and clocks.
+  The unscoped final healthy-delivery gate requires one exact issued token on every
+  latest provisioned TaskManager incarnation, matching the declared participant count
+  and each process's initialization and verified plugin origin. Older incarnations or
+  different tokens cannot fill a missing receipt.
   Event overflow or request saturation makes evidence incomplete. This fixture
   exercises acquisition/distribution; it does not authenticate Kafka or implement
   version-specific callback extensions to Flink's token SPI.
@@ -833,7 +840,7 @@ Connector pull-request gating is the same mechanism with one axis:
   repeated entries. Interning compares the entire event, so contradictory events
   with the same sequence number remain distinct and available for diagnosis.
 - **R4.13i** Optional `setup.flink.token_provider.proof_scope` is exactly `bootstrap`
-  or `submitted-job`. Omission preserves the existing token evidence contract;
+  or `submitted-job`. Omission uses the unscoped all-TM contract in R4.13h;
   it does not select a scope based on the Flink version or available events.
   The compiled scope is retained through artifact binding and runtime execution.
   Neither expected JobID nor expected job alias is supplied in `token_provider`:
@@ -1547,7 +1554,10 @@ Connector pull-request gating is the same mechanism with one axis:
   An explicit token `proof_scope` additionally applies R4.13i to readiness, fault
   qualification, recovery delivery and final barrier re-evaluation.
   Each completed barrier must precede the next readiness sample in the retained
-  sequence, including coalesced sample counts. Before injection, sample the
+  sequence, including coalesced sample counts. Retained observations between a
+  completed checkpoint and the next readiness boundary must keep the same coherent
+  leader; changed or missing samples reject even when the leader later returns.
+  This does not establish continuous observation between samples. Before injection, sample the
   coherent current leader, retain a token trace watermark, and require a new healthy
   request/issuance after it, followed by the same token's receipt on every expected
   live TaskManager incarnation. A request from a different RM process cannot qualify.

@@ -57,17 +57,61 @@ class FlinkSessionLogTest {
     }
 
     @Test
-    void sessionAndLineLimitsRemainExplicitRatherThanDroppingEvidenceSilently() {
+    void sessionLimitRemainsExplicitRatherThanDroppingEvidenceSilently() {
         var log = log("jobmanager-1#1");
         log.created("container-old");
         for (int i = 0; i <= FlinkSessionLog.MAX_SESSIONS; i++) log.accept(MESSAGE);
         assertEquals(FlinkSessionLog.MAX_SESSIONS, log.snapshot().orElseThrow().negotiated().size());
         assertTrue(log.snapshot().orElseThrow().overflow());
+    }
+
+    @Test
+    void unfinishedOwnLoggerLineRemainsUnconfirmedBeforeItsMessageIsComplete() {
+        var log = log("jobmanager-1#1");
+        log.created("container-current");
+        log.accept(MESSAGE);
+        log.accept("INFO org.apache.flink.shaded.zookeeper3.org.apache.zookeeper.ClientCnxn - Session estab");
+        assertTrue(log.snapshot().orElseThrow().overflow());
+    }
+
+    @Test
+    void oversizedUnrelatedLinesDoNotInvalidateRetainedSessions() {
         var oversized = log("jobmanager-1#1");
         oversized.created("container-old");
         oversized.accept("x".repeat(FlinkSessionLog.MAX_LINE_CHARS + 1) + "\n" + MESSAGE);
-        assertTrue(oversized.snapshot().orElseThrow().overflow());
+        assertFalse(oversized.snapshot().orElseThrow().overflow());
         assertEquals(1, oversized.snapshot().orElseThrow().negotiated().size());
+    }
+
+    @Test
+    void relevantOversizedLinesFailClosedEvenWithALateFragmentedLogger() {
+        for (boolean lateLogger : new boolean[] {false, true}) {
+            var log = log("jobmanager-1#1");
+            log.created("container-old");
+            log.accept(MESSAGE);
+            String line = lateLogger
+                    ? "x".repeat(FlinkSessionLog.MAX_LINE_CHARS + 1) + MESSAGE
+                    : MESSAGE.stripTrailing() + "x".repeat(FlinkSessionLog.MAX_LINE_CHARS) + "\n";
+            for (int offset = 0; offset < line.length(); offset += 17) {
+                log.accept(line.substring(offset, Math.min(offset + 17, line.length())));
+            }
+            assertTrue(log.snapshot().orElseThrow().overflow());
+            assertEquals(1, log.snapshot().orElseThrow().negotiated().size());
+        }
+    }
+
+    @Test
+    void truncatedOrMalformedRelevantSessionMessagesRemainUnconfirmed() {
+        var log = log("jobmanager-1#1");
+        log.created("container-old");
+        log.accept(MESSAGE);
+        log.accept(MESSAGE.substring(0, MESSAGE.indexOf("6000")));
+        assertTrue(log.snapshot().orElseThrow().overflow());
+        log.accept("6000\n");
+        assertFalse(log.snapshot().orElseThrow().overflow());
+        log.accept(MESSAGE.replace("6000", "unknown"));
+        assertTrue(log.snapshot().orElseThrow().overflow());
+        assertEquals(2, log.snapshot().orElseThrow().negotiated().size());
     }
 
     private static FlinkSessionLog log(String process) {

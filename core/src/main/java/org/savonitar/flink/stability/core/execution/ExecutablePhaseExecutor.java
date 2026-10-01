@@ -47,34 +47,34 @@ public final class ExecutablePhaseExecutor {
     public static final String NETWORK_FAULT_TRIGGER_MISSED = "network-fault.trigger-missed";
 
     private final FlinkScenarioControl flink;
-    private final TaskManagerControl taskManagers;
+    private final V1AttemptRuntime runtime;
     private final NetworkFaults networkFaults;
     private final PhaseSleeper sleeper;
     private final LongSupplier nanoTime;
 
     public ExecutablePhaseExecutor(
             FlinkScenarioControl flink,
-            TaskManagerControl taskManagers,
+            V1AttemptRuntime runtime,
             NetworkFaults networkFaults) {
-        this(flink, taskManagers, networkFaults, ExecutablePhaseExecutor::sleep);
+        this(flink, runtime, networkFaults, ExecutablePhaseExecutor::sleep);
     }
 
     public ExecutablePhaseExecutor(
             FlinkScenarioControl flink,
-            TaskManagerControl taskManagers,
+            V1AttemptRuntime runtime,
             NetworkFaults networkFaults,
             PhaseSleeper sleeper) {
-        this(flink, taskManagers, networkFaults, sleeper, System::nanoTime);
+        this(flink, runtime, networkFaults, sleeper, System::nanoTime);
     }
 
     ExecutablePhaseExecutor(
             FlinkScenarioControl flink,
-            TaskManagerControl taskManagers,
+            V1AttemptRuntime runtime,
             NetworkFaults networkFaults,
             PhaseSleeper sleeper,
             LongSupplier nanoTime) {
         this.flink = Objects.requireNonNull(flink, "flink");
-        this.taskManagers = Objects.requireNonNull(taskManagers, "taskManagers");
+        this.runtime = Objects.requireNonNull(runtime, "runtime");
         this.networkFaults = Objects.requireNonNull(networkFaults, "networkFaults");
         this.sleeper = Objects.requireNonNull(sleeper, "sleeper");
         this.nanoTime = Objects.requireNonNull(nanoTime, "nanoTime");
@@ -336,7 +336,7 @@ public final class ExecutablePhaseExecutor {
         // The baseline spans multiple REST calls; its initial timestamp is not the kill boundary.
         OptionalLong beforeInjection = jobManagerTimeForKill(job);
         try {
-            taskManagers.killTaskManager(kill.targetName(), TASKMANAGER_ACTION_TIMEOUT);
+            runtime.killTaskManager(kill.targetName(), TASKMANAGER_ACTION_TIMEOUT);
             evidence.kills.add(new PhaseExecutionEvidence.TaskManagerKill(
                     path, loopIterations, kill.targetName(), jobBeforeKill,
                     beforeInjection, jobManagerTimeForKill(job), identity.identity(), identity.failure()));
@@ -376,7 +376,7 @@ public final class ExecutablePhaseExecutor {
     private IdentityObservation taskManagerIdentity(String target) {
         try {
             return new IdentityObservation(Objects.requireNonNull(
-                    taskManagers.taskManagerIdentity(target), "identity"), Optional.empty());
+                    runtime.taskManagerIdentity(target), "identity"), Optional.empty());
         } catch (RuntimeException unavailable) {
             // Missing identity cannot prove the fault, but must not prevent healing or fencing.
             return new IdentityObservation(Optional.empty(), Optional.of(
@@ -409,7 +409,7 @@ public final class ExecutablePhaseExecutor {
             Optional<PhaseExecutionEvidence.TaskManagerKill> previous = evidence.kills.reversed().stream()
                     .filter(kill -> kill.target().equals(restart.targetName()))
                     .findFirst();
-            taskManagers.restartTaskManager(restart.targetName(), TASKMANAGER_ACTION_TIMEOUT);
+            runtime.restartTaskManager(restart.targetName(), TASKMANAGER_ACTION_TIMEOUT);
             IdentityObservation replacement = taskManagerIdentity(restart.targetName());
             evidence.restarts.add(new PhaseExecutionEvidence.TaskManagerRestart(
                     path, loopIterations, restart.targetName(),
@@ -505,7 +505,6 @@ public final class ExecutablePhaseExecutor {
         FlinkJobObservation.Attempt before = observe(job, deadline.remaining());
         FlinkHaControl.LeaderFaultEvidence raw;
         TokenCheckpointBarrier.Operation barrier = fault.recoveryBarrier().isPresent()
-                && taskManagers instanceof V1AttemptRuntime runtime
                 ? new TokenCheckpointBarrier.Operation(runtime, flink, job,
                     evidence.expectedTaskManagers, deadline, sleeper, evidence.tokenProof) : null;
         try {
@@ -518,12 +517,9 @@ public final class ExecutablePhaseExecutor {
                 throw new IllegalStateException(
                         "Leader fault requires a RUNNING job with a completed checkpoint");
             }
-            if (!(taskManagers instanceof FlinkHaControl leaders)) {
-                throw new IllegalStateException("Runtime does not support leader faults");
-            }
             Duration remainingBudget = deadline.remainingOrThrow(() -> new IllegalStateException(
                     "Leader fault exhausted its deadline during the pre-fault job observation"));
-            raw = Objects.requireNonNull(leaders.faultLeader(request, remainingBudget), "leader fault evidence");
+            raw = Objects.requireNonNull(runtime.faultLeader(request, remainingBudget), "leader fault evidence");
         } catch (RuntimeException failure) {
             raw = new FlinkHaControl.LeaderFaultEvidence(request,
                     Optional.empty(), Optional.empty(), Optional.empty(), false, false,

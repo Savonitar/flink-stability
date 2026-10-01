@@ -178,12 +178,12 @@ Repeated operations need independent sessions and restore observations in execut
 order, with append-only token traces. Missing proof stays inconclusive. Component errors and
 unexpected recovery amplification remain findings even when the exact-ID oracle passes.
 
-When `proof_scope` is omitted, the generic healthy-token evidence gate proves healthy JobManager issuance followed
-by a matching receipt on at least one verified, provisioned TaskManager. With two
-TMs, one valid receipt can satisfy this gate; it does not establish delivery to both.
-The opt-in recovery barriers below and the independent twelve-case comparison runner
-require fresh delivery to every declared TM. Their all-TM coverage is stronger than
-the generic control gate and must be reported separately.
+When `proof_scope` is omitted, the final healthy-token gate requires one exact
+healthy token on every latest provisioned TaskManager incarnation, with the declared
+participant count and verified initialization/plugin origin. Receipts on older
+incarnations or receipts for different tokens cannot fill missing participants.
+The opt-in recovery barriers additionally require fresh delivery within their
+specific fault/recovery boundaries.
 
 Separately named experiments can opt into a stronger, explicit token expectation:
 
@@ -194,7 +194,7 @@ token_provider:
   proof_scope: submitted-job  # alternatively: bootstrap
 ```
 
-Omission keeps the existing catalogs' behavior. Neither scope is inferred from the
+Omission applies the unscoped all-TM gate without job-registration binding. Neither scope is inferred from the
 Flink version, and `legacy` is not a schema value. Both explicit scopes require a
 fresh completed request after the post-submit trace watermark and exact-token
 receipt by every expected live TM incarnation. The exact post-submit snapshot is
@@ -241,7 +241,9 @@ start of pre-fault token readiness through actual fault selection, and from the
 healed leader's token-readiness sample through the post-checkpoint sample. An observed
 change or gap within either interval rejects the barrier, even if the leader returns.
 Adjacent barriers enforce ordering: the next readiness wait starts after the previous
-checkpoint barrier completes. Fault scenarios do not impose a global no-election
+checkpoint barrier completes. Final evaluation also requires unchanged retained
+leadership samples from that completed checkpoint through the next readiness sample.
+Fault scenarios do not impose a global no-election
 rule outside those guarded intervals. Additional observed transitions remain evidence
 and findings; neither exactly N elections/restores nor continuous stability between
 samples is established. Token
