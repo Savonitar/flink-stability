@@ -96,11 +96,22 @@ public interface FlinkHaControl {
         throw new UnsupportedOperationException("JobManager leadership faults are unsupported");
     }
 
+    default LeaderFaultEvidence faultLeader(LeaderFaultRequest request, Duration remainingBudget,
+                                            TokenServiceControl.JobTarget target) {
+        throw new UnsupportedOperationException("Submitted-job token faults are unsupported");
+    }
+
     enum Mode { KILL, PAUSE, ISOLATE_ZOOKEEPER }
 
-    record TokenFault(TokenServiceControl.Mode mode, Duration delay) {
+    record TokenFault(TokenServiceControl.Mode mode, Duration delay, boolean submittedJob) {
+        public TokenFault(TokenServiceControl.Mode mode, Duration delay) {
+            this(mode, delay, false);
+        }
         public TokenFault {
             Objects.requireNonNull(mode, "mode");
+            if (submittedJob && mode != TokenServiceControl.Mode.DELAY && mode != TokenServiceControl.Mode.FAIL) {
+                throw new IllegalArgumentException("Submitted-job targeting supports delay and fail only");
+            }
             if (Objects.requireNonNull(delay, "delay").isNegative()) {
                 throw new IllegalArgumentException("delay must be non-negative");
             }

@@ -55,6 +55,29 @@ class ExecutableScenarioPlanCompilerTest {
     Path artifactRoot;
 
     @Test
+    void submittedJobFaultRequiresExplicitJobProofAndSupportedMode() throws IOException {
+        for (String scope : List.of("bootstrap", "submitted-job")) {
+            for (String mode : List.of("delay", "fail", "linkage-error")) {
+                var resolved = resolved(document -> {
+                    enableHa(document);
+                    ((ObjectNode) document.at("/setup/flink")).putObject("token_provider")
+                            .put("renewal_interval", "2s").put("proof_scope", scope);
+                    var token = replaceSteps(document).addObject().putObject("leader_fault")
+                            .put("mode", "isolate-zookeeper").put("duration", "15s").put("timeout", "2m")
+                            .putObject("token_fault").put("mode", mode).put("target", "submitted-job");
+                    if (mode.equals("delay")) token.put("delay", "5s");
+                });
+                if (scope.equals("submitted-job") && !mode.equals("linkage-error")) {
+                    var fault = (ExecutableScenarioPlan.LeaderFault) compiler.compile(resolved).phases().getFirst().steps().getFirst();
+                    assertTrue(fault.request().tokenFault().orElseThrow().submittedJob());
+                } else {
+                    assertThrows(SpecificationException.class, () -> compiler.compile(resolved));
+                }
+            }
+        }
+    }
+
+    @Test
     void bindsHaAndSyntheticTokensWithoutChangingTheWorkloadContract() throws IOException {
         createJar(artifactRoot.resolve("connector.jar"), false, null);
         createJar(artifactRoot.resolve("job.jar"), true, "v1");

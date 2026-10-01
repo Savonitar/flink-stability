@@ -322,6 +322,58 @@ class FlinkHaRuntimeTest {
         }
     }
 
+    @Test
+    void targetedTokenHoldWaitsForCompleteNewLeaderJobExposureAndAlwaysHeals() throws Exception {
+        for (boolean complete : List.of(false, true)) {
+            FakeHandle original = new FakeHandle("jobmanager-1-1", "old");
+            String jobId = "a".repeat(32);
+            var target = new TokenServiceControl.JobTarget(jobId, "eos-job");
+            AtomicInteger snapshotsAfterResume = new AtomicInteger();
+            AtomicInteger heals = new AtomicInteger();
+            TokenServiceControl service = new TokenServiceControl() {
+                boolean armed;
+                public long configure(Mode mode, Duration delay, JobTarget actual) {
+                    assertEquals(target, actual);
+                    armed = true;
+                    return 1;
+                }
+                public long configure(Mode mode, Duration delay) {
+                    assertEquals(Mode.HEALTHY, mode);
+                    assertFalse(original.paused, "process hold must heal before waiting for JOB exposure");
+                    assertTrue(snapshotsAfterResume.get() >= 2);
+                    heals.incrementAndGet();
+                    armed = false;
+                    return 2;
+                }
+                public Snapshot snapshot() {
+                    if (!armed || original.resumeCalls == 0) return new Snapshot(List.of(), false, false, 0, 0);
+                    int count = snapshotsAfterResume.incrementAndGet();
+                    var registration = new RegistrationSnapshot("provider", "JOB", 1, jobId, "eos-job",
+                            false, 0, List.of(new Lifecycle(1, "REGISTER", 1, jobId, "eos-job")));
+                    var events = new java.util.ArrayList<Event>();
+                    var kinds = List.of(Kind.REQUEST_STARTED, Kind.ISSUED, Kind.REQUEST_FINISHED);
+                    for (int i = 0; i < (complete && count >= 2 ? 3 : 1); i++) {
+                        events.add(new Event(i + 1, kinds.get(i), "jobmanager-2#1", "jobmanager", 1,
+                                i * 5_000_000_000L, 1, 1, Mode.DELAY, java.util.OptionalLong.of(1), "",
+                                Optional.of(registration), Optional.of("provider")));
+                    }
+                    return new Snapshot(events, false, false, events.size() == 1 ? 1 : 0, 1);
+                }
+            };
+            try (var runtime = recordedRuntime(original, new FakeHandle("jobmanager-2-1", "standby"), System::nanoTime)) {
+                var request = new FlinkHaControl.LeaderFaultRequest(FlinkHaControl.Mode.PAUSE,
+                        Duration.ofNanos(1), Duration.ofMillis(400), Optional.of(
+                                new FlinkHaControl.TokenFault(TokenServiceControl.Mode.DELAY, Duration.ofSeconds(5), true)));
+                var evidence = runtime.fault(request, request.timeout(), unusedActions(), Optional.of(service), Optional.of(target));
+                assertEquals(1, heals.get());
+                assertEquals(1, original.resumeCalls);
+                assertTrue(evidence.healed());
+                assertEquals(complete, evidence.errors().isEmpty());
+                assertEquals(complete, evidence.after().isPresent());
+            }
+        }
+    }
+
     private static FlinkHaRuntime recordedRuntime(FakeHandle original, FakeHandle standby) throws IOException {
         AtomicLong clock = new AtomicLong();
         return recordedRuntime(original, standby, () -> clock.addAndGet(1_000));
