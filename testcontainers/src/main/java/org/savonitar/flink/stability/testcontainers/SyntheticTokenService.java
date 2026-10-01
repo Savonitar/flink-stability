@@ -41,6 +41,7 @@ final class SyntheticTokenService implements TokenServiceControl, AutoCloseable 
     private final Map<String, Ledger> providers = new HashMap<>();
     private int journalRecords;
     private Settings settings = new Settings(0, Mode.HEALTHY, Duration.ZERO);
+    private Optional<JobTarget> jobTarget = Optional.empty();
     private long eventSequence;
     private long requestSequence;
     private long tokenSequence;
@@ -98,11 +99,23 @@ final class SyntheticTokenService implements TokenServiceControl, AutoCloseable 
                 || (mode == Mode.DELAY ? delay.compareTo(Duration.ofMillis(1)) < 0 : !delay.isZero())) {
             throw new IllegalArgumentException("Invalid synthetic token fault or closed service");
         }
+        jobTarget = Optional.empty();
         settings = new Settings(settings.revision() + 1, mode, delay);
         record(Kind.MODE_CHANGED, "service", "service", 0, settings,
                 OptionalLong.empty(), "delayMillis=" + delay.toMillis());
         notifyAll(); // Healing also releases requests currently held by the delay fault.
         return settings.revision();
+    }
+
+    @Override
+    public synchronized long configure(Mode mode, Duration delay, JobTarget target) {
+        if (mode != Mode.DELAY && mode != Mode.FAIL) {
+            throw new IllegalArgumentException("Submitted-job targeting supports delay and fail only");
+        }
+        Objects.requireNonNull(target, "target");
+        long revision = configure(mode, delay);
+        jobTarget = Optional.of(target);
+        return revision;
     }
 
     @Override
@@ -230,7 +243,11 @@ final class SyntheticTokenService implements TokenServiceControl, AutoCloseable 
                 reply(exchange, overflow ? 503 : 400, new byte[0]);
                 return;
             }
-            selected = settings;
+            selected = jobTarget.isPresent() && !("JOB".equals(registration.scope())
+                    && jobTarget.orElseThrow().jobId().equals(registration.jobId())
+                    && jobTarget.orElseThrow().jobAlias().equals(registration.jobAlias())
+                    && !registration.coverageInvalid())
+                    ? new Settings(settings.revision(), Mode.HEALTHY, Duration.ZERO) : settings;
             request = ++requestSequence;
             activeRequests++;
             maxConcurrentRequests = Math.max(maxConcurrentRequests, activeRequests);

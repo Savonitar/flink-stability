@@ -23,6 +23,8 @@ interface FlinkComponentFactory {
         return List.of();
     }
 
+    default java.util.List<org.savonitar.flink.stability.runtime.api.FlinkComponentLog> componentLogs() { return List.of(); }
+
     default List<FlinkHaControl.SessionEvidence> haSessions() {
         return List.of();
     }

@@ -32,6 +32,8 @@ public interface V1AttemptRuntime extends TaskManagerControl, FlinkHaControl, Au
      */
     List<FlinkClassLoadLog> flinkClassLoadLogs();
 
+    default List<FlinkComponentLog> flinkComponentLogs() { return List.of(); }
+
     default Optional<String> tokenPluginSha256() {
         return Optional.empty();
     }

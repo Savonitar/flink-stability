@@ -49,11 +49,7 @@ public final class TokenScopeProof {
     }
 
     static boolean sameRequest(TokenServiceControl.Event first, TokenServiceControl.Event other) {
-        return first.requestId() > 0 && first.requestId() == other.requestId()
-                && first.revision() == other.revision() && first.mode() == other.mode()
-                && first.process().equals(other.process()) && first.role().equals(other.role())
-                && first.registration().equals(other.registration())
-                && first.participantInstance().equals(other.participantInstance());
+        return TokenServiceControl.sameRequest(first, other);
     }
 
     static boolean request(List<TokenServiceControl.Event> events, TokenServiceControl.Event start,

@@ -97,12 +97,24 @@ class V1ScenarioExecutorTest {
         try (Fixture fixture = fixture()) {
             var runtime = new FakeRuntime(events);
             runtime.captureArchive = true;
+            Path componentLog = temporaryDirectory.resolve("combined-component.log");
+            Files.writeString(componentLog, "2026-10-01 19:43:38,488 ERROR org.apache.kafka.Foo [] - ProducerFencedException\n");
+            runtime.componentLogs = List.of(new org.savonitar.flink.stability.runtime.api.FlinkComponentLog(
+                    "taskmanager-1#1", componentLog, false, Optional.empty()));
             Path output = temporaryDirectory.resolve("successful-capture");
             var result = executor(events, runtime, new FakeFlink(events),
                     (bootstrap, topic, ids, timeout) -> passResult())
                     .execute(fixture.bound(), attemptContext().withKafkaLogOutput(output));
             assertEquals(V1ScenarioExecutionResult.Status.PASS, result.status());
             assertEquals("collected", result.kafkaLogs().status(), result.kafkaLogs().diagnostics().toString());
+            assertEquals(1, result.componentErrors().events().size());
+            for (var copy : List.of(result.withFlinkRestErrors(List.of()),
+                    result.withCleanupFailure(new IOException("cleanup")),
+                    result.withPreparedArtifactCleanupFailure(new IOException("cleanup")),
+                    result.withComponentErrors(result.componentErrors()), result.withKafkaLogs(result.kafkaLogs()))) {
+                assertEquals(result.componentErrors(), copy.componentErrors());
+                assertEquals(result.kafkaLogs(), copy.kafkaLogs());
+            }
             var decoded = result.kafkaLogs().decoded().getFirst();
             assertEquals("PARSED_AND_DECODED", decoded.status());
             byte[] retained = Files.readAllBytes(decoded.evidence().orElseThrow());
@@ -136,6 +148,32 @@ class V1ScenarioExecutorTest {
                         assertTrue(events.indexOf("capture") < events.indexOf("runtime-close"));
                         assertEquals(result.kafkaLogs(), result.withCleanupFailure(new IOException("cleanup")).kafkaLogs());
                     }
+                }
+            }
+        }
+    }
+
+    @Test
+    void componentErrorsAreReadBeforeCleanupAndDoNotChangeDataVerdicts() throws Exception {
+        for (boolean passing : List.of(true, false)) {
+            List<String> events = new ArrayList<>();
+            try (Fixture fixture = fixture()) {
+                FakeRuntime runtime = new FakeRuntime(events);
+                Path log = temporaryDirectory.resolve("component.log");
+                Files.writeString(log, "2026-10-01 19:43:38,488 ERROR org.apache.kafka.Foo [] - ProducerFencedException producerId=7 epoch=1\n");
+                runtime.componentLogs = List.of(new org.savonitar.flink.stability.runtime.api.FlinkComponentLog(
+                        "taskmanager-1#1", log, true, Optional.of("capture truncated")));
+                var result = executor(events, runtime, new FakeFlink(events),
+                        (bootstrap, topic, ids, timeout) -> passing ? passResult() : missingResult())
+                        .execute(fixture.bound(), attemptContext());
+                assertEquals(passing ? V1ScenarioExecutionResult.Status.PASS : V1ScenarioExecutionResult.Status.FAIL,
+                        result.status());
+                assertEquals(1, result.componentErrors().events().size());
+                assertFalse(result.componentErrors().diagnostics().isEmpty());
+                for (var copy : List.of(result.withFlinkRestErrors(List.of()),
+                        result.withCleanupFailure(new IOException("cleanup")),
+                        result.withPreparedArtifactCleanupFailure(new IOException("cleanup")))) {
+                    assertEquals(result.componentErrors(), copy.componentErrors());
                 }
             }
         }
@@ -2232,6 +2270,12 @@ class V1ScenarioExecutorTest {
     }
 
     private static final class FakeRuntime implements V1AttemptRuntime {
+        private List<org.savonitar.flink.stability.runtime.api.FlinkComponentLog> componentLogs = List.of();
+        public List<org.savonitar.flink.stability.runtime.api.FlinkComponentLog> flinkComponentLogs() {
+            assertEquals(0, closeCalls.get());
+            return componentLogs;
+        }
+
         private final List<String> events;
         /** The subject primary's container path, captured when Flink starts. */
         private String primarySource;

@@ -15,6 +15,25 @@ public interface TokenServiceControl {
     /** Returns the revision that subsequent acquisition requests observe. */
     long configure(Mode mode, Duration delay);
 
+    default long configure(Mode mode, Duration delay, JobTarget target) {
+        throw new UnsupportedOperationException("Submitted-job token faults are unsupported");
+    }
+
+    record JobTarget(String jobId, String jobAlias) {
+        public JobTarget {
+            if (jobId == null || !jobId.matches("[0-9a-f]{32}")) {
+                throw new IllegalArgumentException("Require the submitted Flink JobID");
+            }
+            Checks.requireNonBlank(jobAlias, "jobAlias");
+        }
+
+        public boolean matches(Event event) {
+            return event.registration().filter(context -> "JOB".equals(context.scope())
+                    && jobId.equals(context.jobId()) && jobAlias.equals(context.jobAlias())
+                    && !context.coverageInvalid()).isPresent();
+        }
+    }
+
     Snapshot snapshot();
 
     record Event(long sequence, Kind kind, String process, String role,
@@ -81,6 +100,32 @@ public interface TokenServiceControl {
         public long sentThrough() {
             return journal.isEmpty() ? acknowledgedSequence : journal.get(journal.size() - 1).sequence();
         }
+    }
+
+    /** One complete request, shared by the online fault hold and final evidence check. */
+    static boolean completedFault(List<Event> events, Event start, Mode mode, Duration delay) {
+        if (mode == Mode.HEALTHY) return false;
+        return events.stream().anyMatch(outcome -> sameRequest(start, outcome)
+                && outcome.sequence() > start.sequence()
+                && (mode == Mode.DELAY ? outcome.kind() == Kind.ISSUED
+                    && outcome.monotonicNanos() - start.monotonicNanos() >= delay.toNanos()
+                    : outcome.kind() == Kind.FAILED
+                        && outcome.detail().equals(mode == Mode.FAIL ? "HTTP 503" : "HTTP 598"))
+                && events.stream().noneMatch(event -> sameRequest(start, event)
+                    && event.kind() == Kind.FAILED && !event.detail().equals(outcome.detail()))
+                && (mode == Mode.DELAY || events.stream().anyMatch(ack -> sameRequest(start, ack)
+                    && ack.kind() == Kind.FAULT_OBSERVED && ack.sequence() > outcome.sequence()
+                    && ack.detail().equals(outcome.detail())))
+                && events.stream().anyMatch(finish -> sameRequest(start, finish)
+                    && finish.kind() == Kind.REQUEST_FINISHED && finish.sequence() > outcome.sequence()));
+    }
+
+    static boolean sameRequest(Event first, Event other) {
+        return first.requestId() > 0 && first.requestId() == other.requestId()
+                && first.revision() == other.revision() && first.mode() == other.mode()
+                && first.process().equals(other.process()) && first.role().equals(other.role())
+                && first.registration().equals(other.registration())
+                && first.participantInstance().equals(other.participantInstance());
     }
 
     /** Overflow or saturation invalidates evidence; events are never silently overwritten. */

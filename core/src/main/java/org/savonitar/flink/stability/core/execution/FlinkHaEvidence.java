@@ -8,6 +8,8 @@ import org.savonitar.flink.stability.runtime.api.FlinkComponentRole;
 import org.savonitar.flink.stability.runtime.api.FlinkHaControl;
 import org.savonitar.flink.stability.runtime.api.TokenServiceControl;
 
+import org.savonitar.flink.stability.runtime.api.FlinkRuntimeTarget;
+
 import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.HashMap;
@@ -524,6 +526,10 @@ public record FlinkHaEvidence(
                 || !completeTrace(finalSnapshot) || !prefix(before, during) || !prefix(during, after)
                 || !prefix(after, finalSnapshot)) return Optional.of("Token fault trace is incomplete");
         var requested = raw.request().tokenFault().orElseThrow();
+        if (requested.submittedJob() && (requirement.isEmpty()
+                || requirement.orElseThrow().scope() != FlinkRuntimeTarget.TokenProofScope.SUBMITTED_JOB)) {
+            return Optional.of("Submitted-job fault requires the actual submitted job proof");
+        }
         long previous = before.events().size();
         // A later fault's recovery cannot supply the missing healthy delivery of this one.
         List<TokenServiceControl.Event> events = finalSnapshot.events();
@@ -545,37 +551,12 @@ public record FlinkHaEvidence(
                 && process.equals(event.process())
                 && TokenScopeProof.request(events, event, requirement)
                 && initialized(events, event, TokenServiceControl.Kind.PROVIDER_INITIALIZED)).toList();
-        boolean completed = starts.stream().anyMatch(start -> events.stream().anyMatch(outcome ->
-                sameRequest(start, outcome) && outcome.sequence() > start.sequence()
-                        && tokenFaultOutcome(requested, start, outcome)
-                        && events.stream().noneMatch(event -> sameRequest(start, event)
-                                && event.kind() == TokenServiceControl.Kind.FAILED
-                                && !event.detail().equals(outcome.detail()))
-                        && (requested.mode() == TokenServiceControl.Mode.DELAY
-                                || events.stream().anyMatch(ack -> sameRequest(start, ack)
-                                && ack.kind() == TokenServiceControl.Kind.FAULT_OBSERVED
-                                && ack.sequence() > outcome.sequence() && ack.detail().equals(outcome.detail())))
-                        && events.stream().anyMatch(finished -> sameRequest(start, finished)
-                        && finished.sequence() > outcome.sequence()
-                        && finished.kind() == TokenServiceControl.Kind.REQUEST_FINISHED)));
+        var exposureEvents = requested.submittedJob() ? events.stream()
+                .filter(event -> event.sequence() < heal.orElseThrow().sequence()).toList() : events;
+        boolean completed = starts.stream().anyMatch(start -> TokenServiceControl.completedFault(
+                exposureEvents, start, requested.mode(), requested.delay()));
         if (!completed) return Optional.of("No actual acquisition and outcome occurred under the declared token revision");
         return Optional.empty();
-    }
-
-    private static boolean tokenFaultOutcome(FlinkHaControl.TokenFault requested,
-                                             TokenServiceControl.Event start,
-                                             TokenServiceControl.Event outcome) {
-        return switch (requested.mode()) {
-            case DELAY -> outcome.kind() == TokenServiceControl.Kind.ISSUED
-                    && outcome.monotonicNanos() - start.monotonicNanos() >= 0
-                    && java.time.Duration.ofNanos(outcome.monotonicNanos() - start.monotonicNanos())
-                            .compareTo(requested.delay()) >= 0;
-            case FAIL -> outcome.kind() == TokenServiceControl.Kind.FAILED
-                    && "HTTP 503".equals(outcome.detail());
-            case LINKAGE_ERROR -> outcome.kind() == TokenServiceControl.Kind.FAILED
-                    && "HTTP 598".equals(outcome.detail());
-            case HEALTHY -> false;
-        };
     }
 
     static Optional<String> processLabel(List<FlinkComponentProvisioningEvidence> provisioning,

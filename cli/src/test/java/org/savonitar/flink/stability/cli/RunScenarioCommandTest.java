@@ -80,6 +80,30 @@ class RunScenarioCommandTest {
     }
 
     @Test
+    void componentObservationJsonRetainsLevelAndLogger() throws Exception {
+        var event = new org.savonitar.flink.stability.core.execution.ComponentErrorEvidence.Event(
+                "tm#1", "2026-10-01 19:43:38,489", "INFO",
+                "org.apache.kafka.clients.producer.internals.TransactionManager",
+                Optional.empty(), Optional.empty(), Optional.of("tx"), List.of("producer-fenced"));
+        var command = new RunScenarioCommand((root, name, overrides, options) -> new RunScenarioCommand.PreparedExecution() {
+            @Override public V1ScenarioExecutionResult execute(V1AttemptContext context) {
+                return passResult().withComponentErrors(new org.savonitar.flink.stability.core.execution.ComponentErrorEvidence(
+                        List.of(event), List.of())).withKafkaLogs(
+                                new org.savonitar.flink.stability.core.execution.KafkaLogEvidence(
+                                        "partial", Optional.empty(), List.of(), List.of("capture unavailable")));
+            }
+            @Override public ExecutableScenarioPlan.ExpectedOutcome expectedOutcome() { return expectation; }
+            @Override public void close() {}
+        }, () -> context("1234abcd"), new V1ExecutionResultRenderer(), new ValidationDiagnosticRenderer());
+        var invocation = execute(command, "--catalog-root", temporaryDirectory.toString(), "--scenario", "bounded-eos");
+        assertEquals(0, invocation.exitCode(), invocation.stderr());
+        var observed = JSON.readTree(invocation.stdout()).at("/evidence/componentErrors/events/0");
+        assertEquals(event.level(), observed.path("level").asText());
+        assertEquals(event.logger(), observed.path("logger").asText());
+        assertEquals("partial", JSON.readTree(invocation.stdout()).at("/evidence/kafkaLogs/status").asText());
+    }
+
+    @Test
     void rendersDeclaredAndObservedConnectorHashesAfterPreparedCleanup() throws Exception {
         var pins = List.of(
                 new PreparedScenarioPlan.ConnectorPrimaryEvidence(ScenarioSide.SINGLE, "pinned", "connector.jar",

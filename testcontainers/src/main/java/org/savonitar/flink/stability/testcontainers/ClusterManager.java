@@ -272,6 +272,12 @@ public final class ClusterManager implements AutoCloseable {
 
     public synchronized FlinkHaControl.LeaderFaultEvidence faultLeader(
             FlinkHaControl.LeaderFaultRequest request, Duration remainingBudget) {
+        return faultLeader(request, remainingBudget, Optional.empty());
+    }
+
+    public synchronized FlinkHaControl.LeaderFaultEvidence faultLeader(
+            FlinkHaControl.LeaderFaultRequest request, Duration remainingBudget,
+            Optional<TokenServiceControl.JobTarget> target) {
         ensureOpen();
         ensureFlinkProcessStartAllowed();
         if (highAvailability == null) {
@@ -289,7 +295,7 @@ public final class ClusterManager implements AutoCloseable {
                 record(slot.startWithin(deadline));
                 return slot.handle;
             }
-        }, Optional.ofNullable(tokenService));
+        }, Optional.ofNullable(tokenService), target);
     }
 
     public synchronized Optional<String> tokenPluginSha256() {
@@ -419,6 +425,10 @@ public final class ClusterManager implements AutoCloseable {
                     failure instanceof com.github.dockerjava.api.exception.NotFoundException,
                     Optional.of(failure.toString())));
         }
+    }
+
+    synchronized java.util.List<org.savonitar.flink.stability.runtime.api.FlinkComponentLog> componentLogs() {
+        return flinkFactories.stream().flatMap(factory -> factory.componentLogs().stream()).toList();
     }
 
     synchronized List<FlinkClassLoadLog> classLoadLogs() {

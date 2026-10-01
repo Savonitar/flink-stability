@@ -184,6 +184,11 @@ final class FlinkContainer implements FlinkComponentFactory {
     }
 
     @Override
+    public java.util.List<org.savonitar.flink.stability.runtime.api.FlinkComponentLog> componentLogs() {
+        return containers.stream().map(VerifiedFlinkContainer::componentLog).toList();
+    }
+
+    @Override
     public List<FlinkHaControl.SessionEvidence> haSessions() {
         return containers.stream().flatMap(container -> container.haSessionEvidence().stream()).toList();
     }

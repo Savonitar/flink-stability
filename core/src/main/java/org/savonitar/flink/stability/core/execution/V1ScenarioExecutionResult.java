@@ -39,10 +39,12 @@ public record V1ScenarioExecutionResult(
         Optional<org.savonitar.flink.stability.runtime.api.FlinkHaControl.Observations> haObservations,
         Optional<FlinkProcessWriteFenceEvidence.Observations> processObservations,
         KafkaLogEvidence kafkaLogs,
+        ComponentErrorEvidence componentErrors,
         List<String> diagnostics) {
 
     public V1ScenarioExecutionResult {
         Objects.requireNonNull(kafkaLogs, "kafkaLogs");
+        Objects.requireNonNull(componentErrors, "componentErrors");
         Objects.requireNonNull(status, "status");
         reason = requireNonBlank(reason, "reason");
         message = requireNonBlank(message, "message");
@@ -172,7 +174,7 @@ public record V1ScenarioExecutionResult(
                 finalJobObservation, terminalValidation, sinkTransactions, subjectClassOrigins,
                 flinkProvisioningEvidence, expectedFlinkRuntime, runtimeClassOrigins, kafkaTransactionVersion,
                 flinkRestErrors, expectedHa, tokenEvidence, haObservations, processObservations,
-                KafkaLogEvidence.notRequested(), diagnostics);
+                KafkaLogEvidence.notRequested(), ComponentErrorEvidence.empty(), diagnostics);
     }
 
     /** Existing callers that have no REST error snapshot retain their other evidence. */
@@ -303,12 +305,20 @@ public record V1ScenarioExecutionResult(
         return FlinkProcessHealth.evaluate(expectedFlinkRuntime, processFenceEvidence, processObservations);
     }
 
+    public V1ScenarioExecutionResult withComponentErrors(ComponentErrorEvidence errors) {
+        return new V1ScenarioExecutionResult(status, reason, message, inputManifest, phaseEvidence,
+                writeFenceEvidence, processFenceEvidence, finalJobObservation, terminalValidation,
+                sinkTransactions, subjectClassOrigins, flinkProvisioningEvidence, expectedFlinkRuntime,
+                runtimeClassOrigins, kafkaTransactionVersion, flinkRestErrors, expectedHa, tokenEvidence,
+                haObservations, processObservations, kafkaLogs, errors, diagnostics);
+    }
+
     public V1ScenarioExecutionResult withKafkaLogs(KafkaLogEvidence evidence) {
         return new V1ScenarioExecutionResult(status, reason, message, inputManifest, phaseEvidence,
                 writeFenceEvidence, processFenceEvidence, finalJobObservation, terminalValidation,
                 sinkTransactions, subjectClassOrigins, flinkProvisioningEvidence, expectedFlinkRuntime,
                 runtimeClassOrigins, kafkaTransactionVersion, flinkRestErrors, expectedHa, tokenEvidence,
-                haObservations, processObservations, evidence, diagnostics);
+                haObservations, processObservations, evidence, componentErrors, diagnostics);
     }
 
     /** Snapshot recovered HTTP failures before the client and runtime are closed. */
@@ -317,7 +327,7 @@ public record V1ScenarioExecutionResult(
                 writeFenceEvidence, processFenceEvidence, finalJobObservation, terminalValidation,
                 sinkTransactions, subjectClassOrigins, flinkProvisioningEvidence, expectedFlinkRuntime,
                 runtimeClassOrigins, kafkaTransactionVersion, errors, expectedHa, tokenEvidence,
-                haObservations, processObservations, kafkaLogs, diagnostics);
+                haObservations, processObservations, kafkaLogs, componentErrors, diagnostics);
     }
 
     public V1ScenarioExecutionResult withCleanupFailure(Throwable failure) {
@@ -370,7 +380,7 @@ public record V1ScenarioExecutionResult(
                     tokenEvidence,
                     haObservations,
                     processObservations,
-                    kafkaLogs, updated);
+                    kafkaLogs, componentErrors, updated);
         }
         return new V1ScenarioExecutionResult(
                 status,
@@ -393,6 +403,6 @@ public record V1ScenarioExecutionResult(
                 tokenEvidence,
                 haObservations,
                 processObservations,
-                kafkaLogs, updated);
+                kafkaLogs, componentErrors, updated);
     }
 }

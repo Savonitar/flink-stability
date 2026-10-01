@@ -111,7 +111,8 @@ def summarize(name, side, run, result, expected_subject, exit_code):
     return {"scenario": name, "side": side, "run": run, "verdict": result.get("status"),
             "reason": result.get("reason"), **counts, "subjects": sorted(hashes),
             "subjectStatus": origins.get("status", "unavailable"),
-            "subjectOk": subject_ok, "exitCode": exit_code}
+            "subjectOk": subject_ok, "exitCode": exit_code,
+            "componentErrors": evidence.get("componentErrors")}
 
 
 def gate_exit_code(rows):
@@ -134,6 +135,30 @@ def render(manifest, rows):
         lines.append(f"| {row['scenario']} | {row['side']} | {row['run']} | {row['verdict']} | "
                      f"{row['reason']} | {row['missing']} | {row['duplicates']} | {subject} | "
                      f"{row['exitCode']} |")
+    lines += ["", "Component log observations (diagnostic only; counts cover retained log prefixes):",
+              "", "| Side | KafkaCommitter ERROR | Other classified observations | Unclassified observations | KafkaCommitter ERROR kinds | Partial / unavailable runs |",
+              "| --- | --- | --- | --- | --- | --- |"]
+    for side in ("baseline", "candidate"):
+        kinds, committer, other, unclassified, partial = Counter(), 0, 0, 0, 0
+        for row in rows:
+            if row["side"] != side:
+                continue
+            errors = row.get("componentErrors")
+            if errors is None:
+                partial += 1
+                continue
+            partial += errors.get("coverage") != "captured-prefix"
+            for event in errors.get("events", []):
+                if not event.get("level") or not event.get("logger"):
+                    unclassified += 1
+                elif (event["level"] == "ERROR" and event["logger"] ==
+                      "org.apache.flink.connector.kafka.sink.internal.KafkaCommitter"):
+                    committer += 1
+                    kinds.update(set(event.get("kinds", [])))
+                else:
+                    other += 1
+        counts = ", ".join(f"{kind}: {count}" for kind, count in sorted(kinds.items())) or "none observed"
+        lines.append(f"| {side} | {committer} | {other} | {unclassified} | {counts} | {partial} |")
     outcomes = {}
     for row in rows:
         sides = outcomes.setdefault(row["scenario"], {"baseline": Counter(), "candidate": Counter()})
