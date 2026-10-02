@@ -118,7 +118,7 @@ public final class ExecutablePhaseExecutor {
                     !binding.jobId().equals(job.jobId()) || !binding.jobAlias().equals(plan.job().alias())).isPresent()) {
             throw new IllegalArgumentException("Token proof does not match the declared scope and submitted job");
         }
-        Recorder evidence = new Recorder(plan.flink().taskmanagers(), tokenProof);
+        Recorder evidence = new Recorder(plan.flink().taskmanagers(), tokenProof, plan.kafka());
         for (int phaseIndex = 0; phaseIndex < plan.phases().size(); phaseIndex++) {
             if (evidence.stopFurtherSteps) break;
             ExecutableScenarioPlan.Phase phase = plan.phases().get(phaseIndex);
@@ -161,6 +161,19 @@ public final class ExecutablePhaseExecutor {
             } else if (step instanceof ExecutableScenarioPlan.RestartTaskManager restart) {
                 restartTaskManager(
                         phaseIndex, phaseName, path, loopIterations, restart, evidence);
+            } else if (step instanceof ExecutableScenarioPlan.BrokerOperation operation) {
+                org.savonitar.flink.stability.runtime.api.KafkaBrokerControl.Evidence raw;
+                try {
+                    raw = runtime.brokerOperation(operation.targetName(), operation.restart(),
+                            evidence.kafkaPartitions, TASKMANAGER_ACTION_TIMEOUT);
+                } catch (RuntimeException failure) {
+                    raw = new org.savonitar.flink.stability.runtime.api.KafkaBrokerControl.Evidence(
+                            operation.targetName(), operation.restart(), null, null, List.of(), List.of(), failure.toString());
+                }
+                evidence.brokers.add(new PhaseExecutionEvidence.BrokerOperation(path, loopIterations, raw));
+                succeeded(evidence, phaseIndex, phaseName, path, loopIterations,
+                        operation.restart() ? PhaseExecutionEvidence.StepKind.RESTART_BROKER : PhaseExecutionEvidence.StepKind.KILL_BROKER,
+                        "target=" + operation.targetName() + ", effectConfirmed=" + raw.confirmed());
             } else if (step instanceof ExecutableScenarioPlan.EndTxnFault fault) {
                 injectNetworkFault(
                         phaseIndex, phaseName, path, loopIterations, fault, evidence);
@@ -690,17 +703,22 @@ public final class ExecutablePhaseExecutor {
         private final List<PhaseExecutionEvidence.NetworkFault> networkFaults = new ArrayList<>();
         private final List<PhaseExecutionEvidence.TaskManagerRestart> restarts = new ArrayList<>();
         private final List<PhaseExecutionEvidence.LeaderFault> leaderFaults = new ArrayList<>();
+        private final List<PhaseExecutionEvidence.BrokerOperation> brokers = new ArrayList<>();
+        private final List<org.savonitar.flink.stability.runtime.api.KafkaLogCapture.Partition> kafkaPartitions;
         private final int expectedTaskManagers;
         private final Optional<TokenScopeProof.Requirement> tokenProof;
         private boolean stopFurtherSteps;
 
-        private Recorder(int expectedTaskManagers, Optional<TokenScopeProof.Requirement> tokenProof) {
+        private Recorder(int expectedTaskManagers, Optional<TokenScopeProof.Requirement> tokenProof,
+                         ExecutableScenarioPlan.KafkaCluster kafka) {
+            kafkaPartitions = kafka.brokers() == 1 ? List.of() : kafka.topics().stream().flatMap(topic -> java.util.stream.IntStream.range(0, topic.partitions())
+                    .mapToObj(partition -> new org.savonitar.flink.stability.runtime.api.KafkaLogCapture.Partition(topic.name(), partition))).toList();
             this.expectedTaskManagers = expectedTaskManagers;
             this.tokenProof = tokenProof;
         }
 
         private PhaseExecutionEvidence snapshot() {
-            return new PhaseExecutionEvidence(steps, kills, networkFaults, restarts, leaderFaults);
+            return new PhaseExecutionEvidence(steps, kills, networkFaults, restarts, leaderFaults, brokers);
         }
     }
 }

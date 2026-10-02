@@ -375,8 +375,12 @@ Connector pull-request gating is the same mechanism with one axis:
   a permissive image string is not a compatibility assertion.
 - **R4.2b** The v1 format continues to express the broker/topic counts in R4.2
   and R4.3, including valid multi-broker scenarios. The first narrow executable
-  runner is a capability subset: it accepts exactly one broker and therefore
-  requires every topic's `replication_factor` to be `1`. It rejects wider valid-v1
+  runner accepts one broker with topic RF=1, or an optional three-broker KRaft
+  topology with topic RF=3. The latter uses three combined controllers/brokers,
+  internal-topic RF=3, transaction-state min ISR=2 and broker min.insync.replicas=2.
+  Broker names are `broker-1` through `broker-3`, with node IDs 1 through 3;
+  bootstrap lists advertise all three endpoints. The three-broker slice allows at
+  most 128 declared partitions for bounded leadership evidence. One-broker defaults are unchanged. It rejects wider valid-v1
   topology before artifact preparation or Docker with
   `runner.kafka.broker-count-unsupported` or
   `runner.kafka.replication-factor-unsupported`; it never rewrites the scenario.
@@ -1374,7 +1378,7 @@ Connector pull-request gating is the same mechanism with one axis:
   `taskmanager-N` from `setup.flink.taskmanagers`. `kill.target` names exactly one
   declared TaskManager. `restart: { component: taskmanager, name: taskmanager-2 }`
   recreates that same logical slot with the same verified image and connector closure.
-  The `name` field is supported only for `component: taskmanager` and cannot be
+  The `name` field is supported for `component: taskmanager` and named Kafka broker recovery (R6.9c), and cannot be
   combined with `image`. The unnamed restart shorthand is executable only with one
   TaskManager; otherwise reject with `runner.phase.restart-target-required`.
   Lifecycle checks track each target separately: reject double kills, restarts of
@@ -1383,6 +1387,20 @@ Connector pull-request gating is the same mechanism with one axis:
   faults are executable: a second kill before the preceding target is restarted
   rejects with `runner.phase.taskmanager-kill-overlap-unsupported`. Grouped recovery
   from multiple simultaneously missing workers is outside this observation model.
+- **R6.9c** With three Kafka brokers, `kill.target: {kind: named, role: broker,
+  name: broker-1}` and `restart: {component: kafka, name: broker-1}` stop and restart
+  the same owned container without removing its data. No unnamed broker restart,
+  image change, concurrent missing processes or unhealed kill is executable.
+  Each operation uses one two-minute deadline. Retain before/after container,
+  image, network and running-state observations, plus declared-partition leaders,
+  replicas and ISR. A kill is confirmed only when the broker is observed stopped
+  and at least one partition it led has a different available leader and ISR >=2
+  excluding the stopped node. A restart requires the same identity running and
+  its return to every observed declared partition's ISR. Missing, timed-out or
+  contradictory observations do not confirm an effect; keep partial evidence and
+  allow the healing step. With a passing exact-ID oracle, any unconfirmed broker
+  operation gives `broker.operation.effect-unconfirmed` / inconclusive. Data FAIL
+  remains FAIL. This slice supports no multi-broker proxy or tc/iptables backend.
 - **R6.10** **`restore` names the exact checkpoint or savepoint to restart
   from** — the latest, or a specific earlier one, to test rollback.
   `restore.from` accepts `latest-savepoint`, `latest-checkpoint`,
@@ -2059,6 +2077,8 @@ Connector pull-request gating is the same mechanism with one axis:
   evidence after terminal data verification (including a data FAIL), before owner
   cleanup. Omission performs no collection. DIR must be new, have an existing
   parent and contain no symlink ancestors; earlier evidence is never overwritten.
+  With three brokers the collector uses the owned broker-1 replica only, preserving
+  the same aggregate budgets and making no leader/atomic-snapshot claim.
   Source/sink partitions declared by this attempt and coordinator partitions for its
   post-fence listed transactional IDs are inventoried on its owned Kafka container
   and network. Read `__transaction_state` partition count from broker metadata;

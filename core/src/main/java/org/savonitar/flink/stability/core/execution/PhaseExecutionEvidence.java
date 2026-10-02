@@ -22,7 +22,7 @@ public record PhaseExecutionEvidence(
         List<TaskManagerKill> taskManagerKills,
         List<NetworkFault> networkFaults,
         List<TaskManagerRestart> taskManagerRestarts,
-        List<LeaderFault> leaderFaults) {
+        List<LeaderFault> leaderFaults, List<BrokerOperation> brokerOperations) {
     public PhaseExecutionEvidence {
         steps = List.copyOf(Objects.requireNonNull(steps, "steps"));
         taskManagerKills = List.copyOf(Objects.requireNonNull(
@@ -30,7 +30,18 @@ public record PhaseExecutionEvidence(
         networkFaults = List.copyOf(Objects.requireNonNull(networkFaults, "networkFaults"));
         taskManagerRestarts = List.copyOf(Objects.requireNonNull(
                 taskManagerRestarts, "taskManagerRestarts"));
+        brokerOperations = List.copyOf(brokerOperations);
         leaderFaults = List.copyOf(Objects.requireNonNull(leaderFaults, "leaderFaults"));
+    }
+
+    public record BrokerOperation(String path, List<LoopIteration> loopIterations,
+                                  org.savonitar.flink.stability.runtime.api.KafkaBrokerControl.Evidence raw) {
+        public BrokerOperation { loopIterations = List.copyOf(loopIterations); Objects.requireNonNull(raw); }
+    }
+
+    public PhaseExecutionEvidence(List<StepEvidence> steps, List<TaskManagerKill> kills,
+            List<NetworkFault> network, List<TaskManagerRestart> restarts, List<LeaderFault> leaders) {
+        this(steps, kills, network, restarts, leaders, List.of());
     }
 
     public PhaseExecutionEvidence(List<StepEvidence> steps,
@@ -304,6 +315,8 @@ public record PhaseExecutionEvidence(
         WAIT,
         KILL_TASKMANAGER,
         RESTART_TASKMANAGER,
+        KILL_BROKER,
+        RESTART_BROKER,
         NETWORK_FAULT,
         LEADER_FAULT
     }

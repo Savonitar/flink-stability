@@ -256,6 +256,13 @@ final class V1ExecutionResultRenderer {
             restarted.put("previousIdentityFailure", restart.previousIdentityFailure().orElse(null));
             restarted.put("replacementIdentityFailure", restart.replacementIdentityFailure().orElse(null));
         }));
+        var brokerOperations = evidence.putArray("brokerOperations");
+        result.phaseEvidence().ifPresent(phases -> phases.brokerOperations().forEach(operation -> {
+            var rendered = brokerOperations.addObject().put("path", operation.path())
+                    .put("confirmed", operation.raw().confirmed());
+            rendered.set("loopIterations", JSON.valueToTree(operation.loopIterations()));
+            rendered.set("observations", JSON.valueToTree(operation.raw()));
+        }));
         ArrayNode networkFaults = evidence.putArray("networkFaults");
         result.phaseEvidence().ifPresent(phases -> phases.networkFaults().forEach(fault -> {
             ObjectNode rendered = networkFaults.addObject();

@@ -92,7 +92,7 @@ public final class ClusterManager implements AutoCloseable {
                 Network.newNetwork(),
                 true,
                 createFlinkFactoryProvider(classLoadLogs),
-                ApacheKafkaRuntime::new,
+                (ownedNetwork, target) -> target.brokers() == 3 ? new ThreeBrokerKafkaRuntime(ownedNetwork, target) : new ApacheKafkaRuntime(ownedNetwork, target),
                 checkpointStorageRoot);
     }
 
@@ -1110,6 +1110,12 @@ public final class ClusterManager implements AutoCloseable {
             handle = null;
         }
     }
+    public org.savonitar.flink.stability.runtime.api.KafkaBrokerControl.Evidence brokerOperation(String name, boolean restart,
+            List<KafkaLogCapture.Partition> partitions, Duration timeout) {
+        if (kafkaRuntime == null) throw new IllegalStateException("Kafka owner unavailable");
+        return kafkaRuntime.brokerOperation(name, restart, partitions, timeout);
+    }
+
     public KafkaLogCapture captureKafkaLogs(
             List<KafkaLogCapture.Partition> partitions,
             Path directory, MonotonicDeadline deadline) {

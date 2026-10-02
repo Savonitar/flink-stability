@@ -92,6 +92,31 @@ class V1ScenarioExecutorTest {
                     List.of(new KafkaTransactionListing.Transaction(prefix + "-0-1", "CompleteCommit", 7, 0, List.of())));
 
     @Test
+    void brokerEvidenceSurvivesAndUnconfirmedEffectsCannotMaskDataFailure() throws Exception {
+        for (boolean confirmed : List.of(true, false)) for (boolean passes : List.of(true, false)) {
+            var events = new ArrayList<String>();
+            try (Fixture fixture = fixture(document -> {
+                ((ObjectNode) document.at("/setup/kafka/clusters/main")).put("brokers", 3);
+                document.at("/setup/kafka/clusters/main/topics").forEach(topic -> ((ObjectNode) topic).put("replication_factor", 3));
+                var steps = ((com.fasterxml.jackson.databind.node.ArrayNode) document.path("phases")).removeAll()
+                        .addObject().put("name", "brokers").putArray("steps");
+                steps.addObject().putObject("kill").putObject("target").put("kind", "named").put("role", "broker").put("name", "broker-1");
+                steps.addObject().putObject("restart").put("component", "kafka").put("name", "broker-1");
+            })) {
+                var runtime = new FakeRuntime(events); runtime.confirmBroker = confirmed;
+                var result = executor(events, runtime, new FakeFlink(events),
+                        (bootstrap, topic, ids, timeout) -> passes ? passResult() : missingResult()).execute(fixture.bound(), attemptContext());
+                assertEquals(!passes ? V1ScenarioExecutionResult.Status.FAIL : confirmed ? V1ScenarioExecutionResult.Status.PASS
+                        : V1ScenarioExecutionResult.Status.INCONCLUSIVE, result.status());
+                assertEquals(2, result.phaseEvidence().orElseThrow().brokerOperations().size());
+                if (passes && !confirmed) assertEquals("broker.operation.effect-unconfirmed", result.reason());
+                assertEquals(result.phaseEvidence(), result.withCleanupFailure(new IOException("cleanup")).phaseEvidence());
+                assertTrue(events.indexOf("broker-kill") < events.indexOf("broker-restart"));
+            }
+        }
+    }
+
+    @Test
     void kafkaCaptureDecodesAndRetainsReceiptsWithoutOverwritingEarlierEvidence() throws Exception {
         var events = new ArrayList<String>();
         try (Fixture fixture = fixture()) {
@@ -2387,6 +2412,21 @@ class V1ScenarioExecutorTest {
 
         private FakeRuntime(List<String> events) {
             this.events = events;
+        }
+
+        private boolean confirmBroker = true;
+        @Override public org.savonitar.flink.stability.runtime.api.KafkaBrokerControl.Evidence brokerOperation(String name, boolean restart,
+                List<org.savonitar.flink.stability.runtime.api.KafkaLogCapture.Partition> partitions, Duration timeout) {
+            events.add(restart ? "broker-restart" : "broker-kill");
+            assertEquals("broker-1", name); assertEquals(Duration.ofMinutes(2), timeout);
+            var before = new org.savonitar.flink.stability.runtime.api.KafkaBrokerControl.Snapshot("broker-id", "image", "network", 1, !restart);
+            var after = new org.savonitar.flink.stability.runtime.api.KafkaBrokerControl.Snapshot("broker-id", "image", "network", 1, restart);
+            var leadersBefore = partitions.stream().map(p -> new org.savonitar.flink.stability.runtime.api.KafkaBrokerControl.Leadership(
+                    p.topic(), p.partition(), restart ? 2 : 1, List.of(1, 2, 3), restart ? List.of(2, 3) : List.of(1, 2, 3))).toList();
+            var leadersAfter = partitions.stream().map(p -> new org.savonitar.flink.stability.runtime.api.KafkaBrokerControl.Leadership(
+                    p.topic(), p.partition(), 2, List.of(1, 2, 3), restart ? List.of(1, 2, 3) : List.of(2, 3))).toList();
+            return new org.savonitar.flink.stability.runtime.api.KafkaBrokerControl.Evidence(name, restart, before, after,
+                    leadersBefore, leadersAfter, confirmBroker ? null : "unconfirmed metadata");
         }
 
         @Override

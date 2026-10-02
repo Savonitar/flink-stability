@@ -7,7 +7,7 @@ import java.util.regex.Pattern;
 public record KafkaRuntimeTarget(
         String clusterAlias,
         String imageReference,
-        KafkaBrokerPolicy brokerPolicy) {
+        KafkaBrokerPolicy brokerPolicy, int brokers) {
 
     public static final int INTERNAL_LISTENER_PORT = 19_092;
 
@@ -17,10 +17,21 @@ public record KafkaRuntimeTarget(
             Pattern.compile("^apache/kafka:4\\.0\\.(?:0|[1-9][0-9]*)"
                     + "(?:@sha256:[0-9a-f]{64})?$");
 
+    public KafkaRuntimeTarget(String clusterAlias, String imageReference, KafkaBrokerPolicy policy) {
+        this(clusterAlias, imageReference, policy, 1);
+    }
+
+    public String brokerAlias(int ordinal) {
+        if (ordinal < 1 || ordinal > brokers) throw new IllegalArgumentException("Unknown broker ordinal");
+        return brokers == 1 ? networkAlias() : networkAlias() + "-broker-" + ordinal;
+    }
+
     public KafkaRuntimeTarget {
         Objects.requireNonNull(clusterAlias, "clusterAlias");
         Objects.requireNonNull(imageReference, "imageReference");
         Objects.requireNonNull(brokerPolicy, "brokerPolicy");
+        if ((brokers != 1 && brokers != 3) || brokerPolicy.transactionStateLogReplicationFactor() != brokers)
+            throw new IllegalArgumentException("Kafka topology and replication policy must agree (one or three brokers)");
         if (!CLUSTER_ALIAS.matcher(clusterAlias).matches()) {
             throw new IllegalArgumentException(
                     "Kafka cluster alias must be lower-kebab-case: " + clusterAlias);
@@ -37,6 +48,7 @@ public record KafkaRuntimeTarget(
     }
 
     public String internalBootstrapServers() {
-        return networkAlias() + ":" + INTERNAL_LISTENER_PORT;
+        return java.util.stream.IntStream.rangeClosed(1, brokers).mapToObj(i -> brokerAlias(i) + ":" + INTERNAL_LISTENER_PORT)
+                .collect(java.util.stream.Collectors.joining(","));
     }
 }

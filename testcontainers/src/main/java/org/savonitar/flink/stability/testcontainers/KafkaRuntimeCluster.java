@@ -6,7 +6,7 @@ import org.savonitar.flink.stability.runtime.api.MonotonicDeadline;
 import org.savonitar.flink.stability.runtime.api.KafkaLogCapture;
 import org.savonitar.flink.stability.runtime.api.KafkaRuntimeEndpoints;
 
-interface KafkaRuntimeCluster {
+interface KafkaRuntimeCluster extends org.savonitar.flink.stability.runtime.api.KafkaBrokerControl {
     void start();
 
     void stop();
