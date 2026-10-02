@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
-"""Run canonical scenarios against a locally built Kafka connector and against the release.
+"""Run canonical scenarios against two explicit Kafka connector builds or the release.
 
 The candidate catalog swaps only the subject connector: the given JAR plus every JAR in
-its runtime directory. The baseline is the unchanged catalog in scenarios/. Run from
+its runtime directory. The baseline defaults to the unchanged catalog in scenarios/;
+paired --baseline-* options select a local baseline through the same checks. Run from
 the repository root after `mvn install`; docs/PR-TESTING.md describes the procedure.
 """
 import argparse
@@ -26,46 +27,78 @@ def main():
     parser.add_argument("--connector-jar", type=Path, required=True, help="Locally built connector JAR")
     parser.add_argument("--runtime-dir", type=Path, required=True,
                         help="Directory holding exactly the connector's runtime dependency JARs")
+    parser.add_argument("--baseline-connector-jar", type=Path,
+                        help="Optional local baseline connector; requires --baseline-runtime-dir")
+    parser.add_argument("--baseline-runtime-dir", type=Path,
+                        help="Explicit baseline runtime dependency directory")
     parser.add_argument("--output", type=Path, required=True, help="New directory for catalogs and results")
     parser.add_argument("--scenario", action="append", help="Canonical scenario name; repeatable")
     parser.add_argument("--runs", type=int, default=1, help="Runs per scenario and side")
     args = parser.parse_args()
     if args.runs < 1:
         parser.error("--runs must be a positive integer")
+    if (args.baseline_connector_jar is None) != (args.baseline_runtime_dir is None):
+        parser.error("--baseline-connector-jar and --baseline-runtime-dir must be supplied together")
     root = Path.cwd().resolve()
     names = list(dict.fromkeys(args.scenario or DEFAULT_SCENARIOS))
-    connector = args.connector_jar.resolve()
-    dependencies = sorted(args.runtime_dir.resolve().glob("*.jar"))
-    if not dependencies:
-        raise SystemExit("No runtime dependency JARs in " + str(args.runtime_dir))
-    snippet = subject_snippet(artifact_reference(connector, root),
-                              [artifact_reference(jar, root) for jar in dependencies])
+    candidate, candidate_snippet = local_subject(root, args.connector_jar, args.runtime_dir)
+    baseline = {"connector": "maven:org.apache.flink:flink-connector-kafka:5.0.0-2.2",
+                "connectorSha256": RELEASED_SHA256, "dependencyMode": "auto",
+                "runtimeDependencySha256": None}
+    baseline_snippet = None
+    if args.baseline_connector_jar is not None:
+        baseline, baseline_snippet = local_subject(
+            root, args.baseline_connector_jar, args.baseline_runtime_dir)
     # Validate every scenario before creating any output.
     scenarios = {name: canonical(root, name) for name in names}
-    candidates = {name: replace_subject(path.read_text(), snippet) for name, path in scenarios.items()}
+    replacements = {"candidate": {name: replace_subject(path.read_text(), candidate_snippet)
+                                   for name, path in scenarios.items()}}
+    if baseline_snippet is not None:
+        replacements["baseline"] = {name: replace_subject(path.read_text(), baseline_snippet)
+                                    for name, path in scenarios.items()}
     output = args.output.resolve()
     output.mkdir(parents=True, exist_ok=False)
-    catalog = output / "candidate-catalog"
-    catalog.mkdir()
-    for name, path in scenarios.items():
-        (catalog / path.name).write_text(candidates[name])
-        shutil.copyfile(path.with_name(name + ".expected.yaml"), catalog / (name + ".expected.yaml"))
-    manifest = {"connector": str(connector.relative_to(root)), "connectorSha256": sha256(connector),
-                "runtimeDependencySha256": {jar.name: sha256(jar) for jar in dependencies},
-                "scenarios": names, "runs": args.runs}
+    catalogs = {"baseline": root / "scenarios"}
+    for side, documents in replacements.items():
+        catalog = output / (side + "-catalog")
+        catalog.mkdir()
+        catalogs[side] = catalog
+        for name, path in scenarios.items():
+            (catalog / path.name).write_text(documents[name])
+            shutil.copyfile(path.with_name(name + ".expected.yaml"), catalog / (name + ".expected.yaml"))
+    manifest = {"baseline": baseline, "candidate": candidate, "scenarios": names, "runs": args.runs}
     (output / "manifest.json").write_text(json.dumps(manifest, indent=2) + "\n")
     rows = []
     for name in names:
-        for side, catalog_root, subject in (("baseline", root / "scenarios", RELEASED_SHA256),
-                                            ("candidate", catalog, manifest["connectorSha256"])):
+        for side in ("baseline", "candidate"):
             for run in range(1, args.runs + 1):
                 result, exit_code = run_scenario(
-                    root, catalog_root, name, output / side / name / f"run-{run}")
-                rows.append(summarize(name, side, run, result, subject, exit_code))
+                    root, catalogs[side], name, output / side / name / f"run-{run}")
+                rows.append(summarize(name, side, run, result,
+                                      manifest[side]["connectorSha256"], exit_code))
     summary = render(manifest, rows)
     (output / "summary.md").write_text(summary)
     print(summary)
     return gate_exit_code(rows)
+
+
+def local_subject(root, connector, runtime):
+    """Bind either side through exactly the same path, digest and closure checks."""
+    primary = artifact_reference(connector, root)
+    runtime = runtime.resolve()
+    if not runtime.is_dir() or not runtime.is_relative_to(root):
+        raise SystemExit("Runtime directory must be inside the artifact root: " + str(runtime))
+    dependencies = sorted(runtime.glob("*.jar"))
+    if not dependencies:
+        raise SystemExit("No runtime dependency JARs in " + str(runtime))
+    references = [artifact_reference(jar, root) for jar in dependencies]
+    digest = sha256(root / primary)
+    snippet = subject_snippet(primary, references)
+    first, rest = snippet.split("\n", 1)
+    snippet = first + "\nsha256: " + digest + "\n" + rest
+    return {"connector": primary, "connectorSha256": digest, "dependencyMode": "explicit",
+            "runtimeDependencySha256": {reference: sha256(root / reference)
+                                         for reference in references}}, snippet
 
 
 def canonical(root, name):
@@ -122,10 +155,15 @@ def gate_exit_code(rows):
 
 
 def render(manifest, rows):
-    lines = ["# Connector pull-request gate", "",
-             f"Candidate `{manifest['connector']}` (SHA-256 `{manifest['connectorSha256'][:12]}`) with "
-             f"{len(manifest['runtimeDependencySha256'])} runtime dependency JARs; baseline: released "
-             "flink-connector-kafka 5.0.0-2.2.", "",
+    lines = ["# Connector pull-request gate", ""]
+    for side in ("baseline", "candidate"):
+        subject = manifest[side]
+        dependencies = subject["runtimeDependencySha256"]
+        closure = ("automatic released Maven closure" if dependencies is None
+                   else f"{len(dependencies)} explicit runtime dependency JARs")
+        lines += [f"{side.capitalize()}: `{subject['connector']}` "
+                  f"(SHA-256 `{subject['connectorSha256']}`), {closure}.", ""]
+    lines += [
              "Gate result: " + ("PASS" if gate_exit_code(rows) == 0 else "NOT PASSED") + ".", "",
              "| Scenario | Side | Run | Verdict | Reason | Missing | Duplicates | Subject JAR | Exit |",
              "| --- | --- | --- | --- | --- | --- | --- | --- | --- |"]
