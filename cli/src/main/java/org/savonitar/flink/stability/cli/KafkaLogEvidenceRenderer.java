@@ -36,6 +36,11 @@ final class KafkaLogEvidenceRenderer {
                 archive.sha256().ifPresent(hash -> item.put("sha256", hash));
             });
         });
+        evidence.transactions().ifPresent(receipt -> {
+            var item = node.putObject("transactions").put("status", receipt.status());
+            receipt.evidence().ifPresent(path -> item.put("evidence", path.toString()));
+            receipt.sha256().ifPresent(hash -> item.put("sha256", hash));
+        });
         var decoded = node.putArray("decoded");
         evidence.decoded().forEach(receipt -> {
             var item = decoded.addObject().put("archive", receipt.archive().toString()).put("status", receipt.status())

@@ -3,6 +3,8 @@ package org.savonitar.flink.stability.cli;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import org.savonitar.flink.stability.core.validation.kafka.KafkaLogSegmentDecoder;
+import org.savonitar.flink.stability.core.validation.kafka.KafkaTransactionLogEvidence;
+import org.savonitar.flink.stability.runtime.api.MonotonicDeadline;
 import org.savonitar.flink.stability.runtime.api.Digests;
 import picocli.CommandLine;
 
@@ -38,6 +40,13 @@ public final class InspectKafkaLogCommand implements Callable<Integer> {
             description = "Maximum decoded records, from 1 to 100000 (default: 100000).")
     private int maximumRecords;
 
+    @CommandLine.Option(names = "--transaction-state", description = "Decode --input as a coordinator log (known key v0, value v0/v1 only).")
+    private boolean transactionState;
+
+    @CommandLine.Option(names = "--transaction-state-input", paramLabel = "PARTITION=FILE",
+            description = "Join a coordinator segment with --input; repeatable, including multiple segments of a partition.")
+    private java.util.List<String> transactionInputs = new java.util.ArrayList<>();
+
     @Override
     public Integer call() {
         ObjectNode result = JSON.createObjectNode();
@@ -51,11 +60,42 @@ public final class InspectKafkaLogCommand implements Callable<Integer> {
                     || maximumRecords < 1 || maximumRecords > KafkaLogSegmentDecoder.MAX_RECORDS) {
                 throw new IllegalArgumentException("Input byte or record limit is outside the supported range");
             }
+            var deadline = MonotonicDeadline.start(java.time.Duration.ofSeconds(60), System::nanoTime);
             byte[] bytes = readBounded(input, maximumBytes);
             result.put("inputBytes", bytes.length);
             result.put("inputSha256", Digests.sha256(bytes));
             var segment = new KafkaLogSegmentDecoder().decode(bytes, maximumRecords);
             result.set("segment", JSON.valueToTree(segment));
+            if (transactionState || !transactionInputs.isEmpty()) {
+                var transactions = new KafkaTransactionLogEvidence();
+                transactions.add(new KafkaTransactionLogEvidence.Source(
+                        transactionState ? KafkaTransactionLogEvidence.TOPIC : "unspecified-data-topic", -1,
+                        input.toAbsolutePath().normalize().toString()), segment, deadline);
+                int bytesLeft = maximumBytes - bytes.length;
+                int batchesLeft = KafkaLogSegmentDecoder.MAX_BATCHES - segment.batches().size();
+                int recordsLeft = maximumRecords - Math.toIntExact(segment.recordCount());
+                var inputs = result.putArray("transactionStateInputs");
+                for (String supplied : transactionInputs) {
+                    int separator = supplied.indexOf('=');
+                    if (separator < 1) throw new IllegalArgumentException("Expected PARTITION=FILE");
+                    int partition = Integer.parseInt(supplied.substring(0, separator));
+                    if (partition < 0) throw new IllegalArgumentException("Coordinator partition must be nonnegative");
+                    Path path = Path.of(supplied.substring(separator + 1));
+                    if (recordsLeft < 1 || bytesLeft < 1) throw new IllegalArgumentException("Aggregate input budget exhausted");
+                    byte[] extra = readBounded(path, bytesLeft);
+                    var decoded = new KafkaLogSegmentDecoder().decode(extra, recordsLeft);
+                    if (decoded.batches().size() > batchesLeft) throw new IllegalArgumentException("Aggregate batch budget exhausted");
+                    batchesLeft -= decoded.batches().size();
+                    bytesLeft -= extra.length; recordsLeft -= Math.toIntExact(decoded.recordCount());
+                    inputs.addObject().put("partition", partition).put("path", path.toAbsolutePath().normalize().toString())
+                            .put("sha256", Digests.sha256(extra)).put("bytes", extra.length);
+                    transactions.add(new KafkaTransactionLogEvidence.Source(KafkaTransactionLogEvidence.TOPIC,
+                            partition, path.toAbsolutePath().normalize().toString()), decoded, deadline);
+                }
+                var summary = transactions.summary();
+                result.set("transactions", JSON.valueToTree(summary));
+                if (!summary.decoded()) throw new IllegalArgumentException("Transaction-log decoding failed; see transactions.diagnostics");
+            }
             result.put("complete", true);
             specification.commandLine().getOut().println(result);
             return CommandLine.ExitCode.OK;

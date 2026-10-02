@@ -50,6 +50,40 @@ public final class KafkaAdminTransactionLister {
         }
     }
 
+    /** Read the actual coordinator topic layout under the caller's collection-wide deadline. */
+    public int transactionStatePartitions(String bootstrapServers,
+            org.savonitar.flink.stability.runtime.api.MonotonicDeadline deadline) throws Exception {
+        Properties properties = new Properties();
+        properties.put(AdminClientConfig.BOOTSTRAP_SERVERS_CONFIG, bootstrapServers);
+        int timeout = Math.toIntExact(Math.max(1, deadline.remaining().toMillis()));
+        properties.put(AdminClientConfig.DEFAULT_API_TIMEOUT_MS_CONFIG, timeout);
+        properties.put(AdminClientConfig.REQUEST_TIMEOUT_MS_CONFIG, timeout);
+        Admin admin = Admin.create(properties);
+        try {
+            var topic = admin.describeTopics(List.of(KafkaTransactionLogEvidence.TOPIC))
+                    .allTopicNames().get(deadline.remaining().toNanos(), java.util.concurrent.TimeUnit.NANOSECONDS)
+                    .get(KafkaTransactionLogEvidence.TOPIC);
+            return partitionCount(topic.partitions());
+        } finally {
+            admin.close(deadline.remaining());
+        }
+    }
+
+    static int partitionCount(List<org.apache.kafka.common.TopicPartitionInfo> partitions) {
+        var ids = partitions.stream().map(org.apache.kafka.common.TopicPartitionInfo::partition).sorted().toList();
+        if (ids.isEmpty()) throw new IllegalArgumentException("Empty transaction-state metadata");
+        for (int i = 0; i < ids.size(); i++) {
+            if (ids.get(i) != i) throw new IllegalArgumentException("Noncontiguous transaction-state metadata");
+        }
+        return ids.size();
+    }
+
+    /** Kafka Utils.abs maps the Integer.MIN_VALUE hash to zero. */
+    public static int transactionStatePartition(String transactionalId, int count) {
+        if (count < 1) throw new IllegalArgumentException("Invalid metadata partition count");
+        return org.apache.kafka.common.utils.Utils.abs(Objects.requireNonNull(transactionalId).hashCode()) % count;
+    }
+
     private static KafkaTransactionListing.Transaction transaction(
             String transactionalId,
             TransactionDescription description) {

@@ -74,6 +74,16 @@
             <version>4.0.0</version>
         </dependency>
 
+        <!-- Kafka's generated transaction-log messages define the strict v0/v1 wire format. -->
+        <dependency>
+            <groupId>org.apache.kafka</groupId>
+            <artifactId>kafka-transaction-coordinator</artifactId>
+            <version>4.0.0</version>
+            <exclusions>
+                <exclusion><groupId>*</groupId><artifactId>*</artifactId></exclusion>
+            </exclusions>
+        </dependency>
+
         <!-- Validate our checkpoint request against the released Flink REST contract. -->
         <dependency>
             <groupId>org.apache.flink</groupId>

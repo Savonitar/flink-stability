@@ -63,7 +63,7 @@ class RunScenarioCommandTest {
             @Override public V1ScenarioExecutionResult execute(V1AttemptContext context) {
                 seen.set(context);
                 return passResult().withKafkaLogs(new org.savonitar.flink.stability.core.execution.KafkaLogEvidence(
-                        "partial", Optional.empty(), List.of(), List.of("transport failure")));
+                        "partial", Optional.empty(), List.of(), List.of("transport failure"), Optional.empty()));
             }
             @Override public ExecutableScenarioPlan.ExpectedOutcome expectedOutcome() { return expectation; }
             @Override public void close() {}
@@ -90,7 +90,7 @@ class RunScenarioCommandTest {
                 return passResult().withComponentErrors(new org.savonitar.flink.stability.core.execution.ComponentErrorEvidence(
                         List.of(event), List.of())).withKafkaLogs(
                                 new org.savonitar.flink.stability.core.execution.KafkaLogEvidence(
-                                        "partial", Optional.empty(), List.of(), List.of("capture unavailable")));
+                                        "partial", Optional.empty(), List.of(), List.of("capture unavailable"), Optional.empty()));
             }
             @Override public ExecutableScenarioPlan.ExpectedOutcome expectedOutcome() { return expectation; }
             @Override public void close() {}
