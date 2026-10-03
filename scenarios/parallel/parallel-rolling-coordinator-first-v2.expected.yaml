@@ -1,0 +1,9 @@
+format: v1
+kind: expected-result
+
+meta:
+  name: parallel-rolling-coordinator-first-v2.expected
+  scenario: parallel-rolling-coordinator-first-v2
+
+default:
+  outcome: pass

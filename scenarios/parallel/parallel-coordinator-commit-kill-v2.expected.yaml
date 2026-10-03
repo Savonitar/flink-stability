@@ -1,0 +1,7 @@
+format: v1
+kind: expected-result
+meta:
+  name: parallel-coordinator-commit-kill-v2.expected
+  scenario: parallel-coordinator-commit-kill-v2
+default:
+  outcome: pass

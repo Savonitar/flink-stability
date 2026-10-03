@@ -1,0 +1,80 @@
+format: v1
+kind: scenario
+
+meta:
+  name: parallel-broker-leader-kill-v1
+  description: Four-subtask, two-TaskManager variant of broker-leader-kill-v1; four input and output partitions.
+
+runs: 1
+health_retry_limit: 0
+
+setup:
+  kafka:
+    clusters:
+      main:
+        image: apache/kafka:4.0.0
+        brokers: 3
+        transaction_version: 1
+        topics:
+          - name: input
+            partitions: 4
+            replication_factor: 3
+            input_source:
+              mode: generated
+              format: integer-sequence
+              total: 12000
+          - name: output
+            partitions: 4
+            replication_factor: 3
+  flink:
+    image: flink:2.2.0
+    jobmanagers: 1
+    taskmanagers: 2
+
+subject:
+  connectors:
+    kafka:
+      artifact: maven:org.apache.flink:flink-connector-kafka:5.0.0-2.2
+
+workload:
+  jobs:
+    - alias: eos-job
+      jar: ./flink-job-generator/target/flink-job-generator.jar
+      connectors: [kafka]
+      parallelism: 4
+      source: { cluster: main, topic: input }
+      sink:
+        cluster: main
+        topic: output
+        delivery_guarantee: EXACTLY_ONCE
+        transactional_id_prefix: parallel-broker-leader-kill-v1
+        transaction_id_naming_strategy: INCREMENTING
+      checkpointing:
+        interval: 1s
+        mode: EXACTLY_ONCE
+      program_args: [--processingDelayMs, "5"]
+
+phases:
+  - name: warmup
+    steps:
+      - await:
+          condition: { type: job-state, job: eos-job, state: RUNNING }
+          timeout: 2m
+          on_timeout: inconclusive
+      - await:
+          condition: { type: checkpoint-completed, job: eos-job, count: 1 }
+          timeout: 2m
+          on_timeout: fail
+  - name: broker-recovery
+    steps:
+      - broker_fault:
+          mode: kill
+          target: { kind: selector, role: broker, cluster: main, type: partition-leader, topic: output, partition: 0 }
+          duration: 20s
+          timeout: 2m
+
+terminal_validations:
+  - type: kafka.id-set
+    cluster: main
+    topic: output
+    expected: input-manifest
