@@ -554,3 +554,12 @@ expected validation code.
 | SV-225 | Broker selector names a missing topic/partition, another cluster, unknown job or nontransactional sink. | Reject preflight before provisioning. Distinct new broker-leader-kill, broker-leader-pause and broker-coordinator-pause catalogs validate offline. |
 | SV-226 | Admin metadata moves a partition leader; several open sink transactions exist; the selected transaction closes or metadata is absent. | Resolve at injection time, retain lexicographic transaction choice and actual coordinator partition count/hash, use its observed leader, reject missing/stale/unowned selection without guessing. |
 | SV-227 | Pause/resume changes physical paused state, ISR and leader; transfer is missing, mutation fails ambiguously or the deadline expires. | Retain partial evidence, bound the hold, always attempt healing of the same selected identity, do not confirm from Docker acknowledgement alone, preserve data FAIL. |
+
+### Seeded campaigns
+
+| Case | Input | Required result |
+| --- | --- | --- |
+| SV-228 | Campaign seed replay | Same materialized base, expectation, constraints, seed and version regenerate identical scenario/expected YAML bytes; manifest/recipe tampering and unknown versions fail. |
+| SV-229 | Campaign primitive closure | TM/broker kill-wait-restart, JM leader/token faults, runtime broker selectors/pause and EndTxn loss compile with their existing topology requirements; all templates, even unselected ones, are validated. |
+| SV-230 | Campaign reduction | Removal preserves complete fault/heal units; shortening reduces holds/token delay without changing timeouts or oracle; last removal drops the phase; occurrence-only loss cannot be shortened. Candidates replay and pass offline validation. |
+| SV-231 | Campaign output/preflight | Unknown constraints, invalid bounds and incompatible templates fail; output is a new jobs directory without symlink traversal. Existing output/canonical scenarios are not overwritten; missing offline artifacts publish no partial catalog. |
