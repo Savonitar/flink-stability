@@ -32,6 +32,27 @@ class ProxyFaultInjectorTest {
     Path control;
 
     @Test
+    void retainsAppendEvidenceAndHealsAfterTheConfirmedReplacement() throws Exception {
+        FakeProxy proxy = new FakeProxy(control, List.of("""
+                {"event":"response-error-after-append","api":"produce","apiVersion":12,
+                 "claim":1,"occurrence":1,"timeMillis":5000,"beforeDeadline":true,
+                 "transactionalId":"eos-1","producerId":42,"producerEpoch":2,
+                 "forwardedToBroker":true,"originalErrorCodes":{"output/0":0},
+                 "originalBaseOffsets":{"output/0":123},"substitutedErrorCode":7}
+                """));
+        var request = new ExecutableScenarioPlan.ProtocolFault("kafka-proxy", Optional.empty(), Optional.of("eos"),
+                ExecutableScenarioPlan.NetworkFaultAction.ERROR_AFTER_APPEND, 1, Duration.ofSeconds(10),
+                "produce", Optional.of("output"), Optional.empty(), Optional.of("request-timed-out"));
+        var evidence = proxy.injector().inject(PATH, request);
+        assertTrue(evidence.triggered());
+        assertEquals("error-after-append", proxy.rule().path("action").asText());
+        assertEquals(java.util.Map.of("output/0", 123L), evidence.affected().getFirst().originalBaseOffsets());
+        assertEquals((short) 7, evidence.affected().getFirst().substitutedErrorCode());
+        assertTrue(evidence.dropped().isEmpty());
+        assertFalse(Files.exists(control.resolve("rules/" + FAULT_ID + ".json")));
+    }
+
+    @Test
     void recordsTheDroppedResponseAndTheBrokerAnswerTheClientNeverSaw() throws Exception {
         FakeProxy proxy = new FakeProxy(control, List.of(
                 // The broker's first answer is an error: the filter lets it through, and the

@@ -91,6 +91,7 @@ final class ProxyFaultInjector implements ExecutablePhaseExecutor.NetworkFaults 
             case DROP_RESPONSE -> "response-dropped";
             case DELAY -> "request-delayed";
             case ERROR_RESPONSE -> "response-substituted";
+            case ERROR_AFTER_APPEND -> "response-error-after-append";
         };
         // The filter measures this budget from arm on its own monotonic clock. Harness
         // scheduling and delayed file visibility cannot turn a late drop into a trigger.
@@ -252,6 +253,7 @@ final class ProxyFaultInjector implements ExecutablePhaseExecutor.NetworkFaults 
             case DROP_RESPONSE -> "NONE".equals(event.path("error").asText());
             case DELAY -> event.path("requestedDelayMillis").longValue() == fault.latency().orElseThrow().toMillis()
                     && event.path("actualDelayNanos").longValue() >= fault.latency().orElseThrow().toNanos();
+            case ERROR_AFTER_APPEND -> ProxyFaultEvidence.qualifiesAfterAppend(event);
             case ERROR_RESPONSE -> event.path("substitutedErrorCode").isIntegralNumber()
                     && !event.path("forwardedToBroker").asBoolean(true)
                     && "synthetic-before-broker".equals(event.path("errorOrigin").asText());

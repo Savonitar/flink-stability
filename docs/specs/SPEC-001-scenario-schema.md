@@ -3304,7 +3304,7 @@ All three commands prepare artifacts offline and never provision or execute infr
 
 ### Counted transactional proxy faults (development extension)
 
-`network_fault` executes the seven transactional APIs and four counted actions
+`network_fault` executes the seven transactional APIs and counted actions
 specified by SPEC-004 K11–K12. `occurrences` and `trigger_deadline` are required;
 `duration` is forbidden in this form. Delay adds `fault.latency` bounded to 5 s;
 error-response adds an allow-listed `fault.error`. `match.result` remains EndTxn
@@ -3317,6 +3317,17 @@ producer fields mean the selected wire version did not carry them. A rule must
 complete its full occurrence count on time as well as pass exact-ID validation;
 late/absent effects retain `network-fault.trigger-missed`. Existing EndTxn
 `dropped` and retry evidence remain available.
+
+`error-after-append` is a counted Produce-only action with
+`fault.error: request-timed-out`. It forwards the request and replaces only a
+successful, correlated broker response carrying nonnegative base offsets for
+exactly every requested partition. The original codes/offsets, producer identity
+and `forwardedToBroker: true` remain in evidence, with
+`errorOrigin: synthetic-after-append`. The client receives an uncertain timeout
+outcome, not a fabricated pre-append rejection. This mode requires `acks=-1`;
+missing/mixed/duplicate/foreign partition replies pass unchanged and release the
+reservation. Late/missing proof cannot make the scenario PASS. See SPEC-004 K12.7.
+
 
 ### Coordinator failure with a confirmed commit window
 

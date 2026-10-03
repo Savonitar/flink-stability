@@ -1452,6 +1452,30 @@ class ExecutableScenarioPlanCompilerTest {
         })));
     }
 
+    @Test
+    void compilesOnlyTheSafeCountedErrorAfterAppend() {
+        var plan = compiler.compile(resolved(document -> {
+            var fault = dropFault(document, "error-after-append");
+            ((ObjectNode) fault.get("match")).put("api", "produce").put("transactional_id_prefix", "minimal");
+            ((ObjectNode) fault.get("fault")).put("error", "request-timed-out");
+        }));
+        assertEquals(ExecutableScenarioPlan.NetworkFaultAction.ERROR_AFTER_APPEND,
+                ((ExecutableScenarioPlan.ProtocolFault) plan.phases().getFirst().steps().getFirst()).action());
+        for (String api : java.util.List.of("produce", "end-txn")) {
+            org.junit.jupiter.api.Assertions.assertThrows(SpecificationException.class, () -> compiler.compile(resolved(document -> {
+                var fault = dropFault(document, "error-after-append");
+                ((ObjectNode) fault.get("match")).put("api", api);
+                ((ObjectNode) fault.get("fault")).put("error", api.equals("produce") ? "not-enough-replicas" : "request-timed-out");
+            })));
+        }
+        org.junit.jupiter.api.Assertions.assertThrows(SpecificationException.class, () -> compiler.compile(resolved(document -> {
+            var fault = dropFault(document, "error-after-append");
+            ((ObjectNode) fault.get("match")).put("api", "produce");
+            ((ObjectNode) fault.get("fault")).put("error", "request-timed-out");
+            fault.remove("occurrences");
+        })));
+    }
+
     /** Declares kafka-proxy and routes the sink through it. */
     private static void routeSinkThroughProxy(ObjectNode document) {
         ObjectNode proxy = ((ObjectNode) document.at("/setup")).putObject("proxies")

@@ -23,6 +23,7 @@ class ProtocolActionsTest {
     final ObjectMapper json = new ObjectMapper();
     final AtomicInteger forwarded = new AtomicInteger();
     final AtomicReference<ApiMessage> synthetic = new AtomicReference<>();
+    final AtomicReference<ApiMessage> responseForwarded = new AtomicReference<>();
 
     @Test void allApisDropOnlyTwoMatchingMessagesAcrossConnections() throws Exception {
         for (var fixture : ProtocolMessagesTest.fixtures()) {
@@ -95,7 +96,7 @@ class ProtocolActionsTest {
         assertThrows(IllegalArgumentException.class, () -> FaultRule.parse(rule));
     }
 
-    private FaultRuleBook arm(ProtocolMessagesTest.Fixture fixture, String action, String error, long delay, java.util.function.LongSupplier clock, long deadline) throws Exception {
+    FaultRuleBook arm(ProtocolMessagesTest.Fixture fixture, String action, String error, long delay, java.util.function.LongSupplier clock, long deadline) throws Exception {
         Files.createDirectories(control.resolve("rules"));
         var rule = json.createObjectNode().put("faultId", "f").put("api", fixture.api().name().toLowerCase(Locale.ROOT).replace('_', '-')).put("action", action)
             .put("transactionalIdPrefix", "eos-").put("occurrences", 2).put("triggerDeadlineNanos", deadline);
@@ -105,7 +106,7 @@ class ProtocolActionsTest {
         var book = new FaultRuleBook(control, () -> 0L, clock); book.refresh(); return book;
     }
     private void cleanRule() throws Exception { Files.delete(control.resolve("rules/f.json")); Files.delete(control.resolve("events/f.jsonl")); }
-    private List<JsonNode> events() throws Exception {
+    List<JsonNode> events() throws Exception {
         List<JsonNode> events = new ArrayList<>();
         for (String line : Files.readAllLines(control.resolve("events/f.jsonl"))) events.add(json.readTree(line));
         return events;
@@ -113,10 +114,14 @@ class ProtocolActionsTest {
     private RequestHeaderData header(ProtocolMessagesTest.Fixture fixture, int correlation) {
         return new RequestHeaderData().setRequestApiKey(fixture.api().id).setRequestApiVersion(fixture.version()).setCorrelationId(correlation).setClientId("test");
     }
-    private FilterContext context() {
+    FilterContext context() {
         return fake(FilterContext.class, (name, args) -> switch (name) {
             case "channelDescriptor" -> "test";
             case "forwardRequest" -> { forwarded.incrementAndGet(); yield CompletableFuture.completedFuture(result(false)); }
+            case "forwardResponse" -> {
+                responseForwarded.set((ApiMessage) args[1]);
+                yield CompletableFuture.completedFuture(fake(ResponseFilterResult.class, (method, values) -> false));
+            }
             case "requestFilterResultBuilder" -> fake(RequestFilterResultBuilder.class, (method, values) -> {
                 if (method.equals("errorResponse")) {
                     var header = (RequestHeaderData) values[0]; var request = (ApiMessage) values[1];

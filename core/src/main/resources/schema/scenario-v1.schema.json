@@ -1884,7 +1884,8 @@
                       "type": {
                         "enum": [
                           "drop-request",
-                          "drop-response"
+                          "drop-response",
+                          "error-after-append"
                         ]
                       }
                     },
@@ -2300,7 +2301,7 @@
           ],
           "properties": {
             "type": {
-              "const": "error-response"
+              "enum": ["error-response", "error-after-append"]
             },
             "error": {
               "$ref": "#/$defs/kebabName"

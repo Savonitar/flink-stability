@@ -119,7 +119,7 @@ not timer-driven sleeps against an opaque TCP connection.
 - **K3.9** `heal` is required and must be `restore-proxy-rule` in v1.
 - **K3.10** A held network fault is a held fault under SPEC-001 R6.9. A counted
   fault is bounded by its occurrences and trigger deadline instead.
-- **K3.11** `drop-request` and `drop-response` are **counted** faults. `delay` and
+- **K3.11** `drop-request`, `drop-response` and `error-after-append` are **counted** faults. `delay` and
   `error-response` also use the counted form when `occurrences` is present. They affect
   the first `occurrences` matching messages after the rule is armed, then the
   rule heals:
@@ -201,6 +201,7 @@ not timer-driven sleeps against an opaque TCP connection.
   | `error-response` | `error` | Return a Kafka error for matching requests where the API supports it. |
   | `drop-request` | none (counted, K3.11) | Neither forward nor answer a matching request. |
   | `drop-response` | none (counted, K3.11) | Forward a matching request, then discard the broker's successful response. |
+  | `error-after-append` | `error: request-timed-out` (counted, K12.7) | Forward Produce; replace a complete successful append response with a timeout, retaining original offsets as evidence. |
 
 - **K5.1a** A dropped request never reaches the broker; the client sees only a
   request timeout and may retry. A retry is a new message and counts as another
@@ -395,7 +396,8 @@ rejected before provisioning with a `runner.*` diagnostic:
   `add-partitions-to-txn`, `add-offsets-to-txn`, `txn-offset-commit` or
   `find-coordinator` (`runner.network-fault.type-unsupported`,
   `runner.network-fault.api-unsupported`) and do not appear inside loops
-  (`runner.network-fault.loop-unsupported`).
+  (`runner.network-fault.loop-unsupported`). Counted `error-after-append` is additionally
+  executable for Produce only (K12.7).
 - **K11.4** The proxy is Kroxylicious 0.21.0, pinned by digest, with the harness's
   own fault filter plugin (module `kroxylicious-fault-filter`) loaded from its
   classpath. Only connections that route through the proxy can be affected; the
@@ -418,9 +420,9 @@ rejected before provisioning with a `runner.*` diagnostic:
 - **K12.3** `error-response` constructs a Kafka response *before* forwarding the
   selected request. `originalErrorCode: null`, an empty `originalErrorCodes`,
   `substitutedErrorCode`, `errorOrigin: synthetic-before-broker` and
-  `forwardedToBroker: false` make this explicit. It never turns a successful
-  broker commit into a rejection: that would invent a state the broker did not
-  have. This models a transient broker rejection before the operation's effect.
+  `forwardedToBroker: false` make this explicit. This mode models a transient
+  broker rejection before the operation's effect. Post-append uncertainty is a
+  separate action (K12.7), with different evidence and allowed errors.
   The allow-list is shared by preflight and the container plugin.
 
   | Error | Plausible broker state modeled |
@@ -458,3 +460,29 @@ rejected before provisioning with a `runner.*` diagnostic:
   transaction versions, Produce response loss in TV2, and concurrent partition
   enlistment in TV1. They retain the exact-ID oracle and require every declared
   occurrence; a missed fault cannot produce PASS.
+
+- **K12.7** Counted `error-after-append` accepts only `api: produce` and
+  `fault.error: request-timed-out`. With transactional `acks=-1` requests it first
+  forwards to the broker. It consumes a reserved occurrence only after receiving
+  `NONE` and nonnegative base offsets for exactly the requested topic/partition
+  set. Missing, additional, duplicate or failed partition results pass through
+  without consuming the occurrence. It duplicates the response, replaces each
+  partition's code with `REQUEST_TIMED_OUT`, and clears successful offsets/time
+  fields in the client response. The original response object is unchanged.
+
+  `REQUEST_TIMED_OUT` is compatible with an already appended batch: the producer
+  may be uncertain whether its write completed when the request's wait expires.
+  The proxy models that client outcome after observing an append acknowledgement;
+  it does **not** claim the broker really timed out or its ISR fell below minimum.
+  `NOT_ENOUGH_REPLICAS` is a pre-append error and is forbidden in this action.
+  Errors asserting fencing, an epoch change or a competing producer are forbidden.
+
+  Evidence event `response-error-after-append` retains the request's transactional
+  ID/producer ID/epoch, original per-partition error codes and `originalBaseOffsets`,
+  replacement code, `errorOrigin: synthetic-after-append`, forwarding status,
+  occurrence and deadline qualification. Unknown offsets cannot be guessed.
+  Completion after the deadline remains unconfirmed. Existing EndTxn drop/retry
+  evidence and canonical scenarios are unchanged. TV1 and TV2 have separately
+  named `protocol-produce-after-append-v1/v2` scenarios. An append acknowledgement
+  does not establish transaction commit, read visibility, or blame; exact-ID and
+  retained Kafka records provide separate observations.

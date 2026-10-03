@@ -24,7 +24,7 @@ import java.util.concurrent.CompletionStage;
 final class KafkaProtocolFaultFilter implements RequestFilter, ResponseFilter {
     private final FaultRuleBook book;
     private final Map<Integer, Pending> responses = new HashMap<>();
-    private record Pending(FaultRuleBook.Claim claim, Map<String, Object> request) {}
+    private record Pending(FaultRuleBook.Claim claim, Map<String, Object> request, java.util.Set<String> partitions) {}
 
     KafkaProtocolFaultFilter(FaultRuleBook book) { this.book = Objects.requireNonNull(book); }
     private static String alias(ApiKeys api) { return api.name().toLowerCase(Locale.ROOT).replace('_', '-'); }
@@ -57,8 +57,13 @@ final class KafkaProtocolFaultFilter implements RequestFilter, ResponseFilter {
                 details.put("occurrence", book.complete(claim)); book.record(claim, "request-dropped", details);
                 return context.requestFilterResultBuilder().drop().completed();
             }
-            case DROP_RESPONSE -> {
-                responses.put(header.correlationId(), new Pending(claim, details));
+            case DROP_RESPONSE, ERROR_AFTER_APPEND -> {
+                var partitions = ProduceResponseFault.partitions(request);
+                if (claim.rule().action() == FaultRule.Action.ERROR_AFTER_APPEND && partitions.isEmpty()) {
+                    book.release(claim);
+                    return context.forwardRequest(header, request);
+                }
+                responses.put(header.correlationId(), new Pending(claim, details, partitions));
                 details.put("forwardedToBroker", true); book.record(claim, "request-forwarded", details);
                 return context.forwardRequest(header, request);
             }
@@ -106,6 +111,19 @@ final class KafkaProtocolFaultFilter implements RequestFilter, ResponseFilter {
         if (!alias(api).equals(claim.request.api()) || codes.isEmpty() || codes.values().stream().anyMatch(code -> code != 0)) {
             book.release(claim); book.record(claim, "response-forwarded", details);
             return context.forwardResponse(header, response);
+        }
+        if (claim.rule().action() == FaultRule.Action.ERROR_AFTER_APPEND) {
+            var offsets = ProduceResponseFault.appendOffsets(response, pending.partitions());
+            if (offsets.isEmpty()) {
+                book.release(claim); book.record(claim, "response-forwarded", details);
+                return context.forwardResponse(header, response);
+            }
+            var replacement = ProduceResponseFault.timeout((org.apache.kafka.common.message.ProduceResponseData) response);
+            details.put("originalBaseOffsets", offsets);
+            details.put("substitutedErrorCode", Errors.REQUEST_TIMED_OUT.code());
+            details.put("errorOrigin", "synthetic-after-append");
+            details.put("occurrence", book.complete(claim)); book.record(claim, "response-error-after-append", details);
+            return context.forwardResponse(header, replacement);
         }
         details.put("occurrence", book.complete(claim)); book.record(claim, "response-dropped", details);
         return context.responseFilterResultBuilder().drop().completed();

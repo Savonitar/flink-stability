@@ -295,7 +295,9 @@ final class V1ExecutionResultRenderer {
                 message.originalErrorCodes().forEach((entity, code) -> original.put(entity, code.intValue()));
                 if (message.originalErrorCodes().size() == 1) event.put("originalErrorCode", message.originalErrorCodes().values().iterator().next().intValue());
                 else event.putNull("originalErrorCode");
-                event.put("errorOrigin", message.substitutedErrorCode() != null ? "synthetic-before-broker" : message.originalErrorCodes().isEmpty() ? "unavailable" : "broker-response");
+                ObjectNode offsets = event.putObject("originalBaseOffsets");
+                message.originalBaseOffsets().forEach(offsets::put);
+                event.put("errorOrigin", message.substitutedErrorCode() != null ? (message.forwardedToBroker() ? "synthetic-after-append" : "synthetic-before-broker") : message.originalErrorCodes().isEmpty() ? "unavailable" : "broker-response");
                 if (message.substitutedErrorCode() == null) event.putNull("substitutedErrorCode"); else event.put("substitutedErrorCode", message.substitutedErrorCode().intValue());
                 event.put("forwardedToBroker", message.forwardedToBroker());
                 event.put("requestedDelayMillis", message.requestedDelayMillis()); event.put("actualDelayNanos", message.actualDelayNanos());

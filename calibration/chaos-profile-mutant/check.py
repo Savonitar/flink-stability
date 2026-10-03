@@ -32,7 +32,7 @@ def check(report, control=False):
         elif row['verdict'] not in ('pass', 'fail') or row['exitCode'] != (0 if row['verdict'] == 'pass' else 1):
             raise ValueError('Candidate has an unresolved execution: ' + row['scenario'])
     if not control:
-        eligible = {'commit-request-lost', 'commit-response-lost', 'broker-coordinator-pause'}
+        eligible = {'commit-request-lost', 'commit-response-lost', 'broker-coordinator-pause-v1'}
         eligible.update(name for name in names if name.startswith(('protocol-', 'coordinator-')))
         failures = [row for row in rows if row['side'] == 'candidate' and row['scenario'] in eligible
                     and row['verdict'] == 'fail' and isinstance(row['missing'], int) and row['missing'] > 0]

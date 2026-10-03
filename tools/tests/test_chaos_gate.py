@@ -13,6 +13,11 @@ import test_pr_gate as fixtures
 class ChaosProfileTest(unittest.TestCase):
     def test_explicit_profiles_have_unique_existing_names_and_cover_quick(self):
         self.assertEqual(10, len(PROFILES['chaos-quick']))
+        self.assertEqual(28, len(PROFILES['chaos-full']))
+        for name in PROFILES['chaos-full']:
+            if name.startswith('broker-'):
+                self.assertTrue(name.endswith(('-v1', '-v2')), name)
+                self.assertNotIn(name[:-3], PROFILES['chaos-full'])
         self.assertTrue(set(PROFILES['chaos-quick']) <= set(PROFILES['chaos-full']))
         for names in PROFILES.values():
             self.assertEqual(len(names), len(set(names)))

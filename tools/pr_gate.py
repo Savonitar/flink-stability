@@ -18,7 +18,7 @@ from pathlib import Path
 from chaos_profiles import PROFILES
 from gate_evidence import fault_requirements, fault_status, coverage_table, data_difference
 
-from subject_catalog import artifact_reference, replace_subject, sha256, subject_snippet, with_producer_max_block
+from subject_catalog import artifact_reference, replace_subject, sha256, subject_snippet, with_producer_max_block, with_flink_image
 
 DEFAULT_SCENARIOS = ["bounded-eos", "commit-request-lost", "commit-response-lost"]
 RELEASED_SHA256 = "6bb63f7b09930d99745325393b481c092b0c26d626e738b7a1fd6fd8d7d4f1da"
@@ -91,10 +91,7 @@ def main():
             replacements["baseline"] = {name: path.read_text() for name, path in scenarios.items()}
         for documents in replacements.values():
             for name, document in documents.items():
-                anchor = "    image: flink:2.2.0"
-                if document.count(anchor) != 1:
-                    raise SystemExit("Expected one canonical Flink 2.2 image in " + name)
-                documents[name] = document.replace(anchor, "    image: " + args.flink_image)
+                documents[name] = with_flink_image(document, args.flink_image)
     output = args.output.resolve()
     if not output.is_relative_to(root):
         raise SystemExit("Output directory must stay inside the artifact root")

@@ -208,16 +208,18 @@ Posting on the pull request is public. The maintainer decides whether to post an
 `--profile chaos-quick` selects ten scenarios: TaskManager recovery; commit request
 and response loss; partition-leader kill and pause; coordinator pause; coordinator
 failure during commit in TV2; EndTxn delay and retriable coordinator rejection;
-and Produce response loss. With `--runs 2` this is **40 independent runs** (two
+and Produce response loss. Quick selects the explicit TV1 broker-target variants.
+Full omits the five unversioned broker aliases; they remain selectable with `--scenario`.
+With `--runs 2` this is **40 independent runs** (two
 sides), roughly **60–120 minutes** with warm images and artifacts. This is a
 planning estimate, not measured throughput or a timeout. Pulls, startup and
 recovery can increase it.
 
-`--profile chaos-full` is the 31-scenario superset: existing broker catalogs and
-their separately named TV1/TV2 copies, all protocol catalogs and applicable TV
+`--profile chaos-full` is the 28-scenario superset: explicit TV1/TV2 broker catalogs,
+all protocol catalogs (including Produce errors after append) and applicable TV
 pairs, and all four coordinator-commit catalogs. AddPartitionsToTxn is TV1 only:
-the TV2 sink normally does not send it. At two runs it plans 124 independent
-runs, roughly 186–372 minutes. The sole authoritative membership lists are in
+the TV2 sink normally does not send it. At two runs it plans 112 independent
+runs, roughly 168–336 minutes. The sole authoritative membership lists are in
 [`tools/chaos_profiles.py`](../tools/chaos_profiles.py); adding a filename does
 not silently expand either profile. Version copies change only scenario identity
 and the explicit transaction feature level; original catalogs remain untouched.
@@ -287,3 +289,19 @@ A failed command alone is not calibration. The recipe's `check.py` rejects missi
 cells, unconfirmed effects, unknown counts, wrong artifact/closure hashes and failed
 healthy controls. The prepared live matrix has **not been run**; unit checks establish
 the mutation and artifact identity, not profile sensitivity or release health.
+
+## Live qualification is still pending
+
+The replacement common filter has not yet requalified the historical
+[connector-mutant six-cell matrix](../calibration/connector-mutants/README.md#revalidation-required-after-the-proxy-replacement).
+That complete matrix is mandatory before merging the filter replacement, even
+though canonical EndTxn YAML is unchanged. Require the original sensitive and
+harmless outcomes and complete interpretation evidence; the new mutant is not
+its replacement.
+
+Broker runtime targets, protocol and coordinator-commit catalogs, profiles and
+the new mutant currently have offline/fake/serialization validation only. No
+real-Kafka success is claimed. The new post-append Produce timeout scenarios are
+also pending live runs. `error-response` still acts before broker forwarding;
+`error-after-append` is a separate response-path action. Keep all live results
+and classify anomalies before interpreting any profile as qualified.

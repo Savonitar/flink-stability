@@ -121,15 +121,19 @@ final class NetworkFaultPreflightValidator {
         }
 
         ObjectNode fault = (ObjectNode) networkFault.get("fault");
-        if ("error-response".equals(fault.path("type").textValue())) {
+        if ("error-response".equals(fault.path("type").textValue())
+                || "error-after-append".equals(fault.path("type").textValue())) {
             String error = fault.path("error").textValue();
-            if (!profile.allowedErrors().contains(error)) {
+            var allowed = "error-after-append".equals(fault.path("type").textValue())
+                    ? org.savonitar.flink.stability.runtime.api.KafkaProtocolFaultPolicy.errorsAfterAppend(api)
+                    : profile.allowedErrors();
+            if (!allowed.contains(error)) {
                 issues.add(issue(source, ResolutionScope.COMMON,
                         "preflight.network.error-response-unsupported",
                         path + "/fault/error",
                         "Kafka API '" + api + "' cannot safely return error '" + error
                                 + "' in v1; allowed errors: "
-                                + profile.allowedErrors().stream().sorted().toList()));
+                                + allowed.stream().sorted().toList()));
                 selectorValid = false;
             }
         }

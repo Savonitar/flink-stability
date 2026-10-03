@@ -245,10 +245,12 @@ public record PhaseExecutionEvidence(
                                   String event, String api, short apiVersion, int correlationId,
                                   String transactionalId, Long producerId, Short producerEpoch,
                                   Boolean committed, java.util.Map<String, Short> originalErrorCodes,
+                                  java.util.Map<String, Long> originalBaseOffsets,
                                   Short substitutedErrorCode, boolean forwardedToBroker,
                                   long requestedDelayMillis, long actualDelayNanos) {
         public ProtocolMessage {
             originalErrorCodes = java.util.Map.copyOf(originalErrorCodes);
+            originalBaseOffsets = java.util.Map.copyOf(originalBaseOffsets);
             transactionalId = requireNonBlank(transactionalId, "transactionalId");
         }
         boolean qualifies(ExecutableScenarioPlan.NetworkFaultAction action) {
@@ -259,6 +261,12 @@ public record PhaseExecutionEvidence(
                         && !originalErrorCodes.isEmpty() && originalErrorCodes.values().stream().allMatch(code -> code == 0);
                 case DELAY -> "request-delayed".equals(event) && forwardedToBroker && requestedDelayMillis > 0
                         && actualDelayNanos >= java.util.concurrent.TimeUnit.MILLISECONDS.toNanos(requestedDelayMillis);
+                case ERROR_AFTER_APPEND -> "response-error-after-append".equals(event) && "produce".equals(api)
+                        && forwardedToBroker && producerId != null && producerId >= 0 && producerEpoch != null && producerEpoch >= 0
+                        && substitutedErrorCode != null && substitutedErrorCode == org.apache.kafka.common.protocol.Errors.REQUEST_TIMED_OUT.code()
+                        && !originalErrorCodes.isEmpty() && originalErrorCodes.values().stream().allMatch(code -> code == 0)
+                        && originalErrorCodes.keySet().equals(originalBaseOffsets.keySet())
+                        && originalBaseOffsets.values().stream().allMatch(offset -> offset >= 0);
                 case ERROR_RESPONSE -> "response-substituted".equals(event) && substitutedErrorCode != null && !forwardedToBroker && originalErrorCodes.isEmpty();
             };
         }

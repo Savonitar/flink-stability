@@ -939,7 +939,7 @@ public final class ExecutableScenarioPlan {
                 throw new IllegalArgumentException("Unsupported protocol fault API: " + api);
             Objects.requireNonNull(topic, "topic"); Objects.requireNonNull(latency, "latency"); Objects.requireNonNull(error, "error");
             if ((action == NetworkFaultAction.DELAY) != latency.isPresent()
-                    || (action == NetworkFaultAction.ERROR_RESPONSE) != error.isPresent())
+                    || (action == NetworkFaultAction.ERROR_RESPONSE || action == NetworkFaultAction.ERROR_AFTER_APPEND) != error.isPresent())
                 throw new IllegalArgumentException("Fault action options do not match");
             latency.ifPresent(value -> {
                 if (value.isNegative() || value.isZero() || value.compareTo(Duration.ofMillis(
@@ -947,7 +947,9 @@ public final class ExecutableScenarioPlan {
                     throw new IllegalArgumentException("Protocol delay must be 1..5000 ms");
             });
             error.ifPresent(value -> {
-                if (!org.savonitar.flink.stability.runtime.api.KafkaProtocolFaultPolicy.errors(api).contains(value))
+                if (!(action == NetworkFaultAction.ERROR_AFTER_APPEND
+                        ? org.savonitar.flink.stability.runtime.api.KafkaProtocolFaultPolicy.errorsAfterAppend(api)
+                        : org.savonitar.flink.stability.runtime.api.KafkaProtocolFaultPolicy.errors(api)).contains(value))
                     throw new IllegalArgumentException("Unsafe API/error pair");
             });
             if (!"end-txn".equals(api) && result.isPresent()) throw new IllegalArgumentException("Only EndTxn has an outcome selector");
@@ -976,7 +978,8 @@ public final class ExecutableScenarioPlan {
         /** The broker acts on the request; the client never sees the response. */
         DROP_RESPONSE,
         DELAY,
-        ERROR_RESPONSE
+        ERROR_RESPONSE,
+        ERROR_AFTER_APPEND
     }
 
     public record KafkaIdSetValidation(

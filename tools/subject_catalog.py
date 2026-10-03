@@ -54,3 +54,13 @@ def with_producer_max_block(document, milliseconds):
     arguments = match.group(2).rstrip()
     addition = (", " if arguments else "") + '--producerMaxBlockMs, "' + str(milliseconds) + '"'
     return document[:match.start(2)] + arguments + addition + document[match.end(2):]
+
+
+def with_flink_image(document, image):
+    """Use the full spelling in a copy while rejecting changed canonical image inputs."""
+    if image != "docker.io/library/flink:2.2.0":
+        raise SystemExit("Unsupported Flink image override")
+    anchor = "    image: flink:2.2.0"
+    if document.count(anchor) != 1:
+        raise SystemExit("Expected one canonical Flink 2.2 image")
+    return document.replace(anchor, "    image: " + image)

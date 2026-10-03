@@ -25,7 +25,7 @@ import static org.savonitar.flink.stability.core.execution.plan.ExecutableScenar
  * counted drops of EndTxn requests or responses.
  */
 final class NetworkFaultCompiler {
-    private static final Set<String> ACTIONS = Set.of("drop-request", "drop-response", "delay", "error-response");
+    private static final Set<String> ACTIONS = Set.of("drop-request", "drop-response", "delay", "error-response", "error-after-append");
     /** A Docker network alias and a port that leaves room for broker ports above it. */
     private static final Pattern LISTEN = Pattern.compile(
             "^([a-z0-9]+(?:-[a-z0-9]+)*):([1-9][0-9]{0,4})$");
@@ -91,7 +91,7 @@ final class NetworkFaultCompiler {
         if (!ACTIONS.contains(networkFault.at("/fault/type").textValue())) {
             issues.add(issue(source, "runner.network-fault.type-unsupported",
                     path + "/fault/type",
-                    "Only counted drops, delay and error-response are executable"));
+                    "Only counted drops, delay and supported response errors are executable"));
             return;
         }
         if (networkFault.has("duration")) {

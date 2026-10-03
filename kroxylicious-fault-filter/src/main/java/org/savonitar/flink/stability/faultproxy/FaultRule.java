@@ -33,9 +33,11 @@ record FaultRule(
         Objects.requireNonNull(action, "action");
         if (action == Action.DELAY ? latencyMillis < 1 || latencyMillis > org.savonitar.flink.stability.runtime.api.KafkaProtocolFaultPolicy.MAX_DELAY_MILLIS : latencyMillis != 0)
             throw new IllegalArgumentException("Delay must be 1..5000 ms, only for delay action");
-        if ((action == Action.ERROR_RESPONSE) != error.isPresent()) throw new IllegalArgumentException("Error only for error-response action");
+        if ((action == Action.ERROR_RESPONSE || action == Action.ERROR_AFTER_APPEND) != error.isPresent()) throw new IllegalArgumentException("Error only for error-response action");
         error.ifPresent(value -> {
-            if (!org.savonitar.flink.stability.runtime.api.KafkaProtocolFaultPolicy.errors(api).contains(value)) throw new IllegalArgumentException("Unsafe API/error pair");
+            if (!(action == Action.ERROR_AFTER_APPEND
+                    ? org.savonitar.flink.stability.runtime.api.KafkaProtocolFaultPolicy.errorsAfterAppend(api)
+                    : org.savonitar.flink.stability.runtime.api.KafkaProtocolFaultPolicy.errors(api)).contains(value)) throw new IllegalArgumentException("Unsafe API/error pair");
         });
         if (!"end-txn".equals(api) && result != Result.ANY) throw new IllegalArgumentException("Outcome selector only for EndTxn");
         if (occurrences < 1) {
@@ -62,7 +64,7 @@ record FaultRule(
         /** The request never reaches the broker, and the client never hears back. */
         DROP_REQUEST,
         /** The broker acts on the request, but the client never sees the response. */
-        DROP_RESPONSE, DELAY, ERROR_RESPONSE;
+        DROP_RESPONSE, DELAY, ERROR_RESPONSE, ERROR_AFTER_APPEND;
 
         String wireName() {
             return name().toLowerCase(Locale.ROOT).replace('_', '-');

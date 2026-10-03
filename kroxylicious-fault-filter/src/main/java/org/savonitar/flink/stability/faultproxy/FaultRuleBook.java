@@ -153,7 +153,7 @@ final class FaultRuleBook implements AutoCloseable {
         fields.put("action", claim.rule().action().wireName());
         fields.putAll(details);
         boolean dropped = "request-dropped".equals(event) || "response-dropped".equals(event);
-        boolean affected = dropped || "request-delayed".equals(event) || "response-substituted".equals(event);
+        boolean affected = dropped || "request-delayed".equals(event) || "response-substituted".equals(event) || "response-error-after-append".equals(event);
         if (affected) {
             fields.put("beforeDeadline", claim.armed.beforeDeadline(nanoTime.getAsLong()));
         }

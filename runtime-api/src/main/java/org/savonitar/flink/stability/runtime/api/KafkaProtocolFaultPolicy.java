@@ -18,6 +18,9 @@ public final class KafkaProtocolFaultPolicy {
             "txn-offset-commit", Set.of("coordinator-load-in-progress", "coordinator-not-available", "not-coordinator"),
             "find-coordinator", Set.of("coordinator-not-available"),
             "produce", Set.of("not-leader-or-follower", "request-timed-out", "not-enough-replicas"));
+    public static Set<String> errorsAfterAppend(String api) {
+        return "produce".equals(api) ? Set.of("request-timed-out") : Set.of();
+    }
     private KafkaProtocolFaultPolicy() {}
     public static Set<String> errors(String api) { return ERRORS.getOrDefault(api, Set.of()); }
 }

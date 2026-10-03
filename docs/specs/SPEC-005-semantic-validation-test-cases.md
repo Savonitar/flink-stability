@@ -616,3 +616,15 @@ expected validation code.
 | SV-261 | Gate calibration override with explicit/released baseline | Same option in both copied jobs and plan; originals unchanged; unknown catalog shape rejected. |
 | SV-262 | Single-class retriable-discard calibration overlay | Pinned release/source/runtime and artifact digests; only KafkaCommitter.class differs; normal/fenced/unknown/unrelated retry decisions unchanged. |
 | SV-263 | Offline calibration result checking | Require all release cells PASS, complete paired verified fault receipts and candidate FAIL with missing IDs in a protocol/coordinator cell; UNKNOWN, missing cells and harmless-control failures cannot qualify. |
+
+### Produce errors after append
+
+| Case | Input | Required result |
+| --- | --- | --- |
+| SV-264 | Counted Produce error-after-append with request-timed-out | Compile; require occurrences/deadline and routed sink. Other API/error combinations fail before provisioning. |
+| SV-265 | Kafka-serialized successful Produce v3/v8/v12 replies, two occurrences across connections | Forward each request first; substitute exactly two responses; retain original identity/codes/base offsets and serialize valid timeout responses without changing the original objects. |
+| SV-266 | Wrong prefix, acks other than -1, mixed errors, missing/foreign/duplicate partitions or unavailable offsets | Pass unchanged; do not consume the occurrence; later valid response can trigger. |
+| SV-267 | Late response or incomplete append proof in evidence | Cannot confirm the fault or produce PASS; retain partial proof and heal. |
+| SV-268 | Post-append response evidence reaches the result renderer | Preserve producer identity, original success/offsets, replacement timeout and synthetic-after-append origin; do not mislabel as pre-broker rejection. |
+| SV-269 | Full chaos profile includes broker TV variants | Include each explicit TV variant once; unversioned aliases remain individually selectable, not repeated in full. |
+| SV-270 | Legacy calibration full-image copy | Preserve canonical files, six-cell matrix, timing controls, transaction timeout, expectations and pinned artifact hashes; manifest hashes bind actual generated catalogs. |
