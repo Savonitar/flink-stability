@@ -1389,7 +1389,12 @@ Connector pull-request gating is the same mechanism with one axis:
   from multiple simultaneously missing workers is outside this observation model.
 - **R6.9c** With three Kafka brokers, `kill.target: {kind: named, role: broker,
   name: broker-1}` and `restart: {component: kafka, name: broker-1}` stop and restart
-  the same owned container without removing its data. No unnamed broker restart,
+  the same owned container without removing its data. Each broker has a distinct
+  preallocated fixed host-port binding for its lifetime, so the persisted startup
+  script's advertised host endpoint remains reachable after Docker start. A port
+  collision fails startup; no ephemeral-port fallback is allowed. No host log
+  directory is mounted. Inspect the actual mapping after restart and fail evidence
+  confirmation if it differs. No unnamed broker restart,
   image change, concurrent missing processes or unhealed kill is executable.
   Each operation uses one two-minute deadline. Retain before/after container,
   image, network and running-state observations, plus declared-partition leaders,

@@ -34,10 +34,11 @@ final class ThreeBrokerKafkaRuntime implements KafkaRuntimeCluster {
         this.target = target; this.network = Objects.requireNonNull(network); this.brokers = List.copyOf(brokers);
     }
 
-    private static List<KafkaContainer> containers(Network network, KafkaRuntimeTarget target) {
+    static List<KafkaContainer> containers(Network network, KafkaRuntimeTarget target) {
         if (target.brokers() != 3) throw new IllegalArgumentException("Three brokers required");
         String clusterId = org.apache.kafka.common.Uuid.randomUuid().toString();
         var nodes = new ArrayList<KafkaContainer>();
+        var ports = hostPorts();
         for (int node = 1; node <= 3; node++) {
             String alias = target.brokerAlias(node);
             var container = new KafkaContainer(target.imageReference()).withNetwork(network)
@@ -46,9 +47,23 @@ final class ThreeBrokerKafkaRuntime implements KafkaRuntimeCluster {
                     .withCreateContainerCmdModifier(command -> command.withHostName(alias))
                     .withStartupTimeout(Duration.ofMinutes(2))
                     .withLogConsumer(new Slf4jLogConsumer(LoggerFactory.getLogger("KAFKA_BROKER_" + node + "_LOGS")));
+            // Docker must retain this binding when start reuses Testcontainers' persisted starter script.
+            // A competing bind fails startup; never fall back to an ephemeral advertised endpoint.
+            container.setPortBindings(List.of(ports.get(node - 1) + ":9092"));
             nodes.add(container);
         }
         return List.copyOf(nodes);
+    }
+
+    private static List<Integer> hostPorts() {
+        // Reserve all three together to prevent duplicate ephemeral selections.
+        try (var first = new java.net.ServerSocket(0);
+             var second = new java.net.ServerSocket(0);
+             var third = new java.net.ServerSocket(0)) {
+            return List.of(first.getLocalPort(), second.getLocalPort(), third.getLocalPort());
+        } catch (java.io.IOException failure) {
+            throw new IllegalStateException("Cannot allocate fixed Kafka host ports", failure);
+        }
     }
 
     static Map<String, String> environment(KafkaRuntimeTarget target, int node, String clusterId) {
