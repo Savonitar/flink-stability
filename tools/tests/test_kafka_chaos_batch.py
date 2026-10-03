@@ -12,6 +12,18 @@ import kafka_chaos_batch as batch
 
 
 class KafkaChaosBatchTests(unittest.TestCase):
+    def test_copy_accepts_both_equivalent_images_but_not_changed_versions(self):
+        full = 'docker.io/library/flink:2.2.0'
+        for image in ('flink:2.2.0', full):
+            document = '  flink:\n    image: ' + image + '\n'
+            copied = batch.with_flink_image(document, full)
+            self.assertEqual('  flink:\n    image: ' + full + '\n', copied)
+            self.assertEqual(copied, batch.with_flink_image(copied, full))
+        for document in ('    image: flink:2.2.01\n', '    image: flink:2.3.0\n',
+                         '    image: flink:2.2.0\n    image: ' + full + '\n'):
+            with self.assertRaises(SystemExit):
+                batch.with_flink_image(document, full)
+
     def test_matrix_order_and_controls_preserve_calibration_contracts(self):
         cells = batch.matrix()
         self.assertEqual(99, len(cells))
