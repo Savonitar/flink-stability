@@ -25,8 +25,6 @@ import java.util.regex.Pattern;
 
 /** Validates the resolved declaration graph and expected oracle before Docker exists. */
 final class ScenarioPreflightValidator {
-    private static final Pattern STATIC_TARGET_NAME =
-            Pattern.compile("^(taskmanager|jobmanager|broker)-([1-9][0-9]*)$");
 
     ResolvedScenario validateScenario(ResolvedScenario scenario) {
         Objects.requireNonNull(scenario, "scenario");
@@ -288,6 +286,7 @@ final class ScenarioPreflightValidator {
         validateInputSources(source, scope, index, issues);
         validateTerminalValidators(source, scope, index, issues);
         validatePhases(source, scope, index, issues);
+        ProcessTargetPreflightValidator.brokerFaults(source, scope, index.document(), issues);
     }
 
     private static void validateProxies(
@@ -894,64 +893,11 @@ final class ScenarioPreflightValidator {
         }
     }
 
-    private static void validateProcessTarget(
-            Path source,
-            ResolutionScope scope,
-            SideIndex index,
-            ObjectNode target,
-            String path,
-            List<Diagnostic> issues) {
-        if ("selector".equals(target.path("kind").textValue())) {
-            issues.add(issue(source, ResolutionScope.COMMON,
-                    "capability.runtime-target-selector.unsupported",
-                    path + "/kind",
-                    "v1 supports only statically named process targets"));
-            return;
-        }
-
-        String role = target.path("role").textValue();
-        String name = target.path("name").textValue();
-        Matcher matcher = STATIC_TARGET_NAME.matcher(name);
-        boolean matchesRole = matcher.matches() && matcher.group(1).equals(role);
-        BigInteger ordinal = matchesRole
-                ? new BigInteger(matcher.group(2))
-                : BigInteger.ZERO;
-        if (role.equals("broker") && matchesRole) {
-            List<String> matchingClusters = index.clusters().entrySet().stream()
-                    .filter(entry -> ordinal.compareTo(entry.getValue().brokers()) <= 0)
-                    .map(Map.Entry::getKey)
-                    .sorted()
-                    .toList();
-            if (matchingClusters.size() == 1) {
-                return;
-            }
-            if (matchingClusters.size() > 1) {
-                issues.add(issue(source, scope,
-                        "preflight.target.broker-cluster-ambiguous",
-                        path + "/name",
-                        "Named broker target '" + name
-                                + "' exists in Kafka clusters " + matchingClusters));
-                return;
-            }
-        }
-
-        BigInteger upperBound = switch (role) {
-            case "taskmanager" -> index.taskmanagers();
-            case "jobmanager" -> index.jobmanagers();
-            case "broker" -> index.clusters().values().stream()
-                    .map(ClusterIndex::brokers)
-                    .max(BigInteger::compareTo)
-                    .orElse(BigInteger.ZERO);
-            default -> BigInteger.ZERO;
-        };
-        if (!matchesRole || ordinal.compareTo(upperBound) > 0) {
-            issues.add(issue(source, scope,
-                    "preflight.target.named-not-found",
-                    path + "/name",
-                    "No declared " + role + " target named '" + name
-                            + "'; available names are " + role + "-1 through "
-                            + role + "-" + upperBound));
-        }
+    private static void validateProcessTarget(Path source, ResolutionScope scope, SideIndex index,
+            ObjectNode target, String path, List<Diagnostic> issues) {
+        ProcessTargetPreflightValidator.validate(source, scope,
+                index.clusters().entrySet().stream().collect(java.util.stream.Collectors.toMap(Map.Entry::getKey, entry -> entry.getValue().brokers())),
+                index.taskmanagers(), index.jobmanagers(), target, path, issues);
     }
 
     private static void validateNetworkFault(
@@ -1133,7 +1079,7 @@ final class ScenarioPreflightValidator {
     }
 
     private static boolean networkBrokerExists(ClusterIndex cluster, String name) {
-        Matcher matcher = STATIC_TARGET_NAME.matcher(name);
+        Matcher matcher = ProcessTargetPreflightValidator.STATIC_TARGET_NAME.matcher(name);
         return matcher.matches()
                 && matcher.group(1).equals("broker")
                 && new BigInteger(matcher.group(2)).compareTo(cluster.brokers()) <= 0;
@@ -1437,7 +1383,7 @@ final class ScenarioPreflightValidator {
         return value.replace("~", "~0").replace("/", "~1");
     }
 
-    private static Diagnostic issue(
+    static Diagnostic issue(
             Path source,
             ResolutionScope scope,
             String code,

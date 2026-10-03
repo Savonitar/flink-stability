@@ -524,6 +524,7 @@ expected validation code.
 | SV-215 | `run --kafka-log-output DIR` is omitted, enabled for PASS/FAIL, points to existing evidence, or encounters transport failure. | Omission invokes no capture. After the terminal oracle and before owner cleanup, call the owned runtime with declared source/sink and selected coordinator partitions. Retain both Kafka archive receipts and component-error observations through result copies, JSON rendering and cleanup; never overwrite or change the verdict. |
 | SV-216 | Multiple partitions/segments exhaust the shared call, byte or time budget. | Reserve at most 512 Docker requests, retain at most 64 MiB inventory/archive bytes and 64 MiB decoded JSON; use one 60s deadline, stop unfinished work, and report partial coverage. |
 | SV-217 | An owned single-file TAR contains a real Kafka batch or malformed framing, links, traversal, an unexpected member, changed hash or unfinished receipt. | Require receipt EOF, completed worker and matching size/hash before strict USTAR validation; only the exact regular basename is decoded with the existing bounded decoder. Reject every malformed case without affecting the run verdict. |
+
 ### Coordinator log evidence
 
 | Case | Input | Required result |
@@ -531,6 +532,7 @@ expected validation code.
 | SV-218 | Listed transactional IDs hash positively, negatively or to MIN_VALUE; metadata returns a nondefault partition count, is unavailable or exceeds shared bounds. | Use Kafka Utils.abs and the observed count, deduplicate coordinator partitions, retain ID mapping; failures produce partial diagnostics without changing the oracle. Never guess 50 partitions. |
 | SV-219 | Real Kafka transaction serializers generate key v0, value v0/v1, tombstones, unknown versions/tags/states, malformed encodings, excessive objects or expired budgets. | Strict decoder preserves known fields and nullable distinctions; unknown/malformed inputs fail explicitly. CLI returns nonzero and complete=false; automatic evidence remains diagnostic. |
 | SV-220 | Coordinator segments arrive out of order across epochs, later tombstones and unsupported records; data contains COMMIT/ABORT or unmatched producers. | Join physical markers by producerId/epoch, choose highest observed coordinator offset per ID, retain unmatched identities and unknown latest observations. Make no visibility, history-completeness or fault-attribution claim. Aggregate file/record limits apply across CLI inputs. |
+
 ### Three-broker lifecycle
 
 | Case | Input | Required result |
@@ -538,8 +540,17 @@ expected validation code.
 | SV-221 | Three-broker KRaft topology uses RF=3, explicit broker kill/restart; unsupported count, wrong RF, unnamed restart, double kill, overlap or unhealed fault. | Compile only supported topology and sequential matched lifecycle; preserve single-broker behavior. Prepare distinct broker-eos-control/broker-eos-kill catalogs and validate offline. |
 | SV-222 | Fake owned broker stops/returns, leader changes, or metadata/identity/ISR/deadline fails. | Confirm exact container identity, stopped/running observations and actual leader transfer/ISR recovery; preserve partial observations, no confirmation from command acknowledgement alone. |
 | SV-223 | Broker effect is unconfirmed while exact-ID oracle passes or fails. | PASS becomes inconclusive with broker.operation.effect-unconfirmed; data FAIL remains FAIL. Preserve broker evidence through cleanup/result copies and JSON. |
+
 ### Broker endpoint stability
 
 | Case | Input | Required result |
 | --- | --- | --- |
 | SV-224 | Docker start reuses the Kafka starter script after a broker kill. | Allocate distinct explicit host-port bindings before provisioning; the real Testcontainers script retains the same advertised endpoint. Reject any observed changed mapping; preserve container/log identity and single-broker behavior. |
+
+### Runtime broker targets
+
+| Case | Input | Required result |
+| --- | --- | --- |
+| SV-225 | Broker selector names a missing topic/partition, another cluster, unknown job or nontransactional sink. | Reject preflight before provisioning. Distinct new broker-leader-kill, broker-leader-pause and broker-coordinator-pause catalogs validate offline. |
+| SV-226 | Admin metadata moves a partition leader; several open sink transactions exist; the selected transaction closes or metadata is absent. | Resolve at injection time, retain lexicographic transaction choice and actual coordinator partition count/hash, use its observed leader, reject missing/stale/unowned selection without guessing. |
+| SV-227 | Pause/resume changes physical paused state, ISR and leader; transfer is missing, mutation fails ambiguously or the deadline expires. | Retain partial evidence, bound the hold, always attempt healing of the same selected identity, do not confirm from Docker acknowledgement alone, preserve data FAIL. |

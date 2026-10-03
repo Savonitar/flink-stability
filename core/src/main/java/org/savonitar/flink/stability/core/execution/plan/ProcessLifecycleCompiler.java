@@ -82,7 +82,7 @@ final class ProcessLifecycleCompiler {
                     issues.add(issue(source, "runner.phase." + (broker ? "broker" : "taskmanager") + "-already-running",
                             stepPath + "/restart", "A restart must heal a preceding kill of " + name));
                 }
-            } else if (step.has("leader_fault") && !stopped.isEmpty()) {
+            } else if ((step.has("leader_fault") || step.has("broker_fault")) && !stopped.isEmpty()) {
                 issues.add(issue(source, "runner.phase.ha-taskmanager-overlap-unsupported",
                         stepPath + "/leader_fault",
                         "Heal the preceding TaskManager kill before an atomic leader fault"));

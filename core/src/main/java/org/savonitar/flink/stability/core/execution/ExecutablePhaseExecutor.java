@@ -161,6 +161,19 @@ public final class ExecutablePhaseExecutor {
             } else if (step instanceof ExecutableScenarioPlan.RestartTaskManager restart) {
                 restartTaskManager(
                         phaseIndex, phaseName, path, loopIterations, restart, evidence);
+            } else if (step instanceof ExecutableScenarioPlan.BrokerFault fault) {
+                java.util.List<org.savonitar.flink.stability.runtime.api.KafkaBrokerControl.Evidence> observations;
+                try { observations = runtime.brokerFault(fault.request(), evidence.kafkaPartitions); }
+                catch (RuntimeException failure) {
+                    observations = List.of(new org.savonitar.flink.stability.runtime.api.KafkaBrokerControl.Evidence(
+                            "unresolved", false, null, null, List.of(), List.of(), failure.toString(), fault.request().action(), null));
+                }
+                if (observations.isEmpty()) observations = List.of(new org.savonitar.flink.stability.runtime.api.KafkaBrokerControl.Evidence(
+                        "unresolved", false, null, null, List.of(), List.of(), "No broker observations", fault.request().action(), null));
+                for (var observation : observations) evidence.brokers.add(new PhaseExecutionEvidence.BrokerOperation(path, loopIterations, observation));
+                evidence.stopFurtherSteps |= observations.size() != 2 || observations.stream().anyMatch(value -> !value.confirmed());
+                succeeded(evidence, phaseIndex, phaseName, path, loopIterations, PhaseExecutionEvidence.StepKind.BROKER_FAULT,
+                        "effectConfirmed=" + !evidence.stopFurtherSteps);
             } else if (step instanceof ExecutableScenarioPlan.BrokerOperation operation) {
                 org.savonitar.flink.stability.runtime.api.KafkaBrokerControl.Evidence raw;
                 try {

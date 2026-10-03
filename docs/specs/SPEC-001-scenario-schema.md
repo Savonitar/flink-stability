@@ -1310,7 +1310,7 @@ Connector pull-request gating is the same mechanism with one axis:
   leading-zero ordinal, or ordinal above the resolved component count is not a
   declared target. Because the process-target shape has no Kafka-cluster field,
   a broker name must resolve in exactly one declared cluster; zero matches is
-  missing and multiple matches is ambiguous. `kind: selector` remains reserved
+  missing and multiple matches is ambiguous. Outside atomic `broker_fault` (R6.9d), `kind: selector` remains reserved
   in the schema but is an unsupported v1 capability and is rejected before any
   container starts.
 - **R6.8** Fault steps: process `kill`/`stop`, Kafka cluster faults, and network
@@ -1406,6 +1406,33 @@ Connector pull-request gating is the same mechanism with one axis:
   allow the healing step. With a passing exact-ID oracle, any unconfirmed broker
   operation gives `broker.operation.effect-unconfirmed` / inconclusive. Data FAIL
   remains FAIL. This slice supports no multi-broker proxy or tc/iptables backend.
+- **R6.9d** Optional atomic `broker_fault: {mode, target, duration, timeout}` supports
+  `kill` and `pause` with automatic `restart` and `resume` of the same selected broker.
+  `target` requires `role: broker` and the sole three-broker `cluster`. It is either
+  `{kind: named, name: broker-N}`, `{kind: selector, type: partition-leader, topic,
+  partition}`, or `{kind: selector, type: transaction-coordinator, job}`. The last
+  selects the lexicographically first observed Ongoing transactional ID belonging to
+  that job's exactly-once sink prefix, rechecks its state, reads actual contiguous
+  `__transaction_state` metadata and uses the same Kafka hash function as R8.2g.
+  Its coordinator target is the leader of that partition, never the description's
+  potentially stale coordinator ID. Missing/open-state changes or unowned leaders
+  are unconfirmed; do not guess or wait for a different transaction. Retain selected
+  broker, requested selector, transactional ID, producer ID/epoch, actual partition
+  count and selected partition. Recheck the selected partition leader immediately
+  before mutation; an observed change prevents injection.
+  Duration is 1ms–2m, timeout is greater than duration and at most5m; at most100
+  expanded atomic broker faults. No overlap with an unhealed process kill. Docker
+  pause must show the same container running and paused, a changed affected leader
+  and ISR excluding that node; resume shows running/unpaused and ISR recovery.
+  Metadata selection, mutation, effect and ordinary healing share one deadline.
+  The active observation budget cannot exceed the requested hold; missing effect
+  does not extend a pause. Healing always targets the selected physical container,
+  including ambiguous injection failure; a bounded30s safety budget after expiry
+  cannot turn expired evidence into confirmed effect. Retain fault and heal records
+  in brokerOperations and stop subsequent faults if either is unconfirmed. The
+  existing terminal fence and exact-ID oracle still run, with data FAIL primary.
+  This is a metadata sample near injection, not an atomic lock on Kafka leadership.
+
 - **R6.10** **`restore` names the exact checkpoint or savepoint to restart
   from** — the latest, or a specific earlier one, to test rollback.
   `restore.from` accepts `latest-savepoint`, `latest-checkpoint`,

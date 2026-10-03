@@ -70,18 +70,12 @@ public final class KafkaAdminTransactionLister {
     }
 
     static int partitionCount(List<org.apache.kafka.common.TopicPartitionInfo> partitions) {
-        var ids = partitions.stream().map(org.apache.kafka.common.TopicPartitionInfo::partition).sorted().toList();
-        if (ids.isEmpty()) throw new IllegalArgumentException("Empty transaction-state metadata");
-        for (int i = 0; i < ids.size(); i++) {
-            if (ids.get(i) != i) throw new IllegalArgumentException("Noncontiguous transaction-state metadata");
-        }
-        return ids.size();
+        return org.savonitar.flink.stability.runtime.api.KafkaBrokerControl.transactionStatePartitionCount(
+                partitions.stream().map(org.apache.kafka.common.TopicPartitionInfo::partition).toList());
     }
 
-    /** Kafka Utils.abs maps the Integer.MIN_VALUE hash to zero. */
     public static int transactionStatePartition(String transactionalId, int count) {
-        if (count < 1) throw new IllegalArgumentException("Invalid metadata partition count");
-        return org.apache.kafka.common.utils.Utils.abs(Objects.requireNonNull(transactionalId).hashCode()) % count;
+        return org.savonitar.flink.stability.runtime.api.KafkaBrokerControl.transactionStatePartition(transactionalId, count);
     }
 
     private static KafkaTransactionListing.Transaction transaction(

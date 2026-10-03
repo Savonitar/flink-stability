@@ -315,7 +315,7 @@ public record PhaseExecutionEvidence(
         WAIT,
         KILL_TASKMANAGER,
         RESTART_TASKMANAGER,
-        KILL_BROKER,
+        BROKER_FAULT, KILL_BROKER,
         RESTART_BROKER,
         NETWORK_FAULT,
         LEADER_FAULT
