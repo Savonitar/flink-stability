@@ -1,0 +1,9 @@
+format: v1
+kind: expected-result
+
+meta:
+  name: at-least-once-control.expected
+  scenario: at-least-once-control
+
+default:
+  outcome: pass

@@ -1,0 +1,9 @@
+format: v1
+kind: expected-result
+
+meta:
+  name: at-least-once-rolling.expected
+  scenario: at-least-once-rolling
+
+default:
+  outcome: pass

@@ -109,5 +109,13 @@ PROFILES = {
         "parallel-pooling-list-transactions-error-response-v1",
         "parallel-pooling-list-transactions-error-response-v2",
         "parallel-rolling-control-v2",
+        "at-least-once-broker-leader-kill",
+        "at-least-once-broker-leader-pause",
+        "at-least-once-rolling",
+        "at-least-once-produce-response-lost",
+        "at-least-once-produce-after-append",
+        "at-least-once-taskmanager-restart",
+        "at-least-once-control",
+        "at-least-once-protocol-control",
     ),
 }

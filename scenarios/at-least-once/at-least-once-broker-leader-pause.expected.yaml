@@ -1,0 +1,9 @@
+format: v1
+kind: expected-result
+
+meta:
+  name: at-least-once-broker-leader-pause.expected
+  scenario: at-least-once-broker-leader-pause
+
+default:
+  outcome: pass
