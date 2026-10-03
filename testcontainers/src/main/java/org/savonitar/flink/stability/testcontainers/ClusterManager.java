@@ -1110,6 +1110,12 @@ public final class ClusterManager implements AutoCloseable {
             handle = null;
         }
     }
+    public java.util.List<org.savonitar.flink.stability.runtime.api.KafkaBrokerControl.Evidence> brokerFault(
+            org.savonitar.flink.stability.runtime.api.KafkaBrokerControl.Request request,
+            java.util.List<org.savonitar.flink.stability.runtime.api.KafkaLogCapture.Partition> partitions) {
+        return kafkaRuntime.brokerFault(request, partitions);
+    }
+
     public org.savonitar.flink.stability.runtime.api.KafkaBrokerControl.Evidence brokerOperation(String name, boolean restart,
             List<KafkaLogCapture.Partition> partitions, Duration timeout) {
         if (kafkaRuntime == null) throw new IllegalStateException("Kafka owner unavailable");

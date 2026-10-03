@@ -1330,6 +1330,7 @@
         {
           "$ref": "#/$defs/leaderFaultStep"
         },
+        { "$ref": "#/$defs/brokerFaultStep" },
         {
           "$ref": "#/$defs/checkpointStep"
         },
@@ -1346,6 +1347,132 @@
           "$ref": "#/$defs/validateStep"
         }
       ]
+    },
+    "brokerFaultStep": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "broker_fault"
+      ],
+      "properties": {
+        "broker_fault": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "mode",
+            "target",
+            "duration",
+            "timeout"
+          ],
+          "properties": {
+            "mode": {
+              "enum": [
+                "kill",
+                "pause"
+              ]
+            },
+            "target": {
+              "oneOf": [
+                {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "kind",
+                    "role",
+                    "cluster",
+                    "name"
+                  ],
+                  "properties": {
+                    "kind": {
+                      "const": "named"
+                    },
+                    "role": {
+                      "const": "broker"
+                    },
+                    "cluster": {
+                      "$ref": "#/$defs/nonEmptyString"
+                    },
+                    "name": {
+                      "type": "string",
+                      "pattern": "^broker-[1-3]$"
+                    }
+                  }
+                },
+                {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "kind",
+                    "role",
+                    "cluster",
+                    "type",
+                    "topic",
+                    "partition"
+                  ],
+                  "properties": {
+                    "kind": {
+                      "const": "selector"
+                    },
+                    "role": {
+                      "const": "broker"
+                    },
+                    "cluster": {
+                      "$ref": "#/$defs/nonEmptyString"
+                    },
+                    "type": {
+                      "const": "partition-leader"
+                    },
+                    "topic": {
+                      "$ref": "#/$defs/nonEmptyString"
+                    },
+                    "partition": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 2147483647
+                    }
+                  }
+                },
+                {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "kind",
+                    "role",
+                    "cluster",
+                    "type",
+                    "job"
+                  ],
+                  "properties": {
+                    "kind": {
+                      "const": "selector"
+                    },
+                    "role": {
+                      "const": "broker"
+                    },
+                    "cluster": {
+                      "$ref": "#/$defs/nonEmptyString"
+                    },
+                    "type": {
+                      "const": "transaction-coordinator"
+                    },
+                    "job": {
+                      "$ref": "#/$defs/nonEmptyString"
+                    }
+                  }
+                }
+              ]
+            },
+            "duration": {
+              "type": "string",
+              "pattern": "^[1-9][0-9]*(ms|s|m|h)$"
+            },
+            "timeout": {
+              "type": "string",
+              "pattern": "^[1-9][0-9]*(ms|s|m|h)$"
+            }
+          }
+        }
+      }
     },
     "leaderFaultStep": {
       "type": "object",

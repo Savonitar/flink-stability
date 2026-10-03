@@ -54,6 +54,24 @@ class ExecutableScenarioPlanCompilerTest {
     @TempDir
     Path artifactRoot;
 
+    @Test void compilesRuntimeBrokerSelectorsAndRejectsWrongReferencesAndBounds() {
+        var valid = resolved(document -> {
+            ((ObjectNode) document.at("/setup/kafka/clusters/main")).put("brokers", 3);
+            document.at("/setup/kafka/clusters/main/topics").forEach(topic -> ((ObjectNode) topic).put("replication_factor", 3));
+            var fault = replaceSteps(document).addObject().putObject("broker_fault").put("mode", "pause").put("duration", "20s").put("timeout", "2m");
+            fault.putObject("target").put("kind", "selector").put("role", "broker").put("cluster", "main")
+                    .put("type", "transaction-coordinator").put("job", "eos-job");
+        });
+        var fault = (ExecutableScenarioPlan.BrokerFault) compiler.compile(valid).phases().getFirst().steps().getFirst();
+        assertEquals(org.savonitar.flink.stability.runtime.api.KafkaBrokerControl.Action.PAUSE, fault.request().action());
+        assertEquals(org.savonitar.flink.stability.runtime.api.KafkaBrokerControl.TargetKind.TRANSACTION_COORDINATOR, fault.request().target().kind());
+        assertThrows(SpecificationException.class, () -> resolved(document -> {
+            var node = replaceSteps(document).addObject().putObject("broker_fault").put("mode", "kill").put("duration", "1s").put("timeout", "2m");
+            node.putObject("target").put("kind", "selector").put("role", "broker").put("cluster", "absent")
+                    .put("type", "partition-leader").put("topic", "output").put("partition", 500);
+        }));
+    }
+
     @Test
     void compilesThreeBrokersWithNamedKillRestartAndRejectsUnhealedOrWrongTopology() {
         for (boolean heal : List.of(true, false)) {

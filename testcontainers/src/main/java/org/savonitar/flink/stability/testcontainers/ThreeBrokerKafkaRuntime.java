@@ -1,6 +1,5 @@
 package org.savonitar.flink.stability.testcontainers;
 
-import org.apache.kafka.clients.admin.Admin;
 import org.savonitar.flink.stability.runtime.api.*;
 import org.testcontainers.containers.Network;
 import org.testcontainers.kafka.KafkaContainer;
@@ -11,7 +10,6 @@ import java.nio.file.Path;
 import java.time.Duration;
 import java.util.*;
 import java.util.concurrent.CompletableFuture;
-import java.util.concurrent.TimeUnit;
 import java.util.stream.Collectors;
 
 /** Three combined KRaft controller/brokers; process faults preserve each container's local log. */
@@ -110,70 +108,26 @@ final class ThreeBrokerKafkaRuntime implements KafkaRuntimeCluster {
 
     @Override public KafkaBrokerControl.Evidence brokerOperation(String name, boolean restart,
             List<KafkaLogCapture.Partition> partitions, Duration timeout) {
+        var deadline = MonotonicDeadline.start(timeout, System::nanoTime);
+        try (var admin = new KafkaBrokerAdmin(endpoints().hostBootstrapServers(), timeout)) {
+            return KafkaBrokerFault.execute(name, restart, partitions, deadline, driver(name, admin));
+        }
+    }
+    private KafkaBrokerFault.Driver driver(String name, KafkaBrokerAdmin admin) {
         if (!started || name == null || !name.matches("broker-[1-3]")) throw new IllegalArgumentException("Unknown owned broker");
         int node = Integer.parseInt(name.substring(7));
-        var broker = brokers.get(node - 1);
-        String id = broker.getContainerId(), networkId = network.getId();
-        int port = broker.getMappedPort(9092);
-        var admin = Admin.create(Map.of("bootstrap.servers", endpoints().hostBootstrapServers(),
-                "default.api.timeout.ms", Math.toIntExact(timeout.toMillis()), "request.timeout.ms", Math.toIntExact(timeout.toMillis())));
-        try {
-            return KafkaBrokerFault.execute(name, restart, partitions, timeout, new KafkaBrokerFault.Driver() {
-                @Override public KafkaBrokerControl.Snapshot inspect(MonotonicDeadline deadline) {
-                    return ContainerDriverCallBoundary.call(ContainerOperationDeadline.shared("broker inspection", deadline),
-                            "inspect " + name, () -> {
-                        requireOwned(id, node, deadline);
-                        try (var command = broker.getDockerClient().inspectContainerCmd(id)) {
-                            var response = command.exec();
-                            var attachments = response.getNetworkSettings().getNetworks().values();
-                            if (!id.equals(response.getId()) || attachments.stream().noneMatch(attachment ->
-                                    networkId.equals(attachment.getNetworkID()) && attachment.getAliases() != null
-                                            && attachment.getAliases().contains(target.brokerAlias(node))))
-                                throw new IllegalStateException("Broker ownership changed");
-                            boolean running = Boolean.TRUE.equals(response.getState().getRunning());
-                            if (running) {
-                                var bindings = response.getNetworkSettings().getPorts().getBindings()
-                                        .get(com.github.dockerjava.api.model.ExposedPort.tcp(9092));
-                                if (bindings == null || Arrays.stream(bindings).noneMatch(binding -> Integer.toString(port).equals(binding.getHostPortSpec())))
-                                    throw new IllegalStateException("Broker published port changed; advertised endpoint unconfirmed");
-                            }
-                            var snapshot = new KafkaBrokerControl.Snapshot(id, response.getImageId(), networkId, node, running);
-                            var original = identities.putIfAbsent(name, snapshot);
-                            if (original != null && (!original.containerId().equals(id) || !original.imageId().equals(snapshot.imageId())
-                                    || !original.networkId().equals(networkId))) throw new IllegalStateException("Broker identity changed");
-                            return snapshot;
-                        }
-                    });
-                }
-                @Override public void mutate(boolean restart, MonotonicDeadline deadline) {
-                    ContainerDriverCallBoundary.run(ContainerOperationDeadline.shared("broker operation", deadline),
-                            (restart ? "restart " : "kill ") + name, () -> {
-                        requireOwned(id, node, deadline);
-                        if (restart) { try (var command = broker.getDockerClient().startContainerCmd(id)) { command.exec(); } }
-                        else { try (var command = broker.getDockerClient().killContainerCmd(id).withSignal("KILL")) { command.exec(); } }
-                    });
-                }
-                @Override public List<KafkaBrokerControl.Leadership> leaders(List<KafkaLogCapture.Partition> requested, MonotonicDeadline deadline) throws Exception {
-                    requireOwned(id, node, deadline);
-                    var metadata = admin.describeTopics(requested.stream().map(KafkaLogCapture.Partition::topic).distinct().toList())
-                            .allTopicNames().get(deadline.remaining().toNanos(), TimeUnit.NANOSECONDS);
-                    var result = new ArrayList<KafkaBrokerControl.Leadership>();
-                    for (var partition : requested) {
-                        var observed = metadata.get(partition.topic()).partitions().stream()
-                                .filter(item -> item.partition() == partition.partition()).findFirst().orElseThrow();
-                        result.add(new KafkaBrokerControl.Leadership(partition.topic(), partition.partition(),
-                                observed.leader() == null ? -1 : observed.leader().id(),
-                                observed.replicas().stream().map(org.apache.kafka.common.Node::id).toList(),
-                                observed.isr().stream().map(org.apache.kafka.common.Node::id).toList()));
-                    }
-                    return List.copyOf(result);
-                }
-            });
-        } finally { admin.close(Duration.ZERO); }
+        return new DockerKafkaBrokerDriver(brokers.get(node - 1), target, node, network.getId(), () -> started, admin, identities);
     }
-    private void requireOwned(String id, int node, MonotonicDeadline deadline) {
-        if (!started || !id.equals(brokers.get(node - 1).getContainerId()) || deadline.remaining().isZero()
-                || Thread.currentThread().isInterrupted()) throw new IllegalStateException("Broker owner/deadline unavailable");
+    @Override public List<KafkaBrokerControl.Evidence> brokerFault(KafkaBrokerControl.Request request,
+            List<KafkaLogCapture.Partition> partitions) {
+        try (var admin = new KafkaBrokerAdmin(endpoints().hostBootstrapServers(), request.timeout())) {
+            return KafkaSelectedBrokerFault.execute(request, partitions, new KafkaSelectedBrokerFault.Driver() {
+                @Override public KafkaBrokerControl.Selection select(KafkaBrokerControl.Target target, MonotonicDeadline deadline) throws Exception {
+                    return admin.select(target, deadline);
+                }
+                @Override public KafkaBrokerFault.Driver broker(String name) { return driver(name, admin); }
+            });
+        }
     }
     @Override public KafkaLogCapture captureKafkaLogs(List<KafkaLogCapture.Partition> partitions, Path directory, MonotonicDeadline deadline) {
         if (!started) throw new IllegalStateException("Kafka owner unavailable");
