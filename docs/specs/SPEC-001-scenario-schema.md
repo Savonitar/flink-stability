@@ -3458,8 +3458,54 @@ requires positive counter growth during the hold, stable endpoint identities,
 verified absence of owned rules and removal of the helper. Cleanup uncertainty
 retains the watchdog and namespace ownership lock; it cannot become a PASS.
 
-This slice has unit-tested runtime wiring only. No verified public image digest
-was locally available under the development download restriction. Therefore no
-packet YAML operation, canonical scenarios or chaos-full entries are activated
-in this change. Image verification and the first live probe require a separately
-approved follow-up before schema/profile activation; chaos-quick is unchanged.
+The initial runtime slice has now been connected to the canonical packet schema
+below. Tool availability and an immutable index/config pin have been recorded;
+NET_ADMIN fault execution remains pending the separately approved first probe.
+The platform child-manifest limitation is explicit in the image record.
+Chaos-quick is unchanged.
+
+### Canonical packet faults
+
+`packet_fault` names an explicit `taskmanager`, broker `target`, `mode`, `duration`
+and `timeout`. Targets reuse named/partition-leader/transaction-coordinator
+selectors; `type: all-brokers` is supported for delay only. The owned topology must
+have exactly three brokers. Packet operations cannot overlap an unhealed process
+kill. At most 100 expanded operations may execute in one attempt.
+
+Loss uses `loss_percent` (1–100); delay uses `delay_ms` (1–5000) and optional
+`jitter_ms` (0–delay); blackhole accepts neither parameter. Holds are bounded to
+2m, with a strictly larger timeout no greater than 3m. The pinned public image and
+verified ARM64 config ID are in `docs/packet-image-pin.json`; the platform child
+manifest digest remains unavailable from the authorized Docker inspect interface.
+A different host platform requires its own verified pin. Tool presence does not
+establish NET_ADMIN support: the first live stage must pass an isolated probe.
+
+All-broker delay installs three exact destination filters into one queue, holds
+them simultaneously, rechecks every bound peer and retains aggregate counter
+changes. Confirmation requires counter growth, cleanup proof and a RUNNING job
+before and after injection. Raw data failures remain failures; a passing data
+oracle cannot override an unconfirmed packet effect. The new blackhole catalogs
+hold for 45s and explicitly set producer request.timeout.ms=30000 through the
+optional positive `--producerRequestTimeoutMs` workload argument. Existing
+workloads retain their producer defaults. TV1/TV2 controls and variants extend
+chaos-full; chaos-quick is unchanged.
+
+### Explicit at-least-once ID oracle
+
+`kafka.id-set` accepts `mode: at-least-once` only for an `AT_LEAST_ONCE` sink.
+The default is `exactly-once`, including historical at-least-once negative controls.
+A complete, fenced snapshot passes the opt-in mode when missing, unexpected and
+malformed counts are all zero. Duplicate records remain counted and sampled but do
+not fail that guarantee. An incomplete snapshot or verification error remains a
+failure. CLI terminal evidence records the mode; paired PR comparisons retain
+duplicate totals while excluding permitted duplicates from data-failure findings.
+
+### Rolling restart for at-least-once jobs
+
+An `AT_LEAST_ONCE` job can request `broker_fault: { mode: rolling-restart,
+order: fixed, ... }` with a named broker or partition-leader reference. The runner
+restarts all three brokers in numeric order, one at a time, and waits for complete
+ISR on every declared partition between stops. No transaction-state topic or open
+transaction is invented for this nontransactional workload. Exactly-once rolling
+scenarios continue to require their coordinator reference and full transaction-state
+partition inventory. Coordinator-first/last orders require a coordinator target.

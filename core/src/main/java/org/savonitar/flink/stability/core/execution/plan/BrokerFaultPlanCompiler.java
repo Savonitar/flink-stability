@@ -33,6 +33,17 @@ final class BrokerFaultPlanCompiler {
         }
         return count;
     }
+    static KafkaBrokerControl.Target target(JsonNode target, ObjectNode document) {
+        String prefix = null;
+        for (var job : document.at("/workload/jobs"))
+            if (job.path("alias").asText().equals(target.path("job").asText()))
+                prefix = job.at("/sink/transactional_id_prefix").asText();
+        var kind = "named".equals(target.path("kind").asText()) ? KafkaBrokerControl.TargetKind.NAMED
+                : "partition-leader".equals(target.path("type").asText()) ? KafkaBrokerControl.TargetKind.PARTITION_LEADER
+                : KafkaBrokerControl.TargetKind.TRANSACTION_COORDINATOR;
+        return new KafkaBrokerControl.Target(kind, target.path("name").textValue(), target.path("topic").textValue(),
+                target.path("partition").asInt(-1), prefix);
+    }
     static ExecutableScenarioPlan.BrokerFault fault(JsonNode value, ObjectNode document) {
         var target = value.path("target");
         String prefix = null;
@@ -47,6 +58,9 @@ final class BrokerFaultPlanCompiler {
                 : "partition-leader".equals(target.path("type").asText()) ? KafkaBrokerControl.TargetKind.PARTITION_LEADER
                 : KafkaBrokerControl.TargetKind.TRANSACTION_COORDINATOR;
         boolean rolling = "rolling-restart".equals(value.path("mode").asText());
+        if (rolling && kind != KafkaBrokerControl.TargetKind.TRANSACTION_COORDINATOR
+                && !"AT_LEAST_ONCE".equals(document.at("/workload/jobs/0/sink/delivery_guarantee").asText()))
+            throw new IllegalArgumentException("Non-coordinator rolling restart requires an AT_LEAST_ONCE sink");
         Integer commitVersion = null;
         if (value.path("require_commit").asBoolean()) {
             if (kind != KafkaBrokerControl.TargetKind.TRANSACTION_COORDINATOR || selectedJob == null
@@ -58,8 +72,7 @@ final class BrokerFaultPlanCompiler {
             commitVersion = version.intValue();
         }
         return new ExecutableScenarioPlan.BrokerFault(new KafkaBrokerControl.Request(
-                new KafkaBrokerControl.Target(kind, target.path("name").textValue(), target.path("topic").textValue(),
-                        target.path("partition").asInt(-1), prefix),
+                target(target, document),
                 KafkaBrokerControl.Action.valueOf(value.path("mode").asText().toUpperCase(Locale.ROOT).replace('-', '_')),
                 rolling ? java.time.Duration.ZERO : parseDuration(value.path("duration").asText()),
                 parseDuration(value.path("timeout").asText()), commitVersion,

@@ -30,6 +30,27 @@ class PacketFaultBackendTest {
             assertFalse(PacketFaultBackend.execute(request(action), driver).confirmed());
         }
     }
+    @Test void allBrokersShareOneQueueWithThreeExactFiltersAndIdentityChecks() {
+        var targets = java.util.stream.IntStream.rangeClosed(1,3).mapToObj(i ->
+                new KafkaBrokerControl.Target(KafkaBrokerControl.TargetKind.NAMED,"broker-"+i,null,-1,null)).toList();
+        var single=request(PacketFaultControl.Action.DELAY);
+        var request=new PacketFaultControl.Request(single.taskManager(), targets.getFirst(), single.image(), single.action(),
+                0,100,20,single.duration(),single.timeout(),targets.subList(1,3));
+        var driver = new Fake() {
+            @Override public PacketFaultControl.Binding resolve(KafkaBrokerControl.Target target,MonotonicDeadline deadline) {
+                int id=Integer.parseInt(target.name().substring(7));
+                return new PacketFaultControl.Binding(binding.taskManagerId(),binding.taskManagerImageId(),String.format("%064x",100+id),
+                        "broker-image",binding.networkId(),"172.18.0."+(10+id),19092,
+                        new KafkaBrokerControl.Selection(target,target.name(),null,-1,-1,null,null,null,id));
+            }
+        };
+        var result=PacketFaultBackend.execute(request,driver);
+        assertTrue(result.confirmed(),result.toString()); assertEquals(2,result.additionalBindings().size());
+        assertEquals(3,driver.commands.stream().filter(c -> c.contains("filter")).count());
+        assertEquals(1,driver.commands.stream().filter(c -> c.contains("netem")).count());
+        assertEquals(1,driver.commands.stream().filter(c -> c.contains("del")).count());
+        assertEquals(9,driver.verifies);
+    }
     @Test void foreignQdiscIsNotModifiedEvenByCleanupOrWatchdogActivation() {
         var driver = new Fake(); driver.foreign = true;
         var result = PacketFaultBackend.execute(request(PacketFaultControl.Action.LOSS),driver);

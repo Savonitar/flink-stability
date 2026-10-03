@@ -115,6 +115,7 @@ record FaultRule(
     }
 
     boolean matches(FaultRuleBook.RequestIdentity request) {
+        if ("produce".equals(request.api()) && request.transactionalId() == null && topic.isEmpty()) return false;
         return api.equals(request.api()) && (result == Result.ANY || request.committed() != null && matches(request.transactionalId(), request.committed()))
                 && transactionalIdPrefix.map(prefix -> request.transactionalId() != null && request.transactionalId().startsWith(prefix)).orElse(true)
                 && topic.map(value -> request.topics().equals(Set.of(value))).orElse(true);

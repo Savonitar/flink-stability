@@ -182,7 +182,7 @@ def summarize(name, side, run, result, expected_subject, exit_code, required_eff
     terminal = evidence.get("terminalValidation") or {}
     counts = {key: terminal.get(key) for key in ("missing", "duplicates")}
     return {"scenario": name, "side": side, "run": run, "verdict": result.get("status"),
-            "reason": result.get("reason"), **counts, "subjects": sorted(hashes),
+            "reason": result.get("reason"), "oracleMode": terminal.get("mode", "exactly-once"), **counts, "subjects": sorted(hashes),
             "subjectStatus": origins.get("status", "unavailable"),
             "subjectOk": subject_ok, "exitCode": exit_code,
             "componentErrors": evidence.get("componentErrors"),

@@ -1,0 +1,27 @@
+{
+  "sourceTag": "docker.io/nicolaka/netshoot:v0.14",
+  "image": "docker.io/nicolaka/netshoot@sha256:7f08c4aff13ff61a35d30e30c5c1ea8396eac6ab4ce19fd02d5a4b3b5d0d09a2",
+  "indexDigest": "sha256:7f08c4aff13ff61a35d30e30c5c1ea8396eac6ab4ce19fd02d5a4b3b5d0d09a2",
+  "platform": "linux/arm64",
+  "platformManifestDigest": null,
+  "platformManifestStatus": "Unavailable from this Docker image store, including image inspect --platform linux/arm64; no registry query outside the authorized Docker commands was made.",
+  "configImageId": "sha256:3be5270ddd56ae26af7c6ea7ac66c393dbe1d8cb8bceb46ec0b1f4a55c1574ad",
+  "toolCheck": {
+    "date": "2026-10-03",
+    "network": "none",
+    "capabilities": "all dropped",
+    "mounts": [],
+    "readOnlyRoot": true,
+    "exitCode": 0,
+    "paths": [
+      "/bin/sh",
+      "/sbin/ip",
+      "/sbin/tc",
+      "/usr/sbin/iptables"
+    ],
+    "iproute2": "6.15.0",
+    "iptables": "1.8.11 (nf_tables)",
+    "architecture": "aarch64"
+  },
+  "netAdminProbe": "NOT RUN; first live packet stage must pass the isolated probe."
+}

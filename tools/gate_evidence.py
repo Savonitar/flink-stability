@@ -10,7 +10,7 @@ def fault_requirements(text):
     required = Counter()
     lines = text.splitlines()
     for index, line in enumerate(lines):
-        match = re.match(r"^(\s*)- (network_fault|broker_fault|kill|restart|leader_fault):", line)
+        match = re.match(r"^(\s*)- (network_fault|broker_fault|packet_fault|kill|restart|leader_fault):", line)
         if not match:
             continue
         indent, kind = len(match[1]), match[2]
@@ -20,7 +20,8 @@ def fault_requirements(text):
                 break
             block.append(following)
         body = '\n'.join(block)
-        if kind == 'leader_fault': required['flinkHa'] += 1
+        if kind == 'packet_fault': required['packetFaults'] += 1
+        elif kind == 'leader_fault': required['flinkHa'] += 1
         elif kind == 'network_fault':
             required['networkFaults'] += 1
             if re.search(r'^\s+restart:\s*\{\s*component:\s*taskmanager\b', body, re.M):
@@ -32,7 +33,7 @@ def fault_requirements(text):
 
 
 def fault_status(evidence, required=None):
-    keys = {'networkFaults': 'triggered', 'brokerOperations': 'confirmed', 'taskManagerKills': 'confirmed'}
+    keys = {'packetFaults': 'confirmed', 'networkFaults': 'triggered', 'brokerOperations': 'confirmed', 'taskManagerKills': 'confirmed'}
     if required is None:
         required = {key: len(evidence.get(key) or []) for key in keys if evidence.get(key)}
         if not required: return 'unavailable'
@@ -69,7 +70,10 @@ def data_difference(rows, expected_runs=None):
         complete &= all(row['subjectOk'] and row.get('faultStatus') in ('confirmed', 'not-required')
                         and row['verdict'] in ('pass', 'fail') and row['exitCode'] == (0 if row['verdict'] == 'pass' else 1)
                         for values in sides.values() for row in values)
-        for metric in ('missing', 'duplicates'):
+        modes = {row.get('oracleMode', 'exactly-once') for values in sides.values() for row in values}
+        complete &= len(modes) == 1 and modes <= {'exactly-once', 'at-least-once'}
+        metrics = ('missing',) if modes == {'at-least-once'} else ('missing', 'duplicates')
+        for metric in metrics:
             known = complete and all(type(row.get(metric)) is int and row[metric] >= 0 for values in sides.values() for row in values)
             if not known:
                 unresolved.append(name + '/' + metric)

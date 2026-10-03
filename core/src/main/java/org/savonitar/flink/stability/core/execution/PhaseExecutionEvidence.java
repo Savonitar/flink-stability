@@ -22,7 +22,7 @@ public record PhaseExecutionEvidence(
         List<TaskManagerKill> taskManagerKills,
         List<NetworkFault> networkFaults,
         List<TaskManagerRestart> taskManagerRestarts,
-        List<LeaderFault> leaderFaults, List<BrokerOperation> brokerOperations) {
+        List<LeaderFault> leaderFaults, List<BrokerOperation> brokerOperations, List<PacketFault> packetFaults) {
     public PhaseExecutionEvidence {
         steps = List.copyOf(Objects.requireNonNull(steps, "steps"));
         taskManagerKills = List.copyOf(Objects.requireNonNull(
@@ -31,7 +31,25 @@ public record PhaseExecutionEvidence(
         taskManagerRestarts = List.copyOf(Objects.requireNonNull(
                 taskManagerRestarts, "taskManagerRestarts"));
         brokerOperations = List.copyOf(brokerOperations);
+        packetFaults = List.copyOf(packetFaults);
         leaderFaults = List.copyOf(Objects.requireNonNull(leaderFaults, "leaderFaults"));
+    }
+
+    public PhaseExecutionEvidence(List<StepEvidence> steps, List<TaskManagerKill> kills, List<NetworkFault> network,
+                                  List<TaskManagerRestart> restarts, List<LeaderFault> leaders, List<BrokerOperation> brokers) {
+        this(steps, kills, network, restarts, leaders, brokers, List.of());
+    }
+    public record PacketFault(String path, List<LoopIteration> loopIterations,
+                              org.savonitar.flink.stability.runtime.api.PacketFaultControl.Evidence raw,
+                              FlinkJobObservation.Attempt jobBefore, FlinkJobObservation.Attempt jobAfter) {
+        public PacketFault { loopIterations = List.copyOf(loopIterations); Objects.requireNonNull(raw); }
+        public boolean confirmed() {
+            return raw.confirmed() && running(jobBefore) && running(jobAfter);
+        }
+        private static boolean running(FlinkJobObservation.Attempt attempt) {
+            return attempt != null && attempt.observation().map(value -> value.state() ==
+                    org.savonitar.flink.stability.core.flink.FlinkJobState.RUNNING).orElse(false);
+        }
     }
 
     public record BrokerOperation(String path, List<LoopIteration> loopIterations,
@@ -265,7 +283,7 @@ public record PhaseExecutionEvidence(
         public ProtocolMessage {
             originalErrorCodes = java.util.Map.copyOf(originalErrorCodes);
             originalBaseOffsets = java.util.Map.copyOf(originalBaseOffsets);
-            if (!java.util.Set.of("describe-producers", "list-transactions").contains(api))
+            if (!java.util.Set.of("describe-producers", "list-transactions", "produce").contains(api))
                 transactionalId = requireNonBlank(transactionalId, "transactionalId");
             var partitions = new java.util.LinkedHashMap<String, java.util.List<Integer>>();
             topicPartitions.forEach((topic, values) -> partitions.put(topic, java.util.List.copyOf(values)));
@@ -275,6 +293,8 @@ public record PhaseExecutionEvidence(
         }
         boolean qualifies(ExecutableScenarioPlan.NetworkFaultAction action) {
             if (!beforeDeadline) return false;
+            if ("produce".equals(api) && transactionalId == null && (topicPartitions.size() != 1
+                    || topicPartitions.values().stream().anyMatch(java.util.List::isEmpty))) return false;
             if ("describe-producers".equals(api) && (topicPartitions.size() != 1
                     || topicPartitions.values().stream().anyMatch(java.util.List::isEmpty))) return false;
             if ("list-transactions".equals(api) && (producerIdFilters.isEmpty()
@@ -287,7 +307,8 @@ public record PhaseExecutionEvidence(
                 case DELAY -> "request-delayed".equals(event) && forwardedToBroker && requestedDelayMillis > 0
                         && actualDelayNanos >= java.util.concurrent.TimeUnit.MILLISECONDS.toNanos(requestedDelayMillis);
                 case ERROR_AFTER_APPEND -> "response-error-after-append".equals(event) && "produce".equals(api)
-                        && forwardedToBroker && producerId != null && producerId >= 0 && producerEpoch != null && producerEpoch >= 0
+                        && forwardedToBroker && (producerId != null && producerId >= 0 && producerEpoch != null && producerEpoch >= 0
+                            || transactionalId == null && producerId == null && producerEpoch == null)
                         && substitutedErrorCode != null && substitutedErrorCode == org.apache.kafka.common.protocol.Errors.REQUEST_TIMED_OUT.code()
                         && !originalErrorCodes.isEmpty() && originalErrorCodes.values().stream().allMatch(code -> code == 0)
                         && originalErrorCodes.keySet().equals(originalBaseOffsets.keySet())
@@ -389,7 +410,7 @@ public record PhaseExecutionEvidence(
         WAIT,
         KILL_TASKMANAGER,
         RESTART_TASKMANAGER,
-        BROKER_FAULT, KILL_BROKER,
+        PACKET_FAULT, BROKER_FAULT, KILL_BROKER,
         RESTART_BROKER,
         NETWORK_FAULT,
         LEADER_FAULT

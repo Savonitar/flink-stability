@@ -38,6 +38,31 @@ class ProtocolMessagesTest {
             .setTopicData(new ProduceRequestData.TopicProduceDataCollection(List.of(topic).iterator()));
     }
 
+    static ProduceRequestData nonTransactionalProduce(boolean idempotent) {
+        var request = produce().setTransactionalId(null);
+        request.topicData().iterator().next().partitionData().getFirst().setRecords(idempotent
+                ? MemoryRecords.withIdempotentRecords(Compression.NONE, 42, (short) 2, 0, new SimpleRecord(new byte[]{1, 2}))
+                : MemoryRecords.withRecords(Compression.NONE, new SimpleRecord(new byte[]{1, 2})));
+        return request;
+    }
+
+    @Test void nonTransactionalProduceRequiresTopicScopeAndConsistentBatchFlags() throws Exception {
+        for (boolean idempotent : List.of(false, true)) {
+            var request = nonTransactionalProduce(idempotent);
+            var identity = ProtocolMessages.identity((short)12, wire(new Fixture(ApiKeys.PRODUCE, (short)12, request))).orElseThrow();
+            assertNull(identity.transactionalId());
+            assertEquals(idempotent ? Long.valueOf(42) : null, identity.producerId());
+            var json = new com.fasterxml.jackson.databind.ObjectMapper().createObjectNode().put("faultId","alo").put("api","produce")
+                    .put("action","drop-response").put("occurrences",1).put("triggerDeadlineNanos",1000);
+            assertFalse(FaultRule.parse(json).matches(identity));
+            json.put("topic","output"); assertTrue(FaultRule.parse(json).matches(identity));
+            json.put("topic","foreign"); assertFalse(FaultRule.parse(json).matches(identity));
+            json.put("topic","output").put("transactionalIdPrefix","eos-"); assertFalse(FaultRule.parse(json).matches(identity));
+            assertTrue(ProtocolMessages.identity((short)12, request.setTransactionalId("eos-1")).isEmpty());
+        }
+        assertTrue(ProtocolMessages.identity((short)12, produce().setTransactionalId(null)).isEmpty());
+    }
+
     static TxnOffsetCommitRequestData offsets() {
         return new TxnOffsetCommitRequestData().setTransactionalId("eos-1").setProducerId(42).setProducerEpoch((short) 2).setGroupId("group")
             .setTopics(List.of(new TxnOffsetCommitRequestData.TxnOffsetCommitRequestTopic().setName("input").setPartitions(List.of(new TxnOffsetCommitRequestData.TxnOffsetCommitRequestPartition().setPartitionIndex(0).setCommittedOffset(5)))));

@@ -1,0 +1,79 @@
+format: v1
+kind: scenario
+
+meta:
+  name: at-least-once-taskmanager-restart
+  description: Explicit at-least-once guarantee under taskmanager-restart; duplicates counted and permitted.
+
+runs: 1
+health_retry_limit: 0
+completion_timeout: 5m
+
+setup:
+  kafka:
+    clusters:
+      main:
+        image: apache/kafka:4.0.0
+        brokers: 3
+        transaction_version: 2
+        topics:
+          - name: input
+            partitions: 3
+            replication_factor: 3
+            input_source:
+              mode: generated
+              format: integer-sequence
+              total: 30000
+          - name: output
+            partitions: 3
+            replication_factor: 3
+  flink:
+    image: docker.io/library/flink:2.2.0
+    jobmanagers: 1
+    taskmanagers: 1
+
+subject:
+  connectors:
+    kafka:
+      artifact: maven:org.apache.flink:flink-connector-kafka:5.0.0-2.2
+
+workload:
+  jobs:
+    - alias: eos-job
+      jar: ./flink-job-generator/target/flink-job-generator.jar
+      connectors: [kafka]
+      parallelism: 1
+      source: { cluster: main, topic: input }
+      sink:
+        cluster: main
+        topic: output
+        delivery_guarantee: AT_LEAST_ONCE
+      checkpointing:
+        interval: 1s
+        mode: EXACTLY_ONCE
+      program_args: [--processingDelayMs, "5"]
+
+phases:
+  - name: warmup
+    steps:
+      - await:
+          condition: { type: job-state, job: eos-job, state: RUNNING }
+          timeout: 2m
+          on_timeout: inconclusive
+      - await:
+          condition: { type: checkpoint-completed, job: eos-job, count: 1 }
+          timeout: 2m
+          on_timeout: fail
+  - name: taskmanager-recovery
+    steps:
+      - kill:
+          target: { kind: named, role: taskmanager, name: taskmanager-1 }
+      - wait: { duration: 1s }
+      - restart: { component: taskmanager }
+
+terminal_validations:
+  - type: kafka.id-set
+    cluster: main
+    topic: output
+    expected: input-manifest
+    mode: at-least-once

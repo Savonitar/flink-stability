@@ -28,34 +28,52 @@ final class PacketFaultBackend {
         String device = null, error = null, sidecar = null, image = null;
         String chain = "FSCHAOS_" + UUID.randomUUID().toString().replace("-", "").substring(0,12);
         List<PacketFaultControl.Receipt> receipts = new ArrayList<>();
+        List<PacketFaultControl.Binding> others = new ArrayList<>();
         boolean locked = false, opened = false, attempted = false, healed = false, removed = false;
         try {
             binding = driver.resolve(request.broker(), deadline);
             if (!binding.selection().requested().equals(request.broker())) throw new IllegalStateException("Selector binding changed");
+            for (var target : request.additionalBrokers()) {
+                var other = driver.resolve(target, deadline);
+                if (!other.selection().requested().equals(target) || !other.taskManagerId().equals(binding.taskManagerId())
+                        || !other.networkId().equals(binding.networkId()) || other.brokerId().equals(binding.brokerId())
+                        || other.brokerIpv4().equals(binding.brokerIpv4())
+                        || others.stream().anyMatch(prior -> prior.brokerId().equals(other.brokerId()) || prior.brokerIpv4().equals(other.brokerIpv4())))
+                    throw new IllegalStateException("Packet peer identity/network is ambiguous");
+                others.add(other);
+            }
             locked = OWNERS.add(binding.taskManagerId());
             if (!locked) throw new IllegalStateException("TaskManager namespace already owns a packet fault");
             driver.verify(binding, deadline);
+            for (var other : others) driver.verify(other, deadline);
             opened = true; // Even an ambiguous create/start failure must enter cleanup.
             driver.open(request, binding, chain, deadline);
             sidecar = driver.sidecarId(); image = driver.imageId();
             run(driver, receipts, List.of("sh", "-ceu", "command -v ip; command -v tc; command -v iptables; tc -V; iptables --version"), deadline);
             var route = run(driver, receipts, List.of("ip", "-o", "-4", "route", "get", binding.brokerIpv4()), deadline).stdout();
             device = device(route);
+            for (var other : others) {
+                var routeToPeer = run(driver, receipts, List.of("ip", "-o", "-4", "route", "get", other.brokerIpv4()), deadline).stdout();
+                if (!device.equals(device(routeToPeer))) throw new IllegalStateException("Packet peers need the same namespace route device");
+            }
             if (request.action() != PacketFaultControl.Action.BLACKHOLE) {
                 var qdiscs = run(driver, receipts, List.of("tc", "qdisc", "show", "dev", device), deadline).stdout();
                 if (!qdiscs.lines().allMatch(line -> line.isBlank() || line.matches("qdisc noqueue 0: root(?: .*)?")))
                     throw new IllegalStateException("Foreign qdisc: refusing to replace namespace state");
             }
             driver.verify(binding, deadline);
+            for (var other : others) driver.verify(other, deadline);
             if (deadline.remaining().compareTo(request.duration()) <= 0) throw new IllegalStateException("Insufficient packet hold budget");
             attempted = true;
             run(driver, receipts, List.of("sh", "-ceu", "printf %s \"$1\" > /run/flink-packet-owned", "sh", device), deadline);
             for (var command : install(request, binding, device, chain)) run(driver, receipts, command, deadline);
+            for (var other : others) run(driver, receipts, filter(other, device), deadline);
             before = counters(request.action(), run(driver, receipts, counterCommand(request.action(), device, chain), deadline).stdout());
             long heldAt = driver.nanoTime();
             if (deadline.remaining().compareTo(request.duration()) < 0) throw new IllegalStateException("Installation exhausted hold budget");
             driver.sleep(request.duration()); held = driver.nanoTime() - heldAt;
             driver.verify(binding, deadline);
+            for (var other : others) driver.verify(other, deadline);
             var receipt = run(driver, receipts, counterCommand(request.action(), device, chain), deadline);
             after = counters(request.action(), receipt.stdout());
         } catch (Exception failure) {
@@ -86,7 +104,7 @@ final class PacketFaultBackend {
             if (interrupted) Thread.currentThread().interrupt();
         }
         return new PacketFaultControl.Evidence(request, binding, sidecar, image, device, started, driver.clockMillis(), held,
-                before, after, healed, removed, receipts, error);
+                before, after, healed, removed, receipts, error, others);
     }
     private static String append(String current, String error) { return current == null ? error : current + "; " + error; }
     private static PacketFaultControl.Receipt run(Driver driver, List<PacketFaultControl.Receipt> receipts,
@@ -122,9 +140,12 @@ final class PacketFaultBackend {
         else netem.addAll(List.of("delay",request.delayMillis()+"ms",request.jitterMillis()+"ms"));
         return List.of(List.of("tc","qdisc","add","dev",device,"root","handle",ROOT_HANDLE,"prio","bands","3","priomap",
                         "0","0","0","0","0","0","0","0","0","0","0","0","0","0","0","0"), netem,
-                List.of("tc","filter","add","dev",device,"protocol","ip","parent",ROOT_HANDLE,"prio","1","u32",
-                        "match","ip","dst",binding.brokerIpv4()+"/32","match","ip","protocol","6","0xff",
-                        "match","ip","dport",Integer.toString(binding.brokerPort()),"0xffff","flowid",ROOT_HANDLE+"3"));
+                filter(binding, device));
+    }
+    private static List<String> filter(PacketFaultControl.Binding binding, String device) {
+        return List.of("tc","filter","add","dev",device,"protocol","ip","parent",ROOT_HANDLE,"prio","1","u32",
+                "match","ip","dst",binding.brokerIpv4()+"/32","match","ip","protocol","6","0xff",
+                "match","ip","dport",Integer.toString(binding.brokerPort()),"0xffff","flowid",ROOT_HANDLE+"3");
     }
     static List<List<String>> heal(PacketFaultControl.Action action, PacketFaultControl.Binding binding, String device, String chain) {
         if (action != PacketFaultControl.Action.BLACKHOLE) return List.of(List.of("tc","qdisc","del","dev",device,"root","handle",ROOT_HANDLE));

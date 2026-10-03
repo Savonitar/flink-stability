@@ -1,0 +1,9 @@
+format: v1
+kind: expected-result
+
+meta:
+  name: parallel-pooling-list-transactions-drop-response-v2.expected
+  scenario: parallel-pooling-list-transactions-drop-response-v2
+
+default:
+  outcome: pass

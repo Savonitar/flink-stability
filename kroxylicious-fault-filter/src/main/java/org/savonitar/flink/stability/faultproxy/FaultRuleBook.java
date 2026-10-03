@@ -126,6 +126,8 @@ final class FaultRuleBook implements AutoCloseable {
 
     /** Observes a matching request, without deciding whether it will be forwarded or dropped. */
     synchronized void observeRetry(RequestIdentity request, Map<String, Object> details) {
+        // A topic alone cannot identify a retry from a producer without a wire producer ID.
+        if ("produce".equals(request.api()) && request.producerId() == null) return;
         var pending = awaitingRetries.iterator();
         while (pending.hasNext()) {
             Claim claim = pending.next();

@@ -500,3 +500,13 @@ ListTransactions permits `coordinator-load-in-progress` and
 unknown ListTransactions state filters cannot qualify a successful response.
 `error-after-append` remains Produce-only. The routed proxy isolates these faults
 from the harness Admin client. Raw and rendered evidence retain recovery selectors.
+
+### Nontransactional Produce faults
+
+Produce v3..v12 matching also accepts nontransactional batches, including producers
+without an idempotent producer ID. These requests require an exact topic selector
+and cannot match a transactional-prefix rule. Batch transactional flags must agree
+with the request; mixed producer identities remain unsupported. Missing wire
+transactional IDs and producer IDs stay null in evidence. Topic-only observations
+from producers without an ID do not produce retry witnesses. Lost responses and
+error-after-append retain the existing correlation and successful-append checks.

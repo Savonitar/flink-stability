@@ -45,6 +45,12 @@ public final class KafkaIdSetValidator {
         this.nanoTime = Objects.requireNonNull(nanoTime, "nanoTime");
     }
 
+    public KafkaIdSetValidationResult validate(String bootstrapServers, String topic, long[] expectedIds,
+            Duration timeout, KafkaIdSetValidationResult.Mode mode) {
+        Objects.requireNonNull(mode, "mode");
+        return validate(bootstrapServers, topic, expectedIds, timeout).forMode(mode);
+    }
+
     /** {@code expectedIds} must be sorted, unique, and non-empty. */
     public KafkaIdSetValidationResult validate(
             String bootstrapServers,

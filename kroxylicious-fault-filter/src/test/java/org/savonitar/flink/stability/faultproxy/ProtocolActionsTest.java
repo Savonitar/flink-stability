@@ -132,6 +132,9 @@ class ProtocolActionsTest {
             rule.remove("transactionalIdPrefix");
             if (fixture.api() == ApiKeys.DESCRIBE_PRODUCERS) rule.put("topic", "output");
         }
+        if (fixture.request() instanceof ProduceRequestData produce && produce.transactionalId() == null) {
+            rule.remove("transactionalIdPrefix"); rule.put("topic", "output");
+        }
         if (error != null) rule.put("error", error);
         if (delay > 0) rule.put("latencyMillis", delay);
         Files.writeString(control.resolve("rules/f.json"), rule.toString());

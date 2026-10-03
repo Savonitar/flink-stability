@@ -657,3 +657,42 @@ expected validation code.
 | SV-282 | Foreign root qdisc, invalid route/selector, changed endpoint or expired deadline | Refuse unowned state, retain diagnostic receipts and attempt bounded scoped healing after any possible installation. |
 | SV-283 | Interrupted hold, partial installation, failed healing or unknown helper removal | Attempt cleanup; restore interrupt; confirmation requires rule absence and helper removal. Keep watchdog/namespace ownership when cleanup is uncertain. |
 | SV-284 | Mutable image tag, invalid percentages/jitter/bounds, oversized evidence or ambiguous counters | Reject or preserve bounded unconfirmed evidence; never install global rules or claim live validation from unit tests. |
+
+### Broker evidence in negative controls
+
+| Case | Input | Required result |
+| --- | --- | --- |
+| SV-285 | A data failure matches its pinned expectation but a broker fault lacks physical/leadership confirmation | Preserve the raw data FAIL; the scenario is inconclusive with broker.operation.effect-unconfirmed, never a passing negative control. |
+
+### Canonical packet operations
+
+| Case | Input | Required result |
+| --- | --- | --- |
+| SV-286 | Packet schema target references undeclared TaskManager, cluster or partition, or uses invalid mode parameters | Reject before provisioning; require the owned three-broker topology and bounded durations. |
+| SV-287 | Delay targets all brokers | Resolve and verify three distinct owned peers in one namespace, require a common device, install three scoped filters into one queue, hold once and heal once. |
+| SV-288 | Packet counters/heal are unconfirmed or the job finishes during the hold | Preserve raw receipts and any data FAIL; do not advance later steps or allow a passing data oracle to confirm the fault. |
+| SV-289 | Canonical packet image pin or producer request timeout | Preserve index/config/platform distinctions, reject a different deployed image identity, serialize exact timing/counters, and leave producer defaults unchanged unless the positive argument is supplied. |
+
+### Explicit at-least-once oracle
+
+| ID | Input | Required behavior |
+| --- | --- | --- |
+| SV-290 | Complete output repeats expected IDs with explicit at-least-once mode | PASS, preserving exact duplicate totals and samples; strict default remains FAIL. |
+| SV-291 | At-least-once output has missing, unexpected or malformed IDs, or an incomplete snapshot | FAIL; duplicates cannot hide another defect or turn a verification failure into PASS. |
+| SV-292 | At-least-once oracle declared for an exactly-once sink | Reject; historical AT_LEAST_ONCE sinks without the new mode still use the exact-ID oracle. |
+| SV-293 | PR comparison contains allowed duplicates or mismatched oracle modes | Retain duplicate counts; exclude allowed duplicates from guarantee-failure findings; mismatched modes remain unknown. |
+
+### Nontransactional Produce coverage
+
+| ID | Input | Required behavior |
+| --- | --- | --- |
+| SV-294 | Nontransactional Produce with or without idempotent producer identity | Match only an exact topic rule, preserve absent fields, and reject transactional-prefix or foreign-topic selectors. |
+| SV-295 | Nontransactional lost response or error-after-append | Forward the real request; record the correlated response and successful append offsets before substituting an error; never invent a transaction identity. |
+
+### Nontransactional rolling restart
+
+| ID | Input | Required behavior |
+| --- | --- | --- |
+| SV-296 | AT_LEAST_ONCE fixed-order rolling with a partition-leader reference | Restart all three brokers sequentially and require full declared-partition ISR, without requesting nonexistent transaction metadata. |
+| SV-297 | Partial ISR after nontransactional restart, or coordinator order without a coordinator | Stop the sequence after safety healing, or reject before provisioning; keep EOS transaction-state requirements unchanged. |
+| SV-305 | Explicit ID-set mode compiled before execution | Keep the typed plan independent of runtime validator packages; adapt the mode at execution while preserving existing package boundaries. |

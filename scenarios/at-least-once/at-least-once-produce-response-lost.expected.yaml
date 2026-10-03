@@ -1,0 +1,7 @@
+format: v1
+kind: expected-result
+meta:
+  name: at-least-once-produce-response-lost.expected
+  scenario: at-least-once-produce-response-lost
+default:
+  outcome: pass

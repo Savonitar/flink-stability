@@ -815,7 +815,7 @@ public final class ExecutableScenarioPlan {
     }
 
     public sealed interface Step permits AwaitJobState, AwaitCheckpoints, Wait,
-            KillTaskManager, RestartTaskManager, BrokerOperation, BrokerFault, Loop, ProtocolFault, LeaderFault {}
+            KillTaskManager, RestartTaskManager, BrokerOperation, BrokerFault, PacketFault, Loop, ProtocolFault, LeaderFault {}
 
     /** One bounded fault of the observed leader, including unconditional healing. */
     public enum RecoveryBarrier { TOKEN_CHECKPOINT }
@@ -873,6 +873,10 @@ public final class ExecutableScenarioPlan {
         public Wait {
             duration = requirePositive(duration, "duration");
         }
+    }
+
+    public record PacketFault(org.savonitar.flink.stability.runtime.api.PacketFaultControl.Request request) implements Step {
+        public PacketFault { Objects.requireNonNull(request); }
     }
 
     public record BrokerFault(org.savonitar.flink.stability.runtime.api.KafkaBrokerControl.Request request) implements Step {
@@ -990,11 +994,18 @@ public final class ExecutableScenarioPlan {
         ERROR_AFTER_APPEND
     }
 
+    public enum IdSetMode { EXACTLY_ONCE, AT_LEAST_ONCE }
+
     public record KafkaIdSetValidation(
             TopicReference output,
             ExpectedRecords expected,
-            Duration timeout) {
+            Duration timeout,
+            IdSetMode mode) {
+        public KafkaIdSetValidation(TopicReference output, ExpectedRecords expected, Duration timeout) {
+            this(output, expected, timeout, IdSetMode.EXACTLY_ONCE);
+        }
         public KafkaIdSetValidation {
+            Objects.requireNonNull(mode, "mode");
             Objects.requireNonNull(output, "output");
             Objects.requireNonNull(expected, "expected");
             timeout = requirePositive(timeout, "timeout");

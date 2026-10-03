@@ -13,7 +13,7 @@ import test_pr_gate as fixtures
 class ChaosProfileTest(unittest.TestCase):
     def test_explicit_profiles_have_unique_existing_names_and_cover_quick(self):
         self.assertEqual(10, len(PROFILES['chaos-quick']))
-        self.assertEqual(72, len(PROFILES['chaos-full']))
+        self.assertEqual(124, len(PROFILES['chaos-full']))
         for name in PROFILES['chaos-full']:
             if name.startswith('broker-'):
                 self.assertTrue(name.endswith(('-v1', '-v2')), name)
@@ -24,7 +24,7 @@ class ChaosProfileTest(unittest.TestCase):
             for name in names:
                 path = pr_gate.canonical(ROOT, name)
                 self.assertTrue(path.with_name(name + '.expected.yaml').is_file())
-                self.assertEqual(not name.startswith(('broker-eos-control', 'pooling-broker-control', 'rolling-control')), bool(fault_requirements(path.read_text())), name)
+                self.assertEqual(not name.startswith(('broker-eos-control', 'pooling-broker-control', 'rolling-control', 'packet-control', 'parallel-pooling-broker-control', 'parallel-rolling-control', 'at-least-once-control', 'at-least-once-protocol-control')), bool(fault_requirements(path.read_text())), name)
         self.assertNotIn('protocol-add-partitions-concurrent-v2', PROFILES['chaos-full'])
 
     def test_calibration_override_accepts_every_profile_catalog_and_rejects_ambiguity(self):
@@ -37,6 +37,11 @@ class ChaosProfileTest(unittest.TestCase):
         with self.assertRaises(SystemExit):
             pr_gate.with_producer_max_block('no job', 5000)
 
+    def test_packet_requires_its_own_counter_and_cleanup_receipt(self):
+        text = pr_gate.canonical(ROOT, 'packet-leader-loss-v2').read_text()
+        self.assertEqual({'packetFaults': 1}, fault_requirements(text))
+        self.assertEqual('unavailable', fault_status({'brokerOperations': [{'confirmed': True}]}, fault_requirements(text)))
+
     def test_pooling_recovery_requires_both_protocol_and_process_effects(self):
         text = pr_gate.canonical(ROOT, 'pooling-list-transactions-delay-v1').read_text()
         self.assertEqual({'networkFaults': 1, 'taskManagerKills': 1}, fault_requirements(text))
@@ -48,7 +53,7 @@ class ChaosProfileTest(unittest.TestCase):
         self.assertEqual('unavailable', fault_status({'brokerOperations': [{'confirmed': True}] * 2}, fault_requirements(text)))
 
     def test_missing_or_false_effect_is_not_confirmed(self):
-        for key, field, count in [('networkFaults','triggered',1),('brokerOperations','confirmed',2),('taskManagerKills','confirmed',1)]:
+        for key, field, count in [('packetFaults','confirmed',1),('networkFaults','triggered',1),('brokerOperations','confirmed',2),('taskManagerKills','confirmed',1)]:
             self.assertEqual('unavailable',fault_status({},{key:count}))
             self.assertEqual('confirmed',fault_status({key:[{field:True}]*count},{key:count}))
             self.assertEqual('unconfirmed',fault_status({key:[{field:False}]*count},{key:count}))
@@ -64,6 +69,16 @@ class ChaosProfileTest(unittest.TestCase):
         self.assertEqual('unknown',data_difference([baseline,candidate],2)['status'])
         self.assertEqual('no',data_difference([dict(baseline,missing=1),candidate],1)['status'])
         self.assertEqual('unknown',data_difference([],1)['status'])
+
+    def test_at_least_once_duplicate_counts_are_not_a_data_guarantee_failure(self):
+        baseline=pr_gate.summarize('alo','baseline',1,fixtures.run_result(),fixtures.CANDIDATE_HASH,0)
+        candidate=dict(baseline,side='candidate',duplicates=5)
+        rows=[dict(row,oracleMode='at-least-once') for row in (baseline,candidate)]
+        self.assertEqual('no',data_difference(rows,1)['status'])
+        rows[1]['missing']=1
+        self.assertEqual('yes',data_difference(rows,1)['status'])
+        rows[1]['oracleMode']='exactly-once'
+        self.assertEqual('unknown',data_difference(rows,1)['status'])
 
     def test_committer_warnings_and_missing_coverage_are_separate(self):
         self.assertIsNone(committer_counts(None)['WARN'])

@@ -169,6 +169,23 @@ public final class ExecutablePhaseExecutor {
             } else if (step instanceof ExecutableScenarioPlan.RestartTaskManager restart) {
                 restartTaskManager(
                         phaseIndex, phaseName, path, loopIterations, restart, evidence);
+            } else if (step instanceof ExecutableScenarioPlan.PacketFault fault) {
+                FlinkJobObservation.Attempt before = null, after = null;
+                org.savonitar.flink.stability.runtime.api.PacketFaultControl.Evidence raw;
+                try {
+                    before = observe(job, Duration.ofSeconds(10));
+                    if (before.observation().map(value -> value.state() != FlinkJobState.RUNNING).orElse(true))
+                        throw new IllegalStateException("Packet fault requires a running job");
+                    raw = runtime.packetFault(fault.request());
+                    after = observe(job, Duration.ofSeconds(10));
+                } catch (RuntimeException failure) {
+                    raw = org.savonitar.flink.stability.runtime.api.PacketFaultControl.unconfirmed(fault.request(), failure.toString());
+                }
+                var observed = new PhaseExecutionEvidence.PacketFault(path, loopIterations, raw, before, after);
+                evidence.packets.add(observed);
+                evidence.stopFurtherSteps |= !observed.confirmed();
+                succeeded(evidence, phaseIndex, phaseName, path, loopIterations, PhaseExecutionEvidence.StepKind.PACKET_FAULT,
+                        "effectConfirmed=" + observed.confirmed());
             } else if (step instanceof ExecutableScenarioPlan.BrokerFault fault) {
                 java.util.List<org.savonitar.flink.stability.runtime.api.KafkaBrokerControl.Evidence> observations;
                 boolean rolling = fault.request().action() == org.savonitar.flink.stability.runtime.api.KafkaBrokerControl.Action.ROLLING_RESTART;
@@ -761,6 +778,7 @@ public final class ExecutablePhaseExecutor {
         private final List<PhaseExecutionEvidence.TaskManagerRestart> restarts = new ArrayList<>();
         private final List<PhaseExecutionEvidence.LeaderFault> leaderFaults = new ArrayList<>();
         private final List<PhaseExecutionEvidence.BrokerOperation> brokers = new ArrayList<>();
+        private final List<PhaseExecutionEvidence.PacketFault> packets = new ArrayList<>();
         private final List<org.savonitar.flink.stability.runtime.api.KafkaLogCapture.Partition> kafkaPartitions;
         private final int expectedTaskManagers;
         private final Optional<TokenScopeProof.Requirement> tokenProof;
@@ -775,7 +793,7 @@ public final class ExecutablePhaseExecutor {
         }
 
         private PhaseExecutionEvidence snapshot() {
-            return new PhaseExecutionEvidence(steps, kills, networkFaults, restarts, leaderFaults, brokers);
+            return new PhaseExecutionEvidence(steps, kills, networkFaults, restarts, leaderFaults, brokers, packets);
         }
     }
 }

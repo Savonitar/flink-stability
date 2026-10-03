@@ -257,6 +257,8 @@ final class V1ExecutionResultRenderer {
             restarted.put("previousIdentityFailure", restart.previousIdentityFailure().orElse(null));
             restarted.put("replacementIdentityFailure", restart.replacementIdentityFailure().orElse(null));
         }));
+        PacketFaultEvidenceRenderer.render(evidence.putArray("packetFaults"), result.phaseEvidence()
+                .map(PhaseExecutionEvidence::packetFaults).orElse(List.of()));
         var brokerOperations = evidence.putArray("brokerOperations");
         result.phaseEvidence().ifPresent(phases -> phases.brokerOperations().forEach(operation -> {
             var rendered = brokerOperations.addObject().put("path", operation.path())
@@ -386,6 +388,7 @@ final class V1ExecutionResultRenderer {
             terminal.put("status", validation.status().name().toLowerCase(Locale.ROOT));
             terminal.put("completed", true);
             terminal.put("reason", validation.reason());
+            terminal.put("mode", validation.mode().name().toLowerCase(Locale.ROOT).replace('_', '-'));
             terminal.put("expected", validation.evidence().expectedCount());
             terminal.put("observed", validation.evidence().observedCount());
             terminal.put("snapshotComplete", validation.evidence().snapshotComplete());
@@ -520,7 +523,7 @@ final class V1ExecutionResultRenderer {
         rendered.put("resourceId", observed.resourceId());
     }
 
-    private static void putJobObservation(ObjectNode parent, String key, FlinkJobObservation.Attempt attempt) {
+    static void putJobObservation(ObjectNode parent, String key, FlinkJobObservation.Attempt attempt) {
         if (attempt == null) return;
         ObjectNode node = parent.putObject(key);
         node.put("error", attempt.failure().orElse(null));
