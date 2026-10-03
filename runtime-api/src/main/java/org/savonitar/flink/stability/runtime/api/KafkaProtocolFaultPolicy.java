@@ -6,7 +6,8 @@ import java.util.Set;
 /** Wire-fault allowlist shared by planning and the standalone proxy plugin (SPEC-004). */
 public final class KafkaProtocolFaultPolicy {
     public static final Set<String> APIS = Set.of("end-txn", "init-producer-id", "produce",
-            "add-partitions-to-txn", "add-offsets-to-txn", "txn-offset-commit", "find-coordinator");
+            "add-partitions-to-txn", "add-offsets-to-txn", "txn-offset-commit", "find-coordinator",
+            "describe-producers", "list-transactions");
     public static final long MAX_DELAY_MILLIS = 5_000;
     private static final Set<String> TRANSACTION_ERRORS = Set.of("concurrent-transactions",
             "coordinator-load-in-progress", "coordinator-not-available", "not-coordinator");
@@ -17,7 +18,9 @@ public final class KafkaProtocolFaultPolicy {
             "add-offsets-to-txn", TRANSACTION_ERRORS,
             "txn-offset-commit", Set.of("coordinator-load-in-progress", "coordinator-not-available", "not-coordinator"),
             "find-coordinator", Set.of("coordinator-not-available"),
-            "produce", Set.of("not-leader-or-follower", "request-timed-out", "not-enough-replicas"));
+            "produce", Set.of("not-leader-or-follower", "request-timed-out", "not-enough-replicas"),
+            "describe-producers", Set.of("not-leader-or-follower", "request-timed-out"),
+            "list-transactions", Set.of("coordinator-load-in-progress", "coordinator-not-available"));
     public static Set<String> errorsAfterAppend(String api) {
         return "produce".equals(api) ? Set.of("request-timed-out") : Set.of();
     }

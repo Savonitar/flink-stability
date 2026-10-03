@@ -48,7 +48,7 @@ class KafkaCommitWindowObserverTest {
         assertFalse(evidence.withCommitWindow(new KafkaCommitWindow(1,2,original.ongoing(),forged,null)).confirmed());
     }
     static List<KafkaBrokerControl.Evidence> execute(Fake fake, KafkaBrokerControl.Action mode) {
-        return KafkaSelectedBrokerFault.execute(new KafkaBrokerControl.Request(TARGET, mode, Duration.ofMillis(10), Duration.ofMillis(30), fake.version), List.of(new KafkaLogCapture.Partition("output", 0)), fake);
+        return KafkaBrokerFault.execute(new KafkaBrokerControl.Request(TARGET, mode, Duration.ofMillis(10), Duration.ofMillis(30), fake.version), List.of(new KafkaLogCapture.Partition("output", 0)), fake);
     }
     static class Fake extends KafkaSelectedBrokerFaultTest.Fake {
         int version=1; long session=2; String failure="";

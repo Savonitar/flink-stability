@@ -154,6 +154,11 @@ public final class DockerV1AttemptRuntime implements V1AttemptRuntime {
         return clusters.classLoadLogs();
     }
 
+    @Override public org.savonitar.flink.stability.runtime.api.PacketFaultControl.Evidence packetFault(
+            org.savonitar.flink.stability.runtime.api.PacketFaultControl.Request request) {
+        return clusters.packetFault(request);
+    }
+
     @Override
     public void close() {
         clusters.close();

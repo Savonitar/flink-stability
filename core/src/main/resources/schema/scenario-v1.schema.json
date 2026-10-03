@@ -1371,15 +1371,17 @@
           "required": [
             "mode",
             "target",
-            "duration",
             "timeout"
           ],
           "properties": {
-            "require_commit": { "type": "boolean" },
+            "require_commit": {
+              "type": "boolean"
+            },
             "mode": {
               "enum": [
                 "kill",
-                "pause"
+                "pause",
+                "rolling-restart"
               ]
             },
             "target": {
@@ -1480,8 +1482,67 @@
             "timeout": {
               "type": "string",
               "pattern": "^[1-9][0-9]*(ms|s|m|h)$"
+            },
+            "order": {
+              "enum": [
+                "fixed",
+                "coordinator-first",
+                "coordinator-last"
+              ]
+            },
+            "preferred_election": {
+              "type": "boolean"
             }
-          }
+          },
+          "allOf": [
+            {
+              "if": {
+                "properties": {
+                  "mode": {
+                    "const": "rolling-restart"
+                  }
+                }
+              },
+              "then": {
+                "required": [
+                  "order"
+                ],
+                "not": {
+                  "anyOf": [
+                    {
+                      "required": [
+                        "duration"
+                      ]
+                    },
+                    {
+                      "required": [
+                        "require_commit"
+                      ]
+                    }
+                  ]
+                }
+              },
+              "else": {
+                "required": [
+                  "duration"
+                ],
+                "not": {
+                  "anyOf": [
+                    {
+                      "required": [
+                        "order"
+                      ]
+                    },
+                    {
+                      "required": [
+                        "preferred_election"
+                      ]
+                    }
+                  ]
+                }
+              }
+            }
+          ]
         }
       }
     },
@@ -1870,6 +1931,16 @@
             "trigger_deadline": {
               "$ref": "#/$defs/durationOrTemplate"
             },
+            "restart": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["component"],
+              "properties": {
+                "component": { "const": "taskmanager" },
+                "name": { "$ref": "#/$defs/kebabName" }
+              },
+              "description": "Kill and restart a running TaskManager only after the proxy acknowledges arming; heal the rule on failure."
+            },
             "heal": {
               "const": "restore-proxy-rule"
             }
@@ -2225,7 +2296,9 @@
             "add-offsets-to-txn",
             "txn-offset-commit",
             "end-txn",
-            "find-coordinator"
+            "find-coordinator",
+            "describe-producers",
+            "list-transactions"
           ]
         },
         "topic": {

@@ -628,3 +628,32 @@ expected validation code.
 | SV-268 | Post-append response evidence reaches the result renderer | Preserve producer identity, original success/offsets, replacement timeout and synthetic-after-append origin; do not mislabel as pre-broker rejection. |
 | SV-269 | Full chaos profile includes broker TV variants | Include each explicit TV variant once; unversioned aliases remain individually selectable, not repeated in full. |
 | SV-270 | Legacy calibration full-image copy | Preserve canonical files, six-cell matrix, timing controls, transaction timeout, expectations and pinned artifact hashes; manifest hashes bind actual generated catalogs. |
+
+### POOLING recovery faults
+
+| Case | Input | Required result |
+| --- | --- | --- |
+| SV-271 | Kafka-serialized DescribeProducers and ListTransactions recovery requests | Match the exact topic or nonempty producer-ID/Ongoing filters; preserve absent transactional identity and actual selectors across request, delay, synthetic error and correlated response loss. |
+| SV-272 | Unfiltered listing, negative IDs, wrong state, empty partitions, unsupported prefix/topic selectors or transient-error mismatch | Leave unmatched wire traffic unchanged or reject invalid plans before provisioning; no synthetic successful proof from mixed/unknown-state responses. |
+| SV-273 | Protocol fault with nested TaskManager restart | Acknowledge arm before kill/restart, retain existing disruption and identity evidence, enforce action deadlines and always remove the rule after action failure; failed arming never restarts a process. |
+| SV-274 | New TV1/TV2 POOLING catalogs, including broker-down recovery | Validate offline, require exact-ID pass and observed fault effect, include in chaos-full only, preserve original catalogs and expectations; reused IDs do not claim the INCREMENTING commit window. |
+
+### Rolling broker restart
+
+| Case | Input | Required result |
+| --- | --- | --- |
+| SV-275 | Rolling restart with each supported order and a live sink coordinator | Resolve order once, issue TERM then fixed-port restart for each broker, never stop two together, and retain per-broker timestamps and leader/coordinator partition observations. |
+| SV-276 | One restarted broker runs but output or transaction-state ISR remains partial | Do not stop the next broker; bounded timeout leaves an unconfirmed roll and retains partial evidence. All transaction-state partitions must be inventoried from metadata. |
+| SV-277 | TERM fails ambiguously, metadata disappears, or the original deadline expires | Attempt bounded safety restart of the same identity; stop the sequence and preserve unconfirmed evidence. Never substitute KILL for a graceful stop. |
+| SV-278 | Preferred election requested after the third recovery | Require observed preferred leaders and full ISR, not only Admin acknowledgement; a missed election cannot confirm the roll. |
+| SV-279 | Invalid order/target, hold/commit option, absent metadata, or a finished EOS job | Reject invalid plans or retain an inconclusive execution; require all six physical operations before a passing rolling fault receipt. |
+
+### Experimental packet runtime
+
+| Case | Input | Required result |
+| --- | --- | --- |
+| SV-280 | Loss, jittered delay or blackhole request with a selector and immutable sidecar digest | Join the exact TaskManager namespace with NET_ADMIN only, no host mounts; bind the owned broker/container/image/network and exact internal IPv4 client endpoint. |
+| SV-281 | Traffic counters present before injection hold but unchanged afterward | Remain unconfirmed; delay requires packet growth and loss/blackhole require dropped-packet growth during the hold. |
+| SV-282 | Foreign root qdisc, invalid route/selector, changed endpoint or expired deadline | Refuse unowned state, retain diagnostic receipts and attempt bounded scoped healing after any possible installation. |
+| SV-283 | Interrupted hold, partial installation, failed healing or unknown helper removal | Attempt cleanup; restore interrupt; confirmation requires rule absence and helper removal. Keep watchdog/namespace ownership when cleanup is uncertain. |
+| SV-284 | Mutable image tag, invalid percentages/jitter/bounds, oversized evidence or ambiguous counters | Reject or preserve bounded unconfirmed evidence; never install global rules or claim live validation from unit tests. |

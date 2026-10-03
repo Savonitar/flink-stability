@@ -36,6 +36,15 @@ final class KafkaProtocolFaultFilter implements RequestFilter, ResponseFilter {
         var identity = ProtocolMessages.identity(version, request);
         if (identity.isEmpty() || !alias(api).equals(identity.get().api())) return context.forwardRequest(header, request);
         Map<String, Object> details = details(identity.get(), version, header, context);
+        if (request instanceof org.apache.kafka.common.message.ListTransactionsRequestData listing) {
+            details.put("producerIdFilters", listing.producerIdFilters());
+            details.put("stateFilters", listing.stateFilters());
+        }
+        if (request instanceof org.apache.kafka.common.message.DescribeProducersRequestData describe) {
+            var partitions = new java.util.TreeMap<String, java.util.List<Integer>>();
+            describe.topics().forEach(topic -> partitions.put(topic.name(), java.util.List.copyOf(topic.partitionIndexes())));
+            details.put("topicPartitions", partitions);
+        }
         book.observeRetry(identity.get(), details);
         var selected = book.claim(identity.get());
         if (selected.isEmpty()) return context.forwardRequest(header, request);
@@ -59,6 +68,11 @@ final class KafkaProtocolFaultFilter implements RequestFilter, ResponseFilter {
             }
             case DROP_RESPONSE, ERROR_AFTER_APPEND -> {
                 var partitions = ProduceResponseFault.partitions(request);
+                if (request instanceof org.apache.kafka.common.message.DescribeProducersRequestData describe) {
+                    partitions = new java.util.HashSet<>();
+                    for (var topic : describe.topics()) for (int partition : topic.partitionIndexes())
+                        partitions.add(topic.name() + "/" + partition);
+                }
                 if (claim.rule().action() == FaultRule.Action.ERROR_AFTER_APPEND && partitions.isEmpty()) {
                     book.release(claim);
                     return context.forwardRequest(header, request);
@@ -108,7 +122,8 @@ final class KafkaProtocolFaultFilter implements RequestFilter, ResponseFilter {
         if (response instanceof EndTxnResponseData end) {
             details.put("producerId", end.producerId()); details.put("producerEpoch", end.producerEpoch());
         }
-        if (!alias(api).equals(claim.request.api()) || codes.isEmpty() || codes.values().stream().anyMatch(code -> code != 0)) {
+        if (!alias(api).equals(claim.request.api()) || codes.isEmpty() || codes.values().stream().anyMatch(code -> code != 0)
+                || api == ApiKeys.DESCRIBE_PRODUCERS && !codes.keySet().equals(pending.partitions())) {
             book.release(claim); book.record(claim, "response-forwarded", details);
             return context.forwardResponse(header, response);
         }

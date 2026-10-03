@@ -52,12 +52,19 @@ final class ProxyFaultInjector implements ExecutablePhaseExecutor.NetworkFaults 
     public PhaseExecutionEvidence.NetworkFault inject(
             String path,
             ExecutableScenarioPlan.ProtocolFault fault) throws IOException, InterruptedException {
+        try { return inject(path, fault, () -> {}); }
+        catch (IOException | InterruptedException failure) { throw failure; }
+        catch (Exception failure) { throw new IOException("Recovery action failed", failure); }
+    }
+
+    @Override public PhaseExecutionEvidence.NetworkFault inject(String path,
+            ExecutableScenarioPlan.ProtocolFault fault, ExecutablePhaseExecutor.NetworkFaults.ArmedAction afterArmed) throws Exception {
         String faultId = path.substring("$/".length()).replace('/', '-');
         Path rule = rules.resolve(faultId + ".json");
         writeRule(faultId, fault);
         try {
-            return armTriggerAndHeal(path, faultId, rule, fault);
-        } catch (IOException | InterruptedException | RuntimeException failure) {
+            return armTriggerAndHeal(path, faultId, rule, fault, afterArmed);
+        } catch (Exception failure) {
             // The runner's own heal (SPEC-004 K7.2): never leave a rule armed after a failure.
             try {
                 Files.deleteIfExists(rule);
@@ -72,7 +79,7 @@ final class ProxyFaultInjector implements ExecutablePhaseExecutor.NetworkFaults 
             String path,
             String faultId,
             Path rule,
-            ExecutableScenarioPlan.ProtocolFault fault) throws IOException, InterruptedException {
+            ExecutableScenarioPlan.ProtocolFault fault, ExecutablePhaseExecutor.NetworkFaults.ArmedAction afterArmed) throws Exception {
         List<JsonNode> seen = await(faultId, ACKNOWLEDGEMENT_TIMEOUT,
                 lines -> first(lines, "armed").isPresent()
                         || first(lines, "rejected").isPresent());
@@ -83,6 +90,8 @@ final class ProxyFaultInjector implements ExecutablePhaseExecutor.NetworkFaults 
         }
         JsonNode armed = first(seen, "armed").orElseThrow(() -> new IOException(
                 "The proxy did not arm fault " + faultId + " within " + ACKNOWLEDGEMENT_TIMEOUT));
+
+        afterArmed.run();
 
         boolean requestsDropped =
                 fault.action() == ExecutableScenarioPlan.NetworkFaultAction.DROP_REQUEST;

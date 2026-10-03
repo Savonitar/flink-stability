@@ -13,7 +13,7 @@ import test_pr_gate as fixtures
 class ChaosProfileTest(unittest.TestCase):
     def test_explicit_profiles_have_unique_existing_names_and_cover_quick(self):
         self.assertEqual(10, len(PROFILES['chaos-quick']))
-        self.assertEqual(28, len(PROFILES['chaos-full']))
+        self.assertEqual(72, len(PROFILES['chaos-full']))
         for name in PROFILES['chaos-full']:
             if name.startswith('broker-'):
                 self.assertTrue(name.endswith(('-v1', '-v2')), name)
@@ -24,7 +24,7 @@ class ChaosProfileTest(unittest.TestCase):
             for name in names:
                 path = pr_gate.canonical(ROOT, name)
                 self.assertTrue(path.with_name(name + '.expected.yaml').is_file())
-                self.assertEqual(not name.startswith('broker-eos-control'), bool(fault_requirements(path.read_text())), name)
+                self.assertEqual(not name.startswith(('broker-eos-control', 'pooling-broker-control', 'rolling-control')), bool(fault_requirements(path.read_text())), name)
         self.assertNotIn('protocol-add-partitions-concurrent-v2', PROFILES['chaos-full'])
 
     def test_calibration_override_accepts_every_profile_catalog_and_rejects_ambiguity(self):
@@ -36,6 +36,16 @@ class ChaosProfileTest(unittest.TestCase):
                 pr_gate.with_producer_max_block(altered, 5000)
         with self.assertRaises(SystemExit):
             pr_gate.with_producer_max_block('no job', 5000)
+
+    def test_pooling_recovery_requires_both_protocol_and_process_effects(self):
+        text = pr_gate.canonical(ROOT, 'pooling-list-transactions-delay-v1').read_text()
+        self.assertEqual({'networkFaults': 1, 'taskManagerKills': 1}, fault_requirements(text))
+        self.assertEqual('unavailable', fault_status({'networkFaults': [{'triggered': True}]}, fault_requirements(text)))
+
+    def test_rolling_restart_requires_all_six_physical_operations(self):
+        text = pr_gate.canonical(ROOT, 'rolling-fixed-v1').read_text()
+        self.assertEqual({'brokerOperations': 6}, fault_requirements(text))
+        self.assertEqual('unavailable', fault_status({'brokerOperations': [{'confirmed': True}] * 2}, fault_requirements(text)))
 
     def test_missing_or_false_effect_is_not_confirmed(self):
         for key, field, count in [('networkFaults','triggered',1),('brokerOperations','confirmed',2),('taskManagerKills','confirmed',1)]:

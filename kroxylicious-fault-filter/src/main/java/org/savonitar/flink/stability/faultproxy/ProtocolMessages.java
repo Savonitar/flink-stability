@@ -25,9 +25,18 @@ final class ProtocolMessages {
                     : new FaultRuleBook.RequestIdentity("find-coordinator", version >= 4 ? value.coordinatorKeys().getFirst() : value.key(), null, null, null, Set.of());
             case AddPartitionsToTxnRequestData value -> partitions(version, value);
             case ProduceRequestData value -> produce(version, value);
+            case DescribeProducersRequestData value -> version != 0 || value.topics().isEmpty()
+                    || value.topics().stream().anyMatch(t -> t.name().isBlank() || t.partitionIndexes().isEmpty()
+                        || t.partitionIndexes().stream().anyMatch(p -> p < 0)) ? null
+                    : new FaultRuleBook.RequestIdentity("describe-producers", null, null, null, null,
+                        value.topics().stream().map(DescribeProducersRequestData.TopicRequest::name).collect(java.util.stream.Collectors.toSet()));
+            case ListTransactionsRequestData value -> version < 0 || version > 1 || !value.stateFilters().equals(java.util.List.of("Ongoing"))
+                    || value.producerIdFilters().isEmpty() || value.producerIdFilters().stream().anyMatch(id -> id < 0) ? null
+                    : new FaultRuleBook.RequestIdentity("list-transactions", null, null, null, null, Set.of());
             default -> null;
         };
-        return identity == null || identity.transactionalId() == null || identity.transactionalId().isBlank() ? Optional.empty() : Optional.of(identity);
+        return identity == null || (!Set.of("describe-producers", "list-transactions").contains(identity.api())
+                && (identity.transactionalId() == null || identity.transactionalId().isBlank())) ? Optional.empty() : Optional.of(identity);
     }
 
     private static FaultRuleBook.RequestIdentity partitions(short version, AddPartitionsToTxnRequestData value) {
@@ -61,6 +70,13 @@ final class ProtocolMessages {
     static Map<String, Short> errors(short version, ApiMessage response) {
         Map<String, Short> errors = new LinkedHashMap<>();
         switch (response) {
+            case DescribeProducersResponseData value -> value.topics().forEach(topic -> topic.partitions().forEach(partition ->
+                    errors.put(topic.name() + "/" + partition.partitionIndex(), partition.errorCode())));
+            case ListTransactionsResponseData value -> {
+                errors.put("response", value.errorCode());
+                value.unknownStateFilters().forEach(state -> errors.put("unknown-state/" + state,
+                        org.apache.kafka.common.protocol.Errors.INVALID_REQUEST.code()));
+            }
             case EndTxnResponseData value -> errors.put("response", value.errorCode());
             case InitProducerIdResponseData value -> errors.put("response", value.errorCode());
             case AddOffsetsToTxnResponseData value -> errors.put("response", value.errorCode());

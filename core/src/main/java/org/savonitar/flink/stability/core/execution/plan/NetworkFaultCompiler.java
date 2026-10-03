@@ -142,6 +142,7 @@ final class NetworkFaultCompiler {
                 parseDuration(networkFault.path("trigger_deadline").textValue()),
                 match.path("api").textValue(), Optional.ofNullable(match.path("topic").textValue()),
                 networkFault.path("fault").has("latency") ? Optional.of(parseDuration(networkFault.at("/fault/latency").textValue())) : Optional.empty(),
-                Optional.ofNullable(networkFault.at("/fault/error").textValue()));
+                Optional.ofNullable(networkFault.at("/fault/error").textValue()),
+                networkFault.has("restart") ? Optional.of(networkFault.at("/restart/name").asText("taskmanager-1")) : Optional.empty());
     }
 }

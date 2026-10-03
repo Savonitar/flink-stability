@@ -512,6 +512,7 @@ class ScenarioNetworkPreflightValidatorTest {
                     api,
                     null,
                     null);
+            if (api.equals("describe-producers")) ((ObjectNode) networkFault.get("match")).put("topic", "output");
             setErrorResponse(networkFault, error);
         });
     }

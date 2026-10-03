@@ -69,6 +69,10 @@ final class KafkaFaultApiRegistry {
                     TopicBinding.SOURCE,
                     true,
                     org.savonitar.flink.stability.runtime.api.KafkaProtocolFaultPolicy.errors("txn-offset-commit"))),
+            Map.entry("describe-producers", new Profile(Set.of(EndpointKind.SINK), TopicBinding.ENDPOINT, false,
+                    org.savonitar.flink.stability.runtime.api.KafkaProtocolFaultPolicy.errors("describe-producers"))),
+            Map.entry("list-transactions", new Profile(Set.of(EndpointKind.SINK), TopicBinding.FORBIDDEN, false,
+                    org.savonitar.flink.stability.runtime.api.KafkaProtocolFaultPolicy.errors("list-transactions"))),
             Map.entry("find-coordinator", new Profile(
                     Set.of(EndpointKind.SINK), TopicBinding.FORBIDDEN, true,
                     org.savonitar.flink.stability.runtime.api.KafkaProtocolFaultPolicy.errors("find-coordinator"))),

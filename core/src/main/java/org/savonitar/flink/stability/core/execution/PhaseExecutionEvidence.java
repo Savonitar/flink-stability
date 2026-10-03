@@ -35,7 +35,11 @@ public record PhaseExecutionEvidence(
     }
 
     public record BrokerOperation(String path, List<LoopIteration> loopIterations,
-                                  org.savonitar.flink.stability.runtime.api.KafkaBrokerControl.Evidence raw) {
+                                  org.savonitar.flink.stability.runtime.api.KafkaBrokerControl.Evidence raw,
+                                  FlinkJobObservation.Attempt jobBefore, FlinkJobObservation.Attempt jobAfter) {
+        public BrokerOperation(String path, List<LoopIteration> iterations, org.savonitar.flink.stability.runtime.api.KafkaBrokerControl.Evidence raw) {
+            this(path, iterations, raw, null, null);
+        }
         public BrokerOperation { loopIterations = List.copyOf(loopIterations); Objects.requireNonNull(raw); }
     }
 
@@ -247,14 +251,35 @@ public record PhaseExecutionEvidence(
                                   Boolean committed, java.util.Map<String, Short> originalErrorCodes,
                                   java.util.Map<String, Long> originalBaseOffsets,
                                   Short substitutedErrorCode, boolean forwardedToBroker,
-                                  long requestedDelayMillis, long actualDelayNanos) {
+                                  long requestedDelayMillis, long actualDelayNanos,
+                                  java.util.Map<String, java.util.List<Integer>> topicPartitions,
+                                  java.util.List<Long> producerIdFilters, java.util.List<String> stateFilters) {
+        public ProtocolMessage(int occurrence, int claim, long timeMillis, boolean beforeDeadline,
+                String event, String api, short apiVersion, int correlationId, String transactionalId,
+                Long producerId, Short producerEpoch, Boolean committed, java.util.Map<String, Short> codes,
+                java.util.Map<String, Long> offsets, Short substituted, boolean forwarded, long delay, long actual) {
+            this(occurrence, claim, timeMillis, beforeDeadline, event, api, apiVersion, correlationId,
+                    transactionalId, producerId, producerEpoch, committed, codes, offsets, substituted, forwarded,
+                    delay, actual, java.util.Map.of(), java.util.List.of(), java.util.List.of());
+        }
         public ProtocolMessage {
             originalErrorCodes = java.util.Map.copyOf(originalErrorCodes);
             originalBaseOffsets = java.util.Map.copyOf(originalBaseOffsets);
-            transactionalId = requireNonBlank(transactionalId, "transactionalId");
+            if (!java.util.Set.of("describe-producers", "list-transactions").contains(api))
+                transactionalId = requireNonBlank(transactionalId, "transactionalId");
+            var partitions = new java.util.LinkedHashMap<String, java.util.List<Integer>>();
+            topicPartitions.forEach((topic, values) -> partitions.put(topic, java.util.List.copyOf(values)));
+            topicPartitions = java.util.Map.copyOf(partitions);
+            producerIdFilters = java.util.List.copyOf(producerIdFilters);
+            stateFilters = java.util.List.copyOf(stateFilters);
         }
         boolean qualifies(ExecutableScenarioPlan.NetworkFaultAction action) {
             if (!beforeDeadline) return false;
+            if ("describe-producers".equals(api) && (topicPartitions.size() != 1
+                    || topicPartitions.values().stream().anyMatch(java.util.List::isEmpty))) return false;
+            if ("list-transactions".equals(api) && (producerIdFilters.isEmpty()
+                    || producerIdFilters.stream().anyMatch(id -> id < 0)
+                    || !stateFilters.equals(java.util.List.of("Ongoing")))) return false;
             return switch (action) {
                 case DROP_REQUEST -> "request-dropped".equals(event) && !forwardedToBroker;
                 case DROP_RESPONSE -> "response-dropped".equals(event) && forwardedToBroker

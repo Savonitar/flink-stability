@@ -46,6 +46,18 @@ class ProtocolFaultEvidenceTest {
         var line = new ObjectMapper().readTree("{\"event\":\"response-dropped\",\"api\":\"produce\",\"claim\":1}");
         assertThrows(IllegalArgumentException.class, () -> ProxyFaultEvidence.affected(List.of(line), "response-dropped"));
     }
+    @Test void recoveryEvidenceRequiresActualWireSelectorsAndKeepsMissingIdNull() throws Exception {
+        var json = new ObjectMapper();
+        for (String api : List.of("describe-producers", "list-transactions")) {
+            var event = json.createObjectNode().put("event", "request-dropped").put("api", api)
+                    .put("beforeDeadline", true).put("claim", 1).put("occurrence", 1);
+            assertFalse(ProxyFaultEvidence.affected(List.of(event), "request-dropped").getFirst().qualifies(DROP_REQUEST));
+            if (api.equals("describe-producers")) event.putObject("topicPartitions").putArray("output").add(0);
+            else { event.putArray("producerIdFilters").add(42); event.putArray("stateFilters").add("Ongoing"); }
+            var message = ProxyFaultEvidence.affected(List.of(event), "request-dropped").getFirst();
+            assertNull(message.transactionalId()); assertTrue(message.qualifies(DROP_REQUEST));
+        }
+    }
     private PhaseExecutionEvidence.NetworkFault fault(org.savonitar.flink.stability.core.execution.plan.ExecutableScenarioPlan.NetworkFaultAction action, List<PhaseExecutionEvidence.ProtocolMessage> messages) {
         return new PhaseExecutionEvidence.NetworkFault("step", "fault", "proxy", "image", action, 1, Duration.ofSeconds(10), 0, 10, List.of(), List.of(), "produce", messages);
     }

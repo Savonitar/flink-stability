@@ -5,6 +5,7 @@ resolves local references against its artifact root, so every artifact must be a
 regular file inside that root.
 """
 import hashlib
+import re
 from pathlib import Path
 
 RELEASED_SUBJECT = ("connectors:\n    kafka:\n"
@@ -45,7 +46,6 @@ def replace_subject(scenario_text, snippet):
 
 def with_producer_max_block(document, milliseconds):
     """Opt-in calibration setting, restricted to the bundled single-job catalog shape."""
-    import re
     pattern = r'(?m)^(      program_args: \[)([^\]\n]*)(\]\s*)$'
     matches = list(re.finditer(pattern, document))
     if len(matches) != 1 or "--producerMaxBlockMs" in document:
@@ -60,7 +60,7 @@ def with_flink_image(document, image):
     """Use the full spelling in a copy while rejecting changed canonical image inputs."""
     if image != "docker.io/library/flink:2.2.0":
         raise SystemExit("Unsupported Flink image override")
-    anchor = "    image: flink:2.2.0"
-    if document.count(anchor) != 1:
+    pattern = r"(?m)^    image: (?:docker\.io/library/)?flink:2\.2\.0[ \t]*$"
+    if len(re.findall(pattern, document)) != 1:
         raise SystemExit("Expected one canonical Flink 2.2 image")
-    return document.replace(anchor, "    image: " + image)
+    return re.sub(pattern, "    image: " + image, document)

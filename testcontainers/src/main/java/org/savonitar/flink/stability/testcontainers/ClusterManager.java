@@ -1110,6 +1110,16 @@ public final class ClusterManager implements AutoCloseable {
             handle = null;
         }
     }
+    public synchronized org.savonitar.flink.stability.runtime.api.PacketFaultControl.Evidence packetFault(
+            org.savonitar.flink.stability.runtime.api.PacketFaultControl.Request request) {
+        ensureOpen(); ensureFlinkStarted();
+        if (!(kafkaRuntime instanceof ThreeBrokerKafkaRuntime kafka))
+            throw new IllegalStateException("Packet probe requires the owned three-broker runtime");
+        var identity = taskManagerIdentity(request.taskManager(), IDENTITY_TIMEOUT)
+                .orElseThrow(() -> new IllegalStateException("No running owned TaskManager for packet probe"));
+        return kafka.packetFault(request, identity);
+    }
+
     public java.util.List<org.savonitar.flink.stability.runtime.api.KafkaBrokerControl.Evidence> brokerFault(
             org.savonitar.flink.stability.runtime.api.KafkaBrokerControl.Request request,
             java.util.List<org.savonitar.flink.stability.runtime.api.KafkaLogCapture.Partition> partitions) {

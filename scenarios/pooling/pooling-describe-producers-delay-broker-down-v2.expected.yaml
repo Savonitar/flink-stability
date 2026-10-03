@@ -1,0 +1,9 @@
+format: v1
+kind: expected-result
+
+meta:
+  name: pooling-describe-producers-delay-broker-down-v2.expected
+  scenario: pooling-describe-producers-delay-broker-down-v2
+
+default:
+  outcome: pass

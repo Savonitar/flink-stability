@@ -33,14 +33,21 @@ final class ProxyFaultEvidence {
                 if (entry.getValue().isIntegralNumber() && entry.getValue().canConvertToLong())
                     offsets.put(entry.getKey(), entry.getValue().longValue());
             });
+            Map<String, List<Integer>> partitions = new LinkedHashMap<>();
+            request.path("topicPartitions").fields().forEachRemaining(entry -> {
+                List<Integer> indexes = new ArrayList<>(); entry.getValue().forEach(index -> indexes.add(index.intValue()));
+                partitions.put(entry.getKey(), indexes);
+            });
+            List<Long> producerIds = new ArrayList<>(); request.path("producerIdFilters").forEach(id -> producerIds.add(id.longValue()));
+            List<String> states = new ArrayList<>(); request.path("stateFilters").forEach(state -> states.add(state.asText()));
             result.add(new PhaseExecutionEvidence.ProtocolMessage(line.path("occurrence").intValue(), line.path("claim").intValue(),
                     line.path("timeMillis").longValue(), line.path("beforeDeadline").asBoolean(false), event, request.path("api").asText(),
-                    request.path("apiVersion").shortValue(), request.path("correlationId").intValue(), request.path("transactionalId").asText(),
+                    request.path("apiVersion").shortValue(), request.path("correlationId").intValue(), request.path("transactionalId").isTextual() ? request.path("transactionalId").textValue() : null,
                     request.path("producerId").isNumber() ? request.path("producerId").longValue() : null,
                     request.path("producerEpoch").isNumber() ? request.path("producerEpoch").shortValue() : null,
                     request.path("committed").isBoolean() ? request.path("committed").booleanValue() : null, codes, offsets,
                     line.path("substitutedErrorCode").isNumber() ? line.path("substitutedErrorCode").shortValue() : null,
-                    line.path("forwardedToBroker").asBoolean(), line.path("requestedDelayMillis").longValue(), line.path("actualDelayNanos").longValue()));
+                    line.path("forwardedToBroker").asBoolean(), line.path("requestedDelayMillis").longValue(), line.path("actualDelayNanos").longValue(), partitions, producerIds, states));
         }
         return List.copyOf(result);
     }

@@ -96,6 +96,11 @@ final class NetworkFaultPreflightValidator {
         String topic = optionalText(match, "topic");
         String transactionalIdPrefix = optionalText(match, "transactional_id_prefix");
         boolean selectorValid = true;
+        if ("describe-producers".equals(api) && topic == null) {
+            issues.add(issue(source, scope, "preflight.network.topic-selector-required", path + "/match",
+                    "DescribeProducers requires an exact sink topic"));
+            selectorValid = false;
+        }
         if (topic != null
                 && profile.topicBinding() == KafkaFaultApiRegistry.TopicBinding.FORBIDDEN) {
             issues.add(issue(source, ResolutionScope.COMMON,

@@ -3304,7 +3304,7 @@ All three commands prepare artifacts offline and never provision or execute infr
 
 ### Counted transactional proxy faults (development extension)
 
-`network_fault` executes the seven transactional APIs and counted actions
+`network_fault` executes the transactional and recovery Admin APIs and counted actions
 specified by SPEC-004 K11–K12. `occurrences` and `trigger_deadline` are required;
 `duration` is forbidden in this form. Delay adds `fault.latency` bounded to 5 s;
 error-response adds an allow-listed `fault.error`. `match.result` remains EndTxn
@@ -3382,3 +3382,84 @@ deduplication key; repeated copies collapse, different messages at one timestamp
 do not. Stack traces alone do not invent an event or an exception classification.
 The retry header's explicit transactional ID is retained for comparison with the
 selected coordinator transaction. Existing fencing/state categories are preserved.
+
+### POOLING recovery under protocol faults
+
+The pinned Kafka connector 5.0.0-2.2 supports `POOLING` as well as `INCREMENTING`.
+Its LISTING recovery gets topic metadata, describes producers for the target
+partitions, lists `Ongoing` transactions filtered by those producer IDs, and
+aborts transactions owned by the recovering subtask except its precommitted IDs.
+`describe-producers` and `list-transactions` are counted protocol fault APIs.
+DescribeProducers requires `match.topic` for the routed sink. Neither API accepts
+a transactional ID prefix; ListTransactions also has no topic selector and only
+matches requests with a nonempty nonnegative producer-ID filter and exactly the
+`Ongoing` state filter. Evidence retains the actual partition/producer/state
+selectors; absent transactional IDs remain null.
+
+Optional `network_fault.restart: { component: taskmanager, name: taskmanager-1 }`
+kills and restarts a running TaskManager after the proxy acknowledges arming,
+using the existing disruption/identity evidence and bounded lifecycle calls.
+The name can be omitted only for a single TaskManager. A stopped or undeclared
+TaskManager is rejected. The rule is removed on action failure, interruption,
+trigger timeout and normal completion. The filter's deadline starts at arm and
+includes recovery time; late effects cannot confirm the fault. A separately
+killed broker may remain down during this atomic TaskManager recovery, but its
+subsequent named restart is still mandatory.
+
+New `pooling-*` catalogs cover TV1/TV2 controls, bounded EOS, lost commit requests
+and responses, selected coordinator failure, and both recovery APIs with delay,
+transient errors and response loss, with and without a broker down. They extend
+`chaos-full`; the calibrated `chaos-quick` list and all prior catalogs are unchanged.
+POOLING coordinator variants use exact-ID and selected-broker evidence without
+`require_commit`: reused transaction IDs cannot establish the existing
+INCREMENTING-specific commit window. No live calibration is claimed.
+
+### Graceful rolling broker restart
+
+`broker_fault.mode: rolling-restart` restarts all three owned brokers, one at a
+time, through the same broker-fault implementation used for kill, pause, resume
+and named restart. It requires the sink's `transaction-coordinator` target,
+`order: fixed | coordinator-first | coordinator-last`, and a positive `timeout`
+no greater than 5m. It has no `duration` or `require_commit` option. Fixed order
+is broker-1, broker-2, broker-3; coordinator order is resolved once from an open
+sink transaction after the initial health barrier, then held fixed for the batch.
+The remaining brokers keep numeric order. This is relative to the observed
+transaction at the start, not a claim that the same transaction remains open.
+
+Kafka controlled shutdown is explicitly enabled. Each stop sends SIGTERM to the
+exact owned container; it never escalates to SIGKILL. The bounded observer must
+see the process stop and partition leadership/ISR exclude that broker, then the
+fixed-port restart must preserve container, image, network and advertised endpoint.
+Before the first stop and before advancing, all declared topic partitions and
+all observed `__transaction_state` partitions require full RF=3/ISR=3 and a live
+leader. Missing/incomplete metadata, partial ISR, an expired deadline or any
+failed stop/heal halts the sequence; an attempted stop always gets a bounded
+restart attempt, even when normal observation has failed. Safety recovery cannot
+restore an expired operation's confirmation. Metadata is bounded to 128
+transaction-state and 256 total partitions.
+
+Optional `preferred_election: true` requests preferred leader election after the
+third recovery, then waits for both preferred leaders and full ISR. Per-broker
+evidence retains the chosen order, open-transaction reference, timestamps,
+physical identities, before/after leaders (including coordinator partitions),
+and the final full-ISR barrier. The EOS job must be observed RUNNING before and
+after the sequence; completion during a slow roll cannot masquerade as an
+in-flight fault. New `rolling-*` TV1/TV2 controls and variants extend chaos-full.
+Live validation remains pending.
+
+### Experimental packet backend
+
+The runtime exposes an experimental `PacketFaultControl` for loss, delay/jitter
+and bidirectional blackhole between one owned TaskManager namespace and one
+selector-resolved broker client listener. The [packet design](../PACKET-FAULTS.md)
+specifies identity binding, NET_ADMIN-only sidecar isolation, immutable image
+requirements, bounded holds, counter deltas and scoped healing. Confirmation
+requires positive counter growth during the hold, stable endpoint identities,
+verified absence of owned rules and removal of the helper. Cleanup uncertainty
+retains the watchdog and namespace ownership lock; it cannot become a PASS.
+
+This slice has unit-tested runtime wiring only. No verified public image digest
+was locally available under the development download restriction. Therefore no
+packet YAML operation, canonical scenarios or chaos-full entries are activated
+in this change. Image verification and the first live probe require a separately
+approved follow-up before schema/profile activation; chaos-quick is unchanged.

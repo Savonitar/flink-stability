@@ -263,6 +263,8 @@ final class V1ExecutionResultRenderer {
                     .put("confirmed", operation.raw().confirmed());
             rendered.set("loopIterations", JSON.valueToTree(operation.loopIterations()));
             rendered.set("observations", JSON.valueToTree(operation.raw()));
+            putJobObservation(rendered, "jobBefore", operation.jobBefore());
+            putJobObservation(rendered, "jobAfter", operation.jobAfter());
         }));
         ArrayNode networkFaults = evidence.putArray("networkFaults");
         result.phaseEvidence().ifPresent(phases -> phases.networkFaults().forEach(fault -> {
@@ -295,6 +297,10 @@ final class V1ExecutionResultRenderer {
                 message.originalErrorCodes().forEach((entity, code) -> original.put(entity, code.intValue()));
                 if (message.originalErrorCodes().size() == 1) event.put("originalErrorCode", message.originalErrorCodes().values().iterator().next().intValue());
                 else event.putNull("originalErrorCode");
+                ObjectNode partitions = event.putObject("topicPartitions");
+                message.topicPartitions().forEach((topic, indexes) -> { var values = partitions.putArray(topic); indexes.forEach(values::add); });
+                var ids = event.putArray("producerIdFilters"); message.producerIdFilters().forEach(ids::add);
+                var states = event.putArray("stateFilters"); message.stateFilters().forEach(states::add);
                 ObjectNode offsets = event.putObject("originalBaseOffsets");
                 message.originalBaseOffsets().forEach(offsets::put);
                 event.put("errorOrigin", message.substitutedErrorCode() != null ? (message.forwardedToBroker() ? "synthetic-after-append" : "synthetic-before-broker") : message.originalErrorCodes().isEmpty() ? "unavailable" : "broker-response");
@@ -512,6 +518,16 @@ final class V1ExecutionResultRenderer {
         rendered.put("logicalName", observed.logicalName());
         rendered.put("runtimeId", observed.runtimeId());
         rendered.put("resourceId", observed.resourceId());
+    }
+
+    private static void putJobObservation(ObjectNode parent, String key, FlinkJobObservation.Attempt attempt) {
+        if (attempt == null) return;
+        ObjectNode node = parent.putObject(key);
+        node.put("error", attempt.failure().orElse(null));
+        attempt.observation().ifPresent(value -> {
+            node.put("state", value.state().name()); node.put("jobManagerTimeMillis", value.jobManagerTimeMillis());
+            node.put("completedCheckpoints", value.completedCheckpoints()); node.put("restoredCheckpoints", value.restoredCheckpoints());
+        });
     }
 
     private static void putSubtask(ArrayNode parent, FlinkJobObservation.Subtask subtask) {

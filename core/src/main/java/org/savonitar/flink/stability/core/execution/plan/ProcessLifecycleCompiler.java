@@ -82,6 +82,11 @@ final class ProcessLifecycleCompiler {
                     issues.add(issue(source, "runner.phase." + (broker ? "broker" : "taskmanager") + "-already-running",
                             stepPath + "/restart", "A restart must heal a preceding kill of " + name));
                 }
+            } else if (step.at("/network_fault/restart") instanceof ObjectNode restart) {
+                String name = restart.path("name").asText("taskmanager-1");
+                if ((!restart.has("name") && count > 1) || !isDeclaredTaskManager(name, count) || stopped.containsKey(name))
+                    issues.add(issue(source, "runner.phase.restart-target-unsupported", stepPath + "/network_fault/restart",
+                            "Recovery fault must name a running TaskManager; multiple TaskManagers require a name"));
             } else if ((step.has("leader_fault") || step.has("broker_fault")) && !stopped.isEmpty()) {
                 issues.add(issue(source, "runner.phase.ha-taskmanager-overlap-unsupported",
                         stepPath + "/leader_fault",

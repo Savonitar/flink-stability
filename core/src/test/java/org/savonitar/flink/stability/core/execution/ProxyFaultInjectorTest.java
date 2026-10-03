@@ -268,6 +268,27 @@ class ProxyFaultInjectorTest {
                 "a failed injection must not leave its rule armed");
     }
 
+    @Test void recoveryRunsOnlyAfterArmingAndAlwaysRemovesRuleOnFailure() throws Exception {
+        FakeProxy proxy = new FakeProxy(control, List.of());
+        var called = new java.util.concurrent.atomic.AtomicBoolean();
+        var failure = assertThrows(IOException.class, () -> proxy.injector().inject(PATH,
+                fault(ExecutableScenarioPlan.NetworkFaultAction.DROP_REQUEST), () -> {
+                    assertTrue(proxy.armed);
+                    assertTrue(Files.exists(control.resolve("rules/" + FAULT_ID + ".json")));
+                    called.set(true);
+                    throw new IOException("recovery failed");
+                }));
+        assertEquals("recovery failed", failure.getMessage()); assertTrue(called.get());
+        assertFalse(Files.exists(control.resolve("rules/" + FAULT_ID + ".json")));
+    }
+    @Test void failedArmingNeverRestartsTheTaskManager() throws Exception {
+        FakeProxy proxy = new FakeProxy(control, List.of()); proxy.silent = true;
+        var calls = new java.util.concurrent.atomic.AtomicInteger();
+        assertThrows(IOException.class, () -> proxy.injector().inject(PATH,
+                fault(ExecutableScenarioPlan.NetworkFaultAction.DROP_REQUEST), calls::incrementAndGet));
+        assertEquals(0, calls.get());
+    }
+
     private static String requestDrop(boolean beforeDeadline) {
         return """
                 {"event":"request-dropped","claim":1,"occurrence":1,"transactionalId":"eos-0-3",

@@ -94,6 +94,14 @@ public final class ExecutablePhaseExecutor {
                 String path,
                 ExecutableScenarioPlan.ProtocolFault fault) throws IOException, InterruptedException;
 
+        @FunctionalInterface
+        interface ArmedAction { void run() throws Exception; }
+
+        default PhaseExecutionEvidence.NetworkFault inject(String path,
+                ExecutableScenarioPlan.ProtocolFault fault, ArmedAction afterArmed) throws Exception {
+            throw new UnsupportedOperationException("This fault provider cannot synchronize recovery with arming");
+        }
+
         /** Completes a fault's evidence once no client can send again (SPEC-004 K6.12). */
         default PhaseExecutionEvidence.NetworkFault withObservedRetries(
                 PhaseExecutionEvidence.NetworkFault fault) throws IOException {
@@ -163,7 +171,21 @@ public final class ExecutablePhaseExecutor {
                         phaseIndex, phaseName, path, loopIterations, restart, evidence);
             } else if (step instanceof ExecutableScenarioPlan.BrokerFault fault) {
                 java.util.List<org.savonitar.flink.stability.runtime.api.KafkaBrokerControl.Evidence> observations;
-                try { observations = runtime.brokerFault(fault.request(), evidence.kafkaPartitions); }
+                boolean rolling = fault.request().action() == org.savonitar.flink.stability.runtime.api.KafkaBrokerControl.Action.ROLLING_RESTART;
+                FlinkJobObservation.Attempt beforeRolling = null, afterRolling = null;
+                try {
+                    if (rolling) beforeRolling = observe(job, Duration.ofSeconds(10));
+                    if (rolling && beforeRolling.observation().map(value -> value.state() != FlinkJobState.RUNNING).orElse(true))
+                        throw new IllegalStateException("Rolling restart requires an observed running EOS job");
+                    observations = runtime.brokerFault(fault.request(), evidence.kafkaPartitions);
+                    if (rolling) afterRolling = observe(job, Duration.ofSeconds(10));
+                    if (rolling && !observations.isEmpty() && (observations.size() != 6
+                            || observations.stream().anyMatch(value -> value.rolling() == null)
+                            || afterRolling.observation().map(value -> value.state() != FlinkJobState.RUNNING).orElse(true))) {
+                        observations = new java.util.ArrayList<>(observations);
+                        observations.set(0, observations.getFirst().withError("Rolling restart incomplete or EOS job no longer observed running"));
+                    }
+                }
                 catch (RuntimeException failure) {
                     observations = List.of(new org.savonitar.flink.stability.runtime.api.KafkaBrokerControl.Evidence(
                             "unresolved", false, null, null, List.of(), List.of(), failure.toString(), fault.request().action(), null));
@@ -181,8 +203,8 @@ public final class ExecutablePhaseExecutor {
                         observations.set(0, first.withError("Required coordinator commit window not confirmed"));
                     }
                 }
-                for (var observation : observations) evidence.brokers.add(new PhaseExecutionEvidence.BrokerOperation(path, loopIterations, observation));
-                evidence.stopFurtherSteps |= observations.size() != 2 || observations.stream().anyMatch(value -> !value.confirmed());
+                for (var observation : observations) evidence.brokers.add(new PhaseExecutionEvidence.BrokerOperation(path, loopIterations, observation, beforeRolling, afterRolling));
+                evidence.stopFurtherSteps |= observations.size() != (rolling ? 6 : 2) || observations.stream().anyMatch(value -> !value.confirmed());
                 succeeded(evidence, phaseIndex, phaseName, path, loopIterations, PhaseExecutionEvidence.StepKind.BROKER_FAULT,
                         "effectConfirmed=" + !evidence.stopFurtherSteps);
             } else if (step instanceof ExecutableScenarioPlan.BrokerOperation operation) {
@@ -200,7 +222,7 @@ public final class ExecutablePhaseExecutor {
                         "target=" + operation.targetName() + ", effectConfirmed=" + raw.confirmed());
             } else if (step instanceof ExecutableScenarioPlan.ProtocolFault fault) {
                 injectNetworkFault(
-                        phaseIndex, phaseName, path, loopIterations, fault, evidence);
+                        phaseIndex, phaseName, path, loopIterations, job, fault, evidence);
             } else if (step instanceof ExecutableScenarioPlan.LeaderFault fault) {
                 faultLeader(phaseIndex, phaseName, path, loopIterations, job, fault, evidence);
             } else if (step instanceof ExecutableScenarioPlan.Loop loop) {
@@ -494,11 +516,20 @@ public final class ExecutablePhaseExecutor {
             String phaseName,
             String path,
             List<PhaseExecutionEvidence.LoopIteration> loopIterations,
+            FlinkJobHandle job,
             ExecutableScenarioPlan.ProtocolFault fault,
             Recorder evidence)
             throws PhaseExecutionException {
         try {
-            PhaseExecutionEvidence.NetworkFault observed = networkFaults.inject(path, fault);
+            PhaseExecutionEvidence.NetworkFault observed = fault.restartTaskManager().isEmpty()
+                    ? networkFaults.inject(path, fault)
+                    : networkFaults.inject(path, fault, () -> {
+                        String name = fault.restartTaskManager().orElseThrow();
+                        killTaskManager(phaseIndex, phaseName, path + "/restart/kill", loopIterations, job,
+                                new ExecutableScenarioPlan.KillTaskManager(name), evidence);
+                        restartTaskManager(phaseIndex, phaseName, path + "/restart", loopIterations,
+                                new ExecutableScenarioPlan.RestartTaskManager(name), evidence);
+                    });
             evidence.networkFaults.add(observed);
             succeeded(
                     evidence,
@@ -509,6 +540,8 @@ public final class ExecutablePhaseExecutor {
                     PhaseExecutionEvidence.StepKind.NETWORK_FAULT,
                     "fault=" + observed.faultId() + " dropped=" + observed.dropped().size()
                             + "/" + observed.occurrences());
+        } catch (PhaseExecutionException failure) {
+            throw failure;
         } catch (InterruptedException interrupted) {
             Thread.currentThread().interrupt();
             throw failed(

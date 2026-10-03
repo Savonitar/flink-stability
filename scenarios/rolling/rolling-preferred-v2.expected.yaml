@@ -1,0 +1,9 @@
+format: v1
+kind: expected-result
+
+meta:
+  name: rolling-preferred-v2.expected
+  scenario: rolling-preferred-v2
+
+default:
+  outcome: pass

@@ -1,0 +1,66 @@
+# Serial Kafka regression batch
+
+`tools/kafka_chaos_batch.py` prepares and resumes the pending live regression.
+Preparation and `plan` are local only. `run --execute` starts Docker and must be
+separately authorized. The packet backend is excluded until its image pin and
+first probe have been reviewed.
+
+| Stage | Attempts | Warm-image estimate |
+| --- | ---: | ---: |
+| Broker EOS control, then named broker kill | 2 | 4–10 min |
+| Leader kill, leader pause, coordinator pause | 3 | 6–15 min |
+| Legacy control/assume/rewrite × request/response loss | 6 | 12–30 min |
+| Release/discard healthy control, twice each | 4 | 6–12 min |
+| Unchanged chaos-quick, release/discard, twice each | 40 | 60–120 min |
+| New POOLING/rolling controls | 6 | 12–30 min |
+| New POOLING faults | 30 | 90–240 min |
+| New rolling faults | 8 | 32–80 min |
+
+Total: 99 serial attempts, roughly 222–537 minutes (3.7–9 hours). These are
+planning estimates, not measured timings; cold pulls add time. The wrapper gives
+each process 30 minutes, retains a timeout as unresolved and stops. Scenario
+deadlines still apply. A timed-out/interrupted process may require manual cleanup.
+
+Prepare after the final JDK 21 build with a clean committed harness. The launcher
+JSON contains `argv` for the direct Java CLI ending in
+`org.savonitar.flink.stability.cli.Main`, using `-cp` with built JARs, plus an
+explicit non-secret `environment`. Use the tested JDK, isolated Maven repository
+and temporary/home directories. The two build directories hold the already
+verified calibration JARs, runtime closure and `build-evidence.json`; these can
+be retained builds inside the harness. Preparation checks their recipe and
+artifact pins and creates new catalogs without changing canonical files.
+
+```sh
+python3 tools/kafka_chaos_batch.py plan
+python3 tools/kafka_chaos_batch.py prepare --output jobs/live/kafka-chaos-batch \
+  --launcher jobs/validation/batch-launcher.json \
+  --legacy-build path/inside/harness/connector-mutants/target \
+  --quick-build path/inside/harness/chaos-profile-mutant/target
+python3 tools/kafka_chaos_batch.py status --output jobs/live/kafka-chaos-batch
+```
+
+After specific live-run approval, use the same command to start or resume:
+
+```sh
+python3 tools/kafka_chaos_batch.py run --execute \
+  --output jobs/live/kafka-chaos-batch --max-new-cells 99
+```
+
+The manifest freezes the source tree, engine/subject JARs, workload, runtime
+dependencies, launcher and catalog hashes. A process lock prevents overlapping
+launchers. Every cell has an exclusive directory, durable start/completion
+records, raw stdout/stderr, physical Kafka logs and a retained checkpoint-root
+reference. Existing completed cells are verified and skipped. Missing completion,
+changed inputs/results, failed controls and unresolved evidence stop the batch.
+There is no automatic retry or reset command; classify the observation and
+prepare a separately reviewed plan if another attempt is needed. Keep all
+checkpoint/log directories and never run `mvn clean` over live evidence.
+
+Both legacy controls precede mutants. The two sensitive legacy cells retain
+their actual FAIL and positive missing/duplicate counts. Matching counts alone
+do not establish calibration: review matching fault/timeout/decision transaction
+IDs, complete fence/oracle and class-origin evidence, and absence of
+`CALIBRATION_UNSUPPORTED`. The summary explicitly leaves that correlation review
+pending. The existing quick calibration checker must establish both CONTROL_PASS
+and CALIBRATION_DETECTED before the new-feature stages start. All six new healthy
+controls run before any new POOLING or rolling fault.

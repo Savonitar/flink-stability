@@ -9,7 +9,7 @@ final class KafkaCommitWindowObserver {
     private KafkaCommitWindowObserver() {}
     static KafkaCommitWindow observe(KafkaBrokerControl.Selection selected, int version, long sessionMillis,
                                      long heldAt, Duration hold, MonotonicDeadline outer,
-                                     KafkaSelectedBrokerFault.Driver driver, KafkaBrokerFault.Driver physical) {
+                                     KafkaBrokerFault.ClusterDriver driver, KafkaBrokerFault.Driver physical) {
         KafkaCommitWindow.Observation ongoing = null;
         KafkaCommitWindow.Observation committed = null;
         String lastError = null;
