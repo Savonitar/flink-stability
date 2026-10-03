@@ -191,8 +191,18 @@ public record PhaseExecutionEvidence(
             long armedAtMillis,
             long healedAtMillis,
             List<DroppedMessage> dropped,
-            List<String> forwardedErrors) {
+            List<String> forwardedErrors,
+            String api,
+            List<ProtocolMessage> affected) {
+        public NetworkFault(String path, String faultId, String proxy, String proxyImage,
+                            ExecutableScenarioPlan.NetworkFaultAction action, int occurrences, Duration triggerDeadline,
+                            long armedAtMillis, long healedAtMillis, List<DroppedMessage> dropped, List<String> forwardedErrors) {
+            this(path, faultId, proxy, proxyImage, action, occurrences, triggerDeadline, armedAtMillis, healedAtMillis,
+                    dropped, forwardedErrors, "end-txn", List.of());
+        }
         public NetworkFault {
+            api = requireNonBlank(api, "api");
+            affected = List.copyOf(affected);
             path = requireNonBlank(path, "path");
             faultId = requireNonBlank(faultId, "faultId");
             proxy = requireNonBlank(proxy, "proxy");
@@ -213,13 +223,44 @@ public record PhaseExecutionEvidence(
         }
 
         public boolean triggered() {
+            if (!affected.isEmpty() || !"end-txn".equals(api)
+                    || (action != ExecutableScenarioPlan.NetworkFaultAction.DROP_REQUEST
+                        && action != ExecutableScenarioPlan.NetworkFaultAction.DROP_RESPONSE)) {
+                return affected.stream().filter(message -> api.equals(message.api()) && message.qualifies(action))
+                        .filter(message -> message.occurrence() > 0 && message.occurrence() <= occurrences)
+                        .map(ProtocolMessage::claim).distinct().count() >= occurrences;
+            }
             return droppedBeforeDeadline() >= occurrences;
         }
 
         /** The same fault with completed evidence for its dropped messages. */
         public NetworkFault withDropped(List<DroppedMessage> completed) {
             return new NetworkFault(path, faultId, proxy, proxyImage, action, occurrences,
-                    triggerDeadline, armedAtMillis, healedAtMillis, completed, forwardedErrors);
+                    triggerDeadline, armedAtMillis, healedAtMillis, completed, forwardedErrors, api, affected);
+        }
+    }
+
+    /** One affected protocol message. Null identity/error fields mean absent on the wire, never guessed. */
+    public record ProtocolMessage(int occurrence, int claim, long timeMillis, boolean beforeDeadline,
+                                  String event, String api, short apiVersion, int correlationId,
+                                  String transactionalId, Long producerId, Short producerEpoch,
+                                  Boolean committed, java.util.Map<String, Short> originalErrorCodes,
+                                  Short substitutedErrorCode, boolean forwardedToBroker,
+                                  long requestedDelayMillis, long actualDelayNanos) {
+        public ProtocolMessage {
+            originalErrorCodes = java.util.Map.copyOf(originalErrorCodes);
+            transactionalId = requireNonBlank(transactionalId, "transactionalId");
+        }
+        boolean qualifies(ExecutableScenarioPlan.NetworkFaultAction action) {
+            if (!beforeDeadline) return false;
+            return switch (action) {
+                case DROP_REQUEST -> "request-dropped".equals(event) && !forwardedToBroker;
+                case DROP_RESPONSE -> "response-dropped".equals(event) && forwardedToBroker
+                        && !originalErrorCodes.isEmpty() && originalErrorCodes.values().stream().allMatch(code -> code == 0);
+                case DELAY -> "request-delayed".equals(event) && forwardedToBroker && requestedDelayMillis > 0
+                        && actualDelayNanos >= java.util.concurrent.TimeUnit.MILLISECONDS.toNanos(requestedDelayMillis);
+                case ERROR_RESPONSE -> "response-substituted".equals(event) && substitutedErrorCode != null && !forwardedToBroker && originalErrorCodes.isEmpty();
+            };
         }
     }
 

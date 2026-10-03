@@ -3297,3 +3297,19 @@ unknown version/hash mismatch. `campaign shrink` removes or shortens one fault u
 candidate, keeps healing and expectations, and emits only semantically and offline
 artifact-validated candidates with replayable manifests; rejected reductions are recorded.
 All three commands prepare artifacts offline and never provision or execute infrastructure.
+
+### Counted transactional proxy faults (development extension)
+
+`network_fault` executes the seven transactional APIs and four counted actions
+specified by SPEC-004 K11–K12. `occurrences` and `trigger_deadline` are required;
+`duration` is forbidden in this form. Delay adds `fault.latency` bounded to 5 s;
+error-response adds an allow-listed `fault.error`. `match.result` remains EndTxn
+only. Transactional Produce accepts the sink's `transactional_id_prefix`.
+`find-coordinator` selects transaction lookup, never consumer-group discovery.
+`transaction_version` continues to be finalized on the broker before job startup.
+The result's `phaseEvidence.networkFaults[].affected` retains request identity,
+original/substituted error codes, delay duration and deadline qualification. Null
+producer fields mean the selected wire version did not carry them. A rule must
+complete its full occurrence count on time as well as pass exact-ID validation;
+late/absent effects retain `network-fault.trigger-missed`. Existing EndTxn
+`dropped` and retry evidence remain available.

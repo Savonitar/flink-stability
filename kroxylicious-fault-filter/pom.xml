@@ -21,6 +21,12 @@
 
     <dependencies>
         <dependency>
+            <groupId>org.savonitar.flink.stability</groupId>
+            <artifactId>runtime-api</artifactId>
+            <version>${project.version}</version>
+            <scope>provided</scope>
+        </dependency>
+        <dependency>
             <groupId>io.kroxylicious</groupId>
             <artifactId>kroxylicious-api</artifactId>
             <version>${kroxylicious.version}</version>
@@ -47,6 +53,14 @@
     </dependencies>
 
     <build>
+        <resources>
+            <resource><directory>src/main/resources</directory></resource>
+            <!-- Only the dependency-free shared allowlist is needed inside the proxy. -->
+            <resource>
+                <directory>${project.basedir}/../runtime-api/target/classes</directory>
+                <includes><include>org/savonitar/flink/stability/runtime/api/KafkaProtocolFaultPolicy.class</include></includes>
+            </resource>
+        </resources>
         <plugins>
             <plugin>
                 <groupId>org.apache.maven.plugins</groupId>

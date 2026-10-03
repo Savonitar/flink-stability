@@ -115,7 +115,7 @@ public final class ExecutableScenarioPlan {
         if (job.sink().proxy().isPresent() && !job.sink().proxy().equals(kafka.proxy())) {
             throw new IllegalArgumentException("A routed sink must use the cluster's proxy");
         }
-        for (EndTxnFault fault : endTxnFaults(this.phases.stream()
+        for (ProtocolFault fault : protocolFaults(this.phases.stream()
                 .flatMap(phase -> phase.steps().stream())
                 .toList())) {
             // A fault on traffic that never passes the proxy could never trigger.
@@ -127,13 +127,13 @@ public final class ExecutableScenarioPlan {
         }
     }
 
-    private static List<EndTxnFault> endTxnFaults(List<Step> steps) {
-        List<EndTxnFault> faults = new ArrayList<>();
+    private static List<ProtocolFault> protocolFaults(List<Step> steps) {
+        List<ProtocolFault> faults = new ArrayList<>();
         for (Step step : steps) {
-            if (step instanceof EndTxnFault fault) {
+            if (step instanceof ProtocolFault fault) {
                 faults.add(fault);
             } else if (step instanceof Loop loop) {
-                faults.addAll(endTxnFaults(loop.steps()));
+                faults.addAll(protocolFaults(loop.steps()));
             }
         }
         return faults;
@@ -815,7 +815,7 @@ public final class ExecutableScenarioPlan {
     }
 
     public sealed interface Step permits AwaitJobState, AwaitCheckpoints, Wait,
-            KillTaskManager, RestartTaskManager, BrokerOperation, BrokerFault, Loop, EndTxnFault, LeaderFault {}
+            KillTaskManager, RestartTaskManager, BrokerOperation, BrokerFault, Loop, ProtocolFault, LeaderFault {}
 
     /** One bounded fault of the observed leader, including unconditional healing. */
     public enum RecoveryBarrier { TOKEN_CHECKPOINT }
@@ -916,17 +916,41 @@ public final class ExecutableScenarioPlan {
 
     /**
      * Drops the first {@code occurrences} matching EndTxn requests or responses at the proxy, or
-     * stops waiting at {@code triggerDeadline} (SPEC-004 K3.11). Only EndTxn is executable in v1.
+     * stops waiting at {@code triggerDeadline} (SPEC-004 K3.11). All supported APIs use counted, deadline-bound messages.
      */
-    public record EndTxnFault(
+    public record ProtocolFault(
             String proxy,
             Optional<TransactionResult> result,
             Optional<String> transactionalIdPrefix,
             NetworkFaultAction action,
             int occurrences,
-            Duration triggerDeadline) implements Step {
-        public EndTxnFault {
+            Duration triggerDeadline,
+            String api,
+            Optional<String> topic,
+            Optional<Duration> latency,
+            Optional<String> error) implements Step {
+        public ProtocolFault(String proxy, Optional<TransactionResult> result, Optional<String> prefix,
+                             NetworkFaultAction action, int occurrences, Duration deadline) {
+            this(proxy, result, prefix, action, occurrences, deadline, "end-txn", Optional.empty(), Optional.empty(), Optional.empty());
+        }
+        public ProtocolFault {
             proxy = requireNonBlank(proxy, "proxy");
+            if (!org.savonitar.flink.stability.runtime.api.KafkaProtocolFaultPolicy.APIS.contains(api))
+                throw new IllegalArgumentException("Unsupported protocol fault API: " + api);
+            Objects.requireNonNull(topic, "topic"); Objects.requireNonNull(latency, "latency"); Objects.requireNonNull(error, "error");
+            if ((action == NetworkFaultAction.DELAY) != latency.isPresent()
+                    || (action == NetworkFaultAction.ERROR_RESPONSE) != error.isPresent())
+                throw new IllegalArgumentException("Fault action options do not match");
+            latency.ifPresent(value -> {
+                if (value.isNegative() || value.isZero() || value.compareTo(Duration.ofMillis(
+                        org.savonitar.flink.stability.runtime.api.KafkaProtocolFaultPolicy.MAX_DELAY_MILLIS)) > 0)
+                    throw new IllegalArgumentException("Protocol delay must be 1..5000 ms");
+            });
+            error.ifPresent(value -> {
+                if (!org.savonitar.flink.stability.runtime.api.KafkaProtocolFaultPolicy.errors(api).contains(value))
+                    throw new IllegalArgumentException("Unsafe API/error pair");
+            });
+            if (!"end-txn".equals(api) && result.isPresent()) throw new IllegalArgumentException("Only EndTxn has an outcome selector");
             Objects.requireNonNull(result, "result");
             Objects.requireNonNull(transactionalIdPrefix, "transactionalIdPrefix");
             transactionalIdPrefix.ifPresent(prefix ->
@@ -950,7 +974,9 @@ public final class ExecutableScenarioPlan {
         /** The request never reaches the broker; the client times out and may retry. */
         DROP_REQUEST,
         /** The broker acts on the request; the client never sees the response. */
-        DROP_RESPONSE
+        DROP_RESPONSE,
+        DELAY,
+        ERROR_RESPONSE
     }
 
     public record KafkaIdSetValidation(

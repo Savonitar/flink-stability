@@ -1428,7 +1428,7 @@ class V1ScenarioExecutorTest {
                         new ExecutablePhaseExecutor.NetworkFaults() {
                             @Override
                             public PhaseExecutionEvidence.NetworkFault inject(
-                                    String path, ExecutableScenarioPlan.EndTxnFault fault) {
+                                    String path, ExecutableScenarioPlan.ProtocolFault fault) {
                                 return new PhaseExecutionEvidence.NetworkFault(
                                         path, "fault-1", fault.proxy(), "test/proxy",
                                         fault.action(), fault.occurrences(),

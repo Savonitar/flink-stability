@@ -31,16 +31,14 @@ final class KafkaFaultApiRegistry {
     private static final Set<String> LEADER_ERRORS = Set.of(
             "not-leader-or-follower",
             "request-timed-out");
-    private static final Set<String> COORDINATOR_ERRORS = Set.of(
-            "coordinator-not-available",
-            "request-timed-out");
+    
 
     private static final Map<String, Profile> PROFILES = Map.ofEntries(
             Map.entry("produce", new Profile(
                     Set.of(EndpointKind.SINK, EndpointKind.INPUT),
                     TopicBinding.ENDPOINT,
                     false,
-                    LEADER_ERRORS)),
+                    org.savonitar.flink.stability.runtime.api.KafkaProtocolFaultPolicy.errors("produce"))),
             Map.entry("fetch", new Profile(
                     Set.of(EndpointKind.SOURCE),
                     TopicBinding.ENDPOINT,
@@ -55,27 +53,30 @@ final class KafkaFaultApiRegistry {
                     Set.of(EndpointKind.SINK),
                     TopicBinding.FORBIDDEN,
                     true,
-                    COORDINATOR_ERRORS)),
+                    org.savonitar.flink.stability.runtime.api.KafkaProtocolFaultPolicy.errors("init-producer-id"))),
             Map.entry("add-partitions-to-txn", new Profile(
                     Set.of(EndpointKind.SINK),
                     TopicBinding.ENDPOINT,
                     true,
-                    LEADER_ERRORS)),
+                    org.savonitar.flink.stability.runtime.api.KafkaProtocolFaultPolicy.errors("add-partitions-to-txn"))),
             Map.entry("add-offsets-to-txn", new Profile(
                     Set.of(EndpointKind.SINK),
                     TopicBinding.FORBIDDEN,
                     true,
-                    COORDINATOR_ERRORS)),
+                    org.savonitar.flink.stability.runtime.api.KafkaProtocolFaultPolicy.errors("add-offsets-to-txn"))),
             Map.entry("txn-offset-commit", new Profile(
                     Set.of(EndpointKind.SINK),
                     TopicBinding.SOURCE,
                     true,
-                    COORDINATOR_ERRORS)),
+                    org.savonitar.flink.stability.runtime.api.KafkaProtocolFaultPolicy.errors("txn-offset-commit"))),
+            Map.entry("find-coordinator", new Profile(
+                    Set.of(EndpointKind.SINK), TopicBinding.FORBIDDEN, true,
+                    org.savonitar.flink.stability.runtime.api.KafkaProtocolFaultPolicy.errors("find-coordinator"))),
             Map.entry("end-txn", new Profile(
                     Set.of(EndpointKind.SINK),
                     TopicBinding.FORBIDDEN,
                     true,
-                    COORDINATOR_ERRORS)));
+                    org.savonitar.flink.stability.runtime.api.KafkaProtocolFaultPolicy.errors("end-txn"))));
 
     private KafkaFaultApiRegistry() {}
 

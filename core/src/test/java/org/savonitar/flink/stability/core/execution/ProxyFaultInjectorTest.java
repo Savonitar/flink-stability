@@ -254,14 +254,14 @@ class ProxyFaultInjectorTest {
                 """.formatted(beforeDeadline).strip();
     }
 
-    private static ExecutableScenarioPlan.EndTxnFault fault(
+    private static ExecutableScenarioPlan.ProtocolFault fault(
             ExecutableScenarioPlan.NetworkFaultAction action) {
         return fault(action, 1);
     }
 
-    private static ExecutableScenarioPlan.EndTxnFault fault(
+    private static ExecutableScenarioPlan.ProtocolFault fault(
             ExecutableScenarioPlan.NetworkFaultAction action, int occurrences) {
-        return new ExecutableScenarioPlan.EndTxnFault(
+        return new ExecutableScenarioPlan.ProtocolFault(
                 "kafka-proxy",
                 Optional.of(ExecutableScenarioPlan.TransactionResult.COMMIT),
                 Optional.of("eos"),

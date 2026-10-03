@@ -1,0 +1,7 @@
+format: v1
+kind: expected-result
+meta:
+  name: protocol-produce-response-v2.expected
+  scenario: protocol-produce-response-v2
+default:
+  outcome: pass

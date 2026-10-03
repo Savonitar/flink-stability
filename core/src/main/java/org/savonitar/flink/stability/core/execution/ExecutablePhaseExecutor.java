@@ -92,7 +92,7 @@ public final class ExecutablePhaseExecutor {
 
         PhaseExecutionEvidence.NetworkFault inject(
                 String path,
-                ExecutableScenarioPlan.EndTxnFault fault) throws IOException, InterruptedException;
+                ExecutableScenarioPlan.ProtocolFault fault) throws IOException, InterruptedException;
 
         /** Completes a fault's evidence once no client can send again (SPEC-004 K6.12). */
         default PhaseExecutionEvidence.NetworkFault withObservedRetries(
@@ -187,7 +187,7 @@ public final class ExecutablePhaseExecutor {
                 succeeded(evidence, phaseIndex, phaseName, path, loopIterations,
                         operation.restart() ? PhaseExecutionEvidence.StepKind.RESTART_BROKER : PhaseExecutionEvidence.StepKind.KILL_BROKER,
                         "target=" + operation.targetName() + ", effectConfirmed=" + raw.confirmed());
-            } else if (step instanceof ExecutableScenarioPlan.EndTxnFault fault) {
+            } else if (step instanceof ExecutableScenarioPlan.ProtocolFault fault) {
                 injectNetworkFault(
                         phaseIndex, phaseName, path, loopIterations, fault, evidence);
             } else if (step instanceof ExecutableScenarioPlan.LeaderFault fault) {
@@ -483,7 +483,7 @@ public final class ExecutablePhaseExecutor {
             String phaseName,
             String path,
             List<PhaseExecutionEvidence.LoopIteration> loopIterations,
-            ExecutableScenarioPlan.EndTxnFault fault,
+            ExecutableScenarioPlan.ProtocolFault fault,
             Recorder evidence)
             throws PhaseExecutionException {
         try {

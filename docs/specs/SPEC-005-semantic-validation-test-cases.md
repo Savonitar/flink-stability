@@ -309,7 +309,7 @@ expected validation code.
 | SV-136 | Topic-less `metadata` fault has at least one endpoint routed through the proxy on the target cluster. | Accept as matching that routed cluster traffic. |
 | SV-136a | A counted `drop-request` or `drop-response` fault omits `occurrences` or `trigger_deadline`, or declares `duration`; or a held fault declares `occurrences` or `trigger_deadline`. | Reject structurally (SPEC-004 K3.11). |
 | SV-136b | `match.result` on any API but `end-txn`. | Reject structurally (SPEC-004 K4.6). |
-| SV-136c | The runner receives a proxy with an explicit `bootstrap.address`, a `listen` host a runner container uses, or a second proxy; a routed job source or generated input; a network fault on an API other than `end-txn`, of a held type, or inside a loop. | Reject before provisioning with the SPEC-004 K11 `runner.*` diagnostic. |
+| SV-136c | The runner receives a proxy with an explicit `bootstrap.address`, a `listen` host a runner container uses, or a second proxy; a routed job source or generated input; a network fault outside the seven K11.3 APIs, of a held type, or inside a loop. | Reject before provisioning with the SPEC-004 K11 `runner.*` diagnostic. |
 | SV-136d | A counted `end-txn` fault on an exactly-once sink routed through the proxy drops every requested occurrence before its trigger deadline, and the terminal oracle passes. | `pass`; the report lists each dropped message and, for a dropped response, the broker's successful answer. An error response is passed to the client, listed under `forwardedErrors`, and does not count as an occurrence. |
 | SV-136e | A counted fault drops fewer messages than its `occurrences` by its `trigger_deadline`, including when further drops land only while the rule heals. | A passing oracle becomes `inconclusive` with `network-fault.trigger-missed`; a failing oracle keeps `fail`; late drops are reported with `beforeDeadline: false`. A PASS result cannot be constructed with such a fault. |
 | SV-136f | The proxy rejects a rule, or does not arm or heal it within `30s`. | The step fails `inconclusive` with `network-fault.infrastructure`, and the runner deletes the rule first. |
@@ -563,3 +563,17 @@ expected validation code.
 | SV-229 | Campaign primitive closure | TM/broker kill-wait-restart, JM leader/token faults, runtime broker selectors/pause and EndTxn loss compile with their existing topology requirements; all templates, even unselected ones, are validated. |
 | SV-230 | Campaign reduction | Removal preserves complete fault/heal units; shortening reduces holds/token delay without changing timeouts or oracle; last removal drops the phase; occurrence-only loss cannot be shortened. Candidates replay and pass offline validation. |
 | SV-231 | Campaign output/preflight | Unknown constraints, invalid bounds and incompatible templates fail; output is a new jobs directory without symlink traversal. Existing output/canonical scenarios are not overwritten; missing offline artifacts publish no partial catalog. |
+
+### Transactional protocol adapter contracts
+
+| Case | Input | Required result |
+| --- | --- | --- |
+| SV-237 | Seven supported APIs, serialized with Kafka, old/new EndTxn and coordinator wire versions | Preserve request identity; absent producer fields remain null. |
+| SV-238 | Counted Produce with the routed EOS sink prefix and topic | Compile and match only that transactional request. |
+| SV-239 | Delay >5 s, unsafe API/error pair or producer-fenced | Reject before execution. |
+| SV-240 | Delay completes after trigger deadline or rule never matches | Cannot PASS; report effect as late/missing. |
+| SV-241 | Error response for a supported API | Generate a serializable response before broker forwarding; record null original and selected replacement code. |
+| SV-242 | TxnOffsetCommit v0/1 + coordinator-load-in-progress, or insufficient-replica error with acks other than -1 | Pass through without consuming an occurrence. |
+| SV-243 | Multi-ID batch, mixed producer batches, group FindCoordinator or unsupported topic UUID Produce | Pass through; never guess transactional identity. |
+| SV-244 | Mixed success/error partition response under drop-response | Forward entire response and release reservation. |
+| SV-245 | Two matching messages on different proxy connections and occurrences=2 | Shared counter records exactly two affected messages; subsequent requests pass. |

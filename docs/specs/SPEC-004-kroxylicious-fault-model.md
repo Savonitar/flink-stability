@@ -114,12 +114,13 @@ not timer-driven sleeps against an opaque TCP connection.
 - **K3.7** `fault` is required and declares what the proxy does to matching
   traffic.
 - **K3.8** `duration` is required for held network faults (`delay`,
-  `disconnect`, `error-response`) and uses the SPEC-001 duration grammar. It is
+  `disconnect`, `error-response`) without `occurrences`, and uses the SPEC-001 duration grammar. It is
   not accepted for a counted fault (K3.11).
 - **K3.9** `heal` is required and must be `restore-proxy-rule` in v1.
 - **K3.10** A held network fault is a held fault under SPEC-001 R6.9. A counted
   fault is bounded by its occurrences and trigger deadline instead.
-- **K3.11** `drop-request` and `drop-response` are **counted** faults. They affect
+- **K3.11** `drop-request` and `drop-response` are **counted** faults. `delay` and
+  `error-response` also use the counted form when `occurrences` is present. They affect
   the first `occurrences` matching messages after the rule is armed, then the
   rule heals:
 
@@ -156,6 +157,7 @@ not timer-driven sleeps against an opaque TCP connection.
   | `add-offsets-to-txn` | Source offset transaction enlistment. |
   | `txn-offset-commit` | Transactional offset commit. |
   | `end-txn` | Transaction commit or abort. |
+  | `find-coordinator` | Transaction coordinator discovery (key type 1 only). |
 
 - **K4.2a** The semantic endpoint and topic-selector profiles are fail-closed:
 
@@ -169,8 +171,9 @@ not timer-driven sleeps against an opaque TCP connection.
   | `add-offsets-to-txn` | exactly-once sink | forbidden |
   | `txn-offset-commit` | exactly-once sink | paired source topic on the target cluster |
   | `end-txn` | exactly-once sink | forbidden |
+  | `find-coordinator` | exactly-once sink | forbidden |
 
-  `match.transactional_id_prefix` is accepted only for the five transaction
+  `match.transactional_id_prefix` is accepted for transactional `produce` and the six transaction
   APIs and, when present, equals the sink's configured prefix exactly.
   The distinction between `add-offsets-to-txn` and `txn-offset-commit` follows
   their request fields in the
@@ -220,14 +223,12 @@ not timer-driven sleeps against an opaque TCP connection.
 
   | API | Allowed `error` values |
   | --- | --- |
-  | `produce` | `not-leader-or-follower`, `request-timed-out` |
-  | `fetch` | `not-leader-or-follower`, `request-timed-out` |
+  | `produce` | `not-leader-or-follower`, `request-timed-out`, `not-enough-replicas` |
+  | `fetch` (semantic model only) | `not-leader-or-follower`, `request-timed-out` |
   | `metadata` | none |
-  | `init-producer-id` | `coordinator-not-available`, `request-timed-out` |
-  | `add-partitions-to-txn` | `not-leader-or-follower`, `request-timed-out` |
-  | `add-offsets-to-txn` | `coordinator-not-available`, `request-timed-out` |
-  | `txn-offset-commit` | `coordinator-not-available`, `request-timed-out` |
-  | `end-txn` | `coordinator-not-available`, `request-timed-out` |
+  | `init-producer-id`, `add-partitions-to-txn`, `add-offsets-to-txn`, `end-txn` | `concurrent-transactions`, `coordinator-load-in-progress`, `coordinator-not-available`, `not-coordinator` |
+  | `txn-offset-commit` | `coordinator-load-in-progress`, `coordinator-not-available`, `not-coordinator` |
+  | `find-coordinator` | `coordinator-not-available` |
 
   Every unlisted API/error pair is rejected before provisioning. Each listed
   pair still requires adapter contract tests for the Kafka API versions pinned
@@ -389,8 +390,10 @@ rejected before provisioning with a `runner.*` diagnostic:
   (`runner.kafka.proxy-listen-unsupported`).
 - **K11.2** Only the job sink may route through the proxy. A routed job source
   or generated input is `runner.kafka.proxy-route-unsupported`.
-- **K11.3** Network faults are counted `drop-request` or `drop-response` faults
-  on `end-txn` (`runner.network-fault.type-unsupported`,
+- **K11.3** Network faults are counted `drop-request`, `drop-response`, `delay` or
+  `error-response` faults on `end-txn`, `init-producer-id`, `produce`,
+  `add-partitions-to-txn`, `add-offsets-to-txn`, `txn-offset-commit` or
+  `find-coordinator` (`runner.network-fault.type-unsupported`,
   `runner.network-fault.api-unsupported`) and do not appear inside loops
   (`runner.network-fault.loop-unsupported`).
 - **K11.4** The proxy is Kroxylicious 0.21.0, pinned by digest, with the harness's
@@ -398,3 +401,60 @@ rejected before provisioning with a `runner.*` diagnostic:
   classpath. Only connections that route through the proxy can be affected; the
   harness input producer, the job source, and the terminal validators always use
   the direct listener.
+
+
+## 12. Counted transactional protocol faults
+
+- **K12.1** The executable topology remains one broker and one proxy in front of
+  the exactly-once sink. Rules share their occurrence counter across connections.
+  The step arms a rule at phase-step entry; previous traffic cannot consume it.
+  A transactional-ID prefix selects the configured sink. A selected topic must be
+  the only topic in the request, avoiding a fault on unrelated batched traffic.
+- **K12.2** `delay` holds a request asynchronously for `fault.latency` (1 ms to
+  5 s inclusive). This bound stays below the proxy request-filter timeout. Its
+  occurrence completes only when the held request is released. Healing prevents
+  new claims; a pending delay remains bounded. Closing the filter cancels it.
+  An occurrence released after the trigger deadline cannot confirm the fault.
+- **K12.3** `error-response` constructs a Kafka response *before* forwarding the
+  selected request. `originalErrorCode: null`, an empty `originalErrorCodes`,
+  `substitutedErrorCode`, `errorOrigin: synthetic-before-broker` and
+  `forwardedToBroker: false` make this explicit. It never turns a successful
+  broker commit into a rejection: that would invent a state the broker did not
+  have. This models a transient broker rejection before the operation's effect.
+  The allow-list is shared by preflight and the container plugin.
+
+  | Error | Plausible broker state modeled |
+  | --- | --- |
+  | `CONCURRENT_TRANSACTIONS` | A previous transaction-state append or transition for the same ID is pending; the coordinator rejects the new transition before applying it. |
+  | `COORDINATOR_LOAD_IN_PROGRESS` | The coordinator is loading the relevant state partition. TxnOffsetCommit versions below 2 pass through, since Kafka remaps this error for those clients. |
+  | `COORDINATOR_NOT_AVAILABLE` | The coordinator partition is temporarily unavailable; FindCoordinator cannot locate a usable transaction coordinator. |
+  | `NOT_COORDINATOR` | A cached coordinator address no longer owns this ID/group's partition. |
+  | `NOT_LEADER_OR_FOLLOWER` | A Produce request reached a former partition leader. |
+  | `REQUEST_TIMED_OUT` | Produce could not complete within its request timeout; pre-append rejection is one possible outcome. |
+  | `NOT_ENOUGH_REPLICAS` | Produce with `acks=-1` sees fewer in-sync replicas than required, before append. Other acks values pass through. This rule models insufficient ISR; evidence does not claim a real ISR change. |
+
+  `PRODUCER_FENCED`, invalid epochs, and all unlisted errors are rejected. No fault
+  fabricates a competing producer. The matrix follows Kafka 4.0
+  `KafkaApis`/`TransactionCoordinator` and the Kafka 4.2 generated wire schemas used
+  by Kroxylicious; adapter tests serialize requests and responses with Kafka's
+  serializers, including both EndTxn protocol generations.
+- **K12.4** Every completed occurrence records API/version, correlation ID,
+  transactional ID, producer ID/epoch when present in the request, outcome when
+  present, original per-entity response codes, substituted code, and forwarding
+  status. Missing wire fields are `null`, never inferred. A dropped response is
+  correlated to its original request. All response entities must report `NONE`
+  to count a response loss; mixed/error responses pass through and release the
+  reserved occurrence. Only EndTxn retains the existing post-drop retry witness.
+- **K12.5** Multi-ID FindCoordinator/AddPartitionsToTxn batches and Produce batches
+  with mixed producer identities pass through. FindCoordinator group lookups,
+  nontransactional messages, Produce `acks=0`, and Produce v13 topic-UUID requests
+  also pass through. None can satisfy a fault's deadline. Future topic-UUID
+  support needs an observed metadata binding rather than guessed names.
+- **K12.6** The Flink Kafka sink does not send AddOffsetsToTxn or TxnOffsetCommit:
+  Flink checkpoints source offsets itself. Those adapters are tested but no
+  built-in sink scenario expects them to fire. TV2 normally omits the client's
+  AddPartitionsToTxn, so its scenario is TV1 only. The eight `scenarios/protocol`
+  catalogs exercise EndTxn request loss, delay and coordinator rejection in both
+  transaction versions, Produce response loss in TV2, and concurrent partition
+  enlistment in TV1. They retain the exact-ID oracle and require every declared
+  occurrence; a missed fault cannot produce PASS.

@@ -457,24 +457,6 @@ class ScenarioNetworkPreflightValidatorTest {
 
     @Test
     void restrictsTransactionPrefixesAndTransactionApisToExactlyOnceSinks() {
-        SpecificationException prefixOnProduce = reject(document -> {
-            addManagedProxy(document, "kafka-proxy", "main", "127.0.0.1:19092");
-            sink(document).put("connect_via_proxy", "kafka-proxy");
-            addNetworkFault(
-                    replaceSteps(document),
-                    "kafka-proxy",
-                    "main",
-                    null,
-                    "produce",
-                    "output",
-                    "minimal");
-        });
-        assertHasIssue(
-                prefixOnProduce,
-                ResolutionScope.COMMON,
-                "preflight.network.transactional-prefix-unsupported",
-                NETWORK_PATH + "/match/transactional_id_prefix");
-
         SpecificationException wrongPrefix = reject(document -> {
             addManagedProxy(document, "kafka-proxy", "main", "127.0.0.1:19092");
             sink(document).put("connect_via_proxy", "kafka-proxy");

@@ -1876,6 +1876,7 @@
           "allOf": [
             {
               "if": {
+                "anyOf": [{"required": ["occurrences"]}, {"required": ["trigger_deadline"]}, {
                 "properties": {
                   "fault": {
                     "properties": {
@@ -1894,6 +1895,7 @@
                 "required": [
                   "fault"
                 ]
+                }]
               },
               "then": {
                 "required": [
@@ -2220,7 +2222,8 @@
             "add-partitions-to-txn",
             "add-offsets-to-txn",
             "txn-offset-commit",
-            "end-txn"
+            "end-txn",
+            "find-coordinator"
           ]
         },
         "topic": {
