@@ -8,7 +8,8 @@ import java.util.concurrent.Callable;
         subcommands = {
                 RunScenarioCommand.class,
                 ValidateSpecificationsCommand.class,
-                InspectKafkaLogCommand.class
+                InspectKafkaLogCommand.class,
+                CampaignCommand.class
         })
 public class FlinkStabilityCommand implements Callable<Integer> {
     @CommandLine.Spec

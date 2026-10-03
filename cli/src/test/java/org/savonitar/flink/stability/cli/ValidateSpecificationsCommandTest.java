@@ -501,7 +501,7 @@ class ValidateSpecificationsCommandTest {
         assertTrue(result.stderr().contains(diagnostic), result.stderr());
     }
 
-    private static void writePair(
+    static void writePair(
             Path root,
             String name,
             String connectorReference,
@@ -558,7 +558,7 @@ class ValidateSpecificationsCommandTest {
         Files.writeString(path, YAML.writeValueAsString(document));
     }
 
-    private static Path createJar(Path path, boolean executable) throws IOException {
+    static Path createJar(Path path, boolean executable) throws IOException {
         Files.createDirectories(path.getParent());
         Manifest manifest = new Manifest();
         manifest.getMainAttributes().put(Attributes.Name.MANIFEST_VERSION, "1.0");

@@ -3276,3 +3276,24 @@ The execution decisions formerly recorded as review proposals are now normative:
 
 The JSON Schema encodes structural constraints; semantic-validation tests encode
 the cross-file and cross-field constraints cited above.
+
+### R6.10 Seeded campaign generation (first slice)
+
+`campaign generate` materializes one single scenario, replaces an explicitly named phase
+with a bounded seeded sequence of existing self-healing fault units, and writes a new
+catalog under workspace `jobs/`. Other phases, setup, subject, jobs, checkpointing,
+validations and the selected expected result are preserved. Constraints provide 1–32
+complete alternatives, count bounds 1–32 and pre-fault gap bounds 0–120000 ms. TaskManager
+or named broker kill/wait/restart, leader/token faults, broker_fault and EndTxn request/
+response loss reuse their existing schemas and capability checks. Unsupported compositions
+fail closed; canonical scenarios are not modified. See `docs/CAMPAIGNS.md` for the CLI and
+strict JSON constraints contract.
+
+Optional `meta.campaign` requires signed 64-bit `seed`, `generator_version` equal to
+`fault-schedule-v1`, and a lowercase 64-hex `recipe_sha256`. Version 1 fixes the Random
+algorithm/draw order and sorted-key serialization. The local manifest contains all seed
+inputs and YAML digests. `campaign replay` regenerates byte-identical YAML or fails on
+unknown version/hash mismatch. `campaign shrink` removes or shortens one fault unit per
+candidate, keeps healing and expectations, and emits only semantically and offline
+artifact-validated candidates with replayable manifests; rejected reductions are recorded.
+All three commands prepare artifacts offline and never provision or execute infrastructure.
