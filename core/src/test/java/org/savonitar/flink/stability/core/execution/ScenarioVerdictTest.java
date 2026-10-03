@@ -202,6 +202,21 @@ class ScenarioVerdictTest {
     }
 
     @Test
+    void brokerAcknowledgementCannotBlessAMatchingDataFailure() {
+        var raw = new org.savonitar.flink.stability.runtime.api.KafkaBrokerControl.Evidence(
+                "broker-1", false, null, null, List.of(), List.of(), "Missing physical observation");
+        var phases = new PhaseExecutionEvidence(List.of(), List.of(), List.of(), List.of(), List.of(),
+                List.of(new PhaseExecutionEvidence.BrokerOperation("$/phases/0/steps/0", List.of(), raw)));
+        var failed = terminalAttempt(V1ScenarioExecutionResult.Status.FAIL, DUPLICATES, phases,
+                Optional.of(V1ScenarioExecutorTest.confirmedOrigins()));
+        var verdict = ScenarioVerdict.of(EXPECT_DUPLICATES, failed);
+        assertEquals(ScenarioVerdict.Status.INCONCLUSIVE, verdict.status());
+        assertEquals("broker.operation.effect-unconfirmed", verdict.reason());
+        assertEquals(V1ScenarioExecutionResult.Status.FAIL, failed.status());
+        assertEquals(DUPLICATES, failed.reason());
+    }
+
+    @Test
     void aFailureReasonAloneDoesNotProveAnExpectedFailure() {
         V1ScenarioExecutionResult unsupported = new V1ScenarioExecutionResult(
                 V1ScenarioExecutionResult.Status.FAIL, DUPLICATES, "unverified failure",
