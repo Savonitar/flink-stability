@@ -3489,3 +3489,13 @@ hold for 45s and explicitly set producer request.timeout.ms=30000 through the
 optional positive `--producerRequestTimeoutMs` workload argument. Existing
 workloads retain their producer defaults. TV1/TV2 controls and variants extend
 chaos-full; chaos-quick is unchanged.
+
+### Explicit at-least-once ID oracle
+
+`kafka.id-set` accepts `mode: at-least-once` only for an `AT_LEAST_ONCE` sink.
+The default is `exactly-once`, including historical at-least-once negative controls.
+A complete, fenced snapshot passes the opt-in mode when missing, unexpected and
+malformed counts are all zero. Duplicate records remain counted and sampled but do
+not fail that guarantee. An incomplete snapshot or verification error remains a
+failure. CLI terminal evidence records the mode; paired PR comparisons retain
+duplicate totals while excluding permitted duplicates from data-failure findings.

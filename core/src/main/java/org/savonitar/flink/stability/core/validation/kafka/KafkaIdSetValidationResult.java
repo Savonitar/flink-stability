@@ -13,13 +13,38 @@ public record KafkaIdSetValidationResult(
         Status status,
         String reason,
         String message,
-        Evidence evidence) {
+        Evidence evidence,
+        Mode mode) {
 
     public KafkaIdSetValidationResult {
         if (status == null || reason == null || reason.isBlank()
-                || message == null || evidence == null) {
+                || message == null || evidence == null || mode == null) {
             throw new IllegalArgumentException("Validation result fields must be present");
         }
+    }
+
+    public KafkaIdSetValidationResult(Status status, String reason, String message, Evidence evidence) {
+        this(status, reason, message, evidence, Mode.EXACTLY_ONCE);
+    }
+
+    public enum Mode { EXACTLY_ONCE, AT_LEAST_ONCE }
+
+    /** Interpret only a completed ID-set comparison; verification failures remain failures. */
+    public KafkaIdSetValidationResult forMode(Mode requested) {
+        Objects.requireNonNull(requested, "mode");
+        if (requested == mode) return this;
+        if (!evidence.snapshotComplete() || !reason.startsWith("validator.kafka.id-set."))
+            return new KafkaIdSetValidationResult(status, reason, message, evidence, requested);
+        var totals = evidence.defectTotals().orElseThrow();
+        String defect = totals.malformedCount() > 0 ? "malformed" : totals.unexpectedCount() > 0 ? "unexpected"
+                : requested == Mode.EXACTLY_ONCE && totals.duplicateCount() > 0 ? "duplicate"
+                : totals.missingCount() > 0 ? "missing" : null;
+        if (defect != null) return new KafkaIdSetValidationResult(Status.FAIL,
+                "validator.kafka.id-set." + defect + "-ids", "Kafka output contains " + defect + " IDs", evidence, requested);
+        return new KafkaIdSetValidationResult(Status.PASS,
+                requested == Mode.AT_LEAST_ONCE ? "validator.kafka.id-set.at-least-once-match" : "validator.kafka.id-set.match",
+                requested == Mode.AT_LEAST_ONCE ? "All expected IDs are present; duplicates are permitted and counted"
+                        : "Kafka output exactly matches the input manifest", evidence, requested);
     }
 
     public enum Status {

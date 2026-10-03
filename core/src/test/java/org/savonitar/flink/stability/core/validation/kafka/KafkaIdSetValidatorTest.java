@@ -15,6 +15,35 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class KafkaIdSetValidatorTest {
+    @Test void atLeastOnceAllowsDuplicatesAndRetainsTheirExactCountsAndSamples() {
+        var strict = validator(List.of("0", "0", "1", "1", "1"))
+                .validate("kafka:9092", "output", ids(2), Duration.ofMinutes(2));
+        assertEquals(KafkaIdSetValidationResult.Status.FAIL, strict.status());
+        var result = strict.forMode(KafkaIdSetValidationResult.Mode.AT_LEAST_ONCE);
+        assertEquals(KafkaIdSetValidationResult.Status.PASS, result.status());
+        assertEquals(KafkaIdSetValidationResult.Mode.AT_LEAST_ONCE, result.mode());
+        assertEquals("validator.kafka.id-set.at-least-once-match", result.reason());
+        assertEquals(strict.evidence(), result.evidence());
+        assertEquals(3, totals(result).duplicateCount());
+        assertEquals(strict.status(), result.forMode(KafkaIdSetValidationResult.Mode.EXACTLY_ONCE).status());
+    }
+
+    @Test void atLeastOnceStillFailsMissingUnexpectedMalformedAndIncompleteSnapshots() {
+        for (var entry : Map.of("missing", List.of("0", "0"), "unexpected", List.of("0", "1", "2", "0"),
+                "malformed", List.of("0", "1", "bad", "0")).entrySet()) {
+            var result = validator(entry.getValue()).validate("kafka:9092", "output", ids(2), Duration.ofMinutes(2),
+                    KafkaIdSetValidationResult.Mode.AT_LEAST_ONCE);
+            assertEquals(KafkaIdSetValidationResult.Status.FAIL, result.status());
+            assertEquals("validator.kafka.id-set." + entry.getKey() + "-ids", result.reason());
+        }
+        var failure = new KafkaIdSetValidationResult(KafkaIdSetValidationResult.Status.FAIL,
+                "verification.kafka.incomplete-after-timeout", "Incomplete", KafkaIdSetValidationResult.Evidence.unavailable(2))
+                .forMode(KafkaIdSetValidationResult.Mode.AT_LEAST_ONCE);
+        assertEquals(KafkaIdSetValidationResult.Status.FAIL, failure.status());
+        assertEquals("verification.kafka.incomplete-after-timeout", failure.reason());
+        assertFalse(failure.evidence().snapshotComplete());
+    }
+
     @Test
     void completeExactSnapshotPasses() {
         KafkaIdSetValidationResult result = validator(List.of("0", "1", "2"))

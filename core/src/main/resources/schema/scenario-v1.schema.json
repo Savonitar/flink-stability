@@ -2606,6 +2606,7 @@
         "topic": {
           "$ref": "#/$defs/kafkaNameOrTemplate"
         },
+        "mode": {"enum": ["exactly-once", "at-least-once"], "default": "exactly-once"},
         "expected": {
           "const": "input-manifest"
         },

@@ -672,3 +672,13 @@ expected validation code.
 | SV-287 | Delay targets all brokers | Resolve and verify three distinct owned peers in one namespace, require a common device, install three scoped filters into one queue, hold once and heal once. |
 | SV-288 | Packet counters/heal are unconfirmed or the job finishes during the hold | Preserve raw receipts and any data FAIL; do not advance later steps or allow a passing data oracle to confirm the fault. |
 | SV-289 | Canonical packet image pin or producer request timeout | Preserve index/config/platform distinctions, reject a different deployed image identity, serialize exact timing/counters, and leave producer defaults unchanged unless the positive argument is supplied. |
+
+### Explicit at-least-once oracle
+
+| ID | Input | Required behavior |
+| --- | --- | --- |
+| SV-290 | Complete output repeats expected IDs with explicit at-least-once mode | PASS, preserving exact duplicate totals and samples; strict default remains FAIL. |
+| SV-291 | At-least-once output has missing, unexpected or malformed IDs, or an incomplete snapshot | FAIL; duplicates cannot hide another defect or turn a verification failure into PASS. |
+| SV-292 | At-least-once oracle declared for an exactly-once sink | Reject; historical AT_LEAST_ONCE sinks without the new mode still use the exact-ID oracle. |
+| SV-293 | PR comparison contains allowed duplicates or mismatched oracle modes | Retain duplicate counts; exclude allowed duplicates from guarantee-failure findings; mismatched modes remain unknown. |
+| SV-305 | Explicit ID-set mode compiled before execution | Keep the typed plan independent of runtime validator packages; adapt the mode at execution while preserving existing package boundaries. |

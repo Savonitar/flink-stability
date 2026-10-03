@@ -432,6 +432,7 @@ public final class ExecutableScenarioPlanCompiler {
             return;
         }
         ObjectNode validator = (ObjectNode) validators.get(0);
+        IdSetModeCompiler.validate(source, document, issues);
         if (!KAFKA_ID_SET.equals(validator.path("type").textValue())) {
             issues.add(issue(
                     source,
@@ -577,7 +578,7 @@ public final class ExecutableScenarioPlanCompiler {
                 new ExecutableScenarioPlan.KafkaIdSetValidation(
                         topicReference(validationNode),
                         ExecutableScenarioPlan.ExpectedRecords.INPUT_MANIFEST,
-                        terminalTimeout);
+                        terminalTimeout, IdSetModeCompiler.mode(validationNode));
         Duration completionTimeout = document.has("completion_timeout")
                 ? parseDuration(document.path("completion_timeout").textValue())
                 : ExecutableScenarioPlan.DEFAULT_JOB_COMPLETION_TIMEOUT;

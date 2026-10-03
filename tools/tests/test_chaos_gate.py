@@ -70,6 +70,16 @@ class ChaosProfileTest(unittest.TestCase):
         self.assertEqual('no',data_difference([dict(baseline,missing=1),candidate],1)['status'])
         self.assertEqual('unknown',data_difference([],1)['status'])
 
+    def test_at_least_once_duplicate_counts_are_not_a_data_guarantee_failure(self):
+        baseline=pr_gate.summarize('alo','baseline',1,fixtures.run_result(),fixtures.CANDIDATE_HASH,0)
+        candidate=dict(baseline,side='candidate',duplicates=5)
+        rows=[dict(row,oracleMode='at-least-once') for row in (baseline,candidate)]
+        self.assertEqual('no',data_difference(rows,1)['status'])
+        rows[1]['missing']=1
+        self.assertEqual('yes',data_difference(rows,1)['status'])
+        rows[1]['oracleMode']='exactly-once'
+        self.assertEqual('unknown',data_difference(rows,1)['status'])
+
     def test_committer_warnings_and_missing_coverage_are_separate(self):
         self.assertIsNone(committer_counts(None)['WARN'])
         value=committer_counts({'coverage':'partial','events':[

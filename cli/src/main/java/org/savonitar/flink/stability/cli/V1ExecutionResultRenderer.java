@@ -388,6 +388,7 @@ final class V1ExecutionResultRenderer {
             terminal.put("status", validation.status().name().toLowerCase(Locale.ROOT));
             terminal.put("completed", true);
             terminal.put("reason", validation.reason());
+            terminal.put("mode", validation.mode().name().toLowerCase(Locale.ROOT).replace('_', '-'));
             terminal.put("expected", validation.evidence().expectedCount());
             terminal.put("observed", validation.evidence().observedCount());
             terminal.put("snapshotComplete", validation.evidence().snapshotComplete());

@@ -54,6 +54,25 @@ class ExecutableScenarioPlanCompilerTest {
     @TempDir
     Path artifactRoot;
 
+    @Test void atLeastOnceOracleIsExplicitAndRequiresAnAtLeastOnceSink() {
+        java.util.function.Consumer<ObjectNode> aloSink = document -> {
+            var sink = (ObjectNode)document.at("/workload/jobs/0/sink");
+            sink.put("delivery_guarantee", "AT_LEAST_ONCE");
+            sink.remove(List.of("transactional_id_prefix", "transaction_id_naming_strategy"));
+        };
+        var strict = compiler.compile(resolved(aloSink));
+        assertEquals(ExecutableScenarioPlan.IdSetMode.EXACTLY_ONCE,
+                strict.terminalValidation().mode());
+        var alo = compiler.compile(resolved(document -> {
+            aloSink.accept(document);
+            ((ObjectNode)document.at("/terminal_validations/0")).put("mode", "at-least-once");
+        }));
+        assertEquals(ExecutableScenarioPlan.IdSetMode.AT_LEAST_ONCE,
+                alo.terminalValidation().mode());
+        assertThrows(SpecificationException.class, () -> compiler.compile(resolved(document ->
+                ((ObjectNode)document.at("/terminal_validations/0")).put("mode", "at-least-once"))));
+    }
+
     @Test void compilesPacketTargetsAndRejectsInvalidNamespaceOrParameters() {
         for (String mode : List.of("loss", "delay", "blackhole")) {
             var plan = resolved(document -> {

@@ -275,7 +275,8 @@ public final class V1ScenarioExecutor {
                     endpoints.hostBootstrapServers(),
                     plan.terminalValidation().output().topic(),
                     input.inputManifest().presentIds(),
-                    plan.terminalValidation().timeout());
+                    plan.terminalValidation().timeout()).forMode(
+                            KafkaIdSetValidationResult.Mode.valueOf(plan.terminalValidation().mode().name()));
             // Only a transactional (exactly-once) sink has a prefix to list.
             String bootstrapServers = endpoints.hostBootstrapServers();
             sinkTransactions = plan.job().sink().transactionalIdPrefix()

@@ -70,7 +70,10 @@ def data_difference(rows, expected_runs=None):
         complete &= all(row['subjectOk'] and row.get('faultStatus') in ('confirmed', 'not-required')
                         and row['verdict'] in ('pass', 'fail') and row['exitCode'] == (0 if row['verdict'] == 'pass' else 1)
                         for values in sides.values() for row in values)
-        for metric in ('missing', 'duplicates'):
+        modes = {row.get('oracleMode', 'exactly-once') for values in sides.values() for row in values}
+        complete &= len(modes) == 1 and modes <= {'exactly-once', 'at-least-once'}
+        metrics = ('missing',) if modes == {'at-least-once'} else ('missing', 'duplicates')
+        for metric in metrics:
             known = complete and all(type(row.get(metric)) is int and row[metric] >= 0 for values in sides.values() for row in values)
             if not known:
                 unresolved.append(name + '/' + metric)

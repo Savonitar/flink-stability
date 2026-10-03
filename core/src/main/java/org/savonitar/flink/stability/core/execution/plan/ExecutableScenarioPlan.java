@@ -994,11 +994,18 @@ public final class ExecutableScenarioPlan {
         ERROR_AFTER_APPEND
     }
 
+    public enum IdSetMode { EXACTLY_ONCE, AT_LEAST_ONCE }
+
     public record KafkaIdSetValidation(
             TopicReference output,
             ExpectedRecords expected,
-            Duration timeout) {
+            Duration timeout,
+            IdSetMode mode) {
+        public KafkaIdSetValidation(TopicReference output, ExpectedRecords expected, Duration timeout) {
+            this(output, expected, timeout, IdSetMode.EXACTLY_ONCE);
+        }
         public KafkaIdSetValidation {
+            Objects.requireNonNull(mode, "mode");
             Objects.requireNonNull(output, "output");
             Objects.requireNonNull(expected, "expected");
             timeout = requirePositive(timeout, "timeout");
