@@ -49,7 +49,7 @@ every catalog. The HA guide retains observed bounded-completion failures. The
 distributed recovery run also observed repeated restores after one worker kill.
 Neither a passing exact-ID oracle nor a later green run closes those findings.
 The default calibration matrices do not establish sensitivity of these additional
-catalogs, and none exercises a multi-broker topology or a state-sensitive oracle.
+catalogs. These older calibration matrices do not cover the new broker/protocol profiles below.
 
 For a Flink runtime PR, prepare separate image/runtime-JAR pins and compatible
 connector/workload artifacts as described in [runtime build testing](FLINK-RUNTIME-TESTING.md).
@@ -201,3 +201,89 @@ A summary for the pull request names:
 - both connector SHA-256 values and the selected baseline provenance.
 
 Posting on the pull request is public. The maintainer decides whether to post and what.
+
+
+## Chaos profiles against a PR parent
+
+`--profile chaos-quick` selects ten scenarios: TaskManager recovery; commit request
+and response loss; partition-leader kill and pause; coordinator pause; coordinator
+failure during commit in TV2; EndTxn delay and retriable coordinator rejection;
+and Produce response loss. With `--runs 2` this is **40 independent runs** (two
+sides), roughly **60–120 minutes** with warm images and artifacts. This is a
+planning estimate, not measured throughput or a timeout. Pulls, startup and
+recovery can increase it.
+
+`--profile chaos-full` is the 31-scenario superset: existing broker catalogs and
+their separately named TV1/TV2 copies, all protocol catalogs and applicable TV
+pairs, and all four coordinator-commit catalogs. AddPartitionsToTxn is TV1 only:
+the TV2 sink normally does not send it. At two runs it plans 124 independent
+runs, roughly 186–372 minutes. The sole authoritative membership lists are in
+[`tools/chaos_profiles.py`](../tools/chaos_profiles.py); adding a filename does
+not silently expand either profile. Version copies change only scenario identity
+and the explicit transaction feature level; original catalogs remain untouched.
+
+Profiles require both `--baseline-*` arguments: build the PR parent and candidate
+separately and preserve their commit IDs/build provenance. The gate checks both
+sides identically, but cannot infer parentage from a JAR hash. Explicit
+`--scenario` still works, including the previous released default baseline;
+`--profile` and `--scenario` are mutually exclusive.
+
+After placing both builds inside the harness root, one gate command is:
+
+```bash
+python3 tools/pr_gate.py --profile chaos-quick --runs 2 \
+  --baseline-connector-jar jobs/pr/parent/connector.jar \
+  --baseline-runtime-dir jobs/pr/parent/runtime \
+  --connector-jar jobs/pr/head/connector.jar --runtime-dir jobs/pr/head/runtime \
+  --flink-image docker.io/library/flink:2.2.0 --output jobs/pr/chaos-quick
+```
+
+Use `--profile chaos-full` and a fresh output directory for full coverage. Add
+`--dry-run` to print the plan only: no output files, artifact builds, Maven calls,
+Docker access or scenario execution. Planning does not require the JARs to exist;
+execution validates their paths, SHA-256 and closures before creating output.
+The plan always prints before execution and is retained in `manifest.json`.
+The optional full-image spelling changes only the two generated catalog copies.
+All runs collect `--kafka-log-output` into separate run directories.
+
+The first summary table has one row per **scenario and side**: verdict counts,
+summed missing/duplicate counts, KafkaCommitter ERROR and WARN counts, log coverage,
+and fault confirmation. Counts are sums across repetitions, not unique IDs across
+runs. Unavailable counts remain `unknown`; partial log counts are lower bounds on
+the captured prefix, not proof that no other errors occurred. Only the exact
+`org.apache.flink.connector.kafka.sink.internal.KafkaCommitter` logger contributes
+to the two committer columns. Per-run rows and raw stdout/stderr remain available.
+The machine-readable equivalent is `summary.json`.
+
+`Candidate-only losses or duplicates: YES` means at least one candidate run has a
+positive count for a metric for which **every corresponding baseline run has a
+known zero**, with matching side coverage, valid subject origins and confirmed
+fault effects. Missing or inconclusive evidence yields `UNKNOWN`, never an
+invented zero. `NO` means no such candidate-only metric was observed, not that
+both builds passed; shared failures remain failures. The same missing-ID count
+on both sides does not establish the same missing IDs or assign blame.
+
+The gate verifies every expected TaskManager/network/broker receipt in these
+profiles, including both fault and heal for broker_fault. A reported PASS with
+missing/false effect receipts is not a passing gate. Component errors are
+observations and do not independently change the exact-ID verdict. Every baseline
+failure remains a finding; do not silently remove its scenario from the profile.
+
+## Calibrate chaos coverage before trusting it
+
+The [single-class retriable-discard recipe](../calibration/chaos-profile-mutant/README.md)
+builds release 5.0.0-2.2 with only `KafkaCommitter.class` changed. Its wrong decision
+is to discard a pending commit after a retriable exception. The Kafka client usually
+absorbs coordinator error replies internally; the shared, explicit
+`--producer-max-block-ms 5000` calibration setting lets a prolonged uncertain commit
+reach the committer as `TimeoutException`. This flag adds `--producerMaxBlockMs` to
+both **copied** bundled workloads and records it in the plan. It is absent by default;
+use it for calibration, not implicitly for a PR. Broker request timeout, transaction
+timeout, fault rules, checkpointing, load and expectations remain unchanged.
+
+Require release PASS across `chaos-quick`, a verified mutant FAIL with positive
+missing IDs in a protocol/coordinator scenario, and a passing no-fault paired control.
+A failed command alone is not calibration. The recipe's `check.py` rejects missing
+cells, unconfirmed effects, unknown counts, wrong artifact/closure hashes and failed
+healthy controls. The prepared live matrix has **not been run**; unit checks establish
+the mutation and artifact identity, not profile sensitivity or release health.

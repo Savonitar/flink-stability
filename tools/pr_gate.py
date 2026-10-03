@@ -15,7 +15,10 @@ import shutil
 import subprocess
 from pathlib import Path
 
-from subject_catalog import artifact_reference, replace_subject, sha256, subject_snippet
+from chaos_profiles import PROFILES
+from gate_evidence import fault_requirements, fault_status, coverage_table, data_difference
+
+from subject_catalog import artifact_reference, replace_subject, sha256, subject_snippet, with_producer_max_block
 
 DEFAULT_SCENARIOS = ["bounded-eos", "commit-request-lost", "commit-response-lost"]
 RELEASED_SHA256 = "6bb63f7b09930d99745325393b481c092b0c26d626e738b7a1fd6fd8d7d4f1da"
@@ -32,15 +35,36 @@ def main():
     parser.add_argument("--baseline-runtime-dir", type=Path,
                         help="Explicit baseline runtime dependency directory")
     parser.add_argument("--output", type=Path, required=True, help="New directory for catalogs and results")
+    parser.add_argument("--profile", choices=tuple(PROFILES), help="Reviewed chaos coverage; requires an explicit parent baseline")
+    parser.add_argument("--dry-run", action="store_true", help="Print the plan only; do not create files or invoke Maven/Docker")
+    parser.add_argument("--flink-image", choices=("docker.io/library/flink:2.2.0",), help="Use the fully qualified equivalent image in copied catalogs")
+    parser.add_argument("--producer-max-block-ms", type=int, help="Calibration only: identical positive max.block.ms for both copied workloads")
     parser.add_argument("--scenario", action="append", help="Canonical scenario name; repeatable")
     parser.add_argument("--runs", type=int, default=1, help="Runs per scenario and side")
     args = parser.parse_args()
+    if args.producer_max_block_ms is not None and not 0 < args.producer_max_block_ms <= 2147483647:
+        parser.error("--producer-max-block-ms must be a positive 32-bit integer")
     if args.runs < 1:
         parser.error("--runs must be a positive integer")
     if (args.baseline_connector_jar is None) != (args.baseline_runtime_dir is None):
         parser.error("--baseline-connector-jar and --baseline-runtime-dir must be supplied together")
+    if args.profile and args.baseline_connector_jar is None:
+        parser.error("Chaos profiles require an explicit PR parent via both --baseline-* options")
+    if args.profile and args.scenario:
+        parser.error("Choose --profile or repeated --scenario, not both")
     root = Path.cwd().resolve()
-    names = list(dict.fromkeys(args.scenario or DEFAULT_SCENARIOS))
+    names = list(dict.fromkeys(PROFILES[args.profile] if args.profile else args.scenario or DEFAULT_SCENARIOS))
+    scenarios = {name: canonical(root, name) for name in names}
+    plan = {"profile": args.profile, "scenarios": names, "runsPerSide": args.runs,
+            "totalRuns": len(names) * args.runs * 2,
+            "estimatedMinutes": [len(names) * args.runs * 3, len(names) * args.runs * 6],
+            "baseline": str(args.baseline_connector_jar) if args.baseline_connector_jar else "released 5.0.0-2.2",
+            "candidate": str(args.connector_jar), "flinkImageOverride": args.flink_image,
+            "producerMaxBlockMs": args.producer_max_block_ms}
+    print("Plan: " + json.dumps(plan, sort_keys=True), flush=True)
+    print("Estimate assumes warm images/artifacts: 1.5–3 minutes per independent run; not a deadline or measured guarantee.", flush=True)
+    if args.dry_run:
+        return 0
     candidate, candidate_snippet = local_subject(root, args.connector_jar, args.runtime_dir)
     baseline = {"connector": "maven:org.apache.flink:flink-connector-kafka:5.0.0-2.2",
                 "connectorSha256": RELEASED_SHA256, "dependencyMode": "auto",
@@ -50,13 +74,30 @@ def main():
         baseline, baseline_snippet = local_subject(
             root, args.baseline_connector_jar, args.baseline_runtime_dir)
     # Validate every scenario before creating any output.
-    scenarios = {name: canonical(root, name) for name in names}
+    requirements = {name: fault_requirements(path.read_text()) for name, path in scenarios.items()}
     replacements = {"candidate": {name: replace_subject(path.read_text(), candidate_snippet)
                                    for name, path in scenarios.items()}}
     if baseline_snippet is not None:
         replacements["baseline"] = {name: replace_subject(path.read_text(), baseline_snippet)
                                     for name, path in scenarios.items()}
+    if args.producer_max_block_ms is not None:
+        if "baseline" not in replacements:
+            replacements["baseline"] = {name: path.read_text() for name, path in scenarios.items()}
+        for documents in replacements.values():
+            for name, document in documents.items():
+                documents[name] = with_producer_max_block(document, args.producer_max_block_ms)
+    if args.flink_image:
+        if "baseline" not in replacements:
+            replacements["baseline"] = {name: path.read_text() for name, path in scenarios.items()}
+        for documents in replacements.values():
+            for name, document in documents.items():
+                anchor = "    image: flink:2.2.0"
+                if document.count(anchor) != 1:
+                    raise SystemExit("Expected one canonical Flink 2.2 image in " + name)
+                documents[name] = document.replace(anchor, "    image: " + args.flink_image)
     output = args.output.resolve()
+    if not output.is_relative_to(root):
+        raise SystemExit("Output directory must stay inside the artifact root")
     output.mkdir(parents=True, exist_ok=False)
     catalogs = {"baseline": root / "scenarios"}
     for side, documents in replacements.items():
@@ -66,7 +107,7 @@ def main():
         for name, path in scenarios.items():
             (catalog / path.name).write_text(documents[name])
             shutil.copyfile(path.with_name(name + ".expected.yaml"), catalog / (name + ".expected.yaml"))
-    manifest = {"baseline": baseline, "candidate": candidate, "scenarios": names, "runs": args.runs}
+    manifest = {"baseline": baseline, "candidate": candidate, "scenarios": names, "runs": args.runs, "plan": plan, "faultRequirements": requirements}
     (output / "manifest.json").write_text(json.dumps(manifest, indent=2) + "\n")
     rows = []
     for name in names:
@@ -75,7 +116,9 @@ def main():
                 result, exit_code = run_scenario(
                     root, catalogs[side], name, output / side / name / f"run-{run}")
                 rows.append(summarize(name, side, run, result,
-                                      manifest[side]["connectorSha256"], exit_code))
+                                      manifest[side]["connectorSha256"], exit_code, requirements[name]))
+    (output / "summary.json").write_text(json.dumps({"manifest": manifest, "rows": rows,
+            "candidateOnlyDataFailure": data_difference(rows, args.runs)}, indent=2) + "\n")
     summary = render(manifest, rows)
     (output / "summary.md").write_text(summary)
     print(summary)
@@ -111,7 +154,7 @@ def canonical(root, name):
 def run_scenario(root, catalog_root, name, directory):
     directory.mkdir(parents=True)
     arguments = shlex.join(["run", "--catalog-root", str(catalog_root), "--scenario", name,
-                            "--artifact-root", ".", "--offline"])
+                            "--artifact-root", ".", "--offline", "--kafka-log-output", str(directory / "kafka-logs")])
     with (directory / "stdout.json").open("w") as stdout, (directory / "stderr.log").open("w") as stderr:
         try:
             code = subprocess.run(
@@ -130,7 +173,7 @@ def run_scenario(root, catalog_root, name, directory):
     return result, code
 
 
-def summarize(name, side, run, result, expected_subject, exit_code):
+def summarize(name, side, run, result, expected_subject, exit_code, required_effects=None):
     evidence = result.get("evidence") or {}
     origins = evidence.get("subjectClasses") or {}
     observed = [source for process in origins.get("processes", [])
@@ -145,13 +188,15 @@ def summarize(name, side, run, result, expected_subject, exit_code):
             "reason": result.get("reason"), **counts, "subjects": sorted(hashes),
             "subjectStatus": origins.get("status", "unavailable"),
             "subjectOk": subject_ok, "exitCode": exit_code,
-            "componentErrors": evidence.get("componentErrors")}
+            "componentErrors": evidence.get("componentErrors"),
+            "faultStatus": fault_status(evidence, required_effects), "faultRequired": required_effects is not None and bool(required_effects)}
 
 
 def gate_exit_code(rows):
     """A report is successful only when every run passed with confirmed provenance."""
     return 0 if rows and all(row["verdict"] == "pass" and row["subjectOk"]
-                             and row["exitCode"] == 0 for row in rows) else 1
+                             and row["exitCode"] == 0
+                             and (not row.get("faultRequired") or row.get("faultStatus") == "confirmed") for row in rows) else 1
 
 
 def render(manifest, rows):
@@ -163,6 +208,11 @@ def render(manifest, rows):
                    else f"{len(dependencies)} explicit runtime dependency JARs")
         lines += [f"{side.capitalize()}: `{subject['connector']}` "
                   f"(SHA-256 `{subject['connectorSha256']}`), {closure}.", ""]
+    difference = data_difference(rows, manifest.get("runs"))
+    lines += coverage_table(rows)
+    lines += ["", "Candidate-only losses or duplicates: " + difference["status"].upper()
+              + (" (" + ", ".join(difference["findings"]) + ")" if difference["findings"] else "") + ".",
+              "Unresolved comparisons: " + (", ".join(difference["unresolved"]) or "none") + ".", ""]
     lines += [
              "Gate result: " + ("PASS" if gate_exit_code(rows) == 0 else "NOT PASSED") + ".", "",
              "| Scenario | Side | Run | Verdict | Reason | Missing | Duplicates | Subject JAR | Exit |",

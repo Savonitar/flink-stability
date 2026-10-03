@@ -41,3 +41,16 @@ def replace_subject(scenario_text, snippet):
     before, after = check_released_subject(scenario_text)
     subject = "  connectors:\n    kafka:\n" + "".join("      " + line + "\n" for line in snippet.splitlines())
     return before + "\nsubject:\n" + subject + "\nworkload:\n" + after
+
+
+def with_producer_max_block(document, milliseconds):
+    """Opt-in calibration setting, restricted to the bundled single-job catalog shape."""
+    import re
+    pattern = r'(?m)^(      program_args: \[)([^\]\n]*)(\]\s*)$'
+    matches = list(re.finditer(pattern, document))
+    if len(matches) != 1 or "--producerMaxBlockMs" in document:
+        raise SystemExit("Expected one unmodified inline program_args list for calibration")
+    match = matches[0]
+    arguments = match.group(2).rstrip()
+    addition = (", " if arguments else "") + '--producerMaxBlockMs, "' + str(milliseconds) + '"'
+    return document[:match.start(2)] + arguments + addition + document[match.end(2):]

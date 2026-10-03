@@ -595,3 +595,24 @@ expected validation code.
 | Case | Input | Required result |
 | --- | --- | --- |
 | SV-253 | Real KafkaCommitter retry WARN/failure ERROR/interruption INFO headers, stack traces and a similarly named foreign logger | Retain exact-logger categories, original message/level/logger and explicit retry transactional ID; no guessed exception type or duplicate stack-trace event. |
+
+
+### PR chaos profile contracts
+
+| Case | Input | Required result |
+| --- | --- | --- |
+| SV-254 | chaos-quick/full without both explicit baseline artifact flags | Reject before execution; legacy explicit-scenario defaults stay available. |
+| SV-255 | Profile dry-run, even with artifact paths not yet built | Print side/run counts and coarse timing only; create nothing and invoke no runner. |
+| SV-256 | Positive candidate missing/duplicate metric and all matching baseline runs verified zero | Report candidate-only observation; unknown counts/provenance/effects/coverage make the comparison unresolved. |
+| SV-257 | PASS result without an expected fault receipt, or an unconfirmed receipt | Gate does not pass; preserve raw verdict and exact-ID counts. |
+| SV-258 | KafkaCommitter WARN/ERROR, partial capture and similarly named logger | Count exact logger and each severity separately per scenario/side; retain coverage and unknown values. |
+| SV-259 | Full-image spelling and TV-paired profile copies | Original catalogs unchanged; subject swaps symmetric, new version copies explicit and offline valid. |
+
+### PR profile calibration
+
+| Case | Input | Required result |
+| --- | --- | --- |
+| SV-260 | Optional calibration max.block.ms absent, positive, zero, duplicate or malformed | Default leaves producer property absent; positive reaches sink; invalid/duplicate input fails. |
+| SV-261 | Gate calibration override with explicit/released baseline | Same option in both copied jobs and plan; originals unchanged; unknown catalog shape rejected. |
+| SV-262 | Single-class retriable-discard calibration overlay | Pinned release/source/runtime and artifact digests; only KafkaCommitter.class differs; normal/fenced/unknown/unrelated retry decisions unchanged. |
+| SV-263 | Offline calibration result checking | Require all release cells PASS, complete paired verified fault receipts and candidate FAIL with missing IDs in a protocol/coordinator cell; UNKNOWN, missing cells and harmless-control failures cannot qualify. |

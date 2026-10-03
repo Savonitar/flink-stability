@@ -1,0 +1,9 @@
+format: v1
+kind: expected-result
+
+meta:
+  name: broker-eos-kill-v1.expected
+  scenario: broker-eos-kill-v1
+
+default:
+  outcome: pass

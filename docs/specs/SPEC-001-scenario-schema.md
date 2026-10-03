@@ -918,7 +918,11 @@ Connector pull-request gating is the same mechanism with one axis:
   `--bootstrapServers` (both its separate-value and `=value` spellings).
   Every other non-empty token is preserved byte-for-byte and in declaration
   order; the runner does not interpret workload-specific arguments such as the
-  bundled generator's `--processingDelayMs`.
+  bundled generator's `--processingDelayMs`. The bundled generator also accepts
+  an optional positive 32-bit `--producerMaxBlockMs`, passed to Kafka's
+  `max.block.ms` unchanged. Omission keeps Kafka's default. This is an explicit
+  calibration input, independent of processing delay and transaction timeout;
+  it does not alter the typed workload protocol or canonical catalogs.
 - **R5.3** Job options are parameterizable per R2, because several of them *are*
   the dimension under test — delivery guarantee is how `selftest-duplicates` is
   built; state backend is the §3 example.
