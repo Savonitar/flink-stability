@@ -688,4 +688,11 @@ expected validation code.
 | --- | --- | --- |
 | SV-294 | Nontransactional Produce with or without idempotent producer identity | Match only an exact topic rule, preserve absent fields, and reject transactional-prefix or foreign-topic selectors. |
 | SV-295 | Nontransactional lost response or error-after-append | Forward the real request; record the correlated response and successful append offsets before substituting an error; never invent a transaction identity. |
+
+### Nontransactional rolling restart
+
+| ID | Input | Required behavior |
+| --- | --- | --- |
+| SV-296 | AT_LEAST_ONCE fixed-order rolling with a partition-leader reference | Restart all three brokers sequentially and require full declared-partition ISR, without requesting nonexistent transaction metadata. |
+| SV-297 | Partial ISR after nontransactional restart, or coordinator order without a coordinator | Stop the sequence after safety healing, or reject before provisioning; keep EOS transaction-state requirements unchanged. |
 | SV-305 | Explicit ID-set mode compiled before execution | Keep the typed plan independent of runtime validator packages; adapt the mode at execution while preserving existing package boundaries. |

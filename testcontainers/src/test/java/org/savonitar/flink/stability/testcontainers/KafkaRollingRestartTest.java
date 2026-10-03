@@ -13,6 +13,28 @@ class KafkaRollingRestartTest {
         return KafkaBrokerFault.execute(new KafkaBrokerControl.Request(TARGET, KafkaBrokerControl.Action.ROLLING_RESTART,
                 Duration.ZERO, Duration.ofMillis(50), null, order, elect), List.of(new KafkaLogCapture.Partition("output", 0)), driver);
     }
+    @Test void fixedNontransactionalRollingRequiresFullIsrWithoutInventingTransactionMetadata() {
+        var target = new KafkaBrokerControl.Target(KafkaBrokerControl.TargetKind.PARTITION_LEADER, null, "output", 0, null);
+        for (boolean loseIsr : List.of(false, true)) {
+            var driver = new Fake() {
+                public List<KafkaLogCapture.Partition> transactionPartitions(MonotonicDeadline d) { throw new AssertionError("No transactional workload"); }
+                public KafkaBrokerControl.Selection select(KafkaBrokerControl.Target requested, MonotonicDeadline d) {
+                    return new KafkaBrokerControl.Selection(requested, "broker-1", "output", 0, 0, null, null, null, 1);
+                }
+            };
+            driver.neverFull = loseIsr;
+            var result = KafkaBrokerFault.execute(new KafkaBrokerControl.Request(target, KafkaBrokerControl.Action.ROLLING_RESTART,
+                    Duration.ZERO, Duration.ofMillis(50), null, KafkaBrokerControl.RollingOrder.FIXED, false),
+                    List.of(new KafkaLogCapture.Partition("output", 0)), driver);
+            assertEquals(loseIsr ? 1 : 3, driver.stops.size());
+            assertEquals(!loseIsr, result.stream().allMatch(KafkaBrokerControl.Evidence::confirmed));
+            assertNull(result.getFirst().rolling().reference().transactionalId());
+            assertTrue(driver.running.values().stream().allMatch(Boolean::booleanValue));
+        }
+        assertThrows(IllegalArgumentException.class, () -> new KafkaBrokerControl.Request(target, KafkaBrokerControl.Action.ROLLING_RESTART,
+                Duration.ZERO, Duration.ofSeconds(30), null, KafkaBrokerControl.RollingOrder.COORDINATOR_FIRST, false));
+    }
+
     @Test void allOrdersStopOnlyOneBrokerAndWaitForEveryTransactionPartitionToRejoin() {
         for (var order : KafkaBrokerControl.RollingOrder.values()) {
             var driver = new Fake(); var result = execute(driver, order, false);

@@ -38,9 +38,9 @@ public interface KafkaBrokerControl {
                     || commitTransactionVersion < 1 || commitTransactionVersion > 2))
                 throw new IllegalArgumentException("Commit witness requires a transaction coordinator and explicit TV1/TV2");
             if (action == Action.ROLLING_RESTART) {
-                if (order == null || target.kind() != TargetKind.TRANSACTION_COORDINATOR || commitTransactionVersion != null
+                if (order == null || (target.kind() != TargetKind.TRANSACTION_COORDINATOR && order != RollingOrder.FIXED) || commitTransactionVersion != null
                         || !duration.isZero() || timeout.isZero() || timeout.isNegative() || timeout.compareTo(Duration.ofMinutes(5)) > 0)
-                    throw new IllegalArgumentException("Rolling restart requires a sink coordinator, order, no hold, and timeout in (0,5m]");
+                    throw new IllegalArgumentException("Rolling restart requires fixed order or a sink coordinator, no hold, and timeout in (0,5m]");
             } else {
             if (order != null || preferredElection) throw new IllegalArgumentException("Rolling options require rolling-restart");
             if (action != Action.KILL && action != Action.PAUSE) throw new IllegalArgumentException("Expected kill or pause");
@@ -92,8 +92,10 @@ public interface KafkaBrokerControl {
             return ordinal >= 1 && ordinal <= 3 && order.size() == 3
                     && new java.util.HashSet<>(order).equals(java.util.Set.of("broker-1", "broker-2", "broker-3"))
                     && order.get(ordinal - 1).equals(broker) && mode != null && reference != null
-                    && reference.transactionalId() != null && recoveredAtMillis >= startedAtMillis
-                    && fullyReplicated.stream().anyMatch(p -> p.topic().equals("__transaction_state"))
+                    && recoveredAtMillis >= startedAtMillis
+                    && (reference.requested().kind() == TargetKind.TRANSACTION_COORDINATOR
+                        ? reference.transactionalId() != null && fullyReplicated.stream().anyMatch(p -> p.topic().equals("__transaction_state"))
+                        : mode == RollingOrder.FIXED)
                     && fullIsr(fullyReplicated) && (!preferredElectionRequested || preferredElectionConfirmed);
         }
     }

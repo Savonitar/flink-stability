@@ -1551,6 +1551,23 @@ class ExecutableScenarioPlanCompilerTest {
         }
     }
 
+    @Test void atLeastOnceRollingUsesFixedOrderAndARealPartitionLeader() {
+        for (String guarantee : List.of("AT_LEAST_ONCE", "EXACTLY_ONCE")) {
+            Runnable compile = () -> compiler.compile(resolved(document -> {
+                ((ObjectNode)document.at("/setup/kafka/clusters/main")).put("brokers",3);
+                document.at("/setup/kafka/clusters/main/topics").forEach(topic -> ((ObjectNode)topic).put("replication_factor",3));
+                var sink = (ObjectNode)document.at("/workload/jobs/0/sink");
+                sink.put("delivery_guarantee",guarantee);
+                if (guarantee.equals("AT_LEAST_ONCE")) sink.remove(List.of("transactional_id_prefix","transaction_id_naming_strategy"));
+                var fault = replaceSteps(document).addObject().putObject("broker_fault").put("mode","rolling-restart")
+                        .put("order","fixed").put("timeout","2m");
+                fault.putObject("target").put("kind","selector").put("role","broker").put("cluster","main")
+                        .put("type","partition-leader").put("topic","output").put("partition",0);
+            }));
+            if (guarantee.equals("AT_LEAST_ONCE")) compile.run(); else assertThrows(SpecificationException.class, compile::run);
+        }
+    }
+
     @Test void rollingBrokerRestartRequiresCoordinatorOrderAndRejectsHoldOrCommitOptions() {
         for (String invalid : List.of("none", "duration", "require_commit", "named", "timeout", "order")) {
             Runnable compile = () -> {

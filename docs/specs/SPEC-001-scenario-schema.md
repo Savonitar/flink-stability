@@ -3499,3 +3499,13 @@ malformed counts are all zero. Duplicate records remain counted and sampled but 
 not fail that guarantee. An incomplete snapshot or verification error remains a
 failure. CLI terminal evidence records the mode; paired PR comparisons retain
 duplicate totals while excluding permitted duplicates from data-failure findings.
+
+### Rolling restart for at-least-once jobs
+
+An `AT_LEAST_ONCE` job can request `broker_fault: { mode: rolling-restart,
+order: fixed, ... }` with a named broker or partition-leader reference. The runner
+restarts all three brokers in numeric order, one at a time, and waits for complete
+ISR on every declared partition between stops. No transaction-state topic or open
+transaction is invented for this nontransactional workload. Exactly-once rolling
+scenarios continue to require their coordinator reference and full transaction-state
+partition inventory. Coordinator-first/last orders require a coordinator target.

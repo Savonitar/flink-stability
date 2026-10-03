@@ -192,15 +192,18 @@ final class KafkaBrokerFault {
         var result = new ArrayList<KafkaBrokerControl.Evidence>();
         try {
             var observed = new ArrayList<>(partitions);
-            for (var partition : driver.transactionPartitions(deadline)) if (!observed.contains(partition)) observed.add(partition);
-            if (observed.isEmpty() || observed.size() > 256 || observed.stream().noneMatch(p -> p.topic().equals("__transaction_state")))
-                throw new IllegalStateException("Rolling restart requires bounded transaction-state metadata");
+            boolean transactional = request.target().kind() == KafkaBrokerControl.TargetKind.TRANSACTION_COORDINATOR;
+            if (transactional) for (var partition : driver.transactionPartitions(deadline))
+                if (!observed.contains(partition)) observed.add(partition);
+            if (observed.isEmpty() || observed.size() > 256
+                    || transactional && observed.stream().noneMatch(p -> p.topic().equals("__transaction_state")))
+                throw new IllegalStateException("Rolling restart requires bounded partition metadata and transaction state for EOS");
             awaitFullIsr(observed, deadline, driver, false);
             var reference = driver.select(request.target(), deadline);
-            if (reference.transactionalId() == null || !reference.requested().equals(request.target())
+            if (transactional && reference.transactionalId() == null || !reference.requested().equals(request.target())
                     || reference.leader() < 1 || reference.leader() > 3
                     || !reference.broker().equals("broker-" + reference.leader()))
-                throw new IllegalStateException("Open sink coordinator selection is incomplete");
+                throw new IllegalStateException("Rolling reference selection is incomplete");
             var order = new ArrayList<>(List.of("broker-1", "broker-2", "broker-3"));
             if (request.order() != KafkaBrokerControl.RollingOrder.FIXED) {
                 order.remove(reference.broker());

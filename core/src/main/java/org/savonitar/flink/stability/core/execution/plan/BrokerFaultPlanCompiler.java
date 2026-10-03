@@ -58,6 +58,9 @@ final class BrokerFaultPlanCompiler {
                 : "partition-leader".equals(target.path("type").asText()) ? KafkaBrokerControl.TargetKind.PARTITION_LEADER
                 : KafkaBrokerControl.TargetKind.TRANSACTION_COORDINATOR;
         boolean rolling = "rolling-restart".equals(value.path("mode").asText());
+        if (rolling && kind != KafkaBrokerControl.TargetKind.TRANSACTION_COORDINATOR
+                && !"AT_LEAST_ONCE".equals(document.at("/workload/jobs/0/sink/delivery_guarantee").asText()))
+            throw new IllegalArgumentException("Non-coordinator rolling restart requires an AT_LEAST_ONCE sink");
         Integer commitVersion = null;
         if (value.path("require_commit").asBoolean()) {
             if (kind != KafkaBrokerControl.TargetKind.TRANSACTION_COORDINATOR || selectedJob == null
