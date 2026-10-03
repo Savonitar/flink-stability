@@ -486,3 +486,17 @@ rejected before provisioning with a `runner.*` diagnostic:
   named `protocol-produce-after-append-v1/v2` scenarios. An append acknowledgement
   does not establish transaction commit, read visibility, or blame; exact-ID and
   retained Kafka records provide separate observations.
+
+### POOLING Admin recovery adapter
+
+`describe-producers` matches the exact sink topic and retains requested partition
+indexes. `list-transactions` matches only nonempty nonnegative producer-ID filters
+and the singleton wire state `Ongoing`; it does not invent a transactional ID or
+a topic binding. Both use the same shared counted claims, monotonic deadlines,
+delay, request/response loss and heal mechanism as transactional APIs.
+DescribeProducers permits `not-leader-or-follower` and `request-timed-out`;
+ListTransactions permits `coordinator-load-in-progress` and
+`coordinator-not-available`. Mixed/failed replies are forwarded unchanged, and
+unknown ListTransactions state filters cannot qualify a successful response.
+`error-after-append` remains Produce-only. The routed proxy isolates these faults
+from the harness Admin client. Raw and rendered evidence retain recovery selectors.

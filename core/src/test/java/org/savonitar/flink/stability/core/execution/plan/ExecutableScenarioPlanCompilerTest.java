@@ -1476,6 +1476,31 @@ class ExecutableScenarioPlanCompilerTest {
         })));
     }
 
+    @Test void poolingRecoveryCompilesOnlyConcreteSelectorsAndRunningTaskManagers() {
+        for (String api : List.of("describe-producers", "list-transactions")) {
+            for (String invalid : List.of("none", "prefix", "topic", "unknown-tm", "stopped-tm")) {
+                Runnable compile = () -> {
+                    var plan = compiler.compile(resolved(document -> {
+                        var fault = dropFault(document, "drop-response");
+                        var match = (ObjectNode) fault.get("match"); match.put("api", api);
+                        if (api.equals("describe-producers")) match.put("topic", "output");
+                        fault.putObject("restart").put("component", "taskmanager");
+                        if (invalid.equals("prefix")) match.put("transactional_id_prefix", "minimal");
+                        if (invalid.equals("topic")) { if (api.equals("describe-producers")) match.remove("topic"); else match.put("topic", "output"); }
+                        if (invalid.equals("unknown-tm")) ((ObjectNode) fault.get("restart")).put("name", "taskmanager-9");
+                        if (invalid.equals("stopped-tm")) {
+                            var steps = (ArrayNode) document.at("/phases/0/steps");
+                            var kill = document.objectNode(); kill.putObject("kill").putObject("target").put("kind", "named").put("role", "taskmanager").put("name", "taskmanager-1");
+                            steps.insert(0, kill);
+                        }
+                    }));
+                    assertEquals(Optional.of("taskmanager-1"), ((ExecutableScenarioPlan.ProtocolFault) plan.phases().getFirst().steps().getFirst()).restartTaskManager());
+                };
+                if (invalid.equals("none")) compile.run(); else assertThrows(SpecificationException.class, compile::run, api + invalid);
+            }
+        }
+    }
+
     /** Declares kafka-proxy and routes the sink through it. */
     private static void routeSinkThroughProxy(ObjectNode document) {
         ObjectNode proxy = ((ObjectNode) document.at("/setup")).putObject("proxies")

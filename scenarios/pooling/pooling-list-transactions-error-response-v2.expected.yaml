@@ -1,0 +1,9 @@
+format: v1
+kind: expected-result
+
+meta:
+  name: pooling-list-transactions-error-response-v2.expected
+  scenario: pooling-list-transactions-error-response-v2
+
+default:
+  outcome: pass

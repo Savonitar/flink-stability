@@ -628,3 +628,12 @@ expected validation code.
 | SV-268 | Post-append response evidence reaches the result renderer | Preserve producer identity, original success/offsets, replacement timeout and synthetic-after-append origin; do not mislabel as pre-broker rejection. |
 | SV-269 | Full chaos profile includes broker TV variants | Include each explicit TV variant once; unversioned aliases remain individually selectable, not repeated in full. |
 | SV-270 | Legacy calibration full-image copy | Preserve canonical files, six-cell matrix, timing controls, transaction timeout, expectations and pinned artifact hashes; manifest hashes bind actual generated catalogs. |
+
+### POOLING recovery faults
+
+| Case | Input | Required result |
+| --- | --- | --- |
+| SV-271 | Kafka-serialized DescribeProducers and ListTransactions recovery requests | Match the exact topic or nonempty producer-ID/Ongoing filters; preserve absent transactional identity and actual selectors across request, delay, synthetic error and correlated response loss. |
+| SV-272 | Unfiltered listing, negative IDs, wrong state, empty partitions, unsupported prefix/topic selectors or transient-error mismatch | Leave unmatched wire traffic unchanged or reject invalid plans before provisioning; no synthetic successful proof from mixed/unknown-state responses. |
+| SV-273 | Protocol fault with nested TaskManager restart | Acknowledge arm before kill/restart, retain existing disruption and identity evidence, enforce action deadlines and always remove the rule after action failure; failed arming never restarts a process. |
+| SV-274 | New TV1/TV2 POOLING catalogs, including broker-down recovery | Validate offline, require exact-ID pass and observed fault effect, include in chaos-full only, preserve original catalogs and expectations; reused IDs do not claim the INCREMENTING commit window. |

@@ -40,6 +40,12 @@ record FaultRule(
                     : org.savonitar.flink.stability.runtime.api.KafkaProtocolFaultPolicy.errors(api)).contains(value)) throw new IllegalArgumentException("Unsafe API/error pair");
         });
         if (!"end-txn".equals(api) && result != Result.ANY) throw new IllegalArgumentException("Outcome selector only for EndTxn");
+        if (Set.of("describe-producers", "list-transactions").contains(api) && transactionalIdPrefix.isPresent())
+            throw new IllegalArgumentException("Recovery Admin APIs have no transactional ID");
+        if ("describe-producers".equals(api) && topic.isEmpty())
+            throw new IllegalArgumentException("DescribeProducers requires an exact topic");
+        if ("list-transactions".equals(api) && topic.isPresent())
+            throw new IllegalArgumentException("ListTransactions has no topic field");
         if (occurrences < 1) {
             throw new IllegalArgumentException("occurrences must be positive");
         }

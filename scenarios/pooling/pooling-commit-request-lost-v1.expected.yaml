@@ -1,0 +1,9 @@
+format: v1
+kind: expected-result
+
+meta:
+  name: pooling-commit-request-lost-v1.expected
+  scenario: pooling-commit-request-lost-v1
+
+default:
+  outcome: pass

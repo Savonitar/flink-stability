@@ -1,0 +1,9 @@
+format: v1
+kind: expected-result
+
+meta:
+  name: pooling-coordinator-commit-kill-v2.expected
+  scenario: pooling-coordinator-commit-kill-v2
+
+default:
+  outcome: pass

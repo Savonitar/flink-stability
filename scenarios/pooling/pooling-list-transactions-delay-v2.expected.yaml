@@ -1,0 +1,9 @@
+format: v1
+kind: expected-result
+
+meta:
+  name: pooling-list-transactions-delay-v2.expected
+  scenario: pooling-list-transactions-delay-v2
+
+default:
+  outcome: pass

@@ -94,6 +94,14 @@ public final class ExecutablePhaseExecutor {
                 String path,
                 ExecutableScenarioPlan.ProtocolFault fault) throws IOException, InterruptedException;
 
+        @FunctionalInterface
+        interface ArmedAction { void run() throws Exception; }
+
+        default PhaseExecutionEvidence.NetworkFault inject(String path,
+                ExecutableScenarioPlan.ProtocolFault fault, ArmedAction afterArmed) throws Exception {
+            throw new UnsupportedOperationException("This fault provider cannot synchronize recovery with arming");
+        }
+
         /** Completes a fault's evidence once no client can send again (SPEC-004 K6.12). */
         default PhaseExecutionEvidence.NetworkFault withObservedRetries(
                 PhaseExecutionEvidence.NetworkFault fault) throws IOException {
@@ -200,7 +208,7 @@ public final class ExecutablePhaseExecutor {
                         "target=" + operation.targetName() + ", effectConfirmed=" + raw.confirmed());
             } else if (step instanceof ExecutableScenarioPlan.ProtocolFault fault) {
                 injectNetworkFault(
-                        phaseIndex, phaseName, path, loopIterations, fault, evidence);
+                        phaseIndex, phaseName, path, loopIterations, job, fault, evidence);
             } else if (step instanceof ExecutableScenarioPlan.LeaderFault fault) {
                 faultLeader(phaseIndex, phaseName, path, loopIterations, job, fault, evidence);
             } else if (step instanceof ExecutableScenarioPlan.Loop loop) {
@@ -494,11 +502,20 @@ public final class ExecutablePhaseExecutor {
             String phaseName,
             String path,
             List<PhaseExecutionEvidence.LoopIteration> loopIterations,
+            FlinkJobHandle job,
             ExecutableScenarioPlan.ProtocolFault fault,
             Recorder evidence)
             throws PhaseExecutionException {
         try {
-            PhaseExecutionEvidence.NetworkFault observed = networkFaults.inject(path, fault);
+            PhaseExecutionEvidence.NetworkFault observed = fault.restartTaskManager().isEmpty()
+                    ? networkFaults.inject(path, fault)
+                    : networkFaults.inject(path, fault, () -> {
+                        String name = fault.restartTaskManager().orElseThrow();
+                        killTaskManager(phaseIndex, phaseName, path + "/restart/kill", loopIterations, job,
+                                new ExecutableScenarioPlan.KillTaskManager(name), evidence);
+                        restartTaskManager(phaseIndex, phaseName, path + "/restart", loopIterations,
+                                new ExecutableScenarioPlan.RestartTaskManager(name), evidence);
+                    });
             evidence.networkFaults.add(observed);
             succeeded(
                     evidence,
@@ -509,6 +526,8 @@ public final class ExecutablePhaseExecutor {
                     PhaseExecutionEvidence.StepKind.NETWORK_FAULT,
                     "fault=" + observed.faultId() + " dropped=" + observed.dropped().size()
                             + "/" + observed.occurrences());
+        } catch (PhaseExecutionException failure) {
+            throw failure;
         } catch (InterruptedException interrupted) {
             Thread.currentThread().interrupt();
             throw failed(

@@ -1870,6 +1870,16 @@
             "trigger_deadline": {
               "$ref": "#/$defs/durationOrTemplate"
             },
+            "restart": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["component"],
+              "properties": {
+                "component": { "const": "taskmanager" },
+                "name": { "$ref": "#/$defs/kebabName" }
+              },
+              "description": "Kill and restart a running TaskManager only after the proxy acknowledges arming; heal the rule on failure."
+            },
             "heal": {
               "const": "restore-proxy-rule"
             }
@@ -2225,7 +2235,9 @@
             "add-offsets-to-txn",
             "txn-offset-commit",
             "end-txn",
-            "find-coordinator"
+            "find-coordinator",
+            "describe-producers",
+            "list-transactions"
           ]
         },
         "topic": {

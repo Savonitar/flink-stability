@@ -928,12 +928,20 @@ public final class ExecutableScenarioPlan {
             String api,
             Optional<String> topic,
             Optional<Duration> latency,
-            Optional<String> error) implements Step {
+            Optional<String> error,
+            Optional<String> restartTaskManager) implements Step {
+        public ProtocolFault(String proxy, Optional<TransactionResult> result, Optional<String> prefix,
+                NetworkFaultAction action, int occurrences, Duration deadline, String api, Optional<String> topic,
+                Optional<Duration> latency, Optional<String> error) {
+            this(proxy, result, prefix, action, occurrences, deadline, api, topic, latency, error, Optional.empty());
+        }
         public ProtocolFault(String proxy, Optional<TransactionResult> result, Optional<String> prefix,
                              NetworkFaultAction action, int occurrences, Duration deadline) {
             this(proxy, result, prefix, action, occurrences, deadline, "end-txn", Optional.empty(), Optional.empty(), Optional.empty());
         }
         public ProtocolFault {
+            Objects.requireNonNull(restartTaskManager, "restartTaskManager");
+            restartTaskManager.ifPresent(org.savonitar.flink.stability.runtime.api.Checks::taskManagerOrdinal);
             proxy = requireNonBlank(proxy, "proxy");
             if (!org.savonitar.flink.stability.runtime.api.KafkaProtocolFaultPolicy.APIS.contains(api))
                 throw new IllegalArgumentException("Unsupported protocol fault API: " + api);

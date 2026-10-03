@@ -1,0 +1,9 @@
+format: v1
+kind: expected-result
+
+meta:
+  name: pooling-bounded-eos-v2.expected
+  scenario: pooling-bounded-eos-v2
+
+default:
+  outcome: pass

@@ -26,7 +26,7 @@ class ProtocolActionsTest {
     final AtomicReference<ApiMessage> responseForwarded = new AtomicReference<>();
 
     @Test void allApisDropOnlyTwoMatchingMessagesAcrossConnections() throws Exception {
-        for (var fixture : ProtocolMessagesTest.fixtures()) {
+        for (var fixture : java.util.stream.Stream.concat(ProtocolMessagesTest.fixtures().stream(), PoolingProtocolTest.fixtures().stream()).toList()) {
             try (var book = arm(fixture, "drop-request", null, 0, System::nanoTime, Long.MAX_VALUE)) {
                 var first = new KafkaProtocolFaultFilter(book);
                 var second = new KafkaProtocolFaultFilter(book);
@@ -38,7 +38,7 @@ class ProtocolActionsTest {
     }
 
     @Test void permittedErrorsAreKafkaSerializableAndNeverReachTheBroker() throws Exception {
-        for (var fixture : ProtocolMessagesTest.fixtures()) {
+        for (var fixture : java.util.stream.Stream.concat(ProtocolMessagesTest.fixtures().stream(), PoolingProtocolTest.fixtures().stream()).toList()) {
             String api = fixture.api().name().toLowerCase(Locale.ROOT).replace('_', '-');
             for (String error : KafkaProtocolFaultPolicy.errors(api)) {
                 forwarded.set(0); synthetic.set(null);
@@ -96,10 +96,42 @@ class ProtocolActionsTest {
         assertThrows(IllegalArgumentException.class, () -> FaultRule.parse(rule));
     }
 
+    @Test void recoveryResponsesAreCorrelatedAndDelayedWithWireSelectorsRetained() throws Exception {
+        for (var fixture : PoolingProtocolTest.fixtures()) {
+            for (String action : List.of("drop-response", "delay")) {
+                try (var book = arm(fixture, action, null, action.equals("delay") ? 1 : 0, System::nanoTime, Long.MAX_VALUE)) {
+                    var filter = new KafkaProtocolFaultFilter(book);
+                    filter.onRequest(fixture.api(), fixture.version(), header(fixture, 17), ProtocolMessagesTest.wire(fixture), context())
+                            .toCompletableFuture().get(2, TimeUnit.SECONDS);
+                    if (action.equals("drop-response")) {
+                        ApiMessage reply = fixture.api() == ApiKeys.LIST_TRANSACTIONS ? new ListTransactionsResponseData()
+                                : new DescribeProducersResponseData().setTopics(List.of(new DescribeProducersResponseData.TopicResponse().setName("output")
+                                    .setPartitions(List.of(new DescribeProducersResponseData.PartitionResponse().setPartitionIndex(0),
+                                        new DescribeProducersResponseData.PartitionResponse().setPartitionIndex(1)))));
+                        assertFalse(filter.onResponse(fixture.api(), fixture.version(), new ResponseHeaderData().setCorrelationId(99), reply, context()).toCompletableFuture().join().drop());
+                        assertTrue(filter.onResponse(fixture.api(), fixture.version(), new ResponseHeaderData().setCorrelationId(17), reply, context()).toCompletableFuture().join().drop());
+                    }
+                    var event = events().getLast();
+                    assertTrue(event.path("transactionalId").isNull());
+                    if (fixture.api() == ApiKeys.LIST_TRANSACTIONS) {
+                        assertEquals(42L, event.path("producerIdFilters").get(0).longValue());
+                        assertEquals("Ongoing", event.path("stateFilters").get(0).asText());
+                    } else assertEquals(2, event.path("topicPartitions").path("output").size());
+                    assertTrue(event.path("beforeDeadline").asBoolean());
+                }
+                cleanRule();
+            }
+        }
+    }
+
     FaultRuleBook arm(ProtocolMessagesTest.Fixture fixture, String action, String error, long delay, java.util.function.LongSupplier clock, long deadline) throws Exception {
         Files.createDirectories(control.resolve("rules"));
         var rule = json.createObjectNode().put("faultId", "f").put("api", fixture.api().name().toLowerCase(Locale.ROOT).replace('_', '-')).put("action", action)
             .put("transactionalIdPrefix", "eos-").put("occurrences", 2).put("triggerDeadlineNanos", deadline);
+        if (fixture.api() == ApiKeys.DESCRIBE_PRODUCERS || fixture.api() == ApiKeys.LIST_TRANSACTIONS) {
+            rule.remove("transactionalIdPrefix");
+            if (fixture.api() == ApiKeys.DESCRIBE_PRODUCERS) rule.put("topic", "output");
+        }
         if (error != null) rule.put("error", error);
         if (delay > 0) rule.put("latencyMillis", delay);
         Files.writeString(control.resolve("rules/f.json"), rule.toString());
@@ -122,6 +154,9 @@ class ProtocolActionsTest {
                 responseForwarded.set((ApiMessage) args[1]);
                 yield CompletableFuture.completedFuture(fake(ResponseFilterResult.class, (method, values) -> false));
             }
+            case "responseFilterResultBuilder" -> fake(ResponseFilterResultBuilder.class, (method, values) ->
+                    fake(io.kroxylicious.proxy.filter.filterresultbuilder.CloseOrTerminalStage.class, (terminal, unused) ->
+                            CompletableFuture.completedFuture(fake(ResponseFilterResult.class, (m, v) -> m.equals("drop")))));
             case "requestFilterResultBuilder" -> fake(RequestFilterResultBuilder.class, (method, values) -> {
                 if (method.equals("errorResponse")) {
                     var header = (RequestHeaderData) values[0]; var request = (ApiMessage) values[1];

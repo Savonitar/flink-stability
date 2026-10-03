@@ -456,6 +456,31 @@ class ExecutablePhaseExecutorTest {
         assertEquals("fault=phases-0-steps-0 dropped=0/1", step.detail());
     }
 
+    @Test void armedRecoveryUsesBoundedLifecycleAndRetainsDisruptionAndReplacement() throws Exception {
+        var plan = plan(document -> {
+            addProtocolFault(document);
+            ((ObjectNode) document.at("/phases/0/steps/0/network_fault")).putObject("restart").put("component", "taskmanager");
+        });
+        List<String> events = new ArrayList<>();
+        var runtime = new FakeTaskManagers(events);
+        var faults = new ExecutablePhaseExecutor.NetworkFaults() {
+            public PhaseExecutionEvidence.NetworkFault inject(String path, ExecutableScenarioPlan.ProtocolFault fault) {
+                throw new AssertionError("Recovery must be synchronized with arm");
+            }
+            public PhaseExecutionEvidence.NetworkFault inject(String path, ExecutableScenarioPlan.ProtocolFault fault, ArmedAction action) throws Exception {
+                events.add("armed"); action.run(); events.add("healed");
+                return new PhaseExecutionEvidence.NetworkFault(path, "fault", fault.proxy(), "proxy-image", fault.action(),
+                        1, fault.triggerDeadline(), 1, 2, List.of(), List.of());
+            }
+        };
+        var evidence = new ExecutablePhaseExecutor(new FakeFlink(events), runtime, faults, duration -> {}).execute(plan, JOB);
+        assertEquals("armed", events.getFirst()); assertEquals("healed", events.getLast());
+        assertTrue(events.indexOf("kill:taskmanager-1") < events.indexOf("restart:taskmanager"));
+        assertEquals(Duration.ofMinutes(2), runtime.killTimeout); assertEquals(Duration.ofMinutes(2), runtime.restartTimeout);
+        assertEquals(1, evidence.taskManagerKills().size()); assertEquals(1, evidence.taskManagerRestarts().size());
+        assertEquals("taskmanager-1-container-2", evidence.taskManagerRestarts().getFirst().replacementIdentity().orElseThrow().runtimeId());
+    }
+
     @Test
     void aProxyThatCannotInjectMakesTheAttemptInconclusive() {
         ExecutableScenarioPlan plan = plan(ExecutablePhaseExecutorTest::addProtocolFault);
