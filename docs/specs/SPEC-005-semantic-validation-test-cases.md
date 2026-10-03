@@ -663,3 +663,12 @@ expected validation code.
 | Case | Input | Required result |
 | --- | --- | --- |
 | SV-285 | A data failure matches its pinned expectation but a broker fault lacks physical/leadership confirmation | Preserve the raw data FAIL; the scenario is inconclusive with broker.operation.effect-unconfirmed, never a passing negative control. |
+
+### Canonical packet operations
+
+| Case | Input | Required result |
+| --- | --- | --- |
+| SV-286 | Packet schema target references undeclared TaskManager, cluster or partition, or uses invalid mode parameters | Reject before provisioning; require the owned three-broker topology and bounded durations. |
+| SV-287 | Delay targets all brokers | Resolve and verify three distinct owned peers in one namespace, require a common device, install three scoped filters into one queue, hold once and heal once. |
+| SV-288 | Packet counters/heal are unconfirmed or the job finishes during the hold | Preserve raw receipts and any data FAIL; do not advance later steps or allow a passing data oracle to confirm the fault. |
+| SV-289 | Canonical packet image pin or producer request timeout | Preserve index/config/platform distinctions, reject a different deployed image identity, serialize exact timing/counters, and leave producer defaults unchanged unless the positive argument is supplied. |

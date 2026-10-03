@@ -80,8 +80,9 @@ final class ProcessTargetPreflightValidator {
         for (int i = 0; i < steps.size(); i++) {
             var step = steps.get(i); var location = path + "/" + i;
             if (step.has("loop")) brokerSteps(source, scope, step.at("/loop/steps"), location + "/loop/steps", document, issues);
-            if (!step.has("broker_fault")) continue;
-            var target = step.at("/broker_fault/target"); String cluster = target.path("cluster").asText();
+            if (!step.has("broker_fault") && !step.has("packet_fault")) continue;
+            String key = step.has("packet_fault") ? "packet_fault" : "broker_fault";
+            var target = step.path(key).path("target"); String cluster = target.path("cluster").asText();
             var clusters = document.at("/setup/kafka/clusters"); var topology = clusters.path(cluster);
             String error = null;
             if (clusters.size() != 1 || topology.path("brokers").asInt() != 3) error = "Broker faults require the declared three-broker cluster";
@@ -97,7 +98,7 @@ final class ProcessTargetPreflightValidator {
                             && !job.at("/sink/transactional_id_prefix").asText().isBlank();
                 if (!found) error = "Coordinator selector requires an exactly-once sink in the target cluster";
             }
-            if (error != null) issues.add(issue(source, scope, "preflight.broker-fault.target-invalid", location + "/broker_fault/target", error));
+            if (error != null) issues.add(issue(source, scope, "preflight.broker-fault.target-invalid", location + "/" + key + "/target", error));
         }
     }
 }

@@ -815,7 +815,7 @@ public final class ExecutableScenarioPlan {
     }
 
     public sealed interface Step permits AwaitJobState, AwaitCheckpoints, Wait,
-            KillTaskManager, RestartTaskManager, BrokerOperation, BrokerFault, Loop, ProtocolFault, LeaderFault {}
+            KillTaskManager, RestartTaskManager, BrokerOperation, BrokerFault, PacketFault, Loop, ProtocolFault, LeaderFault {}
 
     /** One bounded fault of the observed leader, including unconditional healing. */
     public enum RecoveryBarrier { TOKEN_CHECKPOINT }
@@ -873,6 +873,10 @@ public final class ExecutableScenarioPlan {
         public Wait {
             duration = requirePositive(duration, "duration");
         }
+    }
+
+    public record PacketFault(org.savonitar.flink.stability.runtime.api.PacketFaultControl.Request request) implements Step {
+        public PacketFault { Objects.requireNonNull(request); }
     }
 
     public record BrokerFault(org.savonitar.flink.stability.runtime.api.KafkaBrokerControl.Request request) implements Step {

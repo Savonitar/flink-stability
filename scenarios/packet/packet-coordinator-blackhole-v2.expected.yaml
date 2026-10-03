@@ -1,0 +1,9 @@
+format: v1
+kind: expected-result
+
+meta:
+  name: packet-coordinator-blackhole-v2.expected
+  scenario: packet-coordinator-blackhole-v2
+
+default:
+  outcome: pass

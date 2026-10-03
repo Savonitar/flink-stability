@@ -115,6 +115,8 @@ public record ScenarioVerdict(Status status, String reason, String message, bool
             return unconfirmed(identity.reason(),
                     "The expected failure lacks requested runtime JAR provenance: " + identity.detail());
         }
+        if (attempt.phaseEvidence().orElseThrow().packetFaults().stream().anyMatch(operation -> !operation.confirmed()))
+            return unconfirmed("packet.fault.effect-unconfirmed", "The expected failure lacks confirmed packet fault evidence");
         if (attempt.phaseEvidence().orElseThrow().brokerOperations().stream()
                 .anyMatch(operation -> !operation.raw().confirmed())) {
             return unconfirmed("broker.operation.effect-unconfirmed",

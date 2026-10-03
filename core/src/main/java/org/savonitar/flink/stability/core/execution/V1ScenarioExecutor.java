@@ -309,6 +309,10 @@ public final class V1ScenarioExecutor {
                 message = "The terminal oracle passed, but the run does not show that the"
                         + " subject connector's code ran: "
                         + subjectOrigins.detail(ENTRY_CLASSES);
+            } else if (phases.packetFaults().stream().anyMatch(operation -> !operation.confirmed())) {
+                status = V1ScenarioExecutionResult.Status.INCONCLUSIVE;
+                reason = "packet.fault.effect-unconfirmed";
+                message = "The terminal oracle passed, but packet identity/counters/healing or running-job evidence is unconfirmed";
             } else if (phases.brokerOperations().stream().anyMatch(operation -> !operation.raw().confirmed())) {
                 status = V1ScenarioExecutionResult.Status.INCONCLUSIVE;
                 reason = "broker.operation.effect-unconfirmed";
@@ -781,7 +785,7 @@ public final class V1ScenarioExecutor {
             }
         }
         return new PhaseExecutionEvidence(phases.steps(), phases.taskManagerKills(), completed,
-                phases.taskManagerRestarts(), phases.leaderFaults(), phases.brokerOperations());
+                phases.taskManagerRestarts(), phases.leaderFaults(), phases.brokerOperations(), phases.packetFaults());
     }
 
     /** Starts the plan's Kafka proxy, if it has one, and returns how to fault through it. */

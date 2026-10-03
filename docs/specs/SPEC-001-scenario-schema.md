@@ -3458,8 +3458,34 @@ requires positive counter growth during the hold, stable endpoint identities,
 verified absence of owned rules and removal of the helper. Cleanup uncertainty
 retains the watchdog and namespace ownership lock; it cannot become a PASS.
 
-This slice has unit-tested runtime wiring only. No verified public image digest
-was locally available under the development download restriction. Therefore no
-packet YAML operation, canonical scenarios or chaos-full entries are activated
-in this change. Image verification and the first live probe require a separately
-approved follow-up before schema/profile activation; chaos-quick is unchanged.
+The initial runtime slice has now been connected to the canonical packet schema
+below. Tool availability and an immutable index/config pin have been recorded;
+NET_ADMIN fault execution remains pending the separately approved first probe.
+The platform child-manifest limitation is explicit in the image record.
+Chaos-quick is unchanged.
+
+### Canonical packet faults
+
+`packet_fault` names an explicit `taskmanager`, broker `target`, `mode`, `duration`
+and `timeout`. Targets reuse named/partition-leader/transaction-coordinator
+selectors; `type: all-brokers` is supported for delay only. The owned topology must
+have exactly three brokers. Packet operations cannot overlap an unhealed process
+kill. At most 100 expanded operations may execute in one attempt.
+
+Loss uses `loss_percent` (1–100); delay uses `delay_ms` (1–5000) and optional
+`jitter_ms` (0–delay); blackhole accepts neither parameter. Holds are bounded to
+2m, with a strictly larger timeout no greater than 3m. The pinned public image and
+verified ARM64 config ID are in `docs/packet-image-pin.json`; the platform child
+manifest digest remains unavailable from the authorized Docker inspect interface.
+A different host platform requires its own verified pin. Tool presence does not
+establish NET_ADMIN support: the first live stage must pass an isolated probe.
+
+All-broker delay installs three exact destination filters into one queue, holds
+them simultaneously, rechecks every bound peer and retains aggregate counter
+changes. Confirmation requires counter growth, cleanup proof and a RUNNING job
+before and after injection. Raw data failures remain failures; a passing data
+oracle cannot override an unconfirmed packet effect. The new blackhole catalogs
+hold for 45s and explicitly set producer request.timeout.ms=30000 through the
+optional positive `--producerRequestTimeoutMs` workload argument. Existing
+workloads retain their producer defaults. TV1/TV2 controls and variants extend
+chaos-full; chaos-quick is unchanged.

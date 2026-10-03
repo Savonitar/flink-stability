@@ -481,6 +481,30 @@ class ExecutablePhaseExecutorTest {
         assertEquals("taskmanager-1-container-2", evidence.taskManagerRestarts().getFirst().replacementIdentity().orElseThrow().runtimeId());
     }
 
+    @Test void packetFaultRequiresRunningJobCountersAndHealingBeforeProceeding() throws Exception {
+        var plan=plan(document -> {
+            ((ObjectNode)document.at("/setup/kafka/clusters/main")).put("brokers",3);
+            document.at("/setup/kafka/clusters/main/topics").forEach(topic -> ((ObjectNode)topic).put("replication_factor",3));
+            var steps=replaceSteps(document);
+            var packet=steps.addObject().putObject("packet_fault").put("taskmanager","taskmanager-1")
+                    .put("mode","loss").put("loss_percent",25).put("duration","15s").put("timeout","2m");
+            packet.putObject("target").put("kind","selector").put("role","broker").put("cluster","main")
+                    .put("type","partition-leader").put("topic","output").put("partition",0);
+            steps.addObject().putObject("wait").put("duration","1ms");
+        });
+        for (int mode=0;mode<3;mode++) {
+            List<String> events=new ArrayList<>();var flink=new FakeFlink(events);var runtime=new FakeTaskManagers(events);
+            flink.haObservations.add(RUNNING_JOB);
+            flink.haObservations.add(mode==1 ? new FlinkJobObservation(2000,FlinkJobState.FINISHED,3,0,Optional.empty(),List.of(),List.of()) : RUNNING_JOB);
+            runtime.packetUnconfirmed=mode==2;
+            var result=new ExecutablePhaseExecutor(flink,runtime,ExecutablePhaseExecutor.NetworkFaults.NONE,
+                    duration -> events.add("after-packet")).execute(plan,JOB);
+            assertEquals(mode==0,result.packetFaults().getFirst().confirmed());
+            assertEquals(mode==0,events.contains("after-packet"));
+            assertTrue(events.contains("packet-fault"));
+        }
+    }
+
     @Test void rollingFaultRequiresTheJobToRemainRunningAndRetainsBothObservations() throws Exception {
         var plan = plan(document -> {
             ((ObjectNode) document.at("/setup/kafka/clusters/main")).put("brokers", 3);
@@ -790,6 +814,18 @@ class ExecutablePhaseExecutorTest {
         private RuntimeException leaderFailure;
         private java.util.function.Function<LeaderFaultRequest, LeaderFaultEvidence> leaderEvidence;
         private Duration leaderBudget;
+        private boolean packetUnconfirmed;
+        @Override public org.savonitar.flink.stability.runtime.api.PacketFaultControl.Evidence packetFault(
+                org.savonitar.flink.stability.runtime.api.PacketFaultControl.Request request) {
+            events.add("packet-fault");
+            if (packetUnconfirmed) return org.savonitar.flink.stability.runtime.api.PacketFaultControl.unconfirmed(request,"no counters");
+            var target=request.broker();
+            var binding=new org.savonitar.flink.stability.runtime.api.PacketFaultControl.Binding("a".repeat(64),"tm-image","b".repeat(64),"broker-image","network","172.18.0.5",19092,
+                    new org.savonitar.flink.stability.runtime.api.KafkaBrokerControl.Selection(target,"broker-1","output",0,0,null,null,null,1));
+            return new org.savonitar.flink.stability.runtime.api.PacketFaultControl.Evidence(request,binding,"sidecar","image","eth0",1,2,request.duration().toNanos(),
+                    new org.savonitar.flink.stability.runtime.api.PacketFaultControl.Counters(0,0),
+                    new org.savonitar.flink.stability.runtime.api.PacketFaultControl.Counters(10,2),true,true,List.of(),null,List.of());
+        }
         private List<org.savonitar.flink.stability.runtime.api.KafkaBrokerControl.Evidence> brokerObservations;
         @Override public List<org.savonitar.flink.stability.runtime.api.KafkaBrokerControl.Evidence> brokerFault(
                 org.savonitar.flink.stability.runtime.api.KafkaBrokerControl.Request request,

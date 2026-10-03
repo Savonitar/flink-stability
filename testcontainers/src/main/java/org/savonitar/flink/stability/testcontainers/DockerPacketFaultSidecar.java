@@ -88,6 +88,8 @@ final class DockerPacketFaultSidecar implements PacketFaultBackend.Driver {
             imageId = sidecar.getContainerInfo().getImageId();
             try (var command = docker.inspectImageCmd(imageId)) {
                 var image = command.exec();
+                if (request.image().equals(PacketFaultControl.IMAGE) && !PacketFaultControl.IMAGE_ID.equals(imageId))
+                    throw new IllegalStateException("Pinned linux/arm64 packet image identity differs");
                 String expected = request.image().substring("docker.io/".length());
                 if (image.getRepoDigests() == null || image.getRepoDigests().stream().noneMatch(digest -> digest.equals(expected) || digest.equals(request.image())))
                     throw new IllegalStateException("Sidecar content digest not confirmed");

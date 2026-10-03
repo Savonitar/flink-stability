@@ -54,6 +54,37 @@ class ExecutableScenarioPlanCompilerTest {
     @TempDir
     Path artifactRoot;
 
+    @Test void compilesPacketTargetsAndRejectsInvalidNamespaceOrParameters() {
+        for (String mode : List.of("loss", "delay", "blackhole")) {
+            var plan = resolved(document -> {
+                ((ObjectNode) document.at("/setup/kafka/clusters/main")).put("brokers", 3);
+                document.at("/setup/kafka/clusters/main/topics").forEach(topic -> ((ObjectNode)topic).put("replication_factor",3));
+                var packet = replaceSteps(document).addObject().putObject("packet_fault").put("taskmanager","taskmanager-1")
+                        .put("mode",mode).put("duration","45s").put("timeout","2m");
+                if (mode.equals("loss")) packet.put("loss_percent",25);
+                if (mode.equals("delay")) packet.put("delay_ms",100).put("jitter_ms",20);
+                var target = packet.putObject("target").put("kind","selector").put("role","broker").put("cluster","main");
+                if (mode.equals("delay")) target.put("type","all-brokers");
+                else target.put("type","partition-leader").put("topic","output").put("partition",0);
+            });
+            var packet = (ExecutableScenarioPlan.PacketFault)compiler.compile(plan).phases().getFirst().steps().getFirst();
+            assertEquals(org.savonitar.flink.stability.runtime.api.PacketFaultControl.IMAGE,packet.request().image());
+            assertEquals(mode.equals("delay") ? 2 : 0,packet.request().additionalBrokers().size());
+        }
+        for (String invalid : List.of("undeclared", "wrong-cluster", "missing-loss", "all-loss", "short-timeout")) {
+            assertThrows(SpecificationException.class, () -> compiler.compile(resolved(document -> {
+                ((ObjectNode) document.at("/setup/kafka/clusters/main")).put("brokers",3);
+                document.at("/setup/kafka/clusters/main/topics").forEach(topic -> ((ObjectNode)topic).put("replication_factor",3));
+                var packet = replaceSteps(document).addObject().putObject("packet_fault").put("taskmanager",invalid.equals("undeclared")?"taskmanager-2":"taskmanager-1")
+                        .put("mode","loss").put("duration","45s").put("timeout",invalid.equals("short-timeout")?"1s":"2m");
+                if (!invalid.equals("missing-loss")) packet.put("loss_percent",25);
+                var target=packet.putObject("target").put("kind","selector").put("role","broker").put("cluster",invalid.equals("wrong-cluster")?"other":"main");
+                if (invalid.equals("all-loss")) target.put("type","all-brokers");
+                else target.put("type","partition-leader").put("topic","output").put("partition",0);
+            })), invalid);
+        }
+    }
+
     @Test void compilesRuntimeBrokerSelectorsAndRejectsWrongReferencesAndBounds() {
         var valid = resolved(document -> {
             ((ObjectNode) document.at("/setup/kafka/clusters/main")).put("brokers", 3);

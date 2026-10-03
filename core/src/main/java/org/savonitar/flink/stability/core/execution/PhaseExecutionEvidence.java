@@ -22,7 +22,7 @@ public record PhaseExecutionEvidence(
         List<TaskManagerKill> taskManagerKills,
         List<NetworkFault> networkFaults,
         List<TaskManagerRestart> taskManagerRestarts,
-        List<LeaderFault> leaderFaults, List<BrokerOperation> brokerOperations) {
+        List<LeaderFault> leaderFaults, List<BrokerOperation> brokerOperations, List<PacketFault> packetFaults) {
     public PhaseExecutionEvidence {
         steps = List.copyOf(Objects.requireNonNull(steps, "steps"));
         taskManagerKills = List.copyOf(Objects.requireNonNull(
@@ -31,7 +31,25 @@ public record PhaseExecutionEvidence(
         taskManagerRestarts = List.copyOf(Objects.requireNonNull(
                 taskManagerRestarts, "taskManagerRestarts"));
         brokerOperations = List.copyOf(brokerOperations);
+        packetFaults = List.copyOf(packetFaults);
         leaderFaults = List.copyOf(Objects.requireNonNull(leaderFaults, "leaderFaults"));
+    }
+
+    public PhaseExecutionEvidence(List<StepEvidence> steps, List<TaskManagerKill> kills, List<NetworkFault> network,
+                                  List<TaskManagerRestart> restarts, List<LeaderFault> leaders, List<BrokerOperation> brokers) {
+        this(steps, kills, network, restarts, leaders, brokers, List.of());
+    }
+    public record PacketFault(String path, List<LoopIteration> loopIterations,
+                              org.savonitar.flink.stability.runtime.api.PacketFaultControl.Evidence raw,
+                              FlinkJobObservation.Attempt jobBefore, FlinkJobObservation.Attempt jobAfter) {
+        public PacketFault { loopIterations = List.copyOf(loopIterations); Objects.requireNonNull(raw); }
+        public boolean confirmed() {
+            return raw.confirmed() && running(jobBefore) && running(jobAfter);
+        }
+        private static boolean running(FlinkJobObservation.Attempt attempt) {
+            return attempt != null && attempt.observation().map(value -> value.state() ==
+                    org.savonitar.flink.stability.core.flink.FlinkJobState.RUNNING).orElse(false);
+        }
     }
 
     public record BrokerOperation(String path, List<LoopIteration> loopIterations,
@@ -389,7 +407,7 @@ public record PhaseExecutionEvidence(
         WAIT,
         KILL_TASKMANAGER,
         RESTART_TASKMANAGER,
-        BROKER_FAULT, KILL_BROKER,
+        PACKET_FAULT, BROKER_FAULT, KILL_BROKER,
         RESTART_BROKER,
         NETWORK_FAULT,
         LEADER_FAULT

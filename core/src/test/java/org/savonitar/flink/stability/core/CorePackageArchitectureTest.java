@@ -28,7 +28,7 @@ class CorePackageArchitectureTest {
             Layer.DOCUMENT, 13,
             Layer.RESOLUTION, 29,
             Layer.ARTIFACT, 33,
-            Layer.EXECUTION_PLAN, 12);
+            Layer.EXECUTION_PLAN, 13);
 
     @Test
     void preservesThePreExecutionPackageBoundaries() {

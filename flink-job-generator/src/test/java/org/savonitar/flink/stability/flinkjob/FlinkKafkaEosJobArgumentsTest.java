@@ -29,6 +29,13 @@ class FlinkKafkaEosJobArgumentsTest {
                 new String[]{"--producerMaxBlockMs", "5", "--producerMaxBlockMs", "5"}));
     }
 
+    @Test void packetRequestTimeoutIsExplicitAndStrictlyPositive() {
+        assertNull(FlinkKafkaEosJobArguments.from(new String[0]).producerRequestTimeoutMs());
+        assertEquals(30000, FlinkKafkaEosJobArguments.from(new String[]{"--producerRequestTimeoutMs", "30000"}).producerRequestTimeoutMs());
+        for (String value : new String[]{"0", "-1", "01", "2147483648"})
+            assertThrows(IllegalArgumentException.class, () -> FlinkKafkaEosJobArguments.from(new String[]{"--producerRequestTimeoutMs", value}));
+    }
+
     @Test
     void defaultsProcessingDelayToZero() {
         FlinkKafkaEosJobArguments arguments = FlinkKafkaEosJobArguments.from(new String[0]);

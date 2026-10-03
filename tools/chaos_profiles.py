@@ -65,5 +65,13 @@ PROFILES = {
         "rolling-coordinator-first-v2",
         "rolling-coordinator-last-v2",
         "rolling-preferred-v2",
+        "packet-control-v1",
+        "packet-leader-loss-v1",
+        "packet-all-delay-v1",
+        "packet-coordinator-blackhole-v1",
+        "packet-control-v2",
+        "packet-leader-loss-v2",
+        "packet-all-delay-v2",
+        "packet-coordinator-blackhole-v2",
     ),
 }

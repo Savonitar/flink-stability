@@ -87,7 +87,7 @@ final class ProcessLifecycleCompiler {
                 if ((!restart.has("name") && count > 1) || !isDeclaredTaskManager(name, count) || stopped.containsKey(name))
                     issues.add(issue(source, "runner.phase.restart-target-unsupported", stepPath + "/network_fault/restart",
                             "Recovery fault must name a running TaskManager; multiple TaskManagers require a name"));
-            } else if ((step.has("leader_fault") || step.has("broker_fault")) && !stopped.isEmpty()) {
+            } else if ((step.has("leader_fault") || step.has("broker_fault") || step.has("packet_fault")) && !stopped.isEmpty()) {
                 issues.add(issue(source, "runner.phase.ha-taskmanager-overlap-unsupported",
                         stepPath + "/leader_fault",
                         "Heal the preceding TaskManager kill before an atomic leader fault"));
