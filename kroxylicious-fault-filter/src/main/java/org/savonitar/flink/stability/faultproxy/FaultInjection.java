@@ -12,7 +12,7 @@ import java.time.Duration;
 
 /**
  * The flink-stability fault filter: Kroxylicious loads it from the harness's classpath JAR and
- * creates one {@link EndTxnFaultFilter} per client connection, all sharing one rule book.
+ * creates one {@link KafkaProtocolFaultFilter} per client connection, all sharing one rule book.
  */
 @Plugin(configType = FaultInjection.Config.class)
 public final class FaultInjection implements FilterFactory<FaultInjection.Config, FaultRuleBook> {
@@ -33,7 +33,7 @@ public final class FaultInjection implements FilterFactory<FaultInjection.Config
 
     @Override
     public Filter createFilter(FilterFactoryContext context, FaultRuleBook book) {
-        return new EndTxnFaultFilter(book);
+        return new KafkaProtocolFaultFilter(book);
     }
 
     @Override

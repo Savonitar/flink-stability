@@ -117,6 +117,34 @@ class V1ScenarioExecutorTest {
     }
 
     @Test
+    void coordinatorCommitWitnessGatesPassAndPreservesCommitterErrors() throws Exception {
+        featureSelection = (bootstrap, requested) -> new KafkaTransactionVersion.Selection(Optional.of(1), List.of(
+                new KafkaTransactionVersion.Observation(Optional.of(new KafkaTransactionVersion.Range((short) 1, (short) 1)),
+                        Optional.of(new KafkaTransactionVersion.Range((short) 0, (short) 2)), OptionalLong.of(7))), Optional.empty());
+        for (boolean witness : List.of(true, false)) for (boolean passes : List.of(true, false)) {
+            var events = new ArrayList<String>();
+            try (Fixture fixture = fixture(document -> {
+                ((ObjectNode) document.at("/setup/kafka/clusters/main")).put("brokers", 3).put("transaction_version", 1);
+                ((ObjectNode) document.at("/workload/jobs/0/sink")).put("transaction_id_naming_strategy", "INCREMENTING");
+                document.at("/setup/kafka/clusters/main/topics").forEach(topic -> ((ObjectNode) topic).put("replication_factor", 3));
+                var steps = ((com.fasterxml.jackson.databind.node.ArrayNode) document.path("phases")).removeAll().addObject().put("name", "commit").putArray("steps");
+                var fault = steps.addObject().putObject("broker_fault").put("mode", "kill").put("duration", "45s").put("timeout", "2m").put("require_commit", true);
+                fault.putObject("target").put("kind", "selector").put("role", "broker").put("cluster", "main").put("type", "transaction-coordinator").put("job", "eos-job");
+            })) {
+                var runtime = new FakeRuntime(events); runtime.includeCommitWitness = witness; runtime.captureArchive = true;
+                Path log = temporaryDirectory.resolve("committer-window.log");
+                Files.writeString(log, "2026-10-02 15:00:00,001 WARN org.apache.flink.connector.kafka.sink.internal.KafkaCommitter [] - Encountered retriable exception while committing minimal-0-2.\n");
+                runtime.componentLogs = List.of(new org.savonitar.flink.stability.runtime.api.FlinkComponentLog("taskmanager-1#1", log, false, Optional.empty()));
+                var result = executor(events, runtime, new FakeFlink(events), (bootstrap, topic, ids, timeout) -> passes ? passResult() : missingResult()).execute(fixture.bound(), attemptContext().withKafkaLogOutput(temporaryDirectory.resolve("commit-logs-" + witness + "-" + passes)));
+                assertEquals(!passes ? V1ScenarioExecutionResult.Status.FAIL : witness ? V1ScenarioExecutionResult.Status.PASS : V1ScenarioExecutionResult.Status.INCONCLUSIVE, result.status());
+                assertEquals(1, result.componentErrors().events().size());
+                if (passes && !witness) assertEquals("broker.operation.effect-unconfirmed", result.reason());
+                assertEquals(witness, result.phaseEvidence().orElseThrow().brokerOperations().getFirst().raw().confirmed());
+            }
+        }
+    }
+
+    @Test
     void kafkaCaptureDecodesAndRetainsReceiptsWithoutOverwritingEarlierEvidence() throws Exception {
         var events = new ArrayList<String>();
         try (Fixture fixture = fixture()) {
@@ -1428,7 +1456,7 @@ class V1ScenarioExecutorTest {
                         new ExecutablePhaseExecutor.NetworkFaults() {
                             @Override
                             public PhaseExecutionEvidence.NetworkFault inject(
-                                    String path, ExecutableScenarioPlan.EndTxnFault fault) {
+                                    String path, ExecutableScenarioPlan.ProtocolFault fault) {
                                 return new PhaseExecutionEvidence.NetworkFault(
                                         path, "fault-1", fault.proxy(), "test/proxy",
                                         fault.action(), fault.occurrences(),
@@ -2414,6 +2442,24 @@ class V1ScenarioExecutorTest {
             this.events = events;
         }
 
+        private boolean includeCommitWitness;
+        @Override public List<org.savonitar.flink.stability.runtime.api.KafkaBrokerControl.Evidence> brokerFault(
+                org.savonitar.flink.stability.runtime.api.KafkaBrokerControl.Request request,
+                List<org.savonitar.flink.stability.runtime.api.KafkaLogCapture.Partition> partitions) {
+            String id = request.target().transactionalIdPrefix() + "-0-2";
+            int partition = org.savonitar.flink.stability.runtime.api.KafkaBrokerControl.transactionStatePartition(id, 7);
+            var observed = new ArrayList<>(partitions);
+            observed.add(new org.savonitar.flink.stability.runtime.api.KafkaLogCapture.Partition("__transaction_state", partition));
+            var selected = new org.savonitar.flink.stability.runtime.api.KafkaBrokerControl.Selection(request.target(), "broker-1", "__transaction_state", partition, 7, id, 77L, 4, 1);
+            var held = brokerOperation("broker-1", false, observed, Duration.ofMinutes(2)).withSelection(selected);
+            if (includeCommitWitness) {
+                var leader = held.leadersAfter().getLast();
+                var open = new org.savonitar.flink.stability.runtime.api.KafkaCommitWindow.Observation(id,77,4,"ONGOING",2,12000,12_000_000_000L,held.after(),leader);
+                var done = new org.savonitar.flink.stability.runtime.api.KafkaCommitWindow.Observation(id,77,4,"COMPLETE_COMMIT",2,32000,32_000_000_000L,held.after(),leader);
+                held = held.withCommitWindow(new org.savonitar.flink.stability.runtime.api.KafkaCommitWindow(1,9000,open,done,null));
+            }
+            return List.of(held, brokerOperation("broker-1", true, observed, Duration.ofMinutes(2)).withSelection(selected));
+        }
         private boolean confirmBroker = true;
         @Override public org.savonitar.flink.stability.runtime.api.KafkaBrokerControl.Evidence brokerOperation(String name, boolean restart,
                 List<org.savonitar.flink.stability.runtime.api.KafkaLogCapture.Partition> partitions, Duration timeout) {

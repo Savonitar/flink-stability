@@ -1,0 +1,7 @@
+format: v1
+kind: expected-result
+meta:
+  name: coordinator-commit-kill-v2.expected
+  scenario: coordinator-commit-kill-v2
+default:
+  outcome: pass

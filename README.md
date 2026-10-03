@@ -309,9 +309,9 @@ validation as the package boundary.
 - controlled-unbounded cutoff plus drain/stop;
 - native execution of schema-defined suites and baseline/candidate experiments
   (`tools/pr_gate.py` separately repeats selected scenarios with two connector artifacts);
-- multi-broker or multi-job execution;
-- general network fault injection beyond counted EndTxn drops and the HA
-  ZooKeeper-isolation fixture, and proxies for other clients;
+- multi-job execution;
+- packet-level network faults and proxies for clients beyond the routed Kafka sink;
+  counted Kafka protocol faults and HA ZooKeeper isolation are available;
 - savepoint/restore and upgrade execution;
 - broader state-backend and topology support;
 - health retries, OCI digest capture, and the complete replay-grade report;

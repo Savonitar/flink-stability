@@ -629,7 +629,15 @@ class RunScenarioCommandTest {
                                         "NONE", 2, (short) 1)),
                                 Optional.of(new PhaseExecutionEvidence.Retry(
                                         45_600, "producer-eos-0-2")))),
-                        List.of())));
+                        List.of()),
+                        new PhaseExecutionEvidence.NetworkFault("step", "append", "proxy", "image",
+                                ExecutableScenarioPlan.NetworkFaultAction.ERROR_AFTER_APPEND, 1,
+                                java.time.Duration.ofSeconds(10), 0, 10, List.of(), List.of(), "produce",
+                                List.of(new PhaseExecutionEvidence.ProtocolMessage(1, 1, 5, true,
+                                        "response-error-after-append", "produce", (short) 12, 1,
+                                        "eos-1", 42L, (short) 2, null, java.util.Map.of("output/0", (short) 0),
+                                        java.util.Map.of("output/0", 123L), (short) 7, true, 0, 0)))));
+
         FlinkJobObservation.Attempt atFence = new FlinkJobObservation.Attempt(
                 Optional.of(new FlinkJobObservation(
                         20_000, FlinkJobState.FINISHED, 20, 1,
@@ -663,6 +671,13 @@ class RunScenarioCommandTest {
         JsonNode job = evidence.path("flinkJob");
         JsonNode kill = evidence.path("taskManagerKills").path(0);
         JsonNode fault = evidence.path("networkFaults").path(0);
+        JsonNode append = evidence.at("/networkFaults/1/affected/0");
+        assertEquals("synthetic-after-append", append.path("errorOrigin").asText());
+        assertEquals(123L, append.at("/originalBaseOffsets/output~10").asLong());
+        assertEquals(0, append.path("originalErrorCode").asInt());
+        assertEquals(7, append.path("substitutedErrorCode").asInt());
+        assertTrue(evidence.at("/networkFaults/1/triggered").asBoolean());
+
 
         assertAll(
                 () -> assertEquals("observed", job.path("status").textValue()),

@@ -1,0 +1,7 @@
+format: v1
+kind: expected-result
+meta:
+  name: protocol-endtxn-delay-v2.expected
+  scenario: protocol-endtxn-delay-v2
+default:
+  outcome: pass

@@ -106,9 +106,9 @@ final class FaultRuleBook implements AutoCloseable {
     }
 
     /** Claims a message for the first armed rule that matches and has an occurrence left. */
-    synchronized Optional<Claim> claim(EndTxnIdentity request) {
+    synchronized Optional<Claim> claim(RequestIdentity request) {
         for (ArmedRule candidate : armed.values()) {
-            if (candidate.rule.matches(request.transactionalId(), request.committed())
+            if (candidate.rule.matches(request)
                     && candidate.beforeDeadline(nanoTime.getAsLong())
                     && candidate.completed + candidate.pending < candidate.rule.occurrences()) {
                 candidate.pending++;
@@ -125,7 +125,7 @@ final class FaultRuleBook implements AutoCloseable {
     }
 
     /** Observes a matching request, without deciding whether it will be forwarded or dropped. */
-    synchronized void observeRetry(EndTxnIdentity request, Map<String, Object> details) {
+    synchronized void observeRetry(RequestIdentity request, Map<String, Object> details) {
         var pending = awaitingRetries.iterator();
         while (pending.hasNext()) {
             Claim claim = pending.next();
@@ -153,19 +153,40 @@ final class FaultRuleBook implements AutoCloseable {
         fields.put("action", claim.rule().action().wireName());
         fields.putAll(details);
         boolean dropped = "request-dropped".equals(event) || "response-dropped".equals(event);
-        if (dropped) {
+        boolean affected = dropped || "request-delayed".equals(event) || "response-substituted".equals(event) || "response-error-after-append".equals(event);
+        if (affected) {
             fields.put("beforeDeadline", claim.armed.beforeDeadline(nanoTime.getAsLong()));
         }
         appendQuietly(claim.rule().faultId(), event, fields);
-        if (dropped && !closed) {
+        if (dropped && "end-txn".equals(claim.request.api()) && !closed) {
             awaitingRetries.add(claim);
         }
     }
+
+    private final Set<java.util.concurrent.CompletableFuture<Void>> delays = new HashSet<>();
+
+    synchronized java.util.concurrent.CompletionStage<Void> delay(long millis) {
+        if (closed) return java.util.concurrent.CompletableFuture.failedFuture(new IllegalStateException("Rule book is closed"));
+        if (poller == null) poller = Executors.newSingleThreadScheduledExecutor(runnable -> {
+            Thread thread = new Thread(runnable, "flink-stability-fault-delay"); thread.setDaemon(true); return thread;
+        });
+        var completion = new java.util.concurrent.CompletableFuture<Void>();
+        delays.add(completion);
+        poller.schedule(() -> {
+            synchronized (FaultRuleBook.this) { delays.remove(completion); }
+            completion.complete(null);
+        }, millis, TimeUnit.MILLISECONDS);
+        return completion;
+    }
+
+    long nanoTime() { return nanoTime.getAsLong(); }
 
     @Override
     public synchronized void close() {
         closed = true;
         awaitingRetries.clear();
+        for (var delay : delays) delay.completeExceptionally(new IllegalStateException("Rule book closed before delayed request was released"));
+        delays.clear();
         if (poller != null) {
             poller.shutdownNow();
         }
@@ -189,6 +210,7 @@ final class FaultRuleBook implements AutoCloseable {
         }
         armed.put(faultId, new ArmedRule(rule, nanoTime.getAsLong()));
         Map<String, Object> fields = new LinkedHashMap<>();
+        fields.put("api", rule.api());
         fields.put("result", rule.result().wireName());
         rule.transactionalIdPrefix().ifPresent(prefix -> fields.put("transactionalIdPrefix", prefix));
         fields.put("action", rule.action().wireName());
@@ -233,9 +255,9 @@ final class FaultRuleBook implements AutoCloseable {
     static final class Claim {
         private final ArmedRule armed;
         private final int sequence;
-        private final EndTxnIdentity request;
+        final RequestIdentity request;
 
-        private Claim(ArmedRule armed, int sequence, EndTxnIdentity request) {
+        private Claim(ArmedRule armed, int sequence, RequestIdentity request) {
             this.armed = armed;
             this.sequence = sequence;
             this.request = request;
@@ -251,8 +273,12 @@ final class FaultRuleBook implements AutoCloseable {
     }
 
     /** Original request identity; a response may return a different producer epoch. */
-    record EndTxnIdentity(
-            String transactionalId, long producerId, short producerEpoch, boolean committed) {}
+    record RequestIdentity(String api, String transactionalId, Long producerId, Short producerEpoch, Boolean committed, Set<String> topics) {
+        RequestIdentity(String transactionalId, long producerId, short producerEpoch, boolean committed) {
+            this("end-txn", transactionalId, producerId, producerEpoch, committed, Set.of());
+        }
+        RequestIdentity { topics = Set.copyOf(topics); }
+    }
 
     /** A rule's counts; guarded by the rule book's lock. */
     private static final class ArmedRule {

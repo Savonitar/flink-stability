@@ -10,7 +10,7 @@ RECIPE = Path(__file__).resolve().parent
 sys.path.insert(0, str(RECIPE.parents[1] / "tools"))
 import subject_catalog  # noqa: E402
 from subject_catalog import (artifact_reference, check_released_subject,  # noqa: E402
-                             replace_subject, sha256 as sha, subject_snippet)
+                             replace_subject, sha256 as sha, subject_snippet, with_flink_image)
 
 
 def main():
@@ -18,6 +18,7 @@ def main():
     parser.add_argument("--harness-root", type=Path, default=Path.cwd(), help="FU-7-capable checkout")
     parser.add_argument("--artifact-root", type=Path, help="Root containing harness and generated artifacts")
     parser.add_argument("--output", type=Path, required=True, help="New directory; existing evidence is never overwritten")
+    parser.add_argument("--flink-image", choices=("docker.io/library/flink:2.2.0",), help="Full image spelling in new catalogs only")
     args = parser.parse_args()
     harness = args.harness_root.resolve()
     artifact_root = (args.artifact_root or harness).resolve()
@@ -44,6 +45,8 @@ def main():
         if "default:\n  outcome: pass" not in expected.read_text():
             raise SystemExit("Canonical expected PASS contract changed.")
         shared = text.replace(anchor, anchor + "        transaction_timeout: 60s\n")
+        if args.flink_image:
+            shared = with_flink_image(shared, args.flink_image)
         sources[side] = (name, scenario, expected, shared)
 
     def reference(path):
@@ -89,7 +92,7 @@ def main():
                    "scenarioSha256": sha(target), "canonicalScenarioSha256": sha(scenario),
                    "expectedSha256": sha(expected), "subjectSnippetSha256": sha(cell / "subject-snippet.txt"),
                    "sharedTemplateSha256": sha(archive / (name + ".shared-controls.yaml")),
-                   "sharedTransactionTimeout": "60s", "primarySha256": evidence["artifacts"][mode]["sha256"],
+                   "sharedTransactionTimeout": "60s", "flinkImageOverride": args.flink_image, "primarySha256": evidence["artifacts"][mode]["sha256"],
                    "sourceHashes": recipe_hashes}
             (cell / "catalog-manifest.json").write_text(json.dumps(row, indent=2) + "\n")
             rows.append(row)

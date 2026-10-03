@@ -26,7 +26,7 @@ class CorePackageArchitectureTest {
                     + "(?:\\.[A-Za-z_$][A-Za-z0-9_$]*)+");
     private static final Map<Layer, Integer> EXPECTED_COUNTS = Map.of(
             Layer.DOCUMENT, 13,
-            Layer.RESOLUTION, 28,
+            Layer.RESOLUTION, 29,
             Layer.ARTIFACT, 33,
             Layer.EXECUTION_PLAN, 12);
 

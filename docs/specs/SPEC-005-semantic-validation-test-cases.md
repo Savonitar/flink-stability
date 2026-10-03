@@ -309,7 +309,7 @@ expected validation code.
 | SV-136 | Topic-less `metadata` fault has at least one endpoint routed through the proxy on the target cluster. | Accept as matching that routed cluster traffic. |
 | SV-136a | A counted `drop-request` or `drop-response` fault omits `occurrences` or `trigger_deadline`, or declares `duration`; or a held fault declares `occurrences` or `trigger_deadline`. | Reject structurally (SPEC-004 K3.11). |
 | SV-136b | `match.result` on any API but `end-txn`. | Reject structurally (SPEC-004 K4.6). |
-| SV-136c | The runner receives a proxy with an explicit `bootstrap.address`, a `listen` host a runner container uses, or a second proxy; a routed job source or generated input; a network fault on an API other than `end-txn`, of a held type, or inside a loop. | Reject before provisioning with the SPEC-004 K11 `runner.*` diagnostic. |
+| SV-136c | The runner receives a proxy with an explicit `bootstrap.address`, a `listen` host a runner container uses, or a second proxy; a routed job source or generated input; a network fault outside the seven K11.3 APIs, of a held type, or inside a loop. | Reject before provisioning with the SPEC-004 K11 `runner.*` diagnostic. |
 | SV-136d | A counted `end-txn` fault on an exactly-once sink routed through the proxy drops every requested occurrence before its trigger deadline, and the terminal oracle passes. | `pass`; the report lists each dropped message and, for a dropped response, the broker's successful answer. An error response is passed to the client, listed under `forwardedErrors`, and does not count as an occurrence. |
 | SV-136e | A counted fault drops fewer messages than its `occurrences` by its `trigger_deadline`, including when further drops land only while the rule heals. | A passing oracle becomes `inconclusive` with `network-fault.trigger-missed`; a failing oracle keeps `fail`; late drops are reported with `beforeDeadline: false`. A PASS result cannot be constructed with such a fault. |
 | SV-136f | The proxy rejects a rule, or does not arm or heal it within `30s`. | The step fails `inconclusive` with `network-fault.infrastructure`, and the runner deletes the rule first. |
@@ -563,3 +563,68 @@ expected validation code.
 | SV-229 | Campaign primitive closure | TM/broker kill-wait-restart, JM leader/token faults, runtime broker selectors/pause and EndTxn loss compile with their existing topology requirements; all templates, even unselected ones, are validated. |
 | SV-230 | Campaign reduction | Removal preserves complete fault/heal units; shortening reduces holds/token delay without changing timeouts or oracle; last removal drops the phase; occurrence-only loss cannot be shortened. Candidates replay and pass offline validation. |
 | SV-231 | Campaign output/preflight | Unknown constraints, invalid bounds and incompatible templates fail; output is a new jobs directory without symlink traversal. Existing output/canonical scenarios are not overwritten; missing offline artifacts publish no partial catalog. |
+
+### Transactional protocol adapter contracts
+
+| Case | Input | Required result |
+| --- | --- | --- |
+| SV-237 | Seven supported APIs, serialized with Kafka, old/new EndTxn and coordinator wire versions | Preserve request identity; absent producer fields remain null. |
+| SV-238 | Counted Produce with the routed EOS sink prefix and topic | Compile and match only that transactional request. |
+| SV-239 | Delay >5 s, unsafe API/error pair or producer-fenced | Reject before execution. |
+| SV-240 | Delay completes after trigger deadline or rule never matches | Cannot PASS; report effect as late/missing. |
+| SV-241 | Error response for a supported API | Generate a serializable response before broker forwarding; record null original and selected replacement code. |
+| SV-242 | TxnOffsetCommit v0/1 + coordinator-load-in-progress, or insufficient-replica error with acks other than -1 | Pass through without consuming an occurrence. |
+| SV-243 | Multi-ID batch, mixed producer batches, group FindCoordinator or unsupported topic UUID Produce | Pass through; never guess transactional identity. |
+| SV-244 | Mixed success/error partition response under drop-response | Forward entire response and release reservation. |
+| SV-245 | Two matching messages on different proxy connections and occurrences=2 | Shared counter records exactly two affected messages; subsequent requests pass. |
+
+### Coordinator commit-window contracts
+
+| Case | Input | Required result |
+| --- | --- | --- |
+| SV-246 | `require_commit` with missing transaction feature, reused-ID naming, or another target kind | Reject before provisioning. |
+| SV-247 | Broker session timeout missing/invalid or not shorter than hold | Do not mutate the broker; retain unconfirmed evidence. |
+| SV-248 | Kill/pause, both TV1/TV2, stable new leader and selected transaction ONGOING then COMPLETE_COMMIT while held | Confirm only after the session timeout and before healing; retain both observations and producer identity. |
+| SV-249 | First state is COMPLETE_COMMIT, selected transaction aborts, producer/epoch changes, or deadline expires | No commit proof, cannot PASS; still heal the selected broker. |
+| SV-250 | Admin coordinator differs from partition metadata, ISR includes failed broker, container identity changes or broker resumes early | Do not confirm the observation. |
+| SV-251 | Runtime returns ordinary confirmed broker evidence but omits the required commit window | Passing oracle becomes inconclusive; a data failure remains fail. |
+| SV-252 | A commit error is logged during the run | Preserve `componentErrors`, including level/logger, alongside broker and exact-ID evidence; do not infer blame or require an error log for successful failover. |
+
+### Committer log classification
+
+| Case | Input | Required result |
+| --- | --- | --- |
+| SV-253 | Real KafkaCommitter retry WARN/failure ERROR/interruption INFO headers, stack traces and a similarly named foreign logger | Retain exact-logger categories, original message/level/logger and explicit retry transactional ID; no guessed exception type or duplicate stack-trace event. |
+
+
+### PR chaos profile contracts
+
+| Case | Input | Required result |
+| --- | --- | --- |
+| SV-254 | chaos-quick/full without both explicit baseline artifact flags | Reject before execution; legacy explicit-scenario defaults stay available. |
+| SV-255 | Profile dry-run, even with artifact paths not yet built | Print side/run counts and coarse timing only; create nothing and invoke no runner. |
+| SV-256 | Positive candidate missing/duplicate metric and all matching baseline runs verified zero | Report candidate-only observation; unknown counts/provenance/effects/coverage make the comparison unresolved. |
+| SV-257 | PASS result without an expected fault receipt, or an unconfirmed receipt | Gate does not pass; preserve raw verdict and exact-ID counts. |
+| SV-258 | KafkaCommitter WARN/ERROR, partial capture and similarly named logger | Count exact logger and each severity separately per scenario/side; retain coverage and unknown values. |
+| SV-259 | Full-image spelling and TV-paired profile copies | Original catalogs unchanged; subject swaps symmetric, new version copies explicit and offline valid. |
+
+### PR profile calibration
+
+| Case | Input | Required result |
+| --- | --- | --- |
+| SV-260 | Optional calibration max.block.ms absent, positive, zero, duplicate or malformed | Default leaves producer property absent; positive reaches sink; invalid/duplicate input fails. |
+| SV-261 | Gate calibration override with explicit/released baseline | Same option in both copied jobs and plan; originals unchanged; unknown catalog shape rejected. |
+| SV-262 | Single-class retriable-discard calibration overlay | Pinned release/source/runtime and artifact digests; only KafkaCommitter.class differs; normal/fenced/unknown/unrelated retry decisions unchanged. |
+| SV-263 | Offline calibration result checking | Require all release cells PASS, complete paired verified fault receipts and candidate FAIL with missing IDs in a protocol/coordinator cell; UNKNOWN, missing cells and harmless-control failures cannot qualify. |
+
+### Produce errors after append
+
+| Case | Input | Required result |
+| --- | --- | --- |
+| SV-264 | Counted Produce error-after-append with request-timed-out | Compile; require occurrences/deadline and routed sink. Other API/error combinations fail before provisioning. |
+| SV-265 | Kafka-serialized successful Produce v3/v8/v12 replies, two occurrences across connections | Forward each request first; substitute exactly two responses; retain original identity/codes/base offsets and serialize valid timeout responses without changing the original objects. |
+| SV-266 | Wrong prefix, acks other than -1, mixed errors, missing/foreign/duplicate partitions or unavailable offsets | Pass unchanged; do not consume the occurrence; later valid response can trigger. |
+| SV-267 | Late response or incomplete append proof in evidence | Cannot confirm the fault or produce PASS; retain partial proof and heal. |
+| SV-268 | Post-append response evidence reaches the result renderer | Preserve producer identity, original success/offsets, replacement timeout and synthetic-after-append origin; do not mislabel as pre-broker rejection. |
+| SV-269 | Full chaos profile includes broker TV variants | Include each explicit TV variant once; unversioned aliases remain individually selectable, not repeated in full. |
+| SV-270 | Legacy calibration full-image copy | Preserve canonical files, six-cell matrix, timing controls, transaction timeout, expectations and pinned artifact hashes; manifest hashes bind actual generated catalogs. |

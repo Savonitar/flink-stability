@@ -25,7 +25,7 @@ import static org.savonitar.flink.stability.core.execution.plan.ExecutableScenar
  * counted drops of EndTxn requests or responses.
  */
 final class NetworkFaultCompiler {
-    private static final Set<String> ACTIONS = Set.of("drop-request", "drop-response");
+    private static final Set<String> ACTIONS = Set.of("drop-request", "drop-response", "delay", "error-response", "error-after-append");
     /** A Docker network alias and a port that leaves room for broker ports above it. */
     private static final Pattern LISTEN = Pattern.compile(
             "^([a-z0-9]+(?:-[a-z0-9]+)*):([1-9][0-9]{0,4})$");
@@ -84,15 +84,27 @@ final class NetworkFaultCompiler {
             issues.add(issue(source, "runner.network-fault.loop-unsupported", path,
                     "The first runner does not repeat network faults inside a loop"));
         }
-        if (!"end-txn".equals(networkFault.at("/match/api").textValue())) {
+        if (!org.savonitar.flink.stability.runtime.api.KafkaProtocolFaultPolicy.APIS.contains(networkFault.at("/match/api").textValue())) {
             issues.add(issue(source, "runner.network-fault.api-unsupported",
-                    path + "/match/api", "The first runner faults only end-txn traffic"));
+                    path + "/match/api", "The runner faults only the supported transactional sink APIs"));
         }
         if (!ACTIONS.contains(networkFault.at("/fault/type").textValue())) {
             issues.add(issue(source, "runner.network-fault.type-unsupported",
                     path + "/fault/type",
-                    "The first runner executes only drop-request and drop-response faults"));
+                    "Only counted drops, delay and supported response errors are executable"));
             return;
+        }
+        if (networkFault.has("duration")) {
+            issues.add(issue(source, "runner.network-fault.type-unsupported", path + "/duration", "The runner requires counted messages with a trigger deadline"));
+            return;
+        }
+        if ("delay".equals(networkFault.at("/fault/type").asText())) {
+            int previousIssues = issues.size();
+            requireDuration(source, networkFault.at("/fault/latency"), path + "/fault/latency", issues);
+            if (issues.size() != previousIssues) return;
+            if (parseDuration(networkFault.at("/fault/latency").asText()).compareTo(java.time.Duration.ofMillis(
+                    org.savonitar.flink.stability.runtime.api.KafkaProtocolFaultPolicy.MAX_DELAY_MILLIS)) > 0)
+                issues.add(issue(source, "runner.network-fault.delay-bound", path + "/fault/latency", "Delay must not exceed 5s"));
         }
         requirePositiveInt(source, networkFault.path("occurrences"),
                 path + "/occurrences", issues);
@@ -114,9 +126,9 @@ final class NetworkFaultCompiler {
                 entry.getKey(), listen.group(1), Integer.parseInt(listen.group(2))));
     }
 
-    static ExecutableScenarioPlan.EndTxnFault step(ObjectNode networkFault) {
+    static ExecutableScenarioPlan.ProtocolFault step(ObjectNode networkFault) {
         JsonNode match = networkFault.get("match");
-        return new ExecutableScenarioPlan.EndTxnFault(
+        return new ExecutableScenarioPlan.ProtocolFault(
                 networkFault.path("proxy").textValue(),
                 match.has("result")
                         ? Optional.of(ExecutableScenarioPlan.TransactionResult.valueOf(
@@ -127,6 +139,9 @@ final class NetworkFaultCompiler {
                         networkFault.at("/fault/type").textValue()
                                 .toUpperCase(Locale.ROOT).replace('-', '_')),
                 networkFault.path("occurrences").intValue(),
-                parseDuration(networkFault.path("trigger_deadline").textValue()));
+                parseDuration(networkFault.path("trigger_deadline").textValue()),
+                match.path("api").textValue(), Optional.ofNullable(match.path("topic").textValue()),
+                networkFault.path("fault").has("latency") ? Optional.of(parseDuration(networkFault.at("/fault/latency").textValue())) : Optional.empty(),
+                Optional.ofNullable(networkFault.at("/fault/error").textValue()));
     }
 }

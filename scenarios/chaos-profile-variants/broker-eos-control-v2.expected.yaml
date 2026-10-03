@@ -1,0 +1,9 @@
+format: v1
+kind: expected-result
+
+meta:
+  name: broker-eos-control-v2.expected
+  scenario: broker-eos-control-v2
+
+default:
+  outcome: pass

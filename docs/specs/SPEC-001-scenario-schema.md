@@ -918,7 +918,11 @@ Connector pull-request gating is the same mechanism with one axis:
   `--bootstrapServers` (both its separate-value and `=value` spellings).
   Every other non-empty token is preserved byte-for-byte and in declaration
   order; the runner does not interpret workload-specific arguments such as the
-  bundled generator's `--processingDelayMs`.
+  bundled generator's `--processingDelayMs`. The bundled generator also accepts
+  an optional positive 32-bit `--producerMaxBlockMs`, passed to Kafka's
+  `max.block.ms` unchanged. Omission keeps Kafka's default. This is an explicit
+  calibration input, independent of processing delay and transaction timeout;
+  it does not alter the typed workload protocol or canonical catalogs.
 - **R5.3** Job options are parameterizable per R2, because several of them *are*
   the dimension under test — delivery guarantee is how `selftest-duplicates` is
   built; state backend is the §3 example.
@@ -3297,3 +3301,84 @@ unknown version/hash mismatch. `campaign shrink` removes or shortens one fault u
 candidate, keeps healing and expectations, and emits only semantically and offline
 artifact-validated candidates with replayable manifests; rejected reductions are recorded.
 All three commands prepare artifacts offline and never provision or execute infrastructure.
+
+### Counted transactional proxy faults (development extension)
+
+`network_fault` executes the seven transactional APIs and counted actions
+specified by SPEC-004 K11–K12. `occurrences` and `trigger_deadline` are required;
+`duration` is forbidden in this form. Delay adds `fault.latency` bounded to 5 s;
+error-response adds an allow-listed `fault.error`. `match.result` remains EndTxn
+only. Transactional Produce accepts the sink's `transactional_id_prefix`.
+`find-coordinator` selects transaction lookup, never consumer-group discovery.
+`transaction_version` continues to be finalized on the broker before job startup.
+The result's `phaseEvidence.networkFaults[].affected` retains request identity,
+original/substituted error codes, delay duration and deadline qualification. Null
+producer fields mean the selected wire version did not carry them. A rule must
+complete its full occurrence count on time as well as pass exact-ID validation;
+late/absent effects retain `network-fault.trigger-missed`. Existing EndTxn
+`dropped` and retry evidence remain available.
+
+`error-after-append` is a counted Produce-only action with
+`fault.error: request-timed-out`. It forwards the request and replaces only a
+successful, correlated broker response carrying nonnegative base offsets for
+exactly every requested partition. The original codes/offsets, producer identity
+and `forwardedToBroker: true` remain in evidence, with
+`errorOrigin: synthetic-after-append`. The client receives an uncertain timeout
+outcome, not a fabricated pre-append rejection. This mode requires `acks=-1`;
+missing/mixed/duplicate/foreign partition replies pass unchanged and release the
+reservation. Late/missing proof cannot make the scenario PASS. See SPEC-004 K12.7.
+
+
+### Coordinator failure with a confirmed commit window
+
+`broker_fault.require_commit: true` is an optional strengthening of the existing
+transaction-coordinator selector. It requires an exactly-once sink with explicit
+`transaction_id_naming_strategy: INCREMENTING` and cluster `transaction_version`
+1 or 2. Named/partition-leader targets are rejected for this mode. Existing broker
+faults keep their behavior when the flag is absent or false.
+
+The runner selects one currently ONGOING sink transaction using Admin and retains
+its transactional ID, producer ID/epoch and coordinator partition. It reads that
+broker's `broker.session.timeout.ms` with Admin `describeConfigs`; a missing,
+invalid or unsupported (>120 s) value prevents injection. The declared hold must
+exceed the observed timeout. No partition count or timeout is guessed.
+
+After the existing physical stop/pause, leader transfer and ISR evidence are
+confirmed, the runner must observe the *same* transaction ONGOING under the new
+coordinator, then COMPLETE_COMMIT while the former broker is still stopped/paused.
+Both observations independently inspect the owned container and bracket
+`describeTransactions` with partition metadata reads. The leader must be stable
+and equal the reported coordinator, ISR must contain at least two brokers and
+exclude the failed broker. The producer ID stays equal; TV1 keeps its epoch, TV2
+may advance it by one on commit. A changed ID/epoch, abort, already-completed
+transaction without the post-failover ONGOING witness, or late/missing observation
+cannot confirm the window. Completion must precede healing and occur after the
+observed session timeout. All observation work shares the existing hold and
+operation deadlines; it cannot lengthen the configured fault. Healing is always
+attempted for the same selected broker.
+
+The new `scenarios/coordinator-commit` catalogs use kill/pause × TV1/TV2, 30-second
+checkpoints, a 45-second hold and enough bounded input to span the following
+checkpoint. These values only arrange a candidate window: **PASS requires the
+ordered transaction evidence**, not elapsed sleep or checkpoint count alone. A
+missed window is `inconclusive` with `broker.operation.effect-unconfirmed`, while
+an exact-ID data failure stays `fail`. Thus every passing run confirms a commit
+after coordinator failover during the physical fault; scheduling alone is not a
+claim that every attempt will hit that window.
+
+`phaseEvidence.brokerOperations[].observations.commitWindow` retains the observed
+broker timeout, both transaction states, producer identities, coordinator leaders,
+physical snapshots, wall-clock timestamps and monotonic elapsed times. The
+existing `selection`, leader/ISR snapshots and healing evidence remain present.
+Actual Flink/Kafka commit errors remain in `componentErrors` with their original
+level, logger and message. Absence of such errors is allowed: failover can succeed
+without an ERROR log. Neither errors nor coordinator state replace the exact-ID
+oracle or assign fault to a component.
+
+The component collector recognizes the released internal KafkaCommitter's exact
+retry/failure/interruption header forms as `commit-retriable`, `commit-failed` and
+`commit-interrupted`. It retains each original message and includes it in the
+deduplication key; repeated copies collapse, different messages at one timestamp
+do not. Stack traces alone do not invent an event or an exception classification.
+The retry header's explicit transactional ID is retained for comparison with the
+selected coordinator transaction. Existing fencing/state categories are preserved.

@@ -30,7 +30,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-class EndTxnFaultFilterTest {
+class KafkaProtocolFaultFilterTest {
     private static final short VERSION = 5;
     private static final FilterContext CONTEXT = fakeContext();
 
@@ -39,11 +39,11 @@ class EndTxnFaultFilterTest {
 
     @Test
     void dropsTheFirstMatchingCommitRequestAndForwardsItsRetry() throws IOException {
-        EndTxnFaultFilter filter = new EndTxnFaultFilter(book("drop-request"));
+        KafkaProtocolFaultFilter filter = new KafkaProtocolFaultFilter(book("drop-request"));
 
-        assertTrue(dropped(filter.onEndTxnRequest(
+        assertTrue(dropped(filter.onRequest(org.apache.kafka.common.protocol.ApiKeys.END_TXN,
                 VERSION, requestHeader(11), commit("eos-0-1"), CONTEXT)));
-        assertFalse(dropped(filter.onEndTxnRequest(
+        assertFalse(dropped(filter.onRequest(org.apache.kafka.common.protocol.ApiKeys.END_TXN,
                 VERSION, requestHeader(12), commit("eos-0-1"), CONTEXT)));
 
         List<String> events = Files.readAllLines(control.resolve("events/f1.jsonl"));
@@ -57,14 +57,14 @@ class EndTxnFaultFilterTest {
 
     @Test
     void forwardsAMatchingRequestAndDropsOnlyItsResponse() throws IOException {
-        EndTxnFaultFilter filter = new EndTxnFaultFilter(book("drop-response"));
+        KafkaProtocolFaultFilter filter = new KafkaProtocolFaultFilter(book("drop-response"));
 
-        assertFalse(dropped(filter.onEndTxnRequest(
+        assertFalse(dropped(filter.onRequest(org.apache.kafka.common.protocol.ApiKeys.END_TXN,
                 VERSION, requestHeader(21), commit("eos-0-1"), CONTEXT)));
-        assertFalse(dropped(filter.onEndTxnResponse(
+        assertFalse(dropped(filter.onResponse(org.apache.kafka.common.protocol.ApiKeys.END_TXN,
                 VERSION, new ResponseHeaderData().setCorrelationId(20),
                 new EndTxnResponseData(), CONTEXT)));
-        assertTrue(dropped(filter.onEndTxnResponse(
+        assertTrue(dropped(filter.onResponse(org.apache.kafka.common.protocol.ApiKeys.END_TXN,
                 VERSION, new ResponseHeaderData().setCorrelationId(21),
                 new EndTxnResponseData().setProducerEpoch((short) 4), CONTEXT)));
 
@@ -81,16 +81,16 @@ class EndTxnFaultFilterTest {
     @Test
     void passesAnErrorResponseToTheClientWithoutUsingTheOccurrence() throws IOException {
         FaultRuleBook book = book("drop-response");
-        EndTxnFaultFilter filter = new EndTxnFaultFilter(book);
+        KafkaProtocolFaultFilter filter = new KafkaProtocolFaultFilter(book);
 
-        filter.onEndTxnRequest(VERSION, requestHeader(41), commit("eos-0-1"), CONTEXT);
-        assertFalse(dropped(filter.onEndTxnResponse(
+        filter.onRequest(org.apache.kafka.common.protocol.ApiKeys.END_TXN,VERSION, requestHeader(41), commit("eos-0-1"), CONTEXT);
+        assertFalse(dropped(filter.onResponse(org.apache.kafka.common.protocol.ApiKeys.END_TXN,
                 VERSION, new ResponseHeaderData().setCorrelationId(41),
                 new EndTxnResponseData().setErrorCode(Errors.NOT_COORDINATOR.code()),
                 CONTEXT)), "an error response proves no commit, so the client must see it");
         // The client's retry is claimed again, and its successful response is the occurrence.
-        filter.onEndTxnRequest(VERSION, requestHeader(42), commit("eos-0-1"), CONTEXT);
-        assertTrue(dropped(filter.onEndTxnResponse(
+        filter.onRequest(org.apache.kafka.common.protocol.ApiKeys.END_TXN,VERSION, requestHeader(42), commit("eos-0-1"), CONTEXT);
+        assertTrue(dropped(filter.onResponse(org.apache.kafka.common.protocol.ApiKeys.END_TXN,
                 VERSION, new ResponseHeaderData().setCorrelationId(42),
                 new EndTxnResponseData(), CONTEXT)));
 
@@ -101,7 +101,7 @@ class EndTxnFaultFilterTest {
         assertTrue(events.get(4).contains("\"claim\":2"), events.get(4));
         assertTrue(events.get(4).contains("\"occurrence\":1"), events.get(4));
         heal(book);
-        filter.onEndTxnRequest(VERSION, requestHeader(43), commit("eos-0-1"), CONTEXT);
+        filter.onRequest(org.apache.kafka.common.protocol.ApiKeys.END_TXN,VERSION, requestHeader(43), commit("eos-0-1"), CONTEXT);
         assertEquals(1, retries().size(), "a released error-response claim has no retry witness");
         assertEquals(2, retries().getFirst().path("claim").intValue());
     }
@@ -109,15 +109,15 @@ class EndTxnFaultFilterTest {
     @Test
     void aResponseClaimedBeforeHealIsStillDroppedAfterHeal() throws IOException {
         FaultRuleBook book = book("drop-response");
-        EndTxnFaultFilter filter = new EndTxnFaultFilter(book);
-        filter.onEndTxnRequest(VERSION, requestHeader(51), commit("eos-0-1"), CONTEXT);
+        KafkaProtocolFaultFilter filter = new KafkaProtocolFaultFilter(book);
+        filter.onRequest(org.apache.kafka.common.protocol.ApiKeys.END_TXN,VERSION, requestHeader(51), commit("eos-0-1"), CONTEXT);
         Files.delete(control.resolve("rules/f1.json"));
         book.refresh();
 
-        assertTrue(dropped(filter.onEndTxnResponse(VERSION,
+        assertTrue(dropped(filter.onResponse(org.apache.kafka.common.protocol.ApiKeys.END_TXN,VERSION,
                 new ResponseHeaderData().setCorrelationId(51), new EndTxnResponseData(), CONTEXT)));
-        filter.onEndTxnRequest(VERSION, requestHeader(52), commit("eos-0-2"), CONTEXT);
-        assertFalse(dropped(filter.onEndTxnResponse(VERSION,
+        filter.onRequest(org.apache.kafka.common.protocol.ApiKeys.END_TXN,VERSION, requestHeader(52), commit("eos-0-2"), CONTEXT);
+        assertFalse(dropped(filter.onResponse(org.apache.kafka.common.protocol.ApiKeys.END_TXN,VERSION,
                 new ResponseHeaderData().setCorrelationId(52), new EndTxnResponseData(), CONTEXT)));
 
         List<String> events = Files.readAllLines(control.resolve("events/f1.jsonl"));
@@ -130,11 +130,11 @@ class EndTxnFaultFilterTest {
     void aPendingResponseAfterTheDeadlineIsDroppedButCannotProveTheTrigger() throws IOException {
         AtomicLong clock = new AtomicLong(100);
         FaultRuleBook book = book("drop-response", clock, 10);
-        EndTxnFaultFilter filter = new EndTxnFaultFilter(book);
-        filter.onEndTxnRequest(VERSION, requestHeader(61), commit("eos-0-1"), CONTEXT);
+        KafkaProtocolFaultFilter filter = new KafkaProtocolFaultFilter(book);
+        filter.onRequest(org.apache.kafka.common.protocol.ApiKeys.END_TXN,VERSION, requestHeader(61), commit("eos-0-1"), CONTEXT);
         clock.set(110);
 
-        assertTrue(dropped(filter.onEndTxnResponse(VERSION,
+        assertTrue(dropped(filter.onResponse(org.apache.kafka.common.protocol.ApiKeys.END_TXN,VERSION,
                 new ResponseHeaderData().setCorrelationId(61), new EndTxnResponseData(), CONTEXT)));
 
         List<String> events = Files.readAllLines(control.resolve("events/f1.jsonl"));
@@ -144,16 +144,16 @@ class EndTxnFaultFilterTest {
     @Test
     void theSameCorrelationIdOnAnotherConnectionCannotConsumeAClaimedResponse() throws IOException {
         FaultRuleBook book = book("drop-response");
-        EndTxnFaultFilter first = new EndTxnFaultFilter(book);
-        EndTxnFaultFilter second = new EndTxnFaultFilter(book);
-        first.onEndTxnRequest(VERSION, requestHeader(71), commit("eos-0-1"), CONTEXT);
-        second.onEndTxnRequest(VERSION, requestHeader(71), commit("eos-0-2"), CONTEXT);
+        KafkaProtocolFaultFilter first = new KafkaProtocolFaultFilter(book);
+        KafkaProtocolFaultFilter second = new KafkaProtocolFaultFilter(book);
+        first.onRequest(org.apache.kafka.common.protocol.ApiKeys.END_TXN,VERSION, requestHeader(71), commit("eos-0-1"), CONTEXT);
+        second.onRequest(org.apache.kafka.common.protocol.ApiKeys.END_TXN,VERSION, requestHeader(71), commit("eos-0-2"), CONTEXT);
 
-        assertFalse(dropped(second.onEndTxnResponse(VERSION,
+        assertFalse(dropped(second.onResponse(org.apache.kafka.common.protocol.ApiKeys.END_TXN,VERSION,
                 new ResponseHeaderData().setCorrelationId(71), new EndTxnResponseData(), CONTEXT)));
-        assertTrue(dropped(first.onEndTxnResponse(VERSION,
+        assertTrue(dropped(first.onResponse(org.apache.kafka.common.protocol.ApiKeys.END_TXN,VERSION,
                 new ResponseHeaderData().setCorrelationId(71), new EndTxnResponseData(), CONTEXT)));
-        assertFalse(dropped(first.onEndTxnResponse(VERSION,
+        assertFalse(dropped(first.onResponse(org.apache.kafka.common.protocol.ApiKeys.END_TXN,VERSION,
                 new ResponseHeaderData().setCorrelationId(71), new EndTxnResponseData(), CONTEXT)),
                 "a completed claim cannot be applied twice");
     }
@@ -162,9 +162,9 @@ class EndTxnFaultFilterTest {
     void forwardsEverythingWhileNoRuleIsArmed() throws IOException {
         FaultRuleBook book = new FaultRuleBook(control, () -> 0L);
         book.refresh();
-        EndTxnFaultFilter filter = new EndTxnFaultFilter(book);
+        KafkaProtocolFaultFilter filter = new KafkaProtocolFaultFilter(book);
 
-        assertFalse(dropped(filter.onEndTxnRequest(
+        assertFalse(dropped(filter.onRequest(org.apache.kafka.common.protocol.ApiKeys.END_TXN,
                 VERSION, requestHeader(31), commit("eos-0-1"), CONTEXT)));
         assertFalse(Files.exists(control.resolve("events")));
     }
@@ -173,28 +173,28 @@ class EndTxnFaultFilterTest {
     void observesTheOriginalRequestIdentityOnceAcrossConnectionsAfterResponseLossAndHeal()
             throws IOException {
         FaultRuleBook book = book("drop-response");
-        EndTxnFaultFilter original = new EndTxnFaultFilter(book);
-        original.onEndTxnRequest(VERSION, requestHeader(81), commit("eos-0-1"), CONTEXT);
-        assertTrue(dropped(original.onEndTxnResponse(VERSION,
+        KafkaProtocolFaultFilter original = new KafkaProtocolFaultFilter(book);
+        original.onRequest(org.apache.kafka.common.protocol.ApiKeys.END_TXN,VERSION, requestHeader(81), commit("eos-0-1"), CONTEXT);
+        assertTrue(dropped(original.onResponse(org.apache.kafka.common.protocol.ApiKeys.END_TXN,VERSION,
                 new ResponseHeaderData().setCorrelationId(81),
                 new EndTxnResponseData().setProducerEpoch((short) 4), CONTEXT)));
         heal(book);
 
-        EndTxnFaultFilter reconnected = new EndTxnFaultFilter(book);
+        KafkaProtocolFaultFilter reconnected = new KafkaProtocolFaultFilter(book);
         FilterContext newContext = fakeContext("client-2");
         // A later epoch (including the broker's unseen answer) is not this exact retry.
         for (EndTxnRequestData unrelated : List.of(
                 commit("eos-0-2"), commit("eos-0-1").setProducerId(1001L),
                 commit("eos-0-1").setProducerEpoch((short) 4),
                 commit("eos-0-1").setCommitted(false))) {
-            assertFalse(dropped(reconnected.onEndTxnRequest(
+            assertFalse(dropped(reconnected.onRequest(org.apache.kafka.common.protocol.ApiKeys.END_TXN,
                     VERSION, requestHeader(82), unrelated, newContext)));
         }
         assertTrue(retries().isEmpty());
 
-        assertFalse(dropped(reconnected.onEndTxnRequest(
+        assertFalse(dropped(reconnected.onRequest(org.apache.kafka.common.protocol.ApiKeys.END_TXN,
                 (short) 4, requestHeader(83).setClientId(null), commit("eos-0-1"), newContext)));
-        reconnected.onEndTxnRequest(VERSION, requestHeader(84), commit("eos-0-1"), newContext);
+        reconnected.onRequest(org.apache.kafka.common.protocol.ApiKeys.END_TXN,VERSION, requestHeader(84), commit("eos-0-1"), newContext);
 
         assertEquals(1, retries().size(), "each dropped claim gets at most one witness");
         JsonNode retry = retries().getFirst();
@@ -216,14 +216,14 @@ class EndTxnFaultFilterTest {
     @Test
     void aMatchingRequestBeforeHealDoesNotConsumeThePostHealWitness() throws IOException {
         FaultRuleBook book = book("drop-request");
-        EndTxnFaultFilter filter = new EndTxnFaultFilter(book);
-        assertTrue(dropped(filter.onEndTxnRequest(
+        KafkaProtocolFaultFilter filter = new KafkaProtocolFaultFilter(book);
+        assertTrue(dropped(filter.onRequest(org.apache.kafka.common.protocol.ApiKeys.END_TXN,
                 VERSION, requestHeader(91), commit("eos-0-1"), CONTEXT)));
-        filter.onEndTxnRequest(VERSION, requestHeader(92), commit("eos-0-1"), CONTEXT);
+        filter.onRequest(org.apache.kafka.common.protocol.ApiKeys.END_TXN,VERSION, requestHeader(92), commit("eos-0-1"), CONTEXT);
         assertTrue(retries().isEmpty());
         heal(book);
 
-        filter.onEndTxnRequest(VERSION, requestHeader(93), commit("eos-0-1"), CONTEXT);
+        filter.onRequest(org.apache.kafka.common.protocol.ApiKeys.END_TXN,VERSION, requestHeader(93), commit("eos-0-1"), CONTEXT);
 
         assertEquals(1, retries().size());
         assertEquals(93, retries().getFirst().path("correlationId").intValue());
@@ -233,15 +233,15 @@ class EndTxnFaultFilterTest {
     @Test
     void aRequestAfterHealIsNotARetryWitnessUntilThePendingResponseWasDropped() throws IOException {
         FaultRuleBook book = book("drop-response");
-        EndTxnFaultFilter filter = new EndTxnFaultFilter(book);
-        filter.onEndTxnRequest(VERSION, requestHeader(101), commit("eos-0-1"), CONTEXT);
+        KafkaProtocolFaultFilter filter = new KafkaProtocolFaultFilter(book);
+        filter.onRequest(org.apache.kafka.common.protocol.ApiKeys.END_TXN,VERSION, requestHeader(101), commit("eos-0-1"), CONTEXT);
         heal(book);
-        filter.onEndTxnRequest(VERSION, requestHeader(102), commit("eos-0-1"), CONTEXT);
+        filter.onRequest(org.apache.kafka.common.protocol.ApiKeys.END_TXN,VERSION, requestHeader(102), commit("eos-0-1"), CONTEXT);
         assertTrue(retries().isEmpty());
-        assertTrue(dropped(filter.onEndTxnResponse(VERSION,
+        assertTrue(dropped(filter.onResponse(org.apache.kafka.common.protocol.ApiKeys.END_TXN,VERSION,
                 new ResponseHeaderData().setCorrelationId(101), new EndTxnResponseData(), CONTEXT)));
 
-        filter.onEndTxnRequest(VERSION, requestHeader(103), commit("eos-0-1"), CONTEXT);
+        filter.onRequest(org.apache.kafka.common.protocol.ApiKeys.END_TXN,VERSION, requestHeader(103), commit("eos-0-1"), CONTEXT);
 
         assertEquals(1, retries().size());
         assertEquals(103, retries().getFirst().path("correlationId").intValue());
@@ -251,13 +251,13 @@ class EndTxnFaultFilterTest {
     void observingARetryDoesNotStopAnotherFaultFromDroppingIt() throws IOException {
         FaultRuleBook book = book("drop-request");
         String rule = Files.readString(control.resolve("rules/f1.json"));
-        EndTxnFaultFilter filter = new EndTxnFaultFilter(book);
-        filter.onEndTxnRequest(VERSION, requestHeader(111), commit("eos-0-1"), CONTEXT);
+        KafkaProtocolFaultFilter filter = new KafkaProtocolFaultFilter(book);
+        filter.onRequest(org.apache.kafka.common.protocol.ApiKeys.END_TXN,VERSION, requestHeader(111), commit("eos-0-1"), CONTEXT);
         heal(book);
         Files.writeString(control.resolve("rules/f2.json"), rule.replace("\"f1\"", "\"f2\""));
         book.refresh();
 
-        assertTrue(dropped(filter.onEndTxnRequest(
+        assertTrue(dropped(filter.onRequest(org.apache.kafka.common.protocol.ApiKeys.END_TXN,
                 VERSION, requestHeader(112), commit("eos-0-1"), CONTEXT)));
 
         assertEquals(1, retries().size());
@@ -269,12 +269,12 @@ class EndTxnFaultFilterTest {
     @Test
     void closingTheBookForgetsUnobservedRetries() throws IOException {
         FaultRuleBook book = book("drop-request");
-        EndTxnFaultFilter filter = new EndTxnFaultFilter(book);
-        filter.onEndTxnRequest(VERSION, requestHeader(121), commit("eos-0-1"), CONTEXT);
+        KafkaProtocolFaultFilter filter = new KafkaProtocolFaultFilter(book);
+        filter.onRequest(org.apache.kafka.common.protocol.ApiKeys.END_TXN,VERSION, requestHeader(121), commit("eos-0-1"), CONTEXT);
         heal(book);
         book.close();
 
-        filter.onEndTxnRequest(VERSION, requestHeader(122), commit("eos-0-1"), CONTEXT);
+        filter.onRequest(org.apache.kafka.common.protocol.ApiKeys.END_TXN,VERSION, requestHeader(122), commit("eos-0-1"), CONTEXT);
 
         assertTrue(retries().isEmpty());
     }
@@ -282,20 +282,20 @@ class EndTxnFaultFilterTest {
     @Test
     void aFailedRetryEventWriteDoesNotPreventForwardingOrConsumeTheWitness() throws IOException {
         FaultRuleBook book = book("drop-request");
-        EndTxnFaultFilter filter = new EndTxnFaultFilter(book);
-        filter.onEndTxnRequest(VERSION, requestHeader(131), commit("eos-0-1"), CONTEXT);
+        KafkaProtocolFaultFilter filter = new KafkaProtocolFaultFilter(book);
+        filter.onRequest(org.apache.kafka.common.protocol.ApiKeys.END_TXN,VERSION, requestHeader(131), commit("eos-0-1"), CONTEXT);
         heal(book);
         Path eventFile = control.resolve("events/f1.jsonl");
         String previousEvents = Files.readString(eventFile);
         Files.delete(eventFile);
         Files.createDirectory(eventFile); // deterministic append failure, even with elevated privileges
 
-        assertFalse(dropped(filter.onEndTxnRequest(
+        assertFalse(dropped(filter.onRequest(org.apache.kafka.common.protocol.ApiKeys.END_TXN,
                 VERSION, requestHeader(132), commit("eos-0-1"), CONTEXT)));
 
         Files.delete(eventFile);
         Files.writeString(eventFile, previousEvents);
-        assertFalse(dropped(filter.onEndTxnRequest(
+        assertFalse(dropped(filter.onRequest(org.apache.kafka.common.protocol.ApiKeys.END_TXN,
                 VERSION, requestHeader(133), commit("eos-0-1"), CONTEXT)));
         assertEquals(1, retries().size());
         assertEquals(133, retries().getFirst().path("correlationId").intValue());

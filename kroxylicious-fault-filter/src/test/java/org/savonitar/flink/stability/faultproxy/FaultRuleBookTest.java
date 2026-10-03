@@ -148,7 +148,7 @@ class FaultRuleBookTest {
     void reportsAnInvalidRuleOnceAndNeverArmsIt() throws IOException {
         FaultRuleBook book = new FaultRuleBook(control, () -> 0L);
         writeRule("f2", """
-                {"faultId": "f2", "api": "produce", "action": "drop-request", "occurrences": 1}
+                {"faultId": "f2", "api": "fetch", "action": "drop-request", "occurrences": 1}
                 """);
         book.refresh();
         book.refresh();
@@ -157,7 +157,7 @@ class FaultRuleBookTest {
         List<JsonNode> events = events("f2");
         assertEquals(1, events.size());
         assertEquals("rejected", events.getFirst().get("event").textValue());
-        assertTrue(events.getFirst().get("reason").textValue().contains("produce"));
+        assertTrue(events.getFirst().get("reason").textValue().contains("fetch"));
     }
 
     @Test
@@ -167,7 +167,7 @@ class FaultRuleBookTest {
                 {"faultId":"retry","api":"end-txn","action":"drop-request","occurrences":2}
                 """);
         book.refresh();
-        FaultRuleBook.EndTxnIdentity request = identity("eos-0-1", true);
+        FaultRuleBook.RequestIdentity request = identity("eos-0-1", true);
         for (int index = 0; index < 2; index++) {
             FaultRuleBook.Claim claim = book.claim(request).orElseThrow();
             book.record(claim, "request-dropped", Map.of("occurrence", book.complete(claim)));
@@ -227,8 +227,8 @@ class FaultRuleBookTest {
                 """)));
     }
 
-    private static FaultRuleBook.EndTxnIdentity identity(String transactionalId, boolean committed) {
-        return new FaultRuleBook.EndTxnIdentity(transactionalId, 1000L, (short) 3, committed);
+    private static FaultRuleBook.RequestIdentity identity(String transactionalId, boolean committed) {
+        return new FaultRuleBook.RequestIdentity(transactionalId, 1000L, (short) 3, committed);
     }
 
     private void writeRule(String faultId, String json) throws IOException {

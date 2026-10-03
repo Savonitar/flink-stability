@@ -430,8 +430,8 @@ class ExecutablePhaseExecutorTest {
     }
 
     @Test
-    void injectsEachEndTxnFaultAndKeepsWhatItDid() throws Exception {
-        ExecutableScenarioPlan plan = plan(ExecutablePhaseExecutorTest::addEndTxnFault);
+    void injectsEachProtocolFaultAndKeepsWhatItDid() throws Exception {
+        ExecutableScenarioPlan plan = plan(ExecutablePhaseExecutorTest::addProtocolFault);
         List<String> injected = new ArrayList<>();
         ExecutablePhaseExecutor executor = new ExecutablePhaseExecutor(
                 new FakeFlink(new ArrayList<>()),
@@ -458,7 +458,7 @@ class ExecutablePhaseExecutorTest {
 
     @Test
     void aProxyThatCannotInjectMakesTheAttemptInconclusive() {
-        ExecutableScenarioPlan plan = plan(ExecutablePhaseExecutorTest::addEndTxnFault);
+        ExecutableScenarioPlan plan = plan(ExecutablePhaseExecutorTest::addProtocolFault);
         ExecutablePhaseExecutor executor = new ExecutablePhaseExecutor(
                 new FakeFlink(new ArrayList<>()),
                 new FakeTaskManagers(new ArrayList<>()),
@@ -613,7 +613,7 @@ class ExecutablePhaseExecutorTest {
     }
 
     /** Routes the sink through kafka-proxy; the only step drops a commit request there. */
-    private static void addEndTxnFault(ObjectNode document) {
+    private static void addProtocolFault(ObjectNode document) {
         ObjectNode proxy = ((ObjectNode) document.at("/setup")).putObject("proxies")
                 .putObject("kafka-proxy");
         proxy.put("type", "kroxylicious");

@@ -1375,6 +1375,7 @@
             "timeout"
           ],
           "properties": {
+            "require_commit": { "type": "boolean" },
             "mode": {
               "enum": [
                 "kill",
@@ -1876,13 +1877,15 @@
           "allOf": [
             {
               "if": {
+                "anyOf": [{"required": ["occurrences"]}, {"required": ["trigger_deadline"]}, {
                 "properties": {
                   "fault": {
                     "properties": {
                       "type": {
                         "enum": [
                           "drop-request",
-                          "drop-response"
+                          "drop-response",
+                          "error-after-append"
                         ]
                       }
                     },
@@ -1894,6 +1897,7 @@
                 "required": [
                   "fault"
                 ]
+                }]
               },
               "then": {
                 "required": [
@@ -2220,7 +2224,8 @@
             "add-partitions-to-txn",
             "add-offsets-to-txn",
             "txn-offset-commit",
-            "end-txn"
+            "end-txn",
+            "find-coordinator"
           ]
         },
         "topic": {
@@ -2296,7 +2301,7 @@
           ],
           "properties": {
             "type": {
-              "const": "error-response"
+              "enum": ["error-response", "error-after-append"]
             },
             "error": {
               "$ref": "#/$defs/kebabName"

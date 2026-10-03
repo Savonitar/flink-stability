@@ -51,7 +51,7 @@ final class ProxyFaultInjector implements ExecutablePhaseExecutor.NetworkFaults 
     @Override
     public PhaseExecutionEvidence.NetworkFault inject(
             String path,
-            ExecutableScenarioPlan.EndTxnFault fault) throws IOException, InterruptedException {
+            ExecutableScenarioPlan.ProtocolFault fault) throws IOException, InterruptedException {
         String faultId = path.substring("$/".length()).replace('/', '-');
         Path rule = rules.resolve(faultId + ".json");
         writeRule(faultId, fault);
@@ -72,7 +72,7 @@ final class ProxyFaultInjector implements ExecutablePhaseExecutor.NetworkFaults 
             String path,
             String faultId,
             Path rule,
-            ExecutableScenarioPlan.EndTxnFault fault) throws IOException, InterruptedException {
+            ExecutableScenarioPlan.ProtocolFault fault) throws IOException, InterruptedException {
         List<JsonNode> seen = await(faultId, ACKNOWLEDGEMENT_TIMEOUT,
                 lines -> first(lines, "armed").isPresent()
                         || first(lines, "rejected").isPresent());
@@ -86,11 +86,17 @@ final class ProxyFaultInjector implements ExecutablePhaseExecutor.NetworkFaults 
 
         boolean requestsDropped =
                 fault.action() == ExecutableScenarioPlan.NetworkFaultAction.DROP_REQUEST;
-        String droppedEvent = requestsDropped ? "request-dropped" : "response-dropped";
+        String droppedEvent = switch (fault.action()) {
+            case DROP_REQUEST -> "request-dropped";
+            case DROP_RESPONSE -> "response-dropped";
+            case DELAY -> "request-delayed";
+            case ERROR_RESPONSE -> "response-substituted";
+            case ERROR_AFTER_APPEND -> "response-error-after-append";
+        };
         // The filter measures this budget from arm on its own monotonic clock. Harness
         // scheduling and delayed file visibility cannot turn a late drop into a trigger.
         await(faultId, fault.triggerDeadline(), lines -> all(lines, droppedEvent).stream()
-                .filter(drop -> qualified(drop, requestsDropped))
+                .filter(drop -> qualified(drop, fault))
                 .count() >= fault.occurrences());
 
         Files.delete(rule);
@@ -100,7 +106,9 @@ final class ProxyFaultInjector implements ExecutablePhaseExecutor.NetworkFaults 
                 "The proxy did not heal fault " + faultId + " within " + ACKNOWLEDGEMENT_TIMEOUT));
 
         List<PhaseExecutionEvidence.DroppedMessage> dropped = new ArrayList<>();
-        for (JsonNode drop : all(recorded, droppedEvent)) {
+        for (JsonNode drop : ("end-txn".equals(fault.api())
+                && (fault.action() == ExecutableScenarioPlan.NetworkFaultAction.DROP_REQUEST || fault.action() == ExecutableScenarioPlan.NetworkFaultAction.DROP_RESPONSE)
+                ? all(recorded, droppedEvent) : List.<JsonNode>of())) {
             // A dropped response carries the broker's answer; its request fields were recorded
             // when the same claim was forwarded.
             JsonNode request = requestsDropped
@@ -142,7 +150,8 @@ final class ProxyFaultInjector implements ExecutablePhaseExecutor.NetworkFaults 
                 dropped,
                 all(recorded, "response-forwarded").stream()
                         .map(forwarded -> forwarded.path("error").asText())
-                        .toList());
+                        .toList(), fault.api(),
+                ProxyFaultEvidence.affected(recorded, droppedEvent));
     }
 
     /**
@@ -167,11 +176,14 @@ final class ProxyFaultInjector implements ExecutablePhaseExecutor.NetworkFaults 
     }
 
     /** Moves a complete rule into place, so the filter never reads a partial file. */
-    private void writeRule(String faultId, ExecutableScenarioPlan.EndTxnFault fault)
+    private void writeRule(String faultId, ExecutableScenarioPlan.ProtocolFault fault)
             throws IOException {
         ObjectNode rule = JSON.createObjectNode();
         rule.put("faultId", faultId);
-        rule.put("api", "end-txn");
+        rule.put("api", fault.api());
+        fault.topic().ifPresent(value -> rule.put("topic", value));
+        fault.latency().ifPresent(value -> rule.put("latencyMillis", value.toMillis()));
+        fault.error().ifPresent(value -> rule.put("error", value));
         fault.result().ifPresent(result -> rule.put("result",
                 result.name().toLowerCase(Locale.ROOT)));
         fault.transactionalIdPrefix().ifPresent(prefix ->
@@ -234,9 +246,17 @@ final class ProxyFaultInjector implements ExecutablePhaseExecutor.NetworkFaults 
         return lines.stream().filter(line -> event.equals(line.path("event").asText())).toList();
     }
 
-    private static boolean qualified(JsonNode drop, boolean requestsDropped) {
-        return drop.path("beforeDeadline").isBoolean()
-                && drop.path("beforeDeadline").booleanValue()
-                && (requestsDropped || "NONE".equals(drop.path("error").asText()));
+    private static boolean qualified(JsonNode event, ExecutableScenarioPlan.ProtocolFault fault) {
+        if (!event.path("beforeDeadline").isBoolean() || !event.path("beforeDeadline").booleanValue()) return false;
+        return switch (fault.action()) {
+            case DROP_REQUEST -> true;
+            case DROP_RESPONSE -> "NONE".equals(event.path("error").asText());
+            case DELAY -> event.path("requestedDelayMillis").longValue() == fault.latency().orElseThrow().toMillis()
+                    && event.path("actualDelayNanos").longValue() >= fault.latency().orElseThrow().toNanos();
+            case ERROR_AFTER_APPEND -> ProxyFaultEvidence.qualifiesAfterAppend(event);
+            case ERROR_RESPONSE -> event.path("substitutedErrorCode").isIntegralNumber()
+                    && !event.path("forwardedToBroker").asBoolean(true)
+                    && "synthetic-before-broker".equals(event.path("errorOrigin").asText());
+        };
     }
 }

@@ -15,6 +15,23 @@ recipe overlays a few classes while preserving other upstream JAR contents,
 including LICENSE and NOTICE. It does not build a connector fork or install into
 the Maven cache.
 
+## Revalidation required after the proxy replacement
+
+The results below describe the 2026-09-26 engine only. The common transactional
+filter now serves the same canonical EndTxn scenarios. Those historical results
+do **not** qualify the replacement. Before merging, rerun all six cells on the
+current harness: both controls and both harmless mutant cells must PASS;
+assume/request must FAIL with missing IDs and rewrite/response must FAIL with
+duplicates, with all interpretation evidence below. Do not change the canonical
+faults, expectations, checkpointing or load to make that matrix green.
+
+For Docker installations requiring the fully qualified Flink reference, append
+`--flink-image docker.io/library/flink:2.2.0` to `catalogs.py`. It changes only
+new catalogs and records the actual image override and catalog hashes. Preserve
+old run outputs; use a fresh output directory. Include `--kafka-log-output` in
+future runs to retain physical log evidence. New chaos-profile calibration is
+an additional matrix and cannot substitute for this regression check.
+
 ## Reproduce
 
 Use JDK **21.0.7** in `JAVA_HOME` and `PATH`, Python 3, Maven, and `patch`. The

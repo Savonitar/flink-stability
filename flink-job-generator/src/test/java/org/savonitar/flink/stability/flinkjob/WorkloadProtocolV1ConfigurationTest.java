@@ -26,6 +26,19 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 class WorkloadProtocolV1ConfigurationTest {
 
     @Test
+    void calibrationChangesOnlyTheRequestedProducerProperty() throws Exception {
+        WorkloadProtocolV1Configuration workload = parse(baseExactlyOnceValues());
+        java.lang.reflect.Field field = org.apache.flink.connector.kafka.sink.KafkaSink.class
+                .getDeclaredField("kafkaProducerConfig");
+        field.setAccessible(true);
+        java.util.Properties regular = (java.util.Properties) field.get(FlinkKafkaEosJob.createSink(workload));
+        java.util.Properties calibration = (java.util.Properties) field.get(FlinkKafkaEosJob.createSink(workload, 5000));
+        assertNull(regular.getProperty("max.block.ms"));
+        assertEquals("5000", calibration.remove("max.block.ms"));
+        assertEquals(regular, calibration);
+    }
+
+    @Test
     void parsesExactlyOnceWorkloadWithIndependentEndpointsAndBoundedOffsets() {
         WorkloadProtocolV1Configuration workload = parse(baseExactlyOnceValues());
 

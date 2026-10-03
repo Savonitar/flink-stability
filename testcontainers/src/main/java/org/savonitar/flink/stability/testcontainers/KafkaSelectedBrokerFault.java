@@ -9,6 +9,9 @@ final class KafkaSelectedBrokerFault {
     interface Driver {
         KafkaBrokerControl.Selection select(KafkaBrokerControl.Target target, MonotonicDeadline deadline) throws Exception;
         KafkaBrokerFault.Driver broker(String name);
+        default long clockMillis() { return System.currentTimeMillis(); }
+        default long sessionTimeoutMillis(int brokerId, MonotonicDeadline deadline) throws Exception { throw new UnsupportedOperationException("Broker session timeout unavailable"); }
+        default KafkaCommitWindow.Transaction transaction(String id, MonotonicDeadline deadline) throws Exception { throw new UnsupportedOperationException("Transaction observation unavailable"); }
         default long nanoTime() { return System.nanoTime(); }
     }
     static List<KafkaBrokerControl.Evidence> execute(KafkaBrokerControl.Request request,
@@ -26,6 +29,9 @@ final class KafkaSelectedBrokerFault {
                 if (!observed.contains(selected)) observed.add(selected);
             }
             if (observed.size() > 129) throw new IllegalStateException("Broker observation partition bound exceeded");
+            long sessionMillis = request.commitTransactionVersion() == null ? 0 : driver.sessionTimeoutMillis(selection.leader(), deadline);
+            if (request.commitTransactionVersion() != null && (sessionMillis <= 0 || request.duration().toMillis() <= sessionMillis))
+                throw new IllegalStateException("Commit fault hold must exceed the observed broker session timeout");
             broker = driver.broker(selection.broker());
             var selected = selection; var physical = broker;
             var guarded = new KafkaBrokerFault.Driver() {
@@ -47,6 +53,11 @@ final class KafkaSelectedBrokerFault {
             };
             result.add(KafkaBrokerFault.execute(selection.broker(), request.action(), observed, deadline, guarded,
                     request.duration()).withSelection(selection));
+            if (request.commitTransactionVersion() != null && result.getFirst().confirmed()) {
+                var witness = KafkaCommitWindowObserver.observe(selection, request.commitTransactionVersion(), sessionMillis,
+                        heldAt[0], request.duration(), deadline, driver, broker);
+                result.set(0, result.getFirst().withCommitWindow(witness));
+            }
             while (mutationAttempted[0] && driver.nanoTime() - heldAt[0] < request.duration().toNanos()) {
                 if (deadline.remaining().isZero()) throw new IllegalStateException("Broker hold deadline expired");
                 broker.pause(deadline);

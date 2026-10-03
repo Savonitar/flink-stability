@@ -104,6 +104,7 @@ final class V1ExecutionResultRenderer {
             event.transactionalId().ifPresent(value -> item.put("transactionalId", value));
             var kinds = item.putArray("kinds");
             event.kinds().forEach(kinds::add);
+            item.put("message", event.message());
         });
         var componentDiagnostics = componentErrorsNode.putArray("diagnostics");
         result.componentErrors().diagnostics().forEach(componentDiagnostics::add);
@@ -279,6 +280,28 @@ final class V1ExecutionResultRenderer {
             rendered.put("healedAtMillis", fault.healedAtMillis());
             ArrayNode forwardedErrors = rendered.putArray("forwardedErrors");
             fault.forwardedErrors().forEach(forwardedErrors::add);
+            rendered.put("api", fault.api());
+            ArrayNode affected = rendered.putArray("affected");
+            fault.affected().forEach(message -> {
+                ObjectNode event = affected.addObject();
+                event.put("occurrence", message.occurrence()); event.put("claim", message.claim());
+                event.put("timeMillis", message.timeMillis()); event.put("beforeDeadline", message.beforeDeadline());
+                event.put("event", message.event()); event.put("api", message.api()); event.put("apiVersion", message.apiVersion());
+                event.put("correlationId", message.correlationId()); event.put("transactionalId", message.transactionalId());
+                if (message.producerId() == null) event.putNull("producerId"); else event.put("producerId", message.producerId());
+                if (message.producerEpoch() == null) event.putNull("producerEpoch"); else event.put("producerEpoch", message.producerEpoch().intValue());
+                if (message.committed() == null) event.putNull("committed"); else event.put("committed", message.committed());
+                ObjectNode original = event.putObject("originalErrorCodes");
+                message.originalErrorCodes().forEach((entity, code) -> original.put(entity, code.intValue()));
+                if (message.originalErrorCodes().size() == 1) event.put("originalErrorCode", message.originalErrorCodes().values().iterator().next().intValue());
+                else event.putNull("originalErrorCode");
+                ObjectNode offsets = event.putObject("originalBaseOffsets");
+                message.originalBaseOffsets().forEach(offsets::put);
+                event.put("errorOrigin", message.substitutedErrorCode() != null ? (message.forwardedToBroker() ? "synthetic-after-append" : "synthetic-before-broker") : message.originalErrorCodes().isEmpty() ? "unavailable" : "broker-response");
+                if (message.substitutedErrorCode() == null) event.putNull("substitutedErrorCode"); else event.put("substitutedErrorCode", message.substitutedErrorCode().intValue());
+                event.put("forwardedToBroker", message.forwardedToBroker());
+                event.put("requestedDelayMillis", message.requestedDelayMillis()); event.put("actualDelayNanos", message.actualDelayNanos());
+            });
             ArrayNode dropped = rendered.putArray("dropped");
             fault.dropped().forEach(message -> {
                 ObjectNode drop = dropped.addObject();

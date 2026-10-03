@@ -72,6 +72,21 @@ class ExecutableScenarioPlanCompilerTest {
         }));
     }
 
+    @Test void requiresExplicitTransactionVersionAndIncrementingIdsForCommitWitness() {
+        for (boolean complete : List.of(true, false)) {
+            var plan = resolved(document -> {
+                ((ObjectNode) document.at("/setup/kafka/clusters/main")).put("brokers", 3);
+                if (complete) ((ObjectNode) document.at("/setup/kafka/clusters/main")).put("transaction_version", 2);
+                ((ObjectNode) document.at("/workload/jobs/0/sink")).put("transaction_id_naming_strategy", "INCREMENTING");
+                document.at("/setup/kafka/clusters/main/topics").forEach(topic -> ((ObjectNode) topic).put("replication_factor", 3));
+                var fault = replaceSteps(document).addObject().putObject("broker_fault").put("mode", "kill").put("duration", "45s").put("timeout", "2m").put("require_commit", true);
+                fault.putObject("target").put("kind", "selector").put("role", "broker").put("cluster", "main").put("type", "transaction-coordinator").put("job", "eos-job");
+            });
+            if (complete) assertEquals(2, ((ExecutableScenarioPlan.BrokerFault) compiler.compile(plan).phases().getFirst().steps().getFirst()).request().commitTransactionVersion());
+            else assertThrows(SpecificationException.class, () -> compiler.compile(plan));
+        }
+    }
+
     @Test
     void compilesThreeBrokersWithNamedKillRestartAndRejectsUnhealedOrWrongTopology() {
         for (boolean heal : List.of(true, false)) {
@@ -1327,7 +1342,7 @@ class ExecutableScenarioPlanCompilerTest {
     }
 
     @Test
-    void compilesAProxyRoutedSinkAndACountedEndTxnFault() {
+    void compilesAProxyRoutedSinkAndACountedProtocolFault() {
         ExecutableScenarioPlan plan = compiler.compile(resolved(document -> {
             routeSinkThroughProxy(document);
             ObjectNode fault = replaceSteps(document).addObject().putObject("network_fault");
@@ -1347,7 +1362,7 @@ class ExecutableScenarioPlanCompilerTest {
                 new ExecutableScenarioPlan.KafkaProxy("kafka-proxy", "kafka-proxy", 9092);
         assertEquals(java.util.Optional.of(proxy), plan.kafka().proxy());
         assertEquals(java.util.Optional.of(proxy), plan.job().sink().proxy());
-        assertEquals(List.of(new ExecutableScenarioPlan.EndTxnFault(
+        assertEquals(List.of(new ExecutableScenarioPlan.ProtocolFault(
                         "kafka-proxy",
                         java.util.Optional.of(ExecutableScenarioPlan.TransactionResult.COMMIT),
                         java.util.Optional.of("minimal"),
@@ -1366,10 +1381,6 @@ class ExecutableScenarioPlanCompilerTest {
     void rejectsProxiesAndNetworkFaultsTheRunnerCannotExecute() {
         record Case(String code, Consumer<ObjectNode> mutation) {}
         List<Case> cases = List.of(
-                new Case("runner.network-fault.api-unsupported", document -> {
-                    ObjectNode fault = dropFault(document, "drop-request");
-                    ((ObjectNode) fault.get("match")).put("api", "produce").put("topic", "output");
-                }),
                 new Case("runner.network-fault.type-unsupported", document -> {
                     ObjectNode fault = dropFault(document, "delay");
                     ((ObjectNode) fault.get("fault")).put("latency", "1s");
@@ -1420,6 +1431,49 @@ class ExecutableScenarioPlanCompilerTest {
                             .anyMatch(diagnostic -> diagnostic.code().equals(rejected.code())),
                     failure.getMessage());
         }
+    }
+
+    @Test
+    void compilesCountedProtocolFaultsAndRejectsExcessiveDelay() {
+        for (String api : java.util.List.of("end-txn", "init-producer-id", "produce", "add-partitions-to-txn", "add-offsets-to-txn", "txn-offset-commit", "find-coordinator")) {
+            for (String action : java.util.List.of("drop-request", "drop-response", "delay", "error-response")) {
+                var plan = compiler.compile(resolved(document -> {
+                    var fault = dropFault(document, action);
+                    ((ObjectNode) fault.get("match")).put("api", api).put("transactional_id_prefix", "minimal");
+                    if (action.equals("delay")) ((ObjectNode) fault.get("fault")).put("latency", "3s");
+                    if (action.equals("error-response")) ((ObjectNode) fault.get("fault")).put("error", api.equals("produce") ? "request-timed-out" : "coordinator-not-available");
+                }));
+                assertEquals(api, ((ExecutableScenarioPlan.ProtocolFault) plan.phases().getFirst().steps().getFirst()).api());
+            }
+        }
+        assertFailsAt(Stage.RUNNER_CAPABILITY, () -> compiler.compile(resolved(document -> {
+            var fault = dropFault(document, "delay");
+            ((ObjectNode) fault.get("fault")).put("latency", "6s");
+        })));
+    }
+
+    @Test
+    void compilesOnlyTheSafeCountedErrorAfterAppend() {
+        var plan = compiler.compile(resolved(document -> {
+            var fault = dropFault(document, "error-after-append");
+            ((ObjectNode) fault.get("match")).put("api", "produce").put("transactional_id_prefix", "minimal");
+            ((ObjectNode) fault.get("fault")).put("error", "request-timed-out");
+        }));
+        assertEquals(ExecutableScenarioPlan.NetworkFaultAction.ERROR_AFTER_APPEND,
+                ((ExecutableScenarioPlan.ProtocolFault) plan.phases().getFirst().steps().getFirst()).action());
+        for (String api : java.util.List.of("produce", "end-txn")) {
+            org.junit.jupiter.api.Assertions.assertThrows(SpecificationException.class, () -> compiler.compile(resolved(document -> {
+                var fault = dropFault(document, "error-after-append");
+                ((ObjectNode) fault.get("match")).put("api", api);
+                ((ObjectNode) fault.get("fault")).put("error", api.equals("produce") ? "not-enough-replicas" : "request-timed-out");
+            })));
+        }
+        org.junit.jupiter.api.Assertions.assertThrows(SpecificationException.class, () -> compiler.compile(resolved(document -> {
+            var fault = dropFault(document, "error-after-append");
+            ((ObjectNode) fault.get("match")).put("api", "produce");
+            ((ObjectNode) fault.get("fault")).put("error", "request-timed-out");
+            fault.remove("occurrences");
+        })));
     }
 
     /** Declares kafka-proxy and routes the sink through it. */

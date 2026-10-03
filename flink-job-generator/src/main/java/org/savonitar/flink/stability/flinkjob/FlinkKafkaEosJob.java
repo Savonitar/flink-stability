@@ -52,7 +52,7 @@ public class FlinkKafkaEosJob {
             WorkloadProtocolV1Configuration workload,
             FlinkKafkaEosJobArguments arguments) {
         KafkaSource<String> source = createSource(workload);
-        KafkaSink<String> sink = createSink(workload);
+        KafkaSink<String> sink = createSink(workload, arguments.producerMaxBlockMs());
 
         // The delay runs in an operator chained to the source, so it slows the source itself.
         // A delay after the keyBy shuffle would let the source fill the network buffers
@@ -87,7 +87,14 @@ public class FlinkKafkaEosJob {
     }
 
     static KafkaSink<String> createSink(WorkloadProtocolV1Configuration workload) {
+        return createSink(workload, null);
+    }
+
+    static KafkaSink<String> createSink(WorkloadProtocolV1Configuration workload, Integer maxBlockMs) {
         Properties producerProperties = new Properties();
+        if (maxBlockMs != null) {
+            producerProperties.setProperty(ProducerConfig.MAX_BLOCK_MS_CONFIG, maxBlockMs.toString());
+        }
         if (workload.transactionTimeoutMs() != null) {
             producerProperties.setProperty(
                     ProducerConfig.TRANSACTION_TIMEOUT_CONFIG,

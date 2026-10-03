@@ -62,6 +62,21 @@ class CatalogEvidenceTest(unittest.TestCase):
         ], cwd=self.harness, capture_output=True, text=True, check=False)
         self.assertEqual(0, result.returncode, result.stdout + result.stderr)
 
+    def test_full_image_copy_keeps_canonical_and_records_actual_catalog_hashes(self):
+        output = self.harness / "full-image"
+        command = [sys.executable, "-B", str(self.harness / RECIPE / "catalogs.py"),
+                   "--harness-root", str(self.harness), "--output", str(output),
+                   "--flink-image", "docker.io/library/flink:2.2.0"]
+        result = subprocess.run(command, cwd=self.harness, capture_output=True, text=True)
+        self.assertEqual(0, result.returncode, result.stderr)
+        for row in json.loads((output / "manifest.json").read_text())["cells"]:
+            self.assertEqual("docker.io/library/flink:2.2.0", row["flinkImageOverride"])
+            catalog = output / row["cell"] / (row["scenario"] + ".yaml")
+            self.assertEqual(digest(catalog), row["scenarioSha256"])
+            self.assertIn("image: docker.io/library/flink:2.2.0", catalog.read_text())
+            self.assertIn("image: flink:2.2.0", (self.harness / "scenarios" / catalog.name).read_text())
+            self.assertIn("transaction_timeout: 60s", catalog.read_text())
+
     def test_archive_retains_exact_imported_helper_and_hash_in_every_cell(self):
         helper_name = "tools/subject_catalog.py"
         archived = self.output / "evidence" / helper_name

@@ -33,6 +33,7 @@ def run_result(subject=CANDIDATE_HASH, status="pass", reason="validator.kafka.id
                 }}],
             },
             "terminalValidation": {"missing": 0, "duplicates": 0},
+            "taskManagerKills": [{"confirmed": True}],
         },
     }
 
@@ -156,7 +157,7 @@ class GateCommandTest(unittest.TestCase):
         self.root = Path(temporary.name)
         tools = self.root / "tools"
         tools.mkdir()
-        for name in ("pr_gate.py", "subject_catalog.py"):
+        for name in ("pr_gate.py", "subject_catalog.py", "chaos_profiles.py", "gate_evidence.py"):
             shutil.copyfile(ROOT / "tools" / name, tools / name)
         scenarios = self.root / "scenarios"
         scenarios.mkdir()

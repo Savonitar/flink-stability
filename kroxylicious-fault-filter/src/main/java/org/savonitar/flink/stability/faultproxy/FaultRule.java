@@ -17,16 +17,29 @@ record FaultRule(
         Optional<String> transactionalIdPrefix,
         Action action,
         int occurrences,
-        long triggerDeadlineNanos) {
+        long triggerDeadlineNanos,
+        String api,
+        Optional<String> topic,
+        long latencyMillis,
+        Optional<String> error) {
     private static final Set<String> FIELDS = Set.of(
             "faultId", "api", "result", "transactionalIdPrefix", "action", "occurrences",
-            "triggerDeadlineNanos");
+            "triggerDeadlineNanos", "topic", "latencyMillis", "error");
 
     FaultRule {
         Objects.requireNonNull(faultId, "faultId");
         Objects.requireNonNull(result, "result");
         Objects.requireNonNull(transactionalIdPrefix, "transactionalIdPrefix");
         Objects.requireNonNull(action, "action");
+        if (action == Action.DELAY ? latencyMillis < 1 || latencyMillis > org.savonitar.flink.stability.runtime.api.KafkaProtocolFaultPolicy.MAX_DELAY_MILLIS : latencyMillis != 0)
+            throw new IllegalArgumentException("Delay must be 1..5000 ms, only for delay action");
+        if ((action == Action.ERROR_RESPONSE || action == Action.ERROR_AFTER_APPEND) != error.isPresent()) throw new IllegalArgumentException("Error only for error-response action");
+        error.ifPresent(value -> {
+            if (!(action == Action.ERROR_AFTER_APPEND
+                    ? org.savonitar.flink.stability.runtime.api.KafkaProtocolFaultPolicy.errorsAfterAppend(api)
+                    : org.savonitar.flink.stability.runtime.api.KafkaProtocolFaultPolicy.errors(api)).contains(value)) throw new IllegalArgumentException("Unsafe API/error pair");
+        });
+        if (!"end-txn".equals(api) && result != Result.ANY) throw new IllegalArgumentException("Outcome selector only for EndTxn");
         if (occurrences < 1) {
             throw new IllegalArgumentException("occurrences must be positive");
         }
@@ -51,7 +64,7 @@ record FaultRule(
         /** The request never reaches the broker, and the client never hears back. */
         DROP_REQUEST,
         /** The broker acts on the request, but the client never sees the response. */
-        DROP_RESPONSE;
+        DROP_RESPONSE, DELAY, ERROR_RESPONSE, ERROR_AFTER_APPEND;
 
         String wireName() {
             return name().toLowerCase(Locale.ROOT).replace('_', '-');
@@ -69,7 +82,7 @@ record FaultRule(
             }
         });
         String api = text(node, "api");
-        if (!"end-txn".equals(api)) {
+        if (!org.savonitar.flink.stability.runtime.api.KafkaProtocolFaultPolicy.APIS.contains(api)) {
             throw new IllegalArgumentException("unsupported api '" + api + "'");
         }
         Result result = node.has("result")
@@ -89,7 +102,22 @@ record FaultRule(
             throw new IllegalArgumentException("triggerDeadlineNanos must be an integer");
         }
         return new FaultRule(text(node, "faultId"), result, prefix, action,
-                occurrences.intValue(), deadline.longValue());
+                occurrences.intValue(), deadline.longValue(), api,
+                node.has("topic") ? Optional.of(text(node, "topic")) : Optional.empty(),
+                node.has("latencyMillis") ? integer(node, "latencyMillis") : 0,
+                node.has("error") ? Optional.of(text(node, "error")) : Optional.empty());
+    }
+
+    boolean matches(FaultRuleBook.RequestIdentity request) {
+        return api.equals(request.api()) && (result == Result.ANY || request.committed() != null && matches(request.transactionalId(), request.committed()))
+                && transactionalIdPrefix.map(prefix -> request.transactionalId() != null && request.transactionalId().startsWith(prefix)).orElse(true)
+                && topic.map(value -> request.topics().equals(Set.of(value))).orElse(true);
+    }
+
+    private static long integer(JsonNode node, String field) {
+        JsonNode value = node.get(field);
+        if (!value.isIntegralNumber() || !value.canConvertToLong()) throw new IllegalArgumentException(field + " must be an integer");
+        return value.longValue();
     }
 
     boolean matches(String transactionalId, boolean committed) {
