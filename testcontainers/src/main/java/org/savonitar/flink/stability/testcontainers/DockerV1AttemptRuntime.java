@@ -158,6 +158,11 @@ public final class DockerV1AttemptRuntime implements V1AttemptRuntime {
     public void close() {
         clusters.close();
     }
+    public org.savonitar.flink.stability.runtime.api.KafkaBrokerControl.Evidence brokerOperation(String name, boolean restart,
+            List<KafkaLogCapture.Partition> partitions, Duration timeout) {
+        return clusters.brokerOperation(name, restart, partitions, timeout);
+    }
+
     public KafkaLogCapture captureKafkaLogs(
             List<KafkaLogCapture.Partition> partitions,
             Path directory, MonotonicDeadline deadline) {

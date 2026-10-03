@@ -182,94 +182,7 @@ public final class ExecutableScenarioPlanCompiler {
             List<Diagnostic> issues) {
         NetworkFaultCompiler.validateProxies(source, document, issues);
 
-        ObjectNode clusters = (ObjectNode) document.at("/setup/kafka/clusters");
-        if (clusters.size() != 1) {
-            issues.add(issue(
-                    source,
-                    "runner.kafka.cluster-count-unsupported",
-                    "$/setup/kafka/clusters",
-                    "The first runner requires exactly one Kafka cluster, found "
-                            + clusters.size()));
-        }
-        if (!clusters.isEmpty()) {
-            Map.Entry<String, JsonNode> first = clusters.fields().next();
-            ObjectNode cluster = (ObjectNode) first.getValue();
-            String clusterPath = "$/setup/kafka/clusters/" + pointer(first.getKey());
-            String image = cluster.path("image").textValue();
-            if (image == null || !KafkaBrokerImagePolicy.isSupportedV1(image)) {
-                issues.add(issue(
-                        source,
-                        "runner.kafka.image-version-unsupported",
-                        clusterPath + "/image",
-                        "The first runner requires an official apache/kafka:4.0.x image"));
-            }
-            if (!"kraft".equals(cluster.path("mode").textValue())) {
-                issues.add(issue(
-                        source,
-                        "runner.kafka.mode-unsupported",
-                        clusterPath + "/mode",
-                        "The first runner requires KRaft mode"));
-            }
-            requireEqualInteger(
-                    source,
-                    cluster.path("brokers"),
-                    1,
-                    clusterPath + "/brokers",
-                    "runner.kafka.broker-count-unsupported",
-                    "The first runner requires exactly one Kafka broker",
-                    issues);
-            ArrayNode topics = (ArrayNode) cluster.path("topics");
-            if (topics.size() != 2) {
-                issues.add(issue(
-                        source,
-                        "runner.kafka.topic-count-unsupported",
-                        clusterPath + "/topics",
-                        "The first runner requires exactly the input and output topics, found "
-                                + topics.size()));
-            }
-            for (int index = 0; index < topics.size(); index++) {
-                ObjectNode topic = (ObjectNode) topics.get(index);
-                String topicPath = clusterPath + "/topics/" + index;
-                requirePositiveInt(source, topic.path("partitions"),
-                        topicPath + "/partitions", issues);
-                requireEqualInteger(
-                        source,
-                        topic.path("replication_factor"),
-                        1,
-                        topicPath + "/replication_factor",
-                        "runner.kafka.replication-factor-unsupported",
-                        "A one-broker runner requires replication_factor=1",
-                        issues);
-                if (topic.get("input_source") instanceof ObjectNode input) {
-                    if (input.has("connect_via_proxy")) {
-                        issues.add(issue(
-                                source,
-                                "runner.kafka.proxy-route-unsupported",
-                                topicPath + "/input_source/connect_via_proxy",
-                                "The first runner does not route input through a proxy"));
-                    }
-                    if (!"generated".equals(input.path("mode").textValue())) {
-                        issues.add(issue(
-                                source,
-                                "runner.input.mode-unsupported",
-                                topicPath + "/input_source/mode",
-                                "The first runner requires bounded generated input"));
-                    }
-                    if (!"integer-sequence".equals(input.path("format").textValue())) {
-                        issues.add(issue(
-                                source,
-                                "runner.input.format-unsupported",
-                                topicPath + "/input_source/format",
-                                "The first runner requires integer-sequence input"));
-                    }
-                    requireSupportedInputTotal(
-                            source,
-                            input.path("total"),
-                            topicPath + "/input_source/total",
-                            issues);
-                }
-            }
-        }
+        KafkaTopologyCompiler.validate(source, document, issues);
 
         ObjectNode flink = (ObjectNode) document.at("/setup/flink");
         HighAvailabilityPlanCompiler.validate(source, document, issues);
@@ -519,7 +432,7 @@ public final class ExecutableScenarioPlanCompiler {
                     false,
                     issues);
         }
-        TaskManagerLifecycleCompiler.validate(source, document, issues);
+        ProcessLifecycleCompiler.validate(source, document, issues);
     }
 
     private static void validateSteps(
@@ -684,8 +597,8 @@ public final class ExecutableScenarioPlanCompiler {
                 clusterAlias,
                 clusterNode.path("image").textValue(),
                 ExecutableScenarioPlan.KafkaMode.KRAFT,
-                1,
-                KafkaBrokerPolicy.v1SingleBroker(),
+                clusterNode.path("brokers").intValue(),
+                clusterNode.path("brokers").intValue() == 3 ? KafkaBrokerPolicy.threeBrokers() : KafkaBrokerPolicy.v1SingleBroker(),
                 topics,
                 clusterNode.has("transaction_version")
                         ? Optional.of(clusterNode.path("transaction_version").intValue())
@@ -881,11 +794,13 @@ public final class ExecutableScenarioPlanCompiler {
                 steps.add(new ExecutableScenarioPlan.Wait(
                         parseDuration(wait.path("duration").textValue())));
             } else if (step.get("kill") instanceof ObjectNode kill) {
-                steps.add(new ExecutableScenarioPlan.KillTaskManager(
-                        kill.at("/target/name").textValue()));
+                steps.add("broker".equals(kill.at("/target/role").asText())
+                        ? new ExecutableScenarioPlan.BrokerOperation(kill.at("/target/name").textValue(), false)
+                        : new ExecutableScenarioPlan.KillTaskManager(kill.at("/target/name").textValue()));
             } else if (step.has("restart")) {
-                steps.add(new ExecutableScenarioPlan.RestartTaskManager(
-                        step.path("restart").path("name").asText("taskmanager-1")));
+                steps.add("kafka".equals(step.at("/restart/component").asText())
+                        ? new ExecutableScenarioPlan.BrokerOperation(step.at("/restart/name").asText(), true)
+                        : new ExecutableScenarioPlan.RestartTaskManager(step.path("restart").path("name").asText("taskmanager-1")));
             } else if (step.get("network_fault") instanceof ObjectNode networkFault) {
                 steps.add(NetworkFaultCompiler.step(networkFault));
             } else if (step.has("leader_fault")) {
@@ -947,7 +862,7 @@ public final class ExecutableScenarioPlanCompiler {
                 plan.scenarioPlan().scenario().template().source(), code, path, message)));
     }
 
-    private static void requireEqualInteger(
+    static void requireEqualInteger(
             Path source,
             JsonNode value,
             int expected,
@@ -990,7 +905,7 @@ public final class ExecutableScenarioPlanCompiler {
         }
     }
 
-    private static void requireSupportedInputTotal(
+    static void requireSupportedInputTotal(
             Path source,
             JsonNode value,
             String path,

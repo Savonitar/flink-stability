@@ -161,7 +161,7 @@ final class ApacheKafkaRuntime implements KafkaRuntimeCluster {
         return ownedBinding();
     }
 
-    private static OwnedKafkaArchiveCapture.Driver archiveDriver(
+    static OwnedKafkaArchiveCapture.Driver archiveDriver(
             DockerClient client, String capturedId, String ownedNetworkId) {
         return new OwnedKafkaArchiveCapture.Driver() {
             @Override public OwnedKafkaArchiveCapture.Inspection inspect() {

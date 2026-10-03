@@ -213,10 +213,15 @@ public final class ExecutableScenarioPlan {
                     throw new IllegalArgumentException("transactionVersion must be 1 or 2");
                 }
             });
-            if (brokers != 1) {
-                throw new IllegalArgumentException("The first executable boundary requires one broker");
+            if ((brokers != 1 && brokers != 3) || brokerPolicy.transactionStateLogReplicationFactor() != brokers) {
+                throw new IllegalArgumentException("Kafka requires one or three brokers and a matching replication policy");
             }
             topics = List.copyOf(Objects.requireNonNull(topics, "topics"));
+            if (topics.stream().anyMatch(topic -> topic.replicationFactor() != brokers))
+                throw new IllegalArgumentException("Topic replication must match the topology");
+            if (brokers == 3 && topics.stream().mapToLong(KafkaTopic::partitions).sum() > 128)
+                throw new IllegalArgumentException("Three-broker metadata is bounded to 128 declared partitions");
+            if (brokers == 3 && proxy.isPresent()) throw new IllegalArgumentException("Three-broker proxy routing is unsupported");
             if (topics.size() != 2) {
                 throw new IllegalArgumentException("The first executable boundary requires two topics");
             }
@@ -227,7 +232,7 @@ public final class ExecutableScenarioPlan {
 
         /** What the runtime needs to start this cluster; the broker policy is passed as is. */
         public KafkaRuntimeTarget runtimeTarget() {
-            return new KafkaRuntimeTarget(alias, imageReference, brokerPolicy);
+            return new KafkaRuntimeTarget(alias, imageReference, brokerPolicy, brokers);
         }
     }
 
@@ -261,9 +266,9 @@ public final class ExecutableScenarioPlan {
             if (partitions < 1) {
                 throw new IllegalArgumentException("partitions must be positive");
             }
-            if (replicationFactor != 1) {
+            if (replicationFactor != 1 && replicationFactor != 3) {
                 throw new IllegalArgumentException(
-                        "The first executable boundary requires replicationFactor=1");
+                        "The first executable boundary requires replicationFactor=1 or 3");
             }
         }
     }
@@ -810,7 +815,7 @@ public final class ExecutableScenarioPlan {
     }
 
     public sealed interface Step permits AwaitJobState, AwaitCheckpoints, Wait,
-            KillTaskManager, RestartTaskManager, Loop, EndTxnFault, LeaderFault {}
+            KillTaskManager, RestartTaskManager, BrokerOperation, Loop, EndTxnFault, LeaderFault {}
 
     /** One bounded fault of the observed leader, including unconditional healing. */
     public enum RecoveryBarrier { TOKEN_CHECKPOINT }
@@ -867,6 +872,13 @@ public final class ExecutableScenarioPlan {
     public record Wait(Duration duration) implements Step {
         public Wait {
             duration = requirePositive(duration, "duration");
+        }
+    }
+
+    public record BrokerOperation(String targetName, boolean restart) implements Step {
+        public BrokerOperation {
+            if (targetName == null || !targetName.matches("broker-[1-3]"))
+                throw new IllegalArgumentException("A broker operation must name broker-1 through broker-3");
         }
     }
 

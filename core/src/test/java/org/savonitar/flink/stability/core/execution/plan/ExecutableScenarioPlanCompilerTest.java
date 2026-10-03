@@ -55,6 +55,42 @@ class ExecutableScenarioPlanCompilerTest {
     Path artifactRoot;
 
     @Test
+    void compilesThreeBrokersWithNamedKillRestartAndRejectsUnhealedOrWrongTopology() {
+        for (boolean heal : List.of(true, false)) {
+            var resolved = resolved(document -> {
+                ((ObjectNode) document.at("/setup/kafka/clusters/main")).put("brokers", 3);
+                document.at("/setup/kafka/clusters/main/topics").forEach(topic -> ((ObjectNode) topic).put("replication_factor", 3));
+                var steps = replaceSteps(document);
+                steps.addObject().putObject("kill").putObject("target").put("kind", "named").put("role", "broker").put("name", "broker-1");
+                if (heal) steps.addObject().putObject("restart").put("component", "kafka").put("name", "broker-1");
+            });
+            if (!heal) {
+                assertTrue(assertThrows(SpecificationException.class, () -> compiler.compile(resolved)).diagnostics().stream()
+                        .anyMatch(issue -> issue.code().equals("runner.phase.broker-kill-unhealed")));
+            } else {
+                var plan = compiler.compile(resolved);
+                assertEquals(3, plan.kafka().runtimeTarget().brokers());
+                assertEquals("2", plan.kafka().brokerPolicy().kafkaConfiguration().get("min.insync.replicas"));
+                assertEquals(new ExecutableScenarioPlan.BrokerOperation("broker-1", false), plan.phases().getFirst().steps().getFirst());
+                assertEquals(new ExecutableScenarioPlan.BrokerOperation("broker-1", true), plan.phases().getFirst().steps().getLast());
+            }
+        }
+        var single = resolved(document -> {
+            var steps = replaceSteps(document);
+            steps.addObject().putObject("kill").putObject("target").put("kind", "named").put("role", "broker").put("name", "broker-1");
+            steps.addObject().putObject("restart").put("component", "kafka").put("name", "broker-1");
+        });
+        assertThrows(SpecificationException.class, () -> compiler.compile(single));
+        var tooMany = resolved(document -> {
+            ((ObjectNode) document.at("/setup/kafka/clusters/main")).put("brokers", 3);
+            document.at("/setup/kafka/clusters/main/topics").forEach(topic ->
+                    ((ObjectNode) topic).put("replication_factor", 3).put("partitions", 129));
+        });
+        assertTrue(assertThrows(SpecificationException.class, () -> compiler.compile(tooMany)).diagnostics().stream()
+                .anyMatch(issue -> issue.code().equals("runner.kafka.partition-bound-exceeded")));
+    }
+
+    @Test
     void submittedJobFaultRequiresExplicitJobProofAndSupportedMode() throws IOException {
         for (String scope : List.of("bootstrap", "submitted-job")) {
             for (String mode : List.of("delay", "fail", "linkage-error")) {
