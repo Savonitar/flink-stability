@@ -1342,6 +1342,7 @@
         },
         { "$ref": "#/$defs/brokerFaultStep" },
         { "$ref": "#/$defs/packetFaultStep" },
+        { "$ref": "#/$defs/savepointRestoreStep" },
         {
           "$ref": "#/$defs/checkpointStep"
         },
@@ -1358,6 +1359,40 @@
           "$ref": "#/$defs/validateStep"
         }
       ]
+    },
+    "savepointRestoreStep": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "savepoint_restore"
+      ],
+      "properties": {
+        "savepoint_restore": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "job"
+          ],
+          "properties": {
+            "job": {
+              "$ref": "#/$defs/kebabName"
+            },
+            "parallelism": {
+              "type": "integer",
+              "minimum": 1
+            },
+            "transaction_id_naming_strategy": {
+              "enum": [
+                "INCREMENTING",
+                "POOLING"
+              ]
+            },
+            "timeout": {
+              "$ref": "#/$defs/durationOrTemplate"
+            }
+          }
+        }
+      }
     },
     "packetFaultStep": {
       "type": "object",

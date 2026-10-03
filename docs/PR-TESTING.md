@@ -215,7 +215,7 @@ sides), roughly **60–120 minutes** with warm images and artifacts. This is a
 planning estimate, not measured throughput or a timeout. Pulls, startup and
 recovery can increase it.
 
-`--profile chaos-full` is the 28-scenario superset: explicit TV1/TV2 broker catalogs,
+`--profile chaos-full` is the explicit superset: explicit TV1/TV2 broker catalogs,
 all protocol catalogs (including Produce errors after append) and applicable TV
 pairs, and all four coordinator-commit catalogs. AddPartitionsToTxn is TV1 only:
 the TV2 sink normally does not send it. At two runs it plans 112 independent
@@ -349,7 +349,7 @@ checkout whose build is authorized; this tool is not an OS sandbox.
 The `brokers`, `protocol`, `pooling`, `rolling`, `packet`, and `at-least-once`
 profiles are explicit scenario lists in `tools/chaos_profiles.py`, including the
 applicable controls and parallel variants. `chaos-quick` remains the calibrated
-10-scenario list; `chaos-full` currently includes 124 scenarios. An automatic
+10-scenario list; `chaos-full` currently includes 130 scenarios. An automatic
 suggestion uses the following first-matching path-prefix table (under
 `flink-connector-kafka/src/`); the exact table and each matched path are retained in
 the tool and plan. An unknown path or empty diff selects `chaos-full`. Multiple

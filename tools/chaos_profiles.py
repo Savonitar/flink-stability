@@ -117,6 +117,12 @@ PROFILES = {
         "at-least-once-taskmanager-restart",
         "at-least-once-control",
         "at-least-once-protocol-control",
+        "savepoint-same",
+        "savepoint-scale-down",
+        "savepoint-scale-up",
+        "savepoint-pooling",
+        "savepoint-control-p1",
+        "savepoint-control-p4",
     ),
     "brokers": (
         "broker-eos-control-v1",

@@ -22,7 +22,7 @@ public record PhaseExecutionEvidence(
         List<TaskManagerKill> taskManagerKills,
         List<NetworkFault> networkFaults,
         List<TaskManagerRestart> taskManagerRestarts,
-        List<LeaderFault> leaderFaults, List<BrokerOperation> brokerOperations, List<PacketFault> packetFaults) {
+        List<LeaderFault> leaderFaults, List<BrokerOperation> brokerOperations, List<PacketFault> packetFaults, List<SavepointLifecycle.Evidence> savepointRestores) {
     public PhaseExecutionEvidence {
         steps = List.copyOf(Objects.requireNonNull(steps, "steps"));
         taskManagerKills = List.copyOf(Objects.requireNonNull(
@@ -32,7 +32,13 @@ public record PhaseExecutionEvidence(
                 taskManagerRestarts, "taskManagerRestarts"));
         brokerOperations = List.copyOf(brokerOperations);
         packetFaults = List.copyOf(packetFaults);
+        savepointRestores = List.copyOf(savepointRestores);
         leaderFaults = List.copyOf(Objects.requireNonNull(leaderFaults, "leaderFaults"));
+    }
+
+    public PhaseExecutionEvidence(List<StepEvidence> steps, List<TaskManagerKill> kills, List<NetworkFault> network,
+            List<TaskManagerRestart> restarts, List<LeaderFault> leaders, List<BrokerOperation> brokers, List<PacketFault> packets) {
+        this(steps, kills, network, restarts, leaders, brokers, packets, List.of());
     }
 
     public PhaseExecutionEvidence(List<StepEvidence> steps, List<TaskManagerKill> kills, List<NetworkFault> network,
@@ -410,7 +416,7 @@ public record PhaseExecutionEvidence(
         WAIT,
         KILL_TASKMANAGER,
         RESTART_TASKMANAGER,
-        PACKET_FAULT, BROKER_FAULT, KILL_BROKER,
+        SAVEPOINT_RESTORE, PACKET_FAULT, BROKER_FAULT, KILL_BROKER,
         RESTART_BROKER,
         NETWORK_FAULT,
         LEADER_FAULT

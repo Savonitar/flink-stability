@@ -3509,3 +3509,24 @@ ISR on every declared partition between stops. No transaction-state topic or ope
 transaction is invented for this nontransactional workload. Exactly-once rolling
 scenarios continue to require their coordinator reference and full transaction-state
 partition inventory. Coordinator-first/last orders require a coordinator target.
+
+### Atomic savepoint lifecycle slice
+
+`savepoint_restore` accepts `job`, optional restored `parallelism`, optional
+`transaction_id_naming_strategy`, and `timeout` (default 3m, maximum 5m). It is the
+single final lifecycle step of an EOS/exact-ID scenario, preceded only by await or
+wait steps; loops, HA, token experiments and mixed fault steps are rejected. Capacity
+must fit the existing TaskManagers. Strategy defaults to the original, and
+POOLING→INCREMENTING is rejected. Execution independently requires RUNNING and a
+completed checkpoint before stopping with a canonical non-draining savepoint.
+
+The stop and restored submission each have one POST under the shared deadline.
+Restoration uses the exact owned savepoint location with `claimMode: NO_CLAIM` and
+`allowNonRestoredState: false`. The original input, stopping offsets, transaction
+prefix, uploaded JAR and arguments remain bound across distinct JobIDs. Evidence
+retains both IDs, trigger, original running/checkpoint observation, savepoint result,
+old FINISHED state, restore path and parallelism proof. A failure or uncertain
+operation is inconclusive and cannot replay a mutation. Successful terminal fencing
+and the exact-ID oracle cover the restored job and all output from the lifecycle.
+See [the lifecycle design](../SAVEPOINT-LIFECYCLE.md) for connector-upgrade work that
+remains design only.

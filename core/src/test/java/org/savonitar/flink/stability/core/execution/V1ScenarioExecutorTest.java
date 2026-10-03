@@ -91,6 +91,32 @@ class V1ScenarioExecutorTest {
             (bootstrapServers, prefix, timeout) -> new KafkaTransactionListing(prefix,
                     List.of(new KafkaTransactionListing.Transaction(prefix + "-0-1", "CompleteCommit", 7, 0, List.of())));
 
+    @Test void savepointLifecycleFencesRestoredJobAndUsesOneOriginalManifestOracle() throws Exception {
+        for(boolean passes:List.of(true,false)) {
+            var events=new ArrayList<String>();
+            try(Fixture fixture=fixture(document->{
+                var steps=((ArrayNode)document.path("phases")).removeAll().addObject().put("name","restore").putArray("steps");
+                steps.addObject().putObject("savepoint_restore").put("job","eos-job").put("parallelism",1)
+                        .put("transaction_id_naming_strategy","POOLING").put("timeout","3m");
+            })) {
+                var flink=new FakeFlink(events);flink.savepointEnabled=true;
+                flink.observations.add(job(1,FlinkJobState.RUNNING,1,0));
+                var calls=new AtomicInteger();
+                var result=executor(events,new FakeRuntime(events),flink,(bootstrap,topic,ids,timeout)->{
+                    calls.incrementAndGet();assertArrayEquals(preparedInput().inputManifest().presentIds(),ids);
+                    return passes?passResult():missingResult();
+                }).execute(fixture.bound(),attemptContext());
+                assertEquals(passes?V1ScenarioExecutionResult.Status.PASS:V1ScenarioExecutionResult.Status.FAIL,result.status(),result.toString());
+                assertEquals(1,calls.get());assertEquals(new FlinkJobHandle("restored-job"),flink.finishedHandle);
+                assertTrue(result.phaseEvidence().orElseThrow().savepointRestores().getFirst().confirmed());
+                assertEquals(flink.submission.uploadedJarId(),flink.restoreSubmission.uploadedJarId());
+                assertEquals(flink.submission.programArguments(),flink.restoreSubmission.programArguments());
+                assertEquals(flink.submission.flinkConfiguration().get(ExecutableScenarioPlan.WorkloadConfiguration.PREFIX+"source.stopping-offsets"),
+                        flink.restoreSubmission.flinkConfiguration().get(ExecutableScenarioPlan.WorkloadConfiguration.PREFIX+"source.stopping-offsets"));
+            }
+        }
+    }
+
     @Test
     void brokerEvidenceSurvivesAndUnconfirmedEffectsCannotMaskDataFailure() throws Exception {
         for (boolean confirmed : List.of(true, false)) for (boolean passes : List.of(true, false)) {
@@ -2691,6 +2717,23 @@ class V1ScenarioExecutorTest {
         private final java.util.Deque<FlinkJobObservation> observations =
                 new java.util.ArrayDeque<>();
         private FlinkJobSubmission submission;
+        private FlinkJobSubmission restoreSubmission;
+        private FlinkJobHandle finishedHandle;
+        private boolean savepointEnabled;
+        private String savepointDirectory;
+
+        public String stopWithSavepoint(FlinkJobHandle job,String trigger,String directory,Duration timeout) {
+            savepointDirectory=directory;return trigger;
+        }
+        public org.savonitar.flink.stability.core.flink.FlinkSavepoint.Status savepointStatus(FlinkJobHandle job,String trigger,Duration timeout) {
+            return new org.savonitar.flink.stability.core.flink.FlinkSavepoint.Status(true,savepointDirectory+"/savepoint-x",null,"raw");
+        }
+        public FlinkJobHandle submit(FlinkJobSubmission submission,Duration timeout) {
+            restoreSubmission=submission;return new FlinkJobHandle("restored-job");
+        }
+        public org.savonitar.flink.stability.core.flink.FlinkSavepoint.RestoreProof restoredSavepoint(FlinkJobHandle job,Duration timeout) {
+            return new org.savonitar.flink.stability.core.flink.FlinkSavepoint.RestoreProof(savepointDirectory+"/savepoint-x",true,restoreSubmission.parallelism(),FlinkJobState.RUNNING,"raw");
+        }
         private FlinkJobHandle submittedHandle = JOB;
         private String uploadedJarSha256;
         private IOException awaitFinishedFailure;
@@ -2730,6 +2773,7 @@ class V1ScenarioExecutorTest {
         public FlinkJobState awaitState(
                 FlinkJobHandle job, FlinkJobState expected, Duration timeout) throws IOException {
             events.add("await-running");
+            if(savepointEnabled)return expected;
             if (awaitStateFailure != null) {
                 throw awaitStateFailure;
             }
@@ -2746,6 +2790,7 @@ class V1ScenarioExecutorTest {
         public FlinkJobState awaitFinished(FlinkJobHandle job, Duration timeout)
                 throws IOException {
             events.add("await-finished");
+            finishedHandle=job;
             if (awaitFinishedFailure != null) {
                 throw awaitFinishedFailure;
             }

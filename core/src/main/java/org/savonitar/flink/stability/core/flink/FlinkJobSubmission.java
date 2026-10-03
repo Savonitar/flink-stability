@@ -11,9 +11,16 @@ public record FlinkJobSubmission(
         String uploadedJarId,
         int parallelism,
         Map<String, String> flinkConfiguration,
-        List<String> programArguments) {
+        List<String> programArguments,
+        java.util.Optional<String> savepointPath) {
+
+    public FlinkJobSubmission(String jar, int parallelism, Map<String, String> configuration, List<String> arguments) {
+        this(jar, parallelism, configuration, arguments, java.util.Optional.empty());
+    }
 
     public FlinkJobSubmission {
+        java.util.Objects.requireNonNull(savepointPath, "savepointPath");
+        savepointPath.ifPresent(value -> { if (value.isBlank()) throw new IllegalArgumentException("Empty savepoint path"); });
         if (uploadedJarId == null || uploadedJarId.isBlank()) {
             throw new IllegalArgumentException("uploadedJarId must not be blank");
         }

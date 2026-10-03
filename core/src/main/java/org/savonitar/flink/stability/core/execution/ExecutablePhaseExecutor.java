@@ -53,6 +53,12 @@ public final class ExecutablePhaseExecutor {
     private final NetworkFaults networkFaults;
     private final PhaseSleeper sleeper;
     private final LongSupplier nanoTime;
+    private org.savonitar.flink.stability.core.flink.FlinkJobSubmission restoreSubmission;
+    private String savepointDirectory;
+
+    ExecutablePhaseExecutor withSavepointSubmission(org.savonitar.flink.stability.core.flink.FlinkJobSubmission submission, String directory) {
+        this.restoreSubmission = Objects.requireNonNull(submission); this.savepointDirectory = Objects.requireNonNull(directory); return this;
+    }
 
     public ExecutablePhaseExecutor(
             FlinkScenarioControl flink,
@@ -169,6 +175,14 @@ public final class ExecutablePhaseExecutor {
             } else if (step instanceof ExecutableScenarioPlan.RestartTaskManager restart) {
                 restartTaskManager(
                         phaseIndex, phaseName, path, loopIterations, restart, evidence);
+            } else if (step instanceof ExecutableScenarioPlan.SavepointRestore restore) {
+                var observation = SavepointLifecycle.execute(path, flink, job, restoreSubmission, savepointDirectory, restore, sleeper, nanoTime);
+                evidence.savepoints.add(observation);
+                if (!observation.confirmed()) throw failed(evidence, phaseIndex, phaseName, path, loopIterations,
+                        PhaseExecutionEvidence.StepKind.SAVEPOINT_RESTORE, PhaseExecutionException.Outcome.INCONCLUSIVE,
+                        "savepoint.restore.unconfirmed", new IOException(observation.error() == null ? "Incomplete lifecycle evidence" : observation.error()));
+                succeeded(evidence, phaseIndex, phaseName, path, loopIterations, PhaseExecutionEvidence.StepKind.SAVEPOINT_RESTORE,
+                        "restoredJobId=" + observation.restoredJobId());
             } else if (step instanceof ExecutableScenarioPlan.PacketFault fault) {
                 FlinkJobObservation.Attempt before = null, after = null;
                 org.savonitar.flink.stability.runtime.api.PacketFaultControl.Evidence raw;
@@ -779,6 +793,7 @@ public final class ExecutablePhaseExecutor {
         private final List<PhaseExecutionEvidence.LeaderFault> leaderFaults = new ArrayList<>();
         private final List<PhaseExecutionEvidence.BrokerOperation> brokers = new ArrayList<>();
         private final List<PhaseExecutionEvidence.PacketFault> packets = new ArrayList<>();
+        private final List<SavepointLifecycle.Evidence> savepoints = new ArrayList<>();
         private final List<org.savonitar.flink.stability.runtime.api.KafkaLogCapture.Partition> kafkaPartitions;
         private final int expectedTaskManagers;
         private final Optional<TokenScopeProof.Requirement> tokenProof;
@@ -793,7 +808,7 @@ public final class ExecutablePhaseExecutor {
         }
 
         private PhaseExecutionEvidence snapshot() {
-            return new PhaseExecutionEvidence(steps, kills, networkFaults, restarts, leaderFaults, brokers, packets);
+            return new PhaseExecutionEvidence(steps, kills, networkFaults, restarts, leaderFaults, brokers, packets, savepoints);
         }
     }
 }

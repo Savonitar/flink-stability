@@ -14,7 +14,7 @@ ID, polls only `/jobs/{jobid}/savepoints/{triggerid}`, and retains the acknowled
 trigger, returned location and old job's FINISHED observation. An unknown POST
 outcome is never retried. The location must remain under the attempt's existing
 `file:/flink/checkpoints/` mount. There are no new host mounts. Resubmission supplies
-`savepointPath`, `allowNonRestoredState: false` and `restoreMode: NO_CLAIM`, retaining
+`savepointPath`, `allowNonRestoredState: false` and `claimMode: NO_CLAIM`, retaining
 the source stopping offsets, consumer group, transactional prefix, operator UIDs,
 max parallelism, checkpoint configuration and program arguments. Only requested
 parallelism and the permitted naming-strategy switch change. Every operation shares

@@ -695,4 +695,16 @@ expected validation code.
 | --- | --- | --- |
 | SV-296 | AT_LEAST_ONCE fixed-order rolling with a partition-leader reference | Restart all three brokers sequentially and require full declared-partition ISR, without requesting nonexistent transaction metadata. |
 | SV-297 | Partial ISR after nontransactional restart, or coordinator order without a coordinator | Stop the sequence after safety healing, or reject before provisioning; keep EOS transaction-state requirements unchanged. |
+
+### Stop with savepoint and restore
+
+| ID | Input | Required behavior |
+| --- | --- | --- |
+| SV-298 | Stop/savepoint and restored JAR-run REST requests | Send one non-draining canonical stop, poll its exact trigger, and restore with NO_CLAIM and no discarded state; never replay uncertain POSTs. |
+| SV-299 | Failed/ambiguous savepoint, foreign or encoded-traversal location, or old job not FINISHED | Preserve receipts and do not submit the restored job. |
+| SV-300 | Same/rescaled restore or INCREMENTING→POOLING | Preserve original JAR, args, input offsets/group and transaction prefix; confirm a distinct JobID and exact restored path/parallelism. |
+| SV-301 | Missing restore proof, exhausted deadline, same JobID or wrong restored path/parallelism | Retain the known restored JobID and raw proof, remain unconfirmed and never resubmit. |
+| SV-302 | Unsupported reverse strategy, insufficient capacity, nested/nonfinal transition, non-EOS sink or wrong job | Reject before provisioning. |
+| SV-303 | Successful lifecycle followed by terminal validation | Fence the restored JobID and run one exact-ID oracle against the original whole-input manifest; a data failure remains FAIL. |
+| SV-304 | Savepoint parallelism exceeds the integer range, or restored vertex metadata is nonintegral/out of range | Reject without truncation; malformed REST metadata cannot confirm restoration. |
 | SV-305 | Explicit ID-set mode compiled before execution | Keep the typed plan independent of runtime validator packages; adapt the mode at execution while preserving existing package boundaries. |
