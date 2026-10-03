@@ -28,6 +28,8 @@ class SuggestionTest(unittest.TestCase):
 
 class SyntheticCommandTest(unittest.TestCase):
     def setUp(self):
+        # The ignored runtime-output directory is absent in clean checkouts.
+        (ROOT / 'jobs').mkdir(exist_ok=True)
         self.temporary = tempfile.TemporaryDirectory(dir=ROOT / 'jobs', prefix='connector-tool-test-')
         self.addCleanup(self.temporary.cleanup)
         self.root = Path(self.temporary.name)
