@@ -125,6 +125,12 @@ final class ThreeBrokerKafkaRuntime implements KafkaRuntimeCluster {
                 @Override public KafkaBrokerControl.Selection select(KafkaBrokerControl.Target target, MonotonicDeadline deadline) throws Exception {
                     return admin.select(target, deadline);
                 }
+                @Override public long sessionTimeoutMillis(int brokerId, MonotonicDeadline deadline) throws Exception {
+                    return admin.sessionTimeoutMillis(brokerId, deadline);
+                }
+                @Override public KafkaCommitWindow.Transaction transaction(String id, MonotonicDeadline deadline) throws Exception {
+                    return admin.transaction(id, deadline);
+                }
                 @Override public KafkaBrokerFault.Driver broker(String name) { return driver(name, admin); }
             });
         }

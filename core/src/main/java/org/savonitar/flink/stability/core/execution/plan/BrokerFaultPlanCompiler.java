@@ -36,17 +36,30 @@ final class BrokerFaultPlanCompiler {
     static ExecutableScenarioPlan.BrokerFault fault(JsonNode value, ObjectNode document) {
         var target = value.path("target");
         String prefix = null;
+        JsonNode selectedJob = null;
         if ("transaction-coordinator".equals(target.path("type").asText())) {
-            for (var job : document.at("/workload/jobs")) if (job.path("alias").asText().equals(target.path("job").asText()))
+            for (var job : document.at("/workload/jobs")) if (job.path("alias").asText().equals(target.path("job").asText())) {
+                selectedJob = job;
                 prefix = job.at("/sink/transactional_id_prefix").asText();
+            }
         }
         var kind = "named".equals(target.path("kind").asText()) ? KafkaBrokerControl.TargetKind.NAMED
                 : "partition-leader".equals(target.path("type").asText()) ? KafkaBrokerControl.TargetKind.PARTITION_LEADER
                 : KafkaBrokerControl.TargetKind.TRANSACTION_COORDINATOR;
+        Integer commitVersion = null;
+        if (value.path("require_commit").asBoolean()) {
+            if (kind != KafkaBrokerControl.TargetKind.TRANSACTION_COORDINATOR || selectedJob == null
+                    || !"INCREMENTING".equals(selectedJob.at("/sink/transaction_id_naming_strategy").asText()))
+                throw new IllegalArgumentException("require_commit needs an INCREMENTING sink transaction coordinator");
+            var version = document.at("/setup/kafka/clusters").path(target.path("cluster").asText()).path("transaction_version");
+            if (!version.isInt() || version.intValue() < 1 || version.intValue() > 2)
+                throw new IllegalArgumentException("require_commit needs explicit transaction_version 1 or 2");
+            commitVersion = version.intValue();
+        }
         return new ExecutableScenarioPlan.BrokerFault(new KafkaBrokerControl.Request(
                 new KafkaBrokerControl.Target(kind, target.path("name").textValue(), target.path("topic").textValue(),
                         target.path("partition").asInt(-1), prefix),
                 KafkaBrokerControl.Action.valueOf(value.path("mode").asText().toUpperCase(Locale.ROOT)),
-                parseDuration(value.path("duration").asText()), parseDuration(value.path("timeout").asText())));
+                parseDuration(value.path("duration").asText()), parseDuration(value.path("timeout").asText()), commitVersion));
     }
 }

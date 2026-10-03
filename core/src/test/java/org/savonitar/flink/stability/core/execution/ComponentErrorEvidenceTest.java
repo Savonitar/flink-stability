@@ -60,6 +60,23 @@ class ComponentErrorEvidenceTest {
         assertEquals(List.of("INFO", "ERROR"), evidence.events().stream().map(ComponentErrorEvidence.Event::level).toList());
     }
 
+    @Test void retainsRealCommitterRetryFailureAndInterruptionHeadersWithoutGuessingExceptionTypes() throws Exception {
+        String header = "2026-10-02 15:00:00,001 WARN org.apache.flink.connector.kafka.sink.internal.KafkaCommitter [] - ";
+        String retry = "Encountered retriable exception while committing sink-0-2.";
+        var evidence = ComponentErrorEvidence.collect(List.of(log("tm#1", header + retry + "\n"
+                + "org.apache.kafka.common.errors.NotCoordinatorException: stack trace\n"
+                + header.replace("WARN", "ERROR") + "Unable to commit transaction (request) unknown producer.\n"
+                + header.replace("WARN", "INFO") + "Committing transaction (request) was interrupted.\n"
+                + header.replace("sink.internal.KafkaCommitter", "sink.KafkaCommitter") + retry + "\n")));
+        assertEquals(3, evidence.events().size());
+        var retried = evidence.events().getFirst();
+        assertEquals(List.of("commit-retriable"), retried.kinds());
+        assertEquals(Optional.of("sink-0-2"), retried.transactionalId());
+        assertEquals(retry, retried.message()); assertEquals("WARN", retried.level());
+        assertEquals(List.of("commit-failed"), evidence.events().get(1).kinds());
+        assertEquals(List.of("commit-interrupted"), evidence.events().get(2).kinds());
+    }
+
     @Test void capsUniqueEventsAndReportsIncompleteSourcesWithoutInventingEvents() throws Exception {
         StringBuilder text = new StringBuilder();
         for (int i = 0; i < 600; i++) text.append("2026-10-01 19:43:38,488 ERROR org.apache.kafka.Foo [] - ProducerFencedException producerId=").append(i).append('\n');

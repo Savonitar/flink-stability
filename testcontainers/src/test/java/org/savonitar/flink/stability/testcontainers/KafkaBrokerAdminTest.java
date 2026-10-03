@@ -41,6 +41,14 @@ class KafkaBrokerAdminTest {
             assertEquals(1,admin.select(target,deadline()).leader());
         }
     }
+    @Test void readsSessionTimeoutFromBrokerMetadataAndExactTransaction() throws Exception {
+        var fake = new Fake();
+        try (var admin = new KafkaBrokerAdmin(fake.admin())) {
+            assertEquals(17000, admin.sessionTimeoutMillis(2, deadline()));
+            var state = admin.transaction("sink-a", deadline());
+            assertEquals("ONGOING", state.state()); assertEquals(77, state.producerId()); assertEquals(4, state.producerEpoch());
+        }
+    }
     static MonotonicDeadline deadline(){return MonotonicDeadline.start(Duration.ofSeconds(1),System::nanoTime);}
     static Object result(Class<?> type, Object... args) throws Exception {
         var ctor = type.getDeclaredConstructors()[0]; ctor.setAccessible(true); return ctor.newInstance(args);
@@ -50,6 +58,11 @@ class KafkaBrokerAdminTest {
         Admin admin() {
             return (Admin)Proxy.newProxyInstance(Admin.class.getClassLoader(),new Class<?>[]{Admin.class},(proxy,method,args)->{
                 return switch(method.getName()) {
+                    case "describeConfigs" -> {
+                        var resource = new org.apache.kafka.common.config.ConfigResource(org.apache.kafka.common.config.ConfigResource.Type.BROKER, "2");
+                        assertEquals(List.of(resource), args[0]);
+                        yield result(DescribeConfigsResult.class, Map.of(resource, KafkaFuture.completedFuture(new Config(List.of(new ConfigEntry("broker.session.timeout.ms", "17000"))))));
+                    }
                     case "listTransactions" -> {
                         filteredOngoing=((ListTransactionsOptions)args[0]).filteredStates().equals(Set.of(TransactionState.ONGOING));
                         var future=new KafkaFutureImpl<Collection<TransactionListing>>();

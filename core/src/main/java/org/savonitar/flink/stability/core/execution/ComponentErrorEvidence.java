@@ -27,11 +27,15 @@ public record ComponentErrorEvidence(List<Event> events, List<String> diagnostic
     private static final Pattern TRANSACTION = Pattern.compile("\\btransactionalId[= :]+(?:'([^']*)'|\\\"([^\\\"]*)\\\"|([^,}\\]\\s]+))");
 
     public record Event(String process, String timestamp, String level, String logger, Optional<String> producerId,
-                        Optional<String> epoch, Optional<String> transactionalId, List<String> kinds) {
+                        Optional<String> epoch, Optional<String> transactionalId, List<String> kinds, String message) {
+        public Event(String process, String timestamp, String level, String logger, Optional<String> producerId,
+                     Optional<String> epoch, Optional<String> transactionalId, List<String> kinds) {
+            this(process, timestamp, level, logger, producerId, epoch, transactionalId, kinds, "");
+        }
         public Event { kinds = List.copyOf(kinds); }
     }
     private record Key(String process, String timestamp, String level, String logger, Optional<String> producerId,
-                       Optional<String> epoch, Optional<String> transactionalId) {}
+                       Optional<String> epoch, Optional<String> transactionalId, String message) {}
 
     public ComponentErrorEvidence {
         events = List.copyOf(events);
@@ -72,13 +76,18 @@ public record ComponentErrorEvidence(List<Event> events, List<String> diagnostic
                         if (!match.matches()) continue; // Stack traces have no independent log header.
                         String logger = match.group(3), message = match.group(4);
                         if (!logger.toLowerCase(Locale.ROOT).contains("kafka")) continue;
-                        List<String> kinds = kinds(message);
+                        List<String> kinds = kinds(logger, message);
                         if (kinds.isEmpty()) continue;
                         var tx = TRANSACTION.matcher(message);
                         Optional<String> transaction = Optional.empty();
                         if (tx.find()) for (int i = 1; i <= 3; i++) if (tx.group(i) != null) transaction = Optional.of(tx.group(i));
+                        if (transaction.isEmpty() && kinds.contains("commit-retriable")) {
+                            String beginning = "Encountered retriable exception while committing ";
+                            if (message.startsWith(beginning) && message.endsWith("."))
+                                transaction = Optional.of(message.substring(beginning.length(), message.length() - 1));
+                        }
                         var key = new Key(log.process(), match.group(1).replace('.', ','), match.group(2), logger, field(PRODUCER, message),
-                                field(EPOCH, message), transaction);
+                                field(EPOCH, message), transaction, message);
                         if (!found.containsKey(key) && found.size() == MAX_EVENTS) {
                             issues.add("Component event retention limit exceeded");
                             continue;
@@ -93,7 +102,7 @@ public record ComponentErrorEvidence(List<Event> events, List<String> diagnostic
         return new ComponentErrorEvidence(found.entrySet().stream().map(entry -> {
             var key = entry.getKey();
             return new Event(key.process(), key.timestamp(), key.level(), key.logger(), key.producerId(), key.epoch(), key.transactionalId(),
-                    List.copyOf(entry.getValue()));
+                    List.copyOf(entry.getValue()), key.message());
         }).toList(), List.copyOf(issues));
     }
 
@@ -102,7 +111,7 @@ public record ComponentErrorEvidence(List<Event> events, List<String> diagnostic
         return match.find() ? Optional.of(match.group(1)) : Optional.empty();
     }
 
-    private static List<String> kinds(String message) {
+    private static List<String> kinds(String logger, String message) {
         var result = new ArrayList<String>();
         String lower = message.toLowerCase(Locale.ROOT);
         if (lower.contains("already fenced") || message.contains("ProducerFenced")) result.add("producer-fenced");
@@ -110,6 +119,12 @@ public record ComponentErrorEvidence(List<Event> events, List<String> diagnostic
         if (message.contains("InvalidTxnState")) result.add("invalid-txn-state");
         if (lower.contains("transaction") && lower.contains("aborted")) result.add("transaction-aborted");
         if (lower.contains("transaction") && lower.contains("expired")) result.add("transaction-expired");
+        if (logger.equals("org.apache.flink.connector.kafka.sink.internal.KafkaCommitter")) {
+            if (message.startsWith("Encountered retriable exception while committing ")) result.add("commit-retriable");
+            else if (result.isEmpty() && (message.startsWith("Unable to commit transaction (")
+                    || message.startsWith("Transaction (") && lower.contains("encountered error"))) result.add("commit-failed");
+            else if (message.startsWith("Committing transaction (") && lower.contains("was interrupted")) result.add("commit-interrupted");
+        }
         return result;
     }
 }

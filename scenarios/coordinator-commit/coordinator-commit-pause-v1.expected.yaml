@@ -1,0 +1,7 @@
+format: v1
+kind: expected-result
+meta:
+  name: coordinator-commit-pause-v1.expected
+  scenario: coordinator-commit-pause-v1
+default:
+  outcome: pass

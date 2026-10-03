@@ -170,6 +170,17 @@ public final class ExecutablePhaseExecutor {
                 }
                 if (observations.isEmpty()) observations = List.of(new org.savonitar.flink.stability.runtime.api.KafkaBrokerControl.Evidence(
                         "unresolved", false, null, null, List.of(), List.of(), "No broker observations", fault.request().action(), null));
+                if (fault.request().commitTransactionVersion() != null) {
+                    var first = observations.getFirst();
+                    var window = first.commitWindow();
+                    if (window == null || window.transactionVersion() != fault.request().commitTransactionVersion()
+                            || !window.confirmed(first.selection()) || first.selection() == null
+                            || !first.selection().requested().equals(fault.request().target())
+                            || window.committed().elapsedAfterFaultNanos() >= fault.request().duration().toNanos()) {
+                        observations = new java.util.ArrayList<>(observations);
+                        observations.set(0, first.withError("Required coordinator commit window not confirmed"));
+                    }
+                }
                 for (var observation : observations) evidence.brokers.add(new PhaseExecutionEvidence.BrokerOperation(path, loopIterations, observation));
                 evidence.stopFurtherSteps |= observations.size() != 2 || observations.stream().anyMatch(value -> !value.confirmed());
                 succeeded(evidence, phaseIndex, phaseName, path, loopIterations, PhaseExecutionEvidence.StepKind.BROKER_FAULT,

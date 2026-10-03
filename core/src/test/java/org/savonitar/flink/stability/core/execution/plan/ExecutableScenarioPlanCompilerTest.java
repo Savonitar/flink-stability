@@ -72,6 +72,21 @@ class ExecutableScenarioPlanCompilerTest {
         }));
     }
 
+    @Test void requiresExplicitTransactionVersionAndIncrementingIdsForCommitWitness() {
+        for (boolean complete : List.of(true, false)) {
+            var plan = resolved(document -> {
+                ((ObjectNode) document.at("/setup/kafka/clusters/main")).put("brokers", 3);
+                if (complete) ((ObjectNode) document.at("/setup/kafka/clusters/main")).put("transaction_version", 2);
+                ((ObjectNode) document.at("/workload/jobs/0/sink")).put("transaction_id_naming_strategy", "INCREMENTING");
+                document.at("/setup/kafka/clusters/main/topics").forEach(topic -> ((ObjectNode) topic).put("replication_factor", 3));
+                var fault = replaceSteps(document).addObject().putObject("broker_fault").put("mode", "kill").put("duration", "45s").put("timeout", "2m").put("require_commit", true);
+                fault.putObject("target").put("kind", "selector").put("role", "broker").put("cluster", "main").put("type", "transaction-coordinator").put("job", "eos-job");
+            });
+            if (complete) assertEquals(2, ((ExecutableScenarioPlan.BrokerFault) compiler.compile(plan).phases().getFirst().steps().getFirst()).request().commitTransactionVersion());
+            else assertThrows(SpecificationException.class, () -> compiler.compile(plan));
+        }
+    }
+
     @Test
     void compilesThreeBrokersWithNamedKillRestartAndRejectsUnhealedOrWrongTopology() {
         for (boolean heal : List.of(true, false)) {

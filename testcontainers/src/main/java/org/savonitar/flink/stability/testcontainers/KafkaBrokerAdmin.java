@@ -54,6 +54,20 @@ final class KafkaBrokerAdmin implements AutoCloseable {
         return new KafkaBrokerControl.Selection(target, "broker-" + observed.leader(), topic, partition, count,
                 id, producer, epoch, observed.leader());
     }
+    long sessionTimeoutMillis(int brokerId, MonotonicDeadline deadline) throws Exception {
+        var resource = new org.apache.kafka.common.config.ConfigResource(org.apache.kafka.common.config.ConfigResource.Type.BROKER, Integer.toString(brokerId));
+        var config = admin.describeConfigs(List.of(resource)).all().get(deadline.remaining().toNanos(), TimeUnit.NANOSECONDS).get(resource);
+        var entry = config == null ? null : config.get("broker.session.timeout.ms");
+        if (entry == null || entry.value() == null) throw new IllegalStateException("Broker session timeout unavailable");
+        long value = Long.parseLong(entry.value());
+        if (value <= 0 || value > 120_000) throw new IllegalStateException("Unsupported broker session timeout");
+        return value;
+    }
+    KafkaCommitWindow.Transaction transaction(String id, MonotonicDeadline deadline) throws Exception {
+        var value = admin.describeTransactions(List.of(id)).all().get(deadline.remaining().toNanos(), TimeUnit.NANOSECONDS).get(id);
+        if (value == null) throw new IllegalStateException("Selected transaction unavailable");
+        return new KafkaCommitWindow.Transaction(id, value.producerId(), value.producerEpoch(), value.state().name(), value.coordinatorId());
+    }
     private Map<String, TopicDescription> topics(List<String> names, MonotonicDeadline deadline) throws Exception {
         return admin.describeTopics(names).allTopicNames().get(deadline.remaining().toNanos(), TimeUnit.NANOSECONDS);
     }

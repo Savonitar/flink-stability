@@ -23,9 +23,15 @@ public interface KafkaBrokerControl {
             }
         }
     }
-    record Request(Target target, Action action, Duration duration, Duration timeout) {
+    record Request(Target target, Action action, Duration duration, Duration timeout, Integer commitTransactionVersion) {
+        public Request(Target target, Action action, Duration duration, Duration timeout) {
+            this(target, action, duration, timeout, null);
+        }
         public Request {
             java.util.Objects.requireNonNull(target);
+            if (commitTransactionVersion != null && (target.kind() != TargetKind.TRANSACTION_COORDINATOR
+                    || commitTransactionVersion < 1 || commitTransactionVersion > 2))
+                throw new IllegalArgumentException("Commit witness requires a transaction coordinator and explicit TV1/TV2");
             if (action != Action.KILL && action != Action.PAUSE) throw new IllegalArgumentException("Expected kill or pause");
             if (duration.isZero() || duration.isNegative() || duration.compareTo(Duration.ofMinutes(2)) > 0
                     || timeout.compareTo(duration) <= 0 || timeout.compareTo(Duration.ofMinutes(5)) > 0)
@@ -67,21 +73,31 @@ public interface KafkaBrokerControl {
     }
     record Evidence(String target, boolean restart, Snapshot before, Snapshot after,
                     List<Leadership> leadersBefore, List<Leadership> leadersAfter, String error,
-                    Action action, Selection selection) {
+                    Action action, Selection selection, KafkaCommitWindow commitWindow) {
+        public Evidence(String target, boolean restart, Snapshot before, Snapshot after,
+                        List<Leadership> leadersBefore, List<Leadership> leadersAfter, String error,
+                        Action action, Selection selection) {
+            this(target, restart, before, after, leadersBefore, leadersAfter, error, action, selection, null);
+        }
+        public Evidence withCommitWindow(KafkaCommitWindow window) {
+            return new Evidence(target, restart, before, after, leadersBefore, leadersAfter, error, action, selection, window);
+        }
         public Evidence(String target, boolean restart, Snapshot before, Snapshot after,
                         List<Leadership> leadersBefore, List<Leadership> leadersAfter, String error) {
             this(target, restart, before, after, leadersBefore, leadersAfter, error,
                     restart ? Action.RESTART : Action.KILL, null);
         }
         public Evidence withSelection(Selection selected) {
-            return new Evidence(target, restart, before, after, leadersBefore, leadersAfter, error, action, selected);
+            return new Evidence(target, restart, before, after, leadersBefore, leadersAfter, error, action, selected, commitWindow);
         }
         public Evidence withError(String failure) {
             return new Evidence(target, restart, before, after, leadersBefore, leadersAfter,
-                    error == null ? failure : error + "; " + failure, action, selection);
+                    error == null ? failure : error + "; " + failure, action, selection, commitWindow);
         }
         public Evidence { leadersBefore = List.copyOf(leadersBefore); leadersAfter = List.copyOf(leadersAfter); }
         public boolean confirmed() {
+            if (commitWindow != null && (!commitWindow.confirmed(selection) || after == null
+                    || !after.equals(commitWindow.ongoing().broker()) || !after.equals(commitWindow.committed().broker()))) return false;
             if (error != null || before == null || after == null || before.brokerId() < 1
                     || !target.equals("broker-" + before.brokerId()) || before.brokerId() != after.brokerId()
                     || before.containerId() == null || before.imageId() == null || before.networkId() == null

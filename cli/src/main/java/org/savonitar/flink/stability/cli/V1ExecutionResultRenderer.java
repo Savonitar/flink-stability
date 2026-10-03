@@ -104,6 +104,7 @@ final class V1ExecutionResultRenderer {
             event.transactionalId().ifPresent(value -> item.put("transactionalId", value));
             var kinds = item.putArray("kinds");
             event.kinds().forEach(kinds::add);
+            item.put("message", event.message());
         });
         var componentDiagnostics = componentErrorsNode.putArray("diagnostics");
         result.componentErrors().diagnostics().forEach(componentDiagnostics::add);

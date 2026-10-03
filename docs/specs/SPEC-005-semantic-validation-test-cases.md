@@ -577,3 +577,21 @@ expected validation code.
 | SV-243 | Multi-ID batch, mixed producer batches, group FindCoordinator or unsupported topic UUID Produce | Pass through; never guess transactional identity. |
 | SV-244 | Mixed success/error partition response under drop-response | Forward entire response and release reservation. |
 | SV-245 | Two matching messages on different proxy connections and occurrences=2 | Shared counter records exactly two affected messages; subsequent requests pass. |
+
+### Coordinator commit-window contracts
+
+| Case | Input | Required result |
+| --- | --- | --- |
+| SV-246 | `require_commit` with missing transaction feature, reused-ID naming, or another target kind | Reject before provisioning. |
+| SV-247 | Broker session timeout missing/invalid or not shorter than hold | Do not mutate the broker; retain unconfirmed evidence. |
+| SV-248 | Kill/pause, both TV1/TV2, stable new leader and selected transaction ONGOING then COMPLETE_COMMIT while held | Confirm only after the session timeout and before healing; retain both observations and producer identity. |
+| SV-249 | First state is COMPLETE_COMMIT, selected transaction aborts, producer/epoch changes, or deadline expires | No commit proof, cannot PASS; still heal the selected broker. |
+| SV-250 | Admin coordinator differs from partition metadata, ISR includes failed broker, container identity changes or broker resumes early | Do not confirm the observation. |
+| SV-251 | Runtime returns ordinary confirmed broker evidence but omits the required commit window | Passing oracle becomes inconclusive; a data failure remains fail. |
+| SV-252 | A commit error is logged during the run | Preserve `componentErrors`, including level/logger, alongside broker and exact-ID evidence; do not infer blame or require an error log for successful failover. |
+
+### Committer log classification
+
+| Case | Input | Required result |
+| --- | --- | --- |
+| SV-253 | Real KafkaCommitter retry WARN/failure ERROR/interruption INFO headers, stack traces and a similarly named foreign logger | Retain exact-logger categories, original message/level/logger and explicit retry transactional ID; no guessed exception type or duplicate stack-trace event. |
