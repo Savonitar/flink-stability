@@ -7,7 +7,7 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.TreeMap;
 
-/** Typed broker settings required by the first single-node Kafka runtime. */
+/** Typed broker settings for the supported single-node and three-node KRaft runtimes. */
 public record KafkaBrokerPolicy(
         Duration transactionMaxTimeout,
         int offsetsTopicReplicationFactor,
@@ -21,6 +21,10 @@ public record KafkaBrokerPolicy(
         return new KafkaBrokerPolicy(V1_TRANSACTION_MAX_TIMEOUT, 1, 1, 1, Duration.ZERO);
     }
 
+    public static KafkaBrokerPolicy threeBrokers() {
+        return new KafkaBrokerPolicy(V1_TRANSACTION_MAX_TIMEOUT, 3, 3, 2, Duration.ZERO);
+    }
+
     public KafkaBrokerPolicy {
         Objects.requireNonNull(transactionMaxTimeout, "transactionMaxTimeout");
         Objects.requireNonNull(groupInitialRebalanceDelay, "groupInitialRebalanceDelay");
@@ -28,11 +32,10 @@ public record KafkaBrokerPolicy(
             throw new IllegalArgumentException(
                     "The v1 Kafka transaction max timeout must be exactly two hours");
         }
-        if (offsetsTopicReplicationFactor != 1
-                || transactionStateLogReplicationFactor != 1
-                || transactionStateLogMinIsr != 1) {
+        if (!(offsetsTopicReplicationFactor == 1 && transactionStateLogReplicationFactor == 1 && transactionStateLogMinIsr == 1)
+                && !(offsetsTopicReplicationFactor == 3 && transactionStateLogReplicationFactor == 3 && transactionStateLogMinIsr == 2)) {
             throw new IllegalArgumentException(
-                    "The v1 single-broker internal-topic replication settings must equal one");
+                    "Internal-topic replication must be 1/1/1 or 3/3/2");
         }
         if (!groupInitialRebalanceDelay.isZero()) {
             throw new IllegalArgumentException(
@@ -57,6 +60,10 @@ public record KafkaBrokerPolicy(
         values.put(
                 "transaction.state.log.replication.factor",
                 Integer.toString(transactionStateLogReplicationFactor));
+        if (transactionStateLogReplicationFactor == 3) {
+            values.put("default.replication.factor", "3");
+            values.put("min.insync.replicas", "2");
+        }
         return Collections.unmodifiableMap(new LinkedHashMap<>(values));
     }
 }

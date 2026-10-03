@@ -172,8 +172,8 @@ class SpecificationLoaderTest {
             ObjectNode document = loader.loadScenario(source).document();
             ObjectNode restart = ((ObjectNode) document.at("/phases/0"))
                     .putArray("steps").addObject().putObject("restart")
-                    .put("component", component).put("name", "taskmanager-1");
-            if (component.equals("taskmanager")) {
+                    .put("component", component).put("name", component.equals("kafka") ? "broker-1" : "taskmanager-1");
+            if (component.equals("taskmanager") || component.equals("kafka")) {
                 loader.validateScenarioDocument(source, document);
                 restart.put("image", "flink:2.2.1");
             }
