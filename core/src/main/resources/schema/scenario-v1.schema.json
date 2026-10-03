@@ -1940,7 +1940,7 @@
           "allOf": [{
             "if": { "required": ["name"] },
             "then": {
-              "properties": { "component": { "const": "taskmanager" } },
+              "properties": { "component": { "enum": ["taskmanager", "kafka"] } },
               "not": { "required": ["image"] }
             }
           }],

@@ -21,9 +21,9 @@ final class RestartPreflightValidator {
             Consumer<ObjectNode> validateNamedTarget,
             List<Diagnostic> issues) {
         String component = restart.path("component").textValue();
-        if ("taskmanager".equals(component) && restart.has("name")) {
+        if (("taskmanager".equals(component) || "kafka".equals(component)) && restart.has("name")) {
             ObjectNode target = restart.objectNode().put("kind", "named")
-                    .put("role", "taskmanager").put("name", restart.path("name").textValue());
+                    .put("role", "kafka".equals(component) ? "broker" : "taskmanager").put("name", restart.path("name").textValue());
             validateNamedTarget.accept(target);
         }
         if ("kafka".equals(component) && kafkaClusters.size() != 1) {

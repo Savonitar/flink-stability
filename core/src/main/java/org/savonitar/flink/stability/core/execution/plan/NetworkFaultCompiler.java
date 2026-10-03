@@ -63,7 +63,7 @@ final class NetworkFaultCompiler {
                         || (document.at("/setup/flink").has("high_availability")
                             && (listen.group(1).matches("jobmanager-[12](?:-[1-9][0-9]*)?")
                                 || listen.group(1).equals("flink-zookeeper")))
-                        || TaskManagerLifecycleCompiler.isDeclaredTaskManager(listen.group(1),
+                        || ProcessLifecycleCompiler.isDeclaredTaskManager(listen.group(1),
                                 document.at("/setup/flink/taskmanagers").asInt()))
                 || clusterHost.equals(listen.group(1))) {
             issues.add(issue(source, "runner.kafka.proxy-listen-unsupported", path + "/listen",
