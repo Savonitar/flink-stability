@@ -45,6 +45,12 @@ final class KafkaProtocolFaultFilter implements RequestFilter, ResponseFilter {
             describe.topics().forEach(topic -> partitions.put(topic.name(), java.util.List.copyOf(topic.partitionIndexes())));
             details.put("topicPartitions", partitions);
         }
+        if (request instanceof org.apache.kafka.common.message.ProduceRequestData produce) {
+            var partitions = new java.util.TreeMap<String, java.util.List<Integer>>();
+            produce.topicData().forEach(topic -> partitions.put(topic.name(), topic.partitionData().stream()
+                    .map(org.apache.kafka.common.message.ProduceRequestData.PartitionProduceData::index).toList()));
+            details.put("topicPartitions", partitions);
+        }
         book.observeRetry(identity.get(), details);
         var selected = book.claim(identity.get());
         if (selected.isEmpty()) return context.forwardRequest(header, request);

@@ -31,6 +31,23 @@ class ProxyFaultInjectorTest {
     @TempDir
     Path control;
 
+    @Test void nonTransactionalAppendEvidenceNeedsConcreteTopicButNoInventedProducer() throws Exception {
+        var line = JSON.readTree("""
+                {"event":"response-error-after-append","api":"produce","apiVersion":12,
+                 "claim":1,"occurrence":1,"timeMillis":5000,"beforeDeadline":true,
+                 "transactionalId":null,"producerId":null,"producerEpoch":null,
+                 "topicPartitions":{"output":[0]},
+                 "forwardedToBroker":true,"originalErrorCodes":{"output/0":0},
+                 "originalBaseOffsets":{"output/0":123},"substitutedErrorCode":7}
+                """);
+        assertTrue(ProxyFaultEvidence.qualifiesAfterAppend(line));
+        var message = ProxyFaultEvidence.affected(List.of(line), "response-error-after-append").getFirst();
+        org.junit.jupiter.api.Assertions.assertNull(message.producerId());
+        org.junit.jupiter.api.Assertions.assertNull(message.transactionalId());
+        ((com.fasterxml.jackson.databind.node.ObjectNode)line).remove("topicPartitions");
+        assertFalse(ProxyFaultEvidence.qualifiesAfterAppend(line));
+    }
+
     @Test
     void retainsAppendEvidenceAndHealsAfterTheConfirmedReplacement() throws Exception {
         FakeProxy proxy = new FakeProxy(control, List.of("""

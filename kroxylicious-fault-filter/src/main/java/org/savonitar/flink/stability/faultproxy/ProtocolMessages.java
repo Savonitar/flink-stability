@@ -35,7 +35,7 @@ final class ProtocolMessages {
                     : new FaultRuleBook.RequestIdentity("list-transactions", null, null, null, null, Set.of());
             default -> null;
         };
-        return identity == null || (!Set.of("describe-producers", "list-transactions").contains(identity.api())
+        return identity == null || (!Set.of("describe-producers", "list-transactions", "produce").contains(identity.api())
                 && (identity.transactionalId() == null || identity.transactionalId().isBlank())) ? Optional.empty() : Optional.of(identity);
     }
 
@@ -51,20 +51,22 @@ final class ProtocolMessages {
 
     private static FaultRuleBook.RequestIdentity produce(short version, ProduceRequestData value) {
         // v13 uses topic UUIDs; resolving names would require a separate observed metadata binding.
-        if (version > 12 || value.acks() == 0 || value.transactionalId() == null) return null;
+        if (version > 12 || value.acks() == 0 || value.transactionalId() != null && value.transactionalId().isBlank()) return null;
+        boolean transactional = value.transactionalId() != null;
         Long producerId = null; Short epoch = null; Set<String> topics = new LinkedHashSet<>();
         for (var topic : value.topicData()) {
+            if (topic.name() == null || topic.name().isBlank() || topic.partitionData().isEmpty()) return null;
             topics.add(topic.name());
             for (var partition : topic.partitionData()) {
                 if (!(partition.records() instanceof Records records)) return null;
                 for (var batch : records.batches()) {
-                    if (!batch.isTransactional() || batch.producerId() < 0) return null;
+                    if (batch.isTransactional() != transactional || batch.producerId() < (transactional ? 0 : -1)) return null;
                     if (producerId != null && (producerId != batch.producerId() || epoch != batch.producerEpoch())) return null;
                     producerId = batch.producerId(); epoch = batch.producerEpoch();
                 }
             }
         }
-        return producerId == null ? null : new FaultRuleBook.RequestIdentity("produce", value.transactionalId(), producerId, epoch, null, topics);
+        return producerId == null ? null : new FaultRuleBook.RequestIdentity("produce", value.transactionalId(), producerId < 0 ? null : producerId, producerId < 0 ? null : epoch, null, topics);
     }
 
     static Map<String, Short> errors(short version, ApiMessage response) {

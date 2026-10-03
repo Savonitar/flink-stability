@@ -681,4 +681,11 @@ expected validation code.
 | SV-291 | At-least-once output has missing, unexpected or malformed IDs, or an incomplete snapshot | FAIL; duplicates cannot hide another defect or turn a verification failure into PASS. |
 | SV-292 | At-least-once oracle declared for an exactly-once sink | Reject; historical AT_LEAST_ONCE sinks without the new mode still use the exact-ID oracle. |
 | SV-293 | PR comparison contains allowed duplicates or mismatched oracle modes | Retain duplicate counts; exclude allowed duplicates from guarantee-failure findings; mismatched modes remain unknown. |
+
+### Nontransactional Produce coverage
+
+| ID | Input | Required behavior |
+| --- | --- | --- |
+| SV-294 | Nontransactional Produce with or without idempotent producer identity | Match only an exact topic rule, preserve absent fields, and reject transactional-prefix or foreign-topic selectors. |
+| SV-295 | Nontransactional lost response or error-after-append | Forward the real request; record the correlated response and successful append offsets before substituting an error; never invent a transaction identity. |
 | SV-305 | Explicit ID-set mode compiled before execution | Keep the typed plan independent of runtime validator packages; adapt the mode at execution while preserving existing package boundaries. |

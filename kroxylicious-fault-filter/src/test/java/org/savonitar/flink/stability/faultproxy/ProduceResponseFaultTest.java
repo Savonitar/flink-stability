@@ -14,6 +14,30 @@ import static org.junit.jupiter.api.Assertions.*;
 class ProduceResponseFaultTest {
     @TempDir Path control;
 
+    @Test void nonTransactionalLostResponsesAndAppendErrorsKeepWireEvidence() throws Exception {
+        for (boolean idempotent : List.of(false, true)) for (String action : List.of("drop-response", "error-after-append")) {
+            var helper = helper("alo-" + action + idempotent);
+            var fixture = new ProtocolMessagesTest.Fixture(ApiKeys.PRODUCE, (short)12, ProtocolMessagesTest.nonTransactionalProduce(idempotent));
+            try (var book = helper.arm(fixture, action, action.equals("error-after-append") ? "request-timed-out" : null,
+                    0, System::nanoTime, Long.MAX_VALUE)) {
+                var filter = new KafkaProtocolFaultFilter(book);
+                filter.onRequest(ApiKeys.PRODUCE, (short)12, header((short)12, 1), ProtocolMessagesTest.wire(fixture), helper.context())
+                        .toCompletableFuture().join();
+                var result = filter.onResponse(ApiKeys.PRODUCE, (short)12, new ResponseHeaderData().setCorrelationId(1),
+                        wire(response(), (short)12), helper.context()).toCompletableFuture().join();
+                assertEquals(action.equals("drop-response"), result.drop());
+                assertEquals(1, helper.forwarded.get());
+                var event = helper.events().getLast();
+                assertTrue(event.path("transactionalId").isNull());
+                if (!idempotent) assertTrue(event.path("producerId").isNull());
+                if (action.equals("error-after-append")) {
+                    assertEquals(123L, event.at("/originalBaseOffsets/output~10").asLong());
+                    assertEquals(Errors.REQUEST_TIMED_OUT.code(), partition((ProduceResponseData)helper.responseForwarded.get()).errorCode());
+                }
+            }
+        }
+    }
+
     @Test void forwardsAppendThenSubstitutesOnlyTwoSuccessfulResponsesAcrossConnections() throws Exception {
         for (short version : new short[]{3, 8, 12}) {
             var helper = helper("v" + version);
