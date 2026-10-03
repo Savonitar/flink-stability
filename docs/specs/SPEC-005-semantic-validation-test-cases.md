@@ -637,3 +637,13 @@ expected validation code.
 | SV-272 | Unfiltered listing, negative IDs, wrong state, empty partitions, unsupported prefix/topic selectors or transient-error mismatch | Leave unmatched wire traffic unchanged or reject invalid plans before provisioning; no synthetic successful proof from mixed/unknown-state responses. |
 | SV-273 | Protocol fault with nested TaskManager restart | Acknowledge arm before kill/restart, retain existing disruption and identity evidence, enforce action deadlines and always remove the rule after action failure; failed arming never restarts a process. |
 | SV-274 | New TV1/TV2 POOLING catalogs, including broker-down recovery | Validate offline, require exact-ID pass and observed fault effect, include in chaos-full only, preserve original catalogs and expectations; reused IDs do not claim the INCREMENTING commit window. |
+
+### Rolling broker restart
+
+| Case | Input | Required result |
+| --- | --- | --- |
+| SV-275 | Rolling restart with each supported order and a live sink coordinator | Resolve order once, issue TERM then fixed-port restart for each broker, never stop two together, and retain per-broker timestamps and leader/coordinator partition observations. |
+| SV-276 | One restarted broker runs but output or transaction-state ISR remains partial | Do not stop the next broker; bounded timeout leaves an unconfirmed roll and retains partial evidence. All transaction-state partitions must be inventoried from metadata. |
+| SV-277 | TERM fails ambiguously, metadata disappears, or the original deadline expires | Attempt bounded safety restart of the same identity; stop the sequence and preserve unconfirmed evidence. Never substitute KILL for a graceful stop. |
+| SV-278 | Preferred election requested after the third recovery | Require observed preferred leaders and full ISR, not only Admin acknowledgement; a missed election cannot confirm the roll. |
+| SV-279 | Invalid order/target, hold/commit option, absent metadata, or a finished EOS job | Reject invalid plans or retain an inconclusive execution; require all six physical operations before a passing rolling fault receipt. |

@@ -35,7 +35,11 @@ public record PhaseExecutionEvidence(
     }
 
     public record BrokerOperation(String path, List<LoopIteration> loopIterations,
-                                  org.savonitar.flink.stability.runtime.api.KafkaBrokerControl.Evidence raw) {
+                                  org.savonitar.flink.stability.runtime.api.KafkaBrokerControl.Evidence raw,
+                                  FlinkJobObservation.Attempt jobBefore, FlinkJobObservation.Attempt jobAfter) {
+        public BrokerOperation(String path, List<LoopIteration> iterations, org.savonitar.flink.stability.runtime.api.KafkaBrokerControl.Evidence raw) {
+            this(path, iterations, raw, null, null);
+        }
         public BrokerOperation { loopIterations = List.copyOf(loopIterations); Objects.requireNonNull(raw); }
     }
 

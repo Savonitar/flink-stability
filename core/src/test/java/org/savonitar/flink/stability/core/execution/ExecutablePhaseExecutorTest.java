@@ -481,6 +481,54 @@ class ExecutablePhaseExecutorTest {
         assertEquals("taskmanager-1-container-2", evidence.taskManagerRestarts().getFirst().replacementIdentity().orElseThrow().runtimeId());
     }
 
+    @Test void rollingFaultRequiresTheJobToRemainRunningAndRetainsBothObservations() throws Exception {
+        var plan = plan(document -> {
+            ((ObjectNode) document.at("/setup/kafka/clusters/main")).put("brokers", 3);
+            document.at("/setup/kafka/clusters/main/topics").forEach(topic -> ((ObjectNode) topic).put("replication_factor", 3));
+            var steps = replaceSteps(document);
+            var fault = steps.addObject().putObject("broker_fault").put("mode", "rolling-restart").put("order", "fixed").put("timeout", "2m");
+            fault.putObject("target").put("kind", "selector").put("role", "broker").put("cluster", "main")
+                    .put("type", "transaction-coordinator").put("job", "eos-job");
+            steps.addObject().putObject("wait").put("duration", "1ms");
+        });
+        for (boolean finished : List.of(false, true)) {
+            List<String> events = new ArrayList<>(); var flink = new FakeFlink(events);
+            flink.haObservations.add(RUNNING_JOB);
+            flink.haObservations.add(finished ? new FlinkJobObservation(2000, FlinkJobState.FINISHED, 3, 0, Optional.empty(), List.of(), List.of()) : RUNNING_JOB);
+            var runtime = new FakeTaskManagers(events);
+            runtime.brokerObservations = rollingEvidence();
+            var evidence = new ExecutablePhaseExecutor(flink, runtime, ExecutablePhaseExecutor.NetworkFaults.NONE,
+                    duration -> events.add("after-roll")).execute(plan, JOB);
+            assertEquals(!finished, events.contains("after-roll"));
+            assertEquals(6, evidence.brokerOperations().size());
+            assertEquals(!finished, evidence.brokerOperations().getFirst().raw().confirmed());
+            assertEquals(FlinkJobState.RUNNING, evidence.brokerOperations().getFirst().jobBefore().observation().orElseThrow().state());
+            assertEquals(finished ? FlinkJobState.FINISHED : FlinkJobState.RUNNING,
+                    evidence.brokerOperations().getFirst().jobAfter().observation().orElseThrow().state());
+        }
+    }
+    private static List<org.savonitar.flink.stability.runtime.api.KafkaBrokerControl.Evidence> rollingEvidence() {
+        var result = new ArrayList<org.savonitar.flink.stability.runtime.api.KafkaBrokerControl.Evidence>();
+        var target = new org.savonitar.flink.stability.runtime.api.KafkaBrokerControl.Target(
+                org.savonitar.flink.stability.runtime.api.KafkaBrokerControl.TargetKind.TRANSACTION_COORDINATOR, null, null, -1, "minimal");
+        var reference = new org.savonitar.flink.stability.runtime.api.KafkaBrokerControl.Selection(target, "broker-1", "__transaction_state", 0, 1, "minimal-0", 42L, 0, 1);
+        for (int id = 1; id <= 3; id++) {
+            int next = id == 3 ? 1 : id + 1;
+            var running = new org.savonitar.flink.stability.runtime.api.KafkaBrokerControl.Snapshot("c"+id,"image","network",id,true);
+            var stopped = new org.savonitar.flink.stability.runtime.api.KafkaBrokerControl.Snapshot("c"+id,"image","network",id,false);
+            var before = List.of(new org.savonitar.flink.stability.runtime.api.KafkaBrokerControl.Leadership("__transaction_state",0,id,List.of(1,2,3),List.of(1,2,3)));
+            var isr = new ArrayList<>(List.of(1,2,3)); isr.remove(Integer.valueOf(id));
+            var during = List.of(new org.savonitar.flink.stability.runtime.api.KafkaBrokerControl.Leadership("__transaction_state",0,next,List.of(1,2,3),isr));
+            var ready = List.of(new org.savonitar.flink.stability.runtime.api.KafkaBrokerControl.Leadership("__transaction_state",0,next,List.of(1,2,3),List.of(1,2,3)));
+            var progress = new org.savonitar.flink.stability.runtime.api.KafkaBrokerControl.RollingProgress(id,List.of("broker-1","broker-2","broker-3"),
+                    org.savonitar.flink.stability.runtime.api.KafkaBrokerControl.RollingOrder.FIXED,1,2,reference,ready,false,false);
+            result.add(new org.savonitar.flink.stability.runtime.api.KafkaBrokerControl.Evidence("broker-"+id,false,running,stopped,before,during,null,
+                    org.savonitar.flink.stability.runtime.api.KafkaBrokerControl.Action.STOP,null).withRolling(progress));
+            result.add(new org.savonitar.flink.stability.runtime.api.KafkaBrokerControl.Evidence("broker-"+id,true,stopped,running,during,ready,null).withRolling(progress));
+        }
+        return result;
+    }
+
     @Test
     void aProxyThatCannotInjectMakesTheAttemptInconclusive() {
         ExecutableScenarioPlan plan = plan(ExecutablePhaseExecutorTest::addProtocolFault);
@@ -742,6 +790,10 @@ class ExecutablePhaseExecutorTest {
         private RuntimeException leaderFailure;
         private java.util.function.Function<LeaderFaultRequest, LeaderFaultEvidence> leaderEvidence;
         private Duration leaderBudget;
+        private List<org.savonitar.flink.stability.runtime.api.KafkaBrokerControl.Evidence> brokerObservations;
+        @Override public List<org.savonitar.flink.stability.runtime.api.KafkaBrokerControl.Evidence> brokerFault(
+                org.savonitar.flink.stability.runtime.api.KafkaBrokerControl.Request request,
+                List<org.savonitar.flink.stability.runtime.api.KafkaLogCapture.Partition> partitions) { return brokerObservations; }
 
         private FakeTaskManagers(List<String> events) {
             this.events = events;

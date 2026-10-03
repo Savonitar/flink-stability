@@ -74,6 +74,7 @@ final class ThreeBrokerKafkaRuntime implements KafkaRuntimeCluster {
         environment.put("KAFKA_CONTROLLER_QUORUM_VOTERS", java.util.stream.IntStream.rangeClosed(1, 3)
                 .mapToObj(id -> id + "@" + target.brokerAlias(id) + ":9094").collect(Collectors.joining(",")));
         environment.put("KAFKA_AUTO_CREATE_TOPICS_ENABLE", "false");
+        environment.put("KAFKA_CONTROLLED_SHUTDOWN_ENABLE", "true");
         environment.put("KAFKA_LOG_DIRS", "/tmp/kafka-logs");
         return Map.copyOf(environment);
     }
@@ -121,7 +122,13 @@ final class ThreeBrokerKafkaRuntime implements KafkaRuntimeCluster {
     @Override public List<KafkaBrokerControl.Evidence> brokerFault(KafkaBrokerControl.Request request,
             List<KafkaLogCapture.Partition> partitions) {
         try (var admin = new KafkaBrokerAdmin(endpoints().hostBootstrapServers(), request.timeout())) {
-            return KafkaSelectedBrokerFault.execute(request, partitions, new KafkaSelectedBrokerFault.Driver() {
+            return KafkaBrokerFault.execute(request, partitions, new KafkaBrokerFault.ClusterDriver() {
+                @Override public List<KafkaLogCapture.Partition> transactionPartitions(MonotonicDeadline deadline) throws Exception {
+                    return admin.transactionPartitions(deadline);
+                }
+                @Override public void electPreferred(List<KafkaLogCapture.Partition> partitions, MonotonicDeadline deadline) throws Exception {
+                    admin.electPreferred(partitions, deadline);
+                }
                 @Override public KafkaBrokerControl.Selection select(KafkaBrokerControl.Target target, MonotonicDeadline deadline) throws Exception {
                     return admin.select(target, deadline);
                 }

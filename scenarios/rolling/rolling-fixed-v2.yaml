@@ -1,0 +1,83 @@
+format: v1
+kind: scenario
+
+meta:
+  name: rolling-fixed-v2
+  description: Graceful sequential broker restarts with full ISR barriers and fixed order; TV2.
+
+runs: 1
+health_retry_limit: 0
+completion_timeout: 5m
+
+setup:
+  kafka:
+    clusters:
+      main:
+        image: apache/kafka:4.0.0
+        brokers: 3
+        transaction_version: 2
+        topics:
+          - name: input
+            partitions: 3
+            replication_factor: 3
+            input_source:
+              mode: generated
+              format: integer-sequence
+              total: 30000
+          - name: output
+            partitions: 3
+            replication_factor: 3
+  flink:
+    image: flink:2.2.0
+    jobmanagers: 1
+    taskmanagers: 1
+
+subject:
+  connectors:
+    kafka:
+      artifact: maven:org.apache.flink:flink-connector-kafka:5.0.0-2.2
+
+workload:
+  jobs:
+    - alias: eos-job
+      jar: ./flink-job-generator/target/flink-job-generator.jar
+      connectors: [kafka]
+      parallelism: 1
+      source: { cluster: main, topic: input }
+      sink:
+        cluster: main
+        topic: output
+        delivery_guarantee: EXACTLY_ONCE
+        transactional_id_prefix: rolling-fixed-v2
+        transaction_id_naming_strategy: INCREMENTING
+      checkpointing:
+        interval: 10s
+        mode: EXACTLY_ONCE
+      program_args: [--processingDelayMs, "5"]
+
+phases:
+  - name: warmup
+    steps:
+      - await:
+          condition: { type: job-state, job: eos-job, state: RUNNING }
+          timeout: 2m
+          on_timeout: inconclusive
+      - await:
+          condition: { type: checkpoint-completed, job: eos-job, count: 1 }
+          timeout: 2m
+          on_timeout: fail
+
+  - name: rolling-recovery
+    steps:
+      - broker_fault:
+          mode: rolling-restart
+          target: { kind: selector, role: broker, cluster: main, type: transaction-coordinator, job: eos-job }
+          order: fixed
+          timeout: 2m
+          preferred_election: false
+
+terminal_validations:
+  - type: kafka.id-set
+    cluster: main
+    topic: output
+    expected: input-manifest

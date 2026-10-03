@@ -263,6 +263,8 @@ final class V1ExecutionResultRenderer {
                     .put("confirmed", operation.raw().confirmed());
             rendered.set("loopIterations", JSON.valueToTree(operation.loopIterations()));
             rendered.set("observations", JSON.valueToTree(operation.raw()));
+            putJobObservation(rendered, "jobBefore", operation.jobBefore());
+            putJobObservation(rendered, "jobAfter", operation.jobAfter());
         }));
         ArrayNode networkFaults = evidence.putArray("networkFaults");
         result.phaseEvidence().ifPresent(phases -> phases.networkFaults().forEach(fault -> {
@@ -516,6 +518,16 @@ final class V1ExecutionResultRenderer {
         rendered.put("logicalName", observed.logicalName());
         rendered.put("runtimeId", observed.runtimeId());
         rendered.put("resourceId", observed.resourceId());
+    }
+
+    private static void putJobObservation(ObjectNode parent, String key, FlinkJobObservation.Attempt attempt) {
+        if (attempt == null) return;
+        ObjectNode node = parent.putObject(key);
+        node.put("error", attempt.failure().orElse(null));
+        attempt.observation().ifPresent(value -> {
+            node.put("state", value.state().name()); node.put("jobManagerTimeMillis", value.jobManagerTimeMillis());
+            node.put("completedCheckpoints", value.completedCheckpoints()); node.put("restoredCheckpoints", value.restoredCheckpoints());
+        });
     }
 
     private static void putSubtask(ArrayNode parent, FlinkJobObservation.Subtask subtask) {

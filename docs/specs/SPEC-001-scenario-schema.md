@@ -3413,3 +3413,36 @@ transient errors and response loss, with and without a broker down. They extend
 POOLING coordinator variants use exact-ID and selected-broker evidence without
 `require_commit`: reused transaction IDs cannot establish the existing
 INCREMENTING-specific commit window. No live calibration is claimed.
+
+### Graceful rolling broker restart
+
+`broker_fault.mode: rolling-restart` restarts all three owned brokers, one at a
+time, through the same broker-fault implementation used for kill, pause, resume
+and named restart. It requires the sink's `transaction-coordinator` target,
+`order: fixed | coordinator-first | coordinator-last`, and a positive `timeout`
+no greater than 5m. It has no `duration` or `require_commit` option. Fixed order
+is broker-1, broker-2, broker-3; coordinator order is resolved once from an open
+sink transaction after the initial health barrier, then held fixed for the batch.
+The remaining brokers keep numeric order. This is relative to the observed
+transaction at the start, not a claim that the same transaction remains open.
+
+Kafka controlled shutdown is explicitly enabled. Each stop sends SIGTERM to the
+exact owned container; it never escalates to SIGKILL. The bounded observer must
+see the process stop and partition leadership/ISR exclude that broker, then the
+fixed-port restart must preserve container, image, network and advertised endpoint.
+Before the first stop and before advancing, all declared topic partitions and
+all observed `__transaction_state` partitions require full RF=3/ISR=3 and a live
+leader. Missing/incomplete metadata, partial ISR, an expired deadline or any
+failed stop/heal halts the sequence; an attempted stop always gets a bounded
+restart attempt, even when normal observation has failed. Safety recovery cannot
+restore an expired operation's confirmation. Metadata is bounded to 128
+transaction-state and 256 total partitions.
+
+Optional `preferred_election: true` requests preferred leader election after the
+third recovery, then waits for both preferred leaders and full ISR. Per-broker
+evidence retains the chosen order, open-transaction reference, timestamps,
+physical identities, before/after leaders (including coordinator partitions),
+and the final full-ISR barrier. The EOS job must be observed RUNNING before and
+after the sequence; completion during a slow roll cannot masquerade as an
+in-flight fault. New `rolling-*` TV1/TV2 controls and variants extend chaos-full.
+Live validation remains pending.

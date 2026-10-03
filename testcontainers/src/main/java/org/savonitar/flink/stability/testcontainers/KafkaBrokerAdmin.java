@@ -68,6 +68,18 @@ final class KafkaBrokerAdmin implements AutoCloseable {
         if (value == null) throw new IllegalStateException("Selected transaction unavailable");
         return new KafkaCommitWindow.Transaction(id, value.producerId(), value.producerEpoch(), value.state().name(), value.coordinatorId());
     }
+    List<KafkaLogCapture.Partition> transactionPartitions(MonotonicDeadline deadline) throws Exception {
+        var metadata = topics(List.of("__transaction_state"), deadline).get("__transaction_state");
+        int count = KafkaBrokerControl.transactionStatePartitionCount(metadata.partitions().stream().map(TopicPartitionInfo::partition).toList());
+        if (count > 128) throw new IllegalStateException("Transaction-state partition bound exceeded");
+        return metadata.partitions().stream().map(p -> new KafkaLogCapture.Partition("__transaction_state", p.partition())).toList();
+    }
+    void electPreferred(List<KafkaLogCapture.Partition> partitions, MonotonicDeadline deadline) throws Exception {
+        var selected = partitions.stream().map(p -> new org.apache.kafka.common.TopicPartition(p.topic(), p.partition()))
+                .collect(java.util.stream.Collectors.toSet());
+        admin.electLeaders(org.apache.kafka.common.ElectionType.PREFERRED, selected).all()
+                .get(deadline.remaining().toNanos(), TimeUnit.NANOSECONDS);
+    }
     private Map<String, TopicDescription> topics(List<String> names, MonotonicDeadline deadline) throws Exception {
         return admin.describeTopics(names).allTopicNames().get(deadline.remaining().toNanos(), TimeUnit.NANOSECONDS);
     }

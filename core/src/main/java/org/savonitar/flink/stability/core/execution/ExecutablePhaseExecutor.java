@@ -171,7 +171,21 @@ public final class ExecutablePhaseExecutor {
                         phaseIndex, phaseName, path, loopIterations, restart, evidence);
             } else if (step instanceof ExecutableScenarioPlan.BrokerFault fault) {
                 java.util.List<org.savonitar.flink.stability.runtime.api.KafkaBrokerControl.Evidence> observations;
-                try { observations = runtime.brokerFault(fault.request(), evidence.kafkaPartitions); }
+                boolean rolling = fault.request().action() == org.savonitar.flink.stability.runtime.api.KafkaBrokerControl.Action.ROLLING_RESTART;
+                FlinkJobObservation.Attempt beforeRolling = null, afterRolling = null;
+                try {
+                    if (rolling) beforeRolling = observe(job, Duration.ofSeconds(10));
+                    if (rolling && beforeRolling.observation().map(value -> value.state() != FlinkJobState.RUNNING).orElse(true))
+                        throw new IllegalStateException("Rolling restart requires an observed running EOS job");
+                    observations = runtime.brokerFault(fault.request(), evidence.kafkaPartitions);
+                    if (rolling) afterRolling = observe(job, Duration.ofSeconds(10));
+                    if (rolling && !observations.isEmpty() && (observations.size() != 6
+                            || observations.stream().anyMatch(value -> value.rolling() == null)
+                            || afterRolling.observation().map(value -> value.state() != FlinkJobState.RUNNING).orElse(true))) {
+                        observations = new java.util.ArrayList<>(observations);
+                        observations.set(0, observations.getFirst().withError("Rolling restart incomplete or EOS job no longer observed running"));
+                    }
+                }
                 catch (RuntimeException failure) {
                     observations = List.of(new org.savonitar.flink.stability.runtime.api.KafkaBrokerControl.Evidence(
                             "unresolved", false, null, null, List.of(), List.of(), failure.toString(), fault.request().action(), null));
@@ -189,8 +203,8 @@ public final class ExecutablePhaseExecutor {
                         observations.set(0, first.withError("Required coordinator commit window not confirmed"));
                     }
                 }
-                for (var observation : observations) evidence.brokers.add(new PhaseExecutionEvidence.BrokerOperation(path, loopIterations, observation));
-                evidence.stopFurtherSteps |= observations.size() != 2 || observations.stream().anyMatch(value -> !value.confirmed());
+                for (var observation : observations) evidence.brokers.add(new PhaseExecutionEvidence.BrokerOperation(path, loopIterations, observation, beforeRolling, afterRolling));
+                evidence.stopFurtherSteps |= observations.size() != (rolling ? 6 : 2) || observations.stream().anyMatch(value -> !value.confirmed());
                 succeeded(evidence, phaseIndex, phaseName, path, loopIterations, PhaseExecutionEvidence.StepKind.BROKER_FAULT,
                         "effectConfirmed=" + !evidence.stopFurtherSteps);
             } else if (step instanceof ExecutableScenarioPlan.BrokerOperation operation) {

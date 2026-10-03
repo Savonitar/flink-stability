@@ -25,7 +25,7 @@ def fault_requirements(text):
             required['networkFaults'] += 1
             if re.search(r'^\s+restart:\s*\{\s*component:\s*taskmanager\b', body, re.M):
                 required['taskManagerKills'] += 1
-        elif kind == 'broker_fault': required['brokerOperations'] += 2
+        elif kind == 'broker_fault': required['brokerOperations'] += 6 if re.search(r'mode:\s*rolling-restart\b', body) else 2
         elif re.search(r'role:\s*taskmanager\b', body): required['taskManagerKills'] += 1
         elif re.search(r'role:\s*broker\b|component:\s*kafka\b', body): required['brokerOperations'] += 1
     return dict(required)

@@ -51,6 +51,9 @@ final class DockerKafkaBrokerDriver implements KafkaBrokerFault.Driver {
             requireOwned(deadline);
             switch (action) {
                 case KILL -> { try (var command = broker.getDockerClient().killContainerCmd(id).withSignal("KILL")) { command.exec(); } }
+                // TERM only: never escalate graceful rolling shutdown to KILL on timeout.
+                case STOP -> { try (var command = broker.getDockerClient().killContainerCmd(id).withSignal("TERM")) { command.exec(); } }
+                case ROLLING_RESTART -> throw new IllegalArgumentException("Rolling restart must use the shared broker fault engine");
                 case RESTART -> { try (var command = broker.getDockerClient().startContainerCmd(id)) { command.exec(); } }
                 case PAUSE -> { try (var command = broker.getDockerClient().pauseContainerCmd(id)) { command.exec(); } }
                 case RESUME -> { try (var command = broker.getDockerClient().unpauseContainerCmd(id)) { command.exec(); } }

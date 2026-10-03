@@ -53,10 +53,10 @@ class KafkaSelectedBrokerFaultTest {
         assertEquals(KafkaBrokerControl.Action.RESUME, fake.actions.getLast());
     }
     static List<KafkaBrokerControl.Evidence> execute(Fake fake, KafkaBrokerControl.Action action) {
-        return KafkaSelectedBrokerFault.execute(new KafkaBrokerControl.Request(TARGET, action,
+        return KafkaBrokerFault.execute(new KafkaBrokerControl.Request(TARGET, action,
                 Duration.ofMillis(10), Duration.ofMillis(30)), PARTITIONS, fake);
     }
-    static class Fake implements KafkaSelectedBrokerFault.Driver, KafkaBrokerFault.Driver {
+    static class Fake implements KafkaBrokerFault.ClusterDriver, KafkaBrokerFault.Driver {
         long time; int selections; boolean running = true, paused, transfer = true, changed, missing, failMutation, failHealMetadata, lateMetadata;
         List<KafkaBrokerControl.Action> actions = new ArrayList<>();
         @Override public long nanoTime() { return time; }
