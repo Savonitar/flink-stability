@@ -142,6 +142,13 @@ final class ThreeBrokerKafkaRuntime implements KafkaRuntimeCluster {
             });
         }
     }
+    PacketFaultControl.Evidence packetFault(PacketFaultControl.Request request, TaskManagerControl.Identity taskManager) {
+        if (!started) throw new IllegalStateException("Kafka owner unavailable");
+        try (var admin = new KafkaBrokerAdmin(endpoints().hostBootstrapServers(), request.timeout())) {
+            return PacketFaultBackend.execute(request, new DockerPacketFaultSidecar(brokers.getFirst().getDockerClient(),
+                    taskManager, network.getId(), admin, brokers));
+        }
+    }
     @Override public KafkaLogCapture captureKafkaLogs(List<KafkaLogCapture.Partition> partitions, Path directory, MonotonicDeadline deadline) {
         if (!started) throw new IllegalStateException("Kafka owner unavailable");
         // One owned replica for every RF=3 partition; do not multiply the shared capture budgets.

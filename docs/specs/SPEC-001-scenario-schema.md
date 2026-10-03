@@ -3446,3 +3446,20 @@ and the final full-ISR barrier. The EOS job must be observed RUNNING before and
 after the sequence; completion during a slow roll cannot masquerade as an
 in-flight fault. New `rolling-*` TV1/TV2 controls and variants extend chaos-full.
 Live validation remains pending.
+
+### Experimental packet backend
+
+The runtime exposes an experimental `PacketFaultControl` for loss, delay/jitter
+and bidirectional blackhole between one owned TaskManager namespace and one
+selector-resolved broker client listener. The [packet design](../PACKET-FAULTS.md)
+specifies identity binding, NET_ADMIN-only sidecar isolation, immutable image
+requirements, bounded holds, counter deltas and scoped healing. Confirmation
+requires positive counter growth during the hold, stable endpoint identities,
+verified absence of owned rules and removal of the helper. Cleanup uncertainty
+retains the watchdog and namespace ownership lock; it cannot become a PASS.
+
+This slice has unit-tested runtime wiring only. No verified public image digest
+was locally available under the development download restriction. Therefore no
+packet YAML operation, canonical scenarios or chaos-full entries are activated
+in this change. Image verification and the first live probe require a separately
+approved follow-up before schema/profile activation; chaos-quick is unchanged.

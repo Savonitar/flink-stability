@@ -647,3 +647,13 @@ expected validation code.
 | SV-277 | TERM fails ambiguously, metadata disappears, or the original deadline expires | Attempt bounded safety restart of the same identity; stop the sequence and preserve unconfirmed evidence. Never substitute KILL for a graceful stop. |
 | SV-278 | Preferred election requested after the third recovery | Require observed preferred leaders and full ISR, not only Admin acknowledgement; a missed election cannot confirm the roll. |
 | SV-279 | Invalid order/target, hold/commit option, absent metadata, or a finished EOS job | Reject invalid plans or retain an inconclusive execution; require all six physical operations before a passing rolling fault receipt. |
+
+### Experimental packet runtime
+
+| Case | Input | Required result |
+| --- | --- | --- |
+| SV-280 | Loss, jittered delay or blackhole request with a selector and immutable sidecar digest | Join the exact TaskManager namespace with NET_ADMIN only, no host mounts; bind the owned broker/container/image/network and exact internal IPv4 client endpoint. |
+| SV-281 | Traffic counters present before injection hold but unchanged afterward | Remain unconfirmed; delay requires packet growth and loss/blackhole require dropped-packet growth during the hold. |
+| SV-282 | Foreign root qdisc, invalid route/selector, changed endpoint or expired deadline | Refuse unowned state, retain diagnostic receipts and attempt bounded scoped healing after any possible installation. |
+| SV-283 | Interrupted hold, partial installation, failed healing or unknown helper removal | Attempt cleanup; restore interrupt; confirmation requires rule absence and helper removal. Keep watchdog/namespace ownership when cleanup is uncertain. |
+| SV-284 | Mutable image tag, invalid percentages/jitter/bounds, oversized evidence or ambiguous counters | Reject or preserve bounded unconfirmed evidence; never install global rules or claim live validation from unit tests. |
