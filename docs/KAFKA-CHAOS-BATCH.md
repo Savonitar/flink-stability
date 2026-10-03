@@ -2,8 +2,8 @@
 
 `tools/kafka_chaos_batch.py` prepares and resumes the pending live regression.
 Preparation and `plan` are local only. `run --execute` starts Docker and must be
-separately authorized. The packet backend is excluded until its image pin and
-first probe have been reviewed.
+separately authorized. New packet, parallel, at-least-once and savepoint stages follow the original
+99 cells. The packet stage first requires a successful isolated NET_ADMIN probe.
 
 | Stage | Attempts | Warm-image estimate |
 | --- | ---: | ---: |
@@ -15,8 +15,12 @@ first probe have been reviewed.
 | New POOLING/rolling controls | 6 | 12–30 min |
 | New POOLING faults | 30 | 90–240 min |
 | New rolling faults | 8 | 32–80 min |
+| Packet controls and TV1/TV2 loss, delay/jitter, blackhole | 8 | 32–64 min |
+| Parallelism-four controls and faults | 36 | 108–288 min |
+| At-least-once controls and faults | 8 | 32–64 min |
+| Savepoint controls, rescaling and strategy switch | 6 | 24–60 min |
 
-Total: 99 serial attempts, roughly 222–537 minutes (3.7–9 hours). These are
+Total: 157 serial attempts, roughly 418–1013 minutes (7.0–16.9 hours). These are
 planning estimates, not measured timings; cold pulls add time. The wrapper gives
 each process 30 minutes, retains a timeout as unresolved and stops. Scenario
 deadlines still apply. A timed-out/interrupted process may require manual cleanup.
@@ -43,7 +47,7 @@ After specific live-run approval, use the same command to start or resume:
 
 ```sh
 python3 tools/kafka_chaos_batch.py run --execute \
-  --output jobs/live/kafka-chaos-batch --max-new-cells 99
+  --output jobs/live/kafka-chaos-batch --max-new-cells 157
 ```
 
 The manifest freezes the source tree, engine/subject JARs, workload, runtime
@@ -64,3 +68,39 @@ IDs, complete fence/oracle and class-origin evidence, and absence of
 pending. The existing quick calibration checker must establish both CONTROL_PASS
 and CALIBRATION_DETECTED before the new-feature stages start. All six new healthy
 controls run before any new POOLING or rolling fault.
+
+## Select the new stages
+
+The original 99 IDs, order and calibration cells are unchanged. New stages can be
+selected independently with repeated `--stage packet`, `--stage parallel`,
+`--stage at-least-once` or `--stage savepoint` on `plan`, `prepare` and `run`.
+Omitting the selector includes the original batch first. Each new stage runs all
+its matched controls before its faults; a failed control stops that stage. An
+independently selected stage does not claim that the earlier calibration ran.
+A stage absent from the frozen manifest is rejected. Examples (future execution):
+
+```sh
+python3 tools/kafka_chaos_batch.py plan --stage packet --stage parallel
+python3 tools/kafka_chaos_batch.py run --execute --stage packet \
+  --output jobs/live/kafka-chaos-batch --max-new-cells 8
+```
+
+The packet manifest includes the exact probe command and reviewed image pin. The
+probe uses one disposable container on `--network none`, drops every capability
+then adds NET_ADMIN, has a read-only root plus a small `/run` tmpfs, and adds no
+host mounts. It exercises a local netem qdisc and private iptables chain, removes
+both and emits a completion marker. Docker may retrieve the immutable image if
+missing. The runner checks the marker, exit code, image config ID, platform and
+index digest before launching any packet scenario. Its start/completion records,
+stdout/stderr and inspection output are retained and hashed. Failure, timeout,
+changed evidence or interruption blocks the packet stage; the probe is never
+retried automatically. A timeout may leave an ambiguous container named in the
+start record and requires inspection before any separately approved retry.
+The image tool check alone does not prove NET_ADMIN support.
+
+At-least-once cells require the matching explicit oracle mode. They permit counted
+duplicates only with PASS, zero missing IDs, valid subject provenance and confirmed
+fault receipts. Strict cells retain the zero-duplicate requirement. Savepoint cells
+require lifecycle confirmation in addition to the whole-input terminal oracle.
+Re-freezing always uses a new output directory; old manifests and run evidence
+remain historical and are never overwritten or silently upgraded.

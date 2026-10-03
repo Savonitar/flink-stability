@@ -13,7 +13,7 @@ import test_pr_gate as fixtures
 class ChaosProfileTest(unittest.TestCase):
     def test_explicit_profiles_have_unique_existing_names_and_cover_quick(self):
         self.assertEqual(10, len(PROFILES['chaos-quick']))
-        self.assertEqual(124, len(PROFILES['chaos-full']))
+        self.assertEqual(130, len(PROFILES['chaos-full']))
         for name in PROFILES['chaos-full']:
             if name.startswith('broker-'):
                 self.assertTrue(name.endswith(('-v1', '-v2')), name)
@@ -24,7 +24,7 @@ class ChaosProfileTest(unittest.TestCase):
             for name in names:
                 path = pr_gate.canonical(ROOT, name)
                 self.assertTrue(path.with_name(name + '.expected.yaml').is_file())
-                self.assertEqual(not name.startswith(('broker-eos-control', 'pooling-broker-control', 'rolling-control', 'packet-control', 'parallel-pooling-broker-control', 'parallel-rolling-control', 'at-least-once-control', 'at-least-once-protocol-control')), bool(fault_requirements(path.read_text())), name)
+                self.assertEqual(not name.startswith(('broker-eos-control', 'pooling-broker-control', 'rolling-control', 'packet-control', 'parallel-pooling-broker-control', 'parallel-rolling-control', 'at-least-once-control', 'at-least-once-protocol-control', 'savepoint-control')), bool(fault_requirements(path.read_text())), name)
         self.assertNotIn('protocol-add-partitions-concurrent-v2', PROFILES['chaos-full'])
 
     def test_calibration_override_accepts_every_profile_catalog_and_rejects_ambiguity(self):

@@ -225,11 +225,12 @@ public final class V1ScenarioExecutor {
                     input.stoppingOffsets(),
                     context.attemptOrdinal(),
                     context.attemptNonce8());
-            job = flink.submit(new FlinkJobSubmission(
+            var initialSubmission = new FlinkJobSubmission(
                     uploadedJarId,
                     plan.job().parallelism(),
                     configuration,
-                    plan.job().programArguments().values()));
+                    plan.job().programArguments().values());
+            job = flink.submit(initialSubmission);
             if (expectedHa.tokenProof().isPresent()) {
                 try {
                     var trace = runtime.tokenServiceEvidence().filter(FlinkHaEvidence::completeTrace)
@@ -242,7 +243,10 @@ public final class V1ScenarioExecutor {
             }
             stage = Stage.PHASES;
             phases = new ExecutablePhaseExecutor(flink, runtime, networkFaults)
+                    .withSavepointSubmission(initialSubmission, "file:/flink/checkpoints/savepoints-attempt-"
+                            + context.attemptOrdinal() + "-" + context.attemptNonce8())
                     .execute(plan, job, expectedHa.tokenProof());
+            if (!phases.savepointRestores().isEmpty()) job = new FlinkJobHandle(phases.savepointRestores().getLast().restoredJobId());
 
             if (expectedHa.tokenProof().isPresent()) {
                 try {
@@ -381,6 +385,8 @@ public final class V1ScenarioExecutor {
                     diagnostics(failure));
         } catch (PhaseExecutionException failure) {
             phases = failure.evidence();
+            if (!phases.savepointRestores().isEmpty() && phases.savepointRestores().getLast().restoredJobId() != null)
+                job = new FlinkJobHandle(phases.savepointRestores().getLast().restoredJobId());
             // Read-only: explains a failed await (e.g. a restart loop) and judges earlier kills.
             finalJob = FlinkJobObservation.Attempt.of(flink, job);
             result = result(
@@ -786,7 +792,7 @@ public final class V1ScenarioExecutor {
             }
         }
         return new PhaseExecutionEvidence(phases.steps(), phases.taskManagerKills(), completed,
-                phases.taskManagerRestarts(), phases.leaderFaults(), phases.brokerOperations(), phases.packetFaults());
+                phases.taskManagerRestarts(), phases.leaderFaults(), phases.brokerOperations(), phases.packetFaults(), phases.savepointRestores());
     }
 
     /** Starts the plan's Kafka proxy, if it has one, and returns how to fault through it. */

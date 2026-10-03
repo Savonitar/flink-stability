@@ -10,7 +10,7 @@ import static org.savonitar.flink.stability.core.execution.plan.ExecutableScenar
 /** Phase capability checks and mapping, separated from artifact binding and topology. */
 final class PhasePlanCompiler {
     private static final Set<String> SUPPORTED_STEP_KEYS = Set.of(
-            "await", "wait", "loop", "kill", "restart", "network_fault", "leader_fault", "broker_fault", "packet_fault");
+            "await", "wait", "loop", "kill", "restart", "network_fault", "leader_fault", "broker_fault", "packet_fault", "savepoint_restore");
     static void validatePhases(
             Path source,
             ObjectNode document,
@@ -29,6 +29,7 @@ final class PhasePlanCompiler {
         ProcessLifecycleCompiler.validate(source, document, issues);
         BrokerFaultPlanCompiler.validate(source, document, issues);
         PacketFaultPlanCompiler.validate(source, document, issues);
+        SavepointPlanCompiler.validate(source, document, issues);
     }
 
     private static void validateSteps(
@@ -70,7 +71,7 @@ final class PhasePlanCompiler {
                             true,
                             issues);
                 }
-                case "kill", "restart", "leader_fault", "broker_fault", "packet_fault" -> { /* Validated with their topology/lifecycle. */ }
+                case "kill", "restart", "leader_fault", "broker_fault", "packet_fault", "savepoint_restore" -> { /* Validated with their topology/lifecycle. */ }
                 case "network_fault" -> NetworkFaultCompiler.validateStep(
                         source, (ObjectNode) step.get(key), stepPath + "/network_fault",
                         inLoop, issues);
@@ -166,6 +167,8 @@ final class PhasePlanCompiler {
                         : new ExecutableScenarioPlan.RestartTaskManager(step.path("restart").path("name").asText("taskmanager-1")));
             } else if (step.get("network_fault") instanceof ObjectNode networkFault) {
                 steps.add(NetworkFaultCompiler.step(networkFault));
+            } else if (step.has("savepoint_restore")) {
+                steps.add(SavepointPlanCompiler.step(step.path("savepoint_restore"), document));
             } else if (step.has("packet_fault")) {
                 steps.add(PacketFaultPlanCompiler.fault(step.path("packet_fault"), document));
             } else if (step.has("broker_fault")) {

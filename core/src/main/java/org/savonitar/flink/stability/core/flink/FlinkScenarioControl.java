@@ -20,6 +20,19 @@ public interface FlinkScenarioControl extends FlinkJobControl, AutoCloseable {
     long awaitCompletedCheckpoints(
             FlinkJobHandle job, long minimumCompleted, Duration timeout) throws IOException;
 
+    default String stopWithSavepoint(FlinkJobHandle job, String trigger, String directory, Duration timeout) throws IOException {
+        throw new UnsupportedOperationException("Stop with savepoint unavailable");
+    }
+    default FlinkSavepoint.Status savepointStatus(FlinkJobHandle job, String trigger, Duration timeout) throws IOException {
+        throw new UnsupportedOperationException("Savepoint status unavailable");
+    }
+    default FlinkSavepoint.RestoreProof restoredSavepoint(FlinkJobHandle job, Duration timeout) throws IOException {
+        throw new UnsupportedOperationException("Savepoint restoration proof unavailable");
+    }
+    default FlinkJobHandle submit(FlinkJobSubmission submission, Duration timeout) throws IOException {
+        throw new UnsupportedOperationException("Deadline-bound restored submission unavailable");
+    }
+
     /** Every received HTTP error, including failures followed by a successful retry. */
     default List<RestError> restErrors() {
         return List.of();

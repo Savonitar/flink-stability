@@ -257,6 +257,11 @@ final class V1ExecutionResultRenderer {
             restarted.put("previousIdentityFailure", restart.previousIdentityFailure().orElse(null));
             restarted.put("replacementIdentityFailure", restart.replacementIdentityFailure().orElse(null));
         }));
+        ArrayNode restores = evidence.putArray("savepointRestores");
+        result.phaseEvidence().map(PhaseExecutionEvidence::savepointRestores).orElse(List.of()).forEach(value -> {
+            ObjectNode item = new ObjectMapper().valueToTree(value);
+            item.put("confirmed", value.confirmed()); restores.add(item);
+        });
         PacketFaultEvidenceRenderer.render(evidence.putArray("packetFaults"), result.phaseEvidence()
                 .map(PhaseExecutionEvidence::packetFaults).orElse(List.of()));
         var brokerOperations = evidence.putArray("brokerOperations");

@@ -92,6 +92,8 @@ public record V1ScenarioExecutionResult(
             throw new IllegalArgumentException(
                     "PASS requires both write-fence and terminal-validation evidence");
         }
+        if (status == Status.PASS && phaseEvidence.map(value -> value.savepointRestores().stream().anyMatch(item -> !item.confirmed())).orElse(false))
+            throw new IllegalArgumentException("PASS requires confirmed savepoint restoration");
         if (status == Status.PASS && TaskManagerKillEffect.evaluate(
                         phaseEvidence.map(PhaseExecutionEvidence::taskManagerKills)
                                 .orElse(List.of()),

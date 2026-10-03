@@ -215,7 +215,7 @@ sides), roughly **60–120 minutes** with warm images and artifacts. This is a
 planning estimate, not measured throughput or a timeout. Pulls, startup and
 recovery can increase it.
 
-`--profile chaos-full` is the 28-scenario superset: explicit TV1/TV2 broker catalogs,
+`--profile chaos-full` is the explicit superset: explicit TV1/TV2 broker catalogs,
 all protocol catalogs (including Produce errors after append) and applicable TV
 pairs, and all four coordinator-commit catalogs. AddPartitionsToTxn is TV1 only:
 the TV2 sink normally does not send it. At two runs it plans 112 independent
@@ -305,3 +305,64 @@ real-Kafka success is claimed. The new post-append Produce timeout scenarios are
 also pending live runs. `error-response` still acts before broker forwarding;
 `error-after-append` is a separate response-path action. Keep all live results
 and classify anomalies before interpreting any profile as qualified.
+
+## One-command local checkout comparison
+
+`tools/connector_pr_test.py` resolves local refs, builds an explicit baseline and
+candidate in separate detached Git worktrees, and invokes `tools/pr_gate.py` with
+both artifacts. Keep the connector checkout and a new output directory inside this
+repository. It does not fetch, push, commit, delete worktrees, or modify the input
+checkout's working tree. For example, after installing the harness with JDK 21:
+
+```bash
+python3 tools/connector_pr_test.py \
+  --checkout jobs/pr/321/connector --head pr-head --merge-base-of main \
+  --output jobs/pr/321/comparison --profile auto --runs 2
+```
+
+Use `--base <ref>` instead of `--merge-base-of` for an explicit baseline. The tool
+resolves both arguments to commits before creating worktrees; a merge-base compares
+the head with its actual common ancestor, rather than whatever `main` later points
+to. `--dry-run` performs read-only ref/diff inspection and prints coverage without
+creating output. `--build-only` retains both builds and the exact gate command,
+without launching the chaos runs. Each failure retains its worktrees, logs and
+failure record; retry with a new output directory.
+
+Each side gets a separate Maven repository, isolated HOME and JVM user directory.
+Both Maven settings scopes mirror every artifact/plugin repository to
+`https://repo.maven.apache.org/maven2/`. Builds use `-DskipTests`, the connector
+module plus required reactor modules, and a pinned dependency-copy plugin. No
+snapshots or dependencies unavailable from Central are silently fetched elsewhere.
+The manifest records resolved commits/trees, both primary JAR SHA-256 values, every
+runtime dependency hash, settings hash, Maven/JDK output, commands and selected
+scenarios. The gate uses the already-installed harness and its existing offline
+Maven launch, independently of the two connector build caches. Select the build JDK
+with the normal `JAVA_HOME`/`PATH`; the harness must run with JDK 21.
+`--maven` accepts a command on PATH or a path inside this repository. Relative paths
+are bound to the harness root before entering the isolated build directories.
+
+Project `.mvn` JVM/argument/extension overrides, symlinks, submodules and alternate
+object stores are refused for separate review. The mirror constrains Maven
+resolution, not arbitrary network code executed by a build plugin. Use only a
+checkout whose build is authorized; this tool is not an OS sandbox.
+
+The `brokers`, `protocol`, `pooling`, `rolling`, `packet`, and `at-least-once`
+profiles are explicit scenario lists in `tools/chaos_profiles.py`, including the
+applicable controls and parallel variants. `chaos-quick` remains the calibrated
+10-scenario list; `chaos-full` currently includes 130 scenarios. An automatic
+suggestion uses the following first-matching path-prefix table (under
+`flink-connector-kafka/src/`); the exact table and each matched path are retained in
+the tool and plan. An unknown path or empty diff selects `chaos-full`. Multiple
+suggested profiles form a deduplicated union. Suggestions are conservative starting
+points, not proof that a changed behavior is covered.
+
+| Path prefix | Suggested profiles |
+| --- | --- |
+| `main/java/org/apache/flink/connector/kafka/sink/internal/TransactionalIdFactory` | pooling, rolling |
+| `main/java/org/apache/flink/connector/kafka/sink/internal/KafkaCommitter` | protocol, pooling, brokers |
+| `main/java/org/apache/flink/connector/kafka/sink/internal/FlinkKafkaInternalProducer` | protocol, packet, at-least-once |
+| `main/java/org/apache/flink/connector/kafka/sink/` | pooling, protocol, rolling, at-least-once |
+| `main/java/org/apache/flink/connector/kafka/source/` | brokers, rolling, packet |
+| `test/java/org/apache/flink/connector/kafka/sink/` | pooling, protocol, at-least-once |
+| `test/java/org/apache/flink/connector/kafka/source/` | brokers, rolling, packet |
+| Anything else, including POM/build changes | chaos-full |

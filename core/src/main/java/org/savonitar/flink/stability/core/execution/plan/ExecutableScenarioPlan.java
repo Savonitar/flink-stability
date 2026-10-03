@@ -815,7 +815,15 @@ public final class ExecutableScenarioPlan {
     }
 
     public sealed interface Step permits AwaitJobState, AwaitCheckpoints, Wait,
-            KillTaskManager, RestartTaskManager, BrokerOperation, BrokerFault, PacketFault, Loop, ProtocolFault, LeaderFault {}
+            KillTaskManager, RestartTaskManager, BrokerOperation, BrokerFault, PacketFault, SavepointRestore, Loop, ProtocolFault, LeaderFault {}
+
+    public record SavepointRestore(int parallelism, TransactionIdNamingStrategy strategy, Duration timeout) implements Step {
+        public SavepointRestore {
+            Objects.requireNonNull(strategy, "strategy");
+            if (parallelism < 1 || timeout.isZero() || timeout.isNegative() || timeout.compareTo(Duration.ofMinutes(5)) > 0)
+                throw new IllegalArgumentException("Savepoint restore requires positive parallelism and timeout in (0,5m]");
+        }
+    }
 
     /** One bounded fault of the observed leader, including unconditional healing. */
     public enum RecoveryBarrier { TOKEN_CHECKPOINT }

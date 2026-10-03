@@ -187,17 +187,34 @@ public final class FlinkRestApiClient implements FlinkScenarioControl {
         }
     }
 
+    public String stopWithSavepoint(FlinkJobHandle job, String trigger, String directory, Duration timeout) throws IOException {
+        return FlinkSavepoint.stop(job, trigger, directory, timeout, mapper, this::execute, nanoTime);
+    }
+    public FlinkSavepoint.Status savepointStatus(FlinkJobHandle job, String trigger, Duration timeout) throws IOException {
+        return FlinkSavepoint.status(job, trigger, timeout, this::execute, nanoTime);
+    }
+    public FlinkSavepoint.RestoreProof restoredSavepoint(FlinkJobHandle job, Duration timeout) throws IOException {
+        return FlinkSavepoint.restored(job, timeout, this::execute, nanoTime);
+    }
+    public FlinkJobHandle submit(FlinkJobSubmission submission, Duration timeout) throws IOException {
+        return submitBounded(submission, MonotonicDeadline.start(timeout, nanoTime));
+    }
     public FlinkJobHandle submit(FlinkJobSubmission submission) throws IOException {
+        return submitBounded(submission, null);
+    }
+    private FlinkJobHandle submitBounded(FlinkJobSubmission submission, MonotonicDeadline deadline) throws IOException {
         Objects.requireNonNull(submission, "submission");
         ObjectNode body = mapper.createObjectNode();
         body.put("parallelism", submission.parallelism());
+        submission.savepointPath().ifPresent(path -> body.put("savepointPath", path)
+                .put("allowNonRestoredState", false).put("claimMode", "NO_CLAIM"));
         body.set("flinkConfiguration", mapper.valueToTree(submission.flinkConfiguration()));
         body.set("programArgsList", mapper.valueToTree(submission.programArguments()));
 
         JsonNode response = post(
                 "/jars/" + pathSegment(submission.uploadedJarId()) + "/run",
                 body,
-                null);
+                deadline);
         JsonNode jobId = response.get("jobid");
         if (jobId == null || jobId.asText().isBlank()) {
             throw new IOException("Flink JAR-run response did not contain jobid");

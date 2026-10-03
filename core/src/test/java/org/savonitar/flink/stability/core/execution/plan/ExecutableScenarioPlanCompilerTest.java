@@ -54,6 +54,27 @@ class ExecutableScenarioPlanCompilerTest {
     @TempDir
     Path artifactRoot;
 
+    @Test void savepointRestoreRequiresOneFinalEosTransitionWithinCapacityAndSupportedStrategy() {
+        for (String invalid : List.of("none", "capacity", "overflow", "reverse", "non-eos", "later", "loop", "wrong-job", "long-timeout")) {
+            Runnable compile = () -> {
+                var plan = compiler.compile(resolved(document -> {
+                    ((ObjectNode)document.at("/setup/flink")).put("taskmanagers",2);
+                    var sink=(ObjectNode)document.at("/workload/jobs/0/sink");
+                    if(invalid.equals("reverse"))sink.put("transaction_id_naming_strategy","POOLING");
+                    if(invalid.equals("non-eos")){sink.put("delivery_guarantee","AT_LEAST_ONCE");sink.remove(List.of("transactional_id_prefix","transaction_id_naming_strategy"));}
+                    var steps=replaceSteps(document);
+                    if(invalid.equals("loop"))steps=steps.addObject().putObject("loop").put("times",2).putArray("steps");
+                    steps.addObject().putObject("savepoint_restore").put("job",invalid.equals("wrong-job")?"other":"eos-job")
+                            .put("parallelism",invalid.equals("overflow")?4294967300L:invalid.equals("capacity")?100:4).put("transaction_id_naming_strategy","INCREMENTING")
+                            .put("timeout",invalid.equals("long-timeout")?"6m":"3m");
+                    if(invalid.equals("later"))steps.addObject().putObject("wait").put("duration","1s");
+                }));
+                assertEquals(4,((ExecutableScenarioPlan.SavepointRestore)plan.phases().getFirst().steps().getFirst()).parallelism());
+            };
+            if(invalid.equals("none"))compile.run();else assertThrows(SpecificationException.class,compile::run,invalid);
+        }
+    }
+
     @Test void atLeastOnceOracleIsExplicitAndRequiresAnAtLeastOnceSink() {
         java.util.function.Consumer<ObjectNode> aloSink = document -> {
             var sink = (ObjectNode)document.at("/workload/jobs/0/sink");

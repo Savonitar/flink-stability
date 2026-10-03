@@ -1,0 +1,9 @@
+format: v1
+kind: expected-result
+
+meta:
+  name: savepoint-scale-down.expected
+  scenario: savepoint-scale-down
+
+default:
+  outcome: pass

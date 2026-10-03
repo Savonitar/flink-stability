@@ -24,10 +24,12 @@ RELEASE = "6bb63f7b09930d99745325393b481c092b0c26d626e738b7a1fd6fd8d7d4f1da"
 DISCARD = "e17005ab7dd685446de90634662c842599f3a99119d65f9bab696acc63641397"
 ESTIMATES = {"brokers": (4, 10), "targets": (6, 15), "legacy": (12, 30),
              "quick-control": (6, 12), "quick": (60, 120), "new-controls": (12, 30),
-             "pooling": (90, 240), "rolling": (32, 80)}
+             "pooling": (90, 240), "rolling": (32, 80), "packet": (32, 64),
+             "parallel": (108, 288), "at-least-once": (32, 64), "savepoint": (24, 60)}
+NEW_STAGES = ("packet", "parallel", "at-least-once", "savepoint")
 
 
-def matrix():
+def matrix(stages=None):
     cells = []
 
     def add(group, names, sides=("release",), runs=1):
@@ -50,7 +52,11 @@ def matrix():
     add("new-controls", controls)
     add("pooling", [name for name in pooling if name not in controls])
     add("rolling", [name for name in rolling if name not in controls])
-    return cells
+    for group, prefix in (("packet", "packet-"), ("parallel", "parallel-"),
+                          ("at-least-once", "at-least-once-"), ("savepoint", "savepoint-")):
+        names = [name for name in PROFILES["chaos-full"] if name.startswith(prefix)]
+        add(group, [name for name in names if "control" in name] + [name for name in names if "control" not in name])
+    return cells if not stages else [cell for cell in cells if cell["group"] in stages]
 
 
 def write_new(path, value):
@@ -85,7 +91,7 @@ def clean_tree(root):
     return git(root, "rev-parse", "HEAD^{tree}")
 
 
-def prepare(root, output, launcher_path, legacy, quick):
+def prepare(root, output, launcher_path, legacy, quick, stages=None):
     tree = clean_tree(root)
     inputs = {}
 
@@ -130,7 +136,7 @@ def prepare(root, output, launcher_path, legacy, quick):
         subjects[side], snippets[side] = local_subject(root, jar, runtime)
 
     documents = {}
-    cells = matrix()
+    cells = matrix(stages)
     for cell in cells:
         source = bind(canonical(root, cell["scenario"]))
         expected = bind(source.with_name(cell["scenario"] + ".expected.yaml"))
@@ -144,6 +150,7 @@ def prepare(root, output, launcher_path, legacy, quick):
             text = with_producer_max_block(text, 5000)
         text = replace_subject(text, snippets[cell["side"]])
         cell["requirements"] = fault_requirements(text)
+        cell["oracleMode"] = "at-least-once" if "    mode: at-least-once" in text else "exactly-once"
         cell["subjectSha256"] = subjects[cell["side"]]["connectorSha256"]
         documents[cell["id"]] = (text, expected.read_text())
     output = inside(root, output)
@@ -156,7 +163,8 @@ def prepare(root, output, launcher_path, legacy, quick):
             path.write_text(text)
             bind(path)
         cell["catalog"] = str(catalog)
-    manifest = dict(version=1, root=str(root), sourceTree=tree, sourceCommit=git(root, "rev-parse", "HEAD"),
+    packet_pin = json.loads(bind(root / "docs/packet-image-pin.json").read_text())
+    manifest = dict(version=2, packetProbe=packet_probe_plan(packet_pin), selectedStages=list(stages or []), root=str(root), sourceTree=tree, sourceCommit=git(root, "rev-parse", "HEAD"),
                     launcher=launcher, inputs=inputs, cells=cells, subjects=subjects,
                     estimatesMinutes=ESTIMATES, preparedAt=datetime.now(timezone.utc).isoformat())
     write_new(output / "manifest.json", manifest)
@@ -173,6 +181,8 @@ def verify(manifest):
 
 
 def accepted(cell, row):
+    if row.get("oracleMode", "exactly-once") != cell.get("oracleMode", "exactly-once"):
+        return False
     if not row["subjectOk"] or row["faultStatus"] != ("confirmed" if cell["requirements"] else "not-required"):
         return False
     if (cell["group"], cell["side"], cell["scenario"]) == ("legacy", "assume", "commit-request-lost"):
@@ -182,6 +192,8 @@ def accepted(cell, row):
     if cell["group"] == "quick" and cell["side"] == "discard":
         # The complete matrix checker, not one exit code, decides detection.
         return row["verdict"] in ("pass", "fail") and row["exitCode"] == (0 if row["verdict"] == "pass" else 1)
+    if cell.get("oracleMode") == "at-least-once":
+        return (row["verdict"], row["exitCode"], row["missing"]) == ("pass", 0, 0) and type(row["duplicates"]) is int and row["duplicates"] >= 0
     return (row["verdict"], row["exitCode"], row["missing"], row["duplicates"]) == ("pass", 0, 0, 0)
 
 
@@ -242,12 +254,71 @@ def completed_cell(directory):
     return value
 
 
-def resume(output, limit):
+def packet_probe_plan(pin):
+    script = """set -eu
+ip link set lo up
+tc qdisc add dev lo root handle 7f00: netem delay 1ms
+iptables -w 2 -N FSCHAOS_PROBE
+iptables -w 2 -A FSCHAOS_PROBE -d 127.0.0.1/32 -j DROP
+tc -s qdisc show dev lo
+iptables -w 2 -nvx -L FSCHAOS_PROBE
+iptables -w 2 -F FSCHAOS_PROBE
+iptables -w 2 -X FSCHAOS_PROBE
+tc qdisc del dev lo root
+echo PACKET_NET_ADMIN_OK
+"""
+    return {"pin": pin, "argv": ["docker", "run", "--rm", "--name", "flink-packet-probe-" + uuid.uuid4().hex[:12],
+            "--platform", pin["platform"], "--network", "none", "--cap-drop", "ALL", "--cap-add", "NET_ADMIN",
+            "--security-opt", "no-new-privileges:true", "--read-only", "--tmpfs", "/run:rw,nosuid,nodev,size=1m",
+            "--pids-limit", "32", "--memory", "128m", "--entrypoint", "/bin/sh", pin["image"], "-ceu", script],
+            "inspectArgv": ["docker", "image", "inspect", pin["image"]], "timeoutSeconds": 45}
+
+
+def ensure_packet_probe(output, manifest):
+    directory = output / "packet-probe"
+    previous = completed_cell(directory)
+    if previous is not None:
+        if not previous["accepted"]: raise ValueError("Retained NET_ADMIN probe failed; packet stage stopped")
+        return previous
+    probe = manifest.get("packetProbe")
+    if not probe: raise ValueError("Frozen packet probe is missing")
+    directory.mkdir(exist_ok=False)
+    write_new(directory / "started.json", {"at": datetime.now(timezone.utc).isoformat(), **probe})
+    accepted = False; error = None; code = None
+    environment = manifest["launcher"]["environment"]
+    try:
+        with (directory / "stdout.json").open("x") as stdout, (directory / "stderr.log").open("x") as stderr:
+            result = subprocess.run(probe["argv"], cwd=manifest["root"], env=environment, stdout=stdout, stderr=stderr,
+                                    timeout=probe["timeoutSeconds"])
+            code = result.returncode
+        if code != 0 or "PACKET_NET_ADMIN_OK" not in (directory / "stdout.json").read_text().splitlines():
+            raise ValueError("NET_ADMIN/netem/iptables probe failed")
+        # Docker run retrieves the immutable image if necessary; verify the deployed platform/config afterward.
+        with (directory / "image.json").open("x") as stdout, (directory / "image-stderr.log").open("x") as stderr:
+            inspected = subprocess.run(probe["inspectArgv"], cwd=manifest["root"], env=environment, stdout=stdout, stderr=stderr, timeout=15)
+        image = json.loads((directory / "image.json").read_text())[0] if inspected.returncode == 0 else {}
+        pin = probe["pin"]
+        accepted = (image.get("Id") == pin["configImageId"] and image.get("Os") + "/" + image.get("Architecture") == pin["platform"]
+                    and any(value.endswith("@" + pin["indexDigest"]) for value in image.get("RepoDigests", [])))
+        if not accepted: raise ValueError("Packet probe image/platform identity mismatch")
+    except (OSError, ValueError, TypeError, IndexError, subprocess.TimeoutExpired) as failure:
+        error = str(failure)
+    value = {"accepted": accepted, "row": {"verdict": "pass" if accepted else "inconclusive", "exitCode": code}, "error": error,
+             "outputHashes": {path.name: sha256(path) for path in directory.iterdir() if path.name != "completed.json" and path.is_file()}}
+    write_new(directory / "completed.json", value)
+    if not accepted: raise ValueError("NET_ADMIN probe unconfirmed; packet stage stopped: " + str(error))
+    return value
+
+
+def resume(output, limit, stages=None):
     manifest = json.loads((output / "manifest.json").read_text())
     verify(manifest)
     root = Path(manifest["root"])
+    if stages and set(stages) - {cell["group"] for cell in manifest["cells"]}:
+        raise ValueError("Selected stage is absent from the frozen manifest")
     completed, launched = {}, 0
     for cell in manifest["cells"]:
+        if stages and cell["group"] not in stages: continue
         value = completed_cell(output / "runs" / cell["id"])
         if value is None:
             if launched == limit:
@@ -255,6 +326,7 @@ def resume(output, limit):
             # Stop before the new-feature block unless both quick checks qualify.
             if cell["group"] == "new-controls":
                 check_quick(root, manifest, completed)
+            if cell["group"] == "packet": ensure_packet_probe(output, manifest)
             value = run_cell(root, output, manifest, cell)
             launched += 1
         completed[cell["id"]] = value
@@ -281,7 +353,7 @@ def summary(output, manifest):
                 except (ValueError, KeyError):
                     outcomes["invalid"] += 1
         done = sum(outcomes.values())
-        low, high = ESTIMATES[group]
+        low, high = manifest.get("estimatesMinutes", ESTIMATES)[group]
         other = done - outcomes['pass'] - outcomes['fail']
         print(f"| {group} | {count} | {low}–{high} | {done} | {outcomes['pass']} / {outcomes['fail']} / {other} |")
     print("Estimates assume warm images; no automatic retries. Completed does not mean passed.")
@@ -296,11 +368,12 @@ def main():
     parser.add_argument("--legacy-build", type=Path)
     parser.add_argument("--quick-build", type=Path)
     parser.add_argument("--execute", action="store_true", help="Explicit live launch; obtain permission before using")
-    parser.add_argument("--max-new-cells", type=int, default=99, help="Bound this invocation; completed cells are skipped")
+    parser.add_argument("--stage", choices=NEW_STAGES, action="append", help="Select a new stage independently; repeatable. Omission includes the original batch first.")
+    parser.add_argument("--max-new-cells", type=int, default=157, help="Bound this invocation; completed cells are skipped")
     args = parser.parse_args()
     root = Path.cwd().absolute()
     if args.action == "plan":
-        print(json.dumps({"cells": matrix(), "estimatesMinutes": ESTIMATES}, indent=2))
+        print(json.dumps({"cells": matrix(args.stage), "estimatesMinutes": ESTIMATES}, indent=2))
         return 0
     if args.output is None:
         parser.error("--output is required")
@@ -308,7 +381,7 @@ def main():
     if args.action == "prepare":
         if None in (args.launcher, args.legacy_build, args.quick_build):
             parser.error("prepare requires --launcher, --legacy-build and --quick-build")
-        manifest = prepare(root, output, args.launcher, args.legacy_build, args.quick_build)
+        manifest = prepare(root, output, args.launcher, args.legacy_build, args.quick_build, args.stage)
         summary(output, manifest)
         return 0
     manifest = json.loads((output / "manifest.json").read_text())
@@ -320,7 +393,7 @@ def main():
             import fcntl
             with (output / "runner.lock").open("a") as lock:
                 fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
-                manifest, completed = resume(output, args.max_new_cells)
+                manifest, completed = resume(output, args.max_new_cells, args.stage)
                 write_new(output / ("summary-" + uuid.uuid4().hex + ".json"), {"completed": completed})
     finally:
         summary(output, manifest)
