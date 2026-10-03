@@ -83,13 +83,13 @@ class V1ScenarioExecutorTest {
     @TempDir
     Path temporaryDirectory;
 
+    private int coordinatorPartitionCount = 7;
+
     private V1ScenarioExecutor.TransactionVersionSelection featureSelection = new KafkaTransactionVersion()::select;
 
     private V1ScenarioExecutor.TransactionListing transactionListing =
-            (bootstrapServers, prefix, timeout) -> new KafkaTransactionListing(
-                    prefix,
-                    List.of(new KafkaTransactionListing.Transaction(
-                            prefix + "-0-1", "CompleteCommit", 7, 0, List.of())));
+            (bootstrapServers, prefix, timeout) -> new KafkaTransactionListing(prefix,
+                    List.of(new KafkaTransactionListing.Transaction(prefix + "-0-1", "CompleteCommit", 7, 0, List.of())));
 
     @Test
     void kafkaCaptureDecodesAndRetainsReceiptsWithoutOverwritingEarlierEvidence() throws Exception {
@@ -119,10 +119,39 @@ class V1ScenarioExecutorTest {
             assertEquals("PARSED_AND_DECODED", decoded.status());
             byte[] retained = Files.readAllBytes(decoded.evidence().orElseThrow());
             assertEquals(org.savonitar.flink.stability.runtime.api.Digests.sha256(retained), decoded.sha256().orElseThrow());
-            var retry = KafkaLogEvidence.collect(runtime, fixture.bound().executablePlan(), output);
+            var retry = KafkaLogEvidence.collect(runtime, fixture.bound().executablePlan(), output, Optional.empty(), deadline -> 7);
             assertEquals("partial", retry.status());
             assertEquals(1, events.stream().filter("capture"::equals).count());
             assertArrayEquals(retained, Files.readAllBytes(decoded.evidence().orElseThrow()));
+        }
+    }
+
+    @Test
+    void coordinatorMetadataFailurePreservesDataCaptureAndVerdict() throws Exception {
+        coordinatorPartitionCount = 0;
+        var events = new ArrayList<String>();
+        try (Fixture fixture = fixture()) {
+            var runtime = new FakeRuntime(events); runtime.captureArchive = true; runtime.expectedCapturedPartitions = 2;
+            var result = executor(events, runtime, new FakeFlink(events), (bootstrap, topic, ids, timeout) -> passResult())
+                    .execute(fixture.bound(), attemptContext().withKafkaLogOutput(temporaryDirectory.resolve("bad-metadata")));
+            assertEquals(V1ScenarioExecutionResult.Status.PASS, result.status());
+            assertEquals("partial", result.kafkaLogs().status());
+            assertEquals(2, result.kafkaLogs().decoded().size());
+            assertTrue(result.kafkaLogs().diagnostics().stream().anyMatch(value -> value.contains("partition discovery")));
+        }
+    }
+
+    @Test
+    void coordinatorMetadataConsumesTheSameDeadlineAsCapture() throws Exception {
+        var events = new ArrayList<String>(); var time = new java.util.concurrent.atomic.AtomicLong();
+        var deadline = org.savonitar.flink.stability.runtime.api.MonotonicDeadline.start(Duration.ofSeconds(60), time::get);
+        try (Fixture fixture = fixture()) {
+            var listing = transactionListing.list("unused", "minimal", Duration.ofSeconds(1));
+            var result = KafkaLogEvidence.collect(new FakeRuntime(events), fixture.bound().executablePlan(),
+                    temporaryDirectory.resolve("expired-metadata"), Optional.of(listing), supplied -> {
+                        assertEquals(deadline, supplied); time.set(Duration.ofSeconds(60).toNanos()); return 7;
+                    }, deadline);
+            assertEquals("partial", result.status()); assertFalse(events.contains("capture"));
         }
     }
 
@@ -2070,11 +2099,16 @@ class V1ScenarioExecutorTest {
                     return flink;
                 },
                 validation,
-                (bootstrapServers, prefix, timeout) -> {
-                    events.add("list-transactions");
-                    assertEquals("localhost:39092", bootstrapServers);
-                    assertEquals(V1ScenarioExecutor.SINK_TRANSACTION_LISTING_TIMEOUT, timeout);
-                    return transactionListing.list(bootstrapServers, prefix, timeout);
+                new V1ScenarioExecutor.TransactionListing() {
+                    @Override public KafkaTransactionListing list(String bootstrapServers, String prefix, Duration timeout) throws Exception {
+                        events.add("list-transactions");
+                        assertEquals("localhost:39092", bootstrapServers);
+                        assertEquals(V1ScenarioExecutor.SINK_TRANSACTION_LISTING_TIMEOUT, timeout);
+                        runtime.expectedCoordinatorPartition = org.apache.kafka.common.utils.Utils.abs((prefix + "-0-1").hashCode()) % 7;
+                        return transactionListing.list(bootstrapServers, prefix, timeout);
+                    }
+                    @Override public int transactionStatePartitions(String bootstrapServers,
+                            org.savonitar.flink.stability.runtime.api.MonotonicDeadline deadline) { return coordinatorPartitionCount; }
                 },
                 cleanupTimeout,
                 endpoint -> networkFaults, featureSelection);
@@ -2317,7 +2351,10 @@ class V1ScenarioExecutorTest {
                 List<org.savonitar.flink.stability.runtime.api.KafkaLogCapture.Partition> partitions,
                 Path output, org.savonitar.flink.stability.runtime.api.MonotonicDeadline deadline) {
             events.add("capture");
-            assertEquals(2, partitions.size());
+            assertEquals(expectedCapturedPartitions, partitions.size());
+            if (expectedCapturedPartitions == 3)
+            assertEquals(new org.savonitar.flink.stability.runtime.api.KafkaLogCapture.Partition("__transaction_state",
+                    expectedCoordinatorPartition), partitions.getLast());
             assertTrue(Files.isDirectory(output));
             if (!captureArchive) throw new IllegalStateException("fake archive transport failure");
             try {
@@ -2332,15 +2369,21 @@ class V1ScenarioExecutorTest {
                 byte[] field = String.format(java.util.Locale.ROOT, "%06o\0 ", checksum)
                         .getBytes(java.nio.charset.StandardCharsets.US_ASCII);
                 System.arraycopy(field, 0, tar, 148, field.length);
-                Path file = output.resolve("segment.tar.part"); Files.write(file, tar);
-                var archive = new org.savonitar.flink.stability.runtime.api.KafkaLogCapture.Archive(
-                        partitions.getFirst(), name, "container", "image", "network", 1, file,
-                        "TRANSPORT_EOF", tar.length, Optional.of(org.savonitar.flink.stability.runtime.api.Digests.sha256(tar)),
-                        true, "fake finished transport");
+                var archives = new ArrayList<org.savonitar.flink.stability.runtime.api.KafkaLogCapture.Archive>();
+                for (var partition : partitions) {
+                    Path file = output.resolve("segment-" + archives.size() + ".tar.part"); Files.write(file, tar);
+                    archives.add(new org.savonitar.flink.stability.runtime.api.KafkaLogCapture.Archive(
+                            partition, name, "container", "image", "network", 1, file,
+                            "TRANSPORT_EOF", tar.length, Optional.of(org.savonitar.flink.stability.runtime.api.Digests.sha256(tar)),
+                            true, "fake finished transport"));
+                }
                 return new org.savonitar.flink.stability.runtime.api.KafkaLogCapture(
-                        List.of(), List.of(archive), tar.length, 3, List.of());
+                        List.of(), archives, tar.length * archives.size(), 3, List.of());
             } catch (IOException failure) { throw new java.io.UncheckedIOException(failure); }
         }
+
+        private int expectedCapturedPartitions = 3;
+        private int expectedCoordinatorPartition;
 
         private FakeRuntime(List<String> events) {
             this.events = events;

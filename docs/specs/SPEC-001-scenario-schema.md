@@ -2059,13 +2059,17 @@ Connector pull-request gating is the same mechanism with one axis:
   evidence after terminal data verification (including a data FAIL), before owner
   cleanup. Omission performs no collection. DIR must be new, have an existing
   parent and contain no symlink ancestors; earlier evidence is never overwritten.
-  Only source/sink partitions declared by this attempt are inventoried on its owned
-  Kafka container and network. The registered Apache Kafka runtime uses the fixed
+  Source/sink partitions declared by this attempt and coordinator partitions for its
+  post-fence listed transactional IDs are inventoried on its owned Kafka container
+  and network. Read `__transaction_state` partition count from broker metadata;
+  select `Utils.abs(transactionalId.hashCode()) % count` (Kafka maps MIN_VALUE to
+  zero), never assume a default count. Retain the count and ID-to-partition mapping.
+  Missing listing/metadata produces partial evidence; it cannot establish absence. The registered Apache Kafka runtime uses the fixed
   `/tmp/kafka-logs` root; an absent or unsupported layout is diagnostic failure,
   with no search of alternative roots. Identity is observed at collection time and
   checked around each inventory/copy; this is not a startup or atomic-snapshot proof.
   Only exact regular `[0-9]{20}.log` inventory members may be copied, never indexes.
-  A shared monotonic 60s deadline covers inventory, transport, strict TAR validation
+  A shared monotonic 60s deadline covers coordinator metadata, inventory, transport, strict TAR validation
   and decoding. Aggregate limits are 128 partitions, 512 reserved Docker requests,
   64 MiB of inventory/transport bytes, another 64 MiB of decoded JSON, and 100,000
   decoded records and batches. Each inventory is at most 64 KiB/64 entries/32 logs;
@@ -2081,6 +2085,22 @@ Connector pull-request gating is the same mechanism with one axis:
   files. Neither success, failure, unsupported bytes nor timeout changes any oracle
   result or scenario verdict. Missing captures are not absence-of-record evidence;
   transaction visibility and completeness remain unproven.
+
+- **R8.2h** `inspect-kafka-log --transaction-state` explicitly interprets its input as
+  coordinator records. Only transaction key version 0 and value versions 0/1 are
+  supported through Kafka's generated serializers; null values remain tombstones.
+  Unknown versions, states, client transaction versions, tagged semantics, trailing
+  bytes and noncanonical encodings are errors, never guessed schemas. A record is
+  at most 64 KiB, 128 topics and 4096 partitions; collection-wide limits from R8.2g
+  are shared with data records. Repeat `--transaction-state-input PARTITION=FILE`
+  to join additional coordinator segments with a data input. CLI byte/record limits
+  apply to their sum and use a shared 60s deadline. No paths or topic identities are
+  inferred from filenames. `transactions` joins observed producerId/epoch to data
+  COMMIT/ABORT markers and the highest observed coordinator offset for the ID,
+  including a later tombstone or unsupported record. Absent identity matches stay
+  unassociated. Compaction and capture gaps prevent claims of complete history,
+  transaction visibility or responsibility. Automatic collection retains this
+  summary separately with a SHA-256 receipt; errors do not change the exact-ID oracle.
 
 - **R8.3** A scenario declares `runs: K`, a positive integer; the report gives
   N-of-K. Any clean expectation mismatch is a failure — exactly-once is not a

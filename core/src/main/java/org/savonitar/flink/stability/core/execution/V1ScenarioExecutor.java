@@ -144,7 +144,9 @@ public final class V1ScenarioExecutor {
         }
         if (context.kafkaLogOutput().isPresent()) {
             var logs = result.terminalValidation().isPresent() && resources.runtime != null
-                    ? KafkaLogEvidence.collect(resources.runtime, prepared.executablePlan(), context.kafkaLogOutput().orElseThrow())
+                    ? KafkaLogEvidence.collect(resources.runtime, prepared.executablePlan(), context.kafkaLogOutput().orElseThrow(),
+                            result.sinkTransactions(), deadline -> transactionListing.transactionStatePartitions(
+                                    resources.endpoints.hostBootstrapServers(), deadline))
                     : KafkaLogEvidence.notRun();
             result = result.withKafkaLogs(logs);
         }
@@ -188,6 +190,7 @@ public final class V1ScenarioExecutor {
             resources.runtime = runtime;
             stage = Stage.KAFKA_START;
             KafkaRuntimeEndpoints endpoints = runtime.startKafka(plan.kafka().runtimeTarget());
+            resources.endpoints = endpoints;
             stage = Stage.KAFKA_FEATURE_SELECTION;
             KafkaTransactionVersion.Selection selected = transactionVersionSelection.select(
                     endpoints.hostBootstrapServers(), plan.kafka().transactionVersion());
@@ -689,6 +692,7 @@ public final class V1ScenarioExecutor {
     private static final class AttemptResources {
         private FlinkScenarioControl flink;
         private V1AttemptRuntime runtime;
+        private KafkaRuntimeEndpoints endpoints;
         private boolean cleanupStarted;
 
         private RuntimeException cleanup(AttemptCleanupBoundary boundary) {
@@ -737,6 +741,10 @@ public final class V1ScenarioExecutor {
 
     @FunctionalInterface
     interface TransactionListing {
+        default int transactionStatePartitions(String bootstrapServers,
+                org.savonitar.flink.stability.runtime.api.MonotonicDeadline deadline) throws Exception {
+            return new KafkaAdminTransactionLister().transactionStatePartitions(bootstrapServers, deadline);
+        }
         KafkaTransactionListing list(
                 String bootstrapServers,
                 String transactionalIdPrefix,

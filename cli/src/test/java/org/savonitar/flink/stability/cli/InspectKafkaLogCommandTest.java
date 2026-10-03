@@ -122,6 +122,41 @@ class InspectKafkaLogCommandTest {
         assertFalse(JSON.readTree(invalid.stdout()).has("inputSha256"));
     }
 
+    @Test
+    void coordinatorModesDecodeRealKafkaMessagesAndShareBudgets() throws Exception {
+        byte[] key = org.apache.kafka.common.protocol.MessageUtil.toVersionPrefixedBytes((short) 0,
+                new org.apache.kafka.coordinator.transaction.generated.TransactionLogKey().setTransactionalId("task-0-1"));
+        var value = new org.apache.kafka.coordinator.transaction.generated.TransactionLogValue()
+                .setProducerId(17).setProducerEpoch((short) 3).setTransactionStatus((byte) 4)
+                .setTransactionTimeoutMs(1000).setTransactionPartitions(java.util.List.of());
+        byte[] encoded = org.apache.kafka.common.protocol.MessageUtil.toVersionPrefixedBytes((short) 1, value);
+        Path coordinator = segment("coordinator.log", new SimpleRecord(key, encoded));
+        Invocation only = execute("inspect-kafka-log", "--input", coordinator.toString(), "--transaction-state");
+        assertEquals(0, only.exitCode(), only.stdout());
+        assertEquals("CompleteCommit", JSON.readTree(only.stdout()).at(
+                "/transactions/chains/0/latestCoordinator/record/decoded/stateName").asText());
+        Path data = segment("data.log", new SimpleRecord("7".getBytes(StandardCharsets.UTF_8)));
+        Invocation joined = execute("inspect-kafka-log", "--input", data.toString(),
+                "--transaction-state-input", "7=" + coordinator);
+        assertEquals(0, joined.exitCode(), joined.stdout());
+        assertEquals(7, JSON.readTree(joined.stdout()).at("/transactions/coordinatorRecords/0/source/partition").asInt());
+        Invocation bounded = execute("inspect-kafka-log", "--input", data.toString(),
+                "--transaction-state-input", "7=" + coordinator, "--max-records", "1");
+        assertEquals(CommandLine.ExitCode.SOFTWARE, bounded.exitCode());
+        assertFalse(JSON.readTree(bounded.stdout()).path("complete").asBoolean());
+        Path unknown = segment("future.log", new SimpleRecord(key, new byte[]{0, 2}));
+        Invocation rejected = execute("inspect-kafka-log", "--input", unknown.toString(), "--transaction-state");
+        assertEquals(CommandLine.ExitCode.SOFTWARE, rejected.exitCode());
+        assertEquals("UNSUPPORTED_VERSION", JSON.readTree(rejected.stdout()).at(
+                "/transactions/coordinatorRecords/0/record/status").asText());
+    }
+
+    private Path segment(String name, SimpleRecord record) throws Exception {
+        var buffer = MemoryRecords.withRecords(Compression.none().build(), record).buffer().duplicate();
+        byte[] bytes = new byte[buffer.remaining()]; buffer.get(bytes);
+        return Files.write(temporaryDirectory.toRealPath().resolve(name), bytes);
+    }
+
     private static Invocation execute(String... arguments) {
         StringWriter stdout = new StringWriter();
         StringWriter stderr = new StringWriter();
