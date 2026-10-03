@@ -37,6 +37,11 @@ def run_result(subject=CANDIDATE_HASH, status="pass", reason="validator.kafka.id
     }
 
 
+def subject_manifest():
+    return {side: {"connector": side + ".jar", "connectorSha256": CANDIDATE_HASH,
+                   "runtimeDependencySha256": {}} for side in ("baseline", "candidate")}
+
+
 class SubjectEvidenceTest(unittest.TestCase):
     def summarize(self, result, exit_code=0):
         return pr_gate.summarize("bounded-eos", "candidate", 1, result, CANDIDATE_HASH, exit_code)
@@ -55,8 +60,7 @@ class SubjectEvidenceTest(unittest.TestCase):
         }
         row = self.summarize(result)
         self.assertEqual(0, pr_gate.gate_exit_code([row]))
-        manifest = {"connector": "candidate.jar", "connectorSha256": CANDIDATE_HASH,
-                    "runtimeDependencySha256": {}}
+        manifest = subject_manifest()
         report = pr_gate.render(manifest, [row])
         self.assertIn("| candidate | 2 | 1 | 0 | producer-fenced: 2 | 1 |", report)
         self.assertIn("diagnostic only", report)
@@ -72,8 +76,7 @@ class SubjectEvidenceTest(unittest.TestCase):
                  "kinds": ["producer-fenced"]}]}
         row = self.summarize(result)
         baseline = dict(row, side="baseline")
-        manifest = {"connector": "candidate.jar", "connectorSha256": CANDIDATE_HASH,
-                    "runtimeDependencySha256": {}}
+        manifest = subject_manifest()
         report = pr_gate.render(manifest, [baseline, row])
         for side in ("baseline", "candidate"):
             self.assertIn(f"| {side} | 0 | 2 | 1 | none observed | 0 |", report)
@@ -115,8 +118,7 @@ class SubjectEvidenceTest(unittest.TestCase):
 
 
 class GateReportTest(unittest.TestCase):
-    manifest = {"connector": "candidate.jar", "connectorSha256": CANDIDATE_HASH,
-                "runtimeDependencySha256": {}}
+    manifest = subject_manifest()
 
     def rows(self, baseline, candidate):
         return [pr_gate.summarize("bounded-eos", side, index, run_result(status=status, reason=reason),
@@ -213,6 +215,61 @@ raise SystemExit(fixture["exit"])
             self.assertEqual(run_result(subject), json.loads((directory / "stdout.json").read_text()))
             self.assertEqual("0\n", (directory / "exit-code.txt").read_text())
             self.assertEqual("controlled Maven stderr\n", (directory / "stderr.log").read_text())
+
+    def test_explicit_baseline_uses_its_own_digest_closure_and_catalog(self):
+        baseline_bytes = b"synthetic baseline"
+        baseline_hash = hashlib.sha256(baseline_bytes).hexdigest()
+        (self.root / "baseline.jar").write_bytes(baseline_bytes)
+        runtime = self.root / "baseline-runtime"
+        runtime.mkdir()
+        (runtime / "baseline-dependency.jar").write_bytes(b"baseline dependency")
+        extra = ("--baseline-connector-jar", "baseline.jar", "--baseline-runtime-dir", "baseline-runtime")
+        result, output = self.command(baseline=run_result(baseline_hash), extra=extra)
+        self.assertEqual(0, result.returncode, result.stderr)
+        manifest = json.loads((output / "manifest.json").read_text())
+        for side, expected in (("baseline", baseline_hash), ("candidate", CANDIDATE_HASH)):
+            self.assertEqual(expected, manifest[side]["connectorSha256"])
+            catalog = (output / (side + "-catalog") / "bounded-eos.yaml").read_text()
+            self.assertIn("sha256: " + expected, catalog)
+            self.assertIn("./" + side + ".jar", catalog)
+            self.assertIn(expected, result.stdout)
+        self.assertIn("./baseline-runtime/baseline-dependency.jar",
+                      manifest["baseline"]["runtimeDependencySha256"])
+        # The release and the candidate are equally wrong as an explicitly selected baseline.
+        for wrong in (pr_gate.RELEASED_SHA256, CANDIDATE_HASH):
+            result, _ = self.command(baseline=run_result(wrong), extra=extra)
+            self.assertEqual(1, result.returncode)
+            self.assertIn("NOT VERIFIED", result.stdout)
+
+    def test_baseline_options_must_be_paired_before_execution(self):
+        for extra in (("--baseline-connector-jar", "candidate.jar"),
+                      ("--baseline-runtime-dir", "runtime")):
+            result, output = self.command(extra=extra)
+            self.assertEqual(2, result.returncode)
+            self.assertIn("must be supplied together", result.stderr)
+            self.assertFalse(output.exists())
+            self.assertFalse(self.calls.exists())
+
+    def test_invalid_baseline_artifacts_reject_before_execution(self):
+        (self.root / "empty-runtime").mkdir()
+        for jar, runtime in (("absent.jar", "runtime"), ("candidate.jar", "empty-runtime"),
+                             ("candidate.jar", "absent-runtime")):
+            result, output = self.command(extra=("--baseline-connector-jar", jar,
+                                                "--baseline-runtime-dir", runtime))
+            self.assertNotEqual(0, result.returncode)
+            self.assertFalse(output.exists())
+            self.assertFalse(self.calls.exists())
+
+    def test_default_manifest_records_both_sides_and_preserves_release_catalog(self):
+        result, output = self.command()
+        self.assertEqual(0, result.returncode, result.stderr)
+        manifest = json.loads((output / "manifest.json").read_text())
+        self.assertEqual(pr_gate.RELEASED_SHA256, manifest["baseline"]["connectorSha256"])
+        self.assertEqual("auto", manifest["baseline"]["dependencyMode"])
+        self.assertIsNone(manifest["baseline"]["runtimeDependencySha256"])
+        self.assertFalse((output / "baseline-catalog").exists())
+        self.assertIn("5.0.0-2.2", result.stdout)
+        self.assertEqual(CANDIDATE_HASH, manifest["candidate"]["connectorSha256"])
 
     def test_failures_on_either_side_exit_one(self):
         failed = run_result(status="fail", reason="validator.kafka.id-set.missing-ids")

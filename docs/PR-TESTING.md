@@ -6,7 +6,7 @@ The connector gate below changes connector artifacts only.
 When a change to `apache/flink-connector-kafka` looks risky, build it and run it as the
 subject connector. `tools/pr_gate.py` runs each chosen scenario on both sides:
 
-- the baseline runs with the released connector 5.0.0-2.2;
+- the baseline runs with the released connector 5.0.0-2.2 by default, or an explicit local build;
 - the candidate runs with the build under test.
 
 ## What the scenarios cover
@@ -110,6 +110,35 @@ because the harness reads local artifacts only from inside its artifact root.
    Repeated names are deduplicated. `--runs` must be positive and specifies the
    number of runs per scenario on each side; its default is 1.
 
+## Select a causal baseline
+
+For a PR comparison, build its parent with the same Flink/dependency versions and
+build procedure as the candidate. Comparing only with release 5.0.0-2.2 can confound
+the PR with Flink or Jackson version changes. Supply both optional baseline flags:
+
+```bash
+python3 tools/pr_gate.py \
+  --baseline-connector-jar jobs/pr/321/baseline/connector.jar \
+  --baseline-runtime-dir jobs/pr/321/baseline/runtime \
+  --connector-jar jobs/pr/321/candidate/connector.jar \
+  --runtime-dir jobs/pr/321/candidate/runtime \
+  --scenario bounded-eos --output jobs/pr/321/parent-head-gate
+```
+
+Each runtime directory must contain the intended nonempty dependency closure inside
+the artifact root. Both local sides use the same path validation, primary SHA-256
+pin in their generated catalogs, and observed class-origin/hash check. The engine
+locks and verifies both closures. The flags must appear together; omission keeps
+the canonical released baseline and its automatic Maven closure. Scenario faults,
+load, timings and expectations are copied unchanged.
+
+`manifest.json` records `baseline` and `candidate` objects with connector references,
+full SHA-256 values, dependency mode and per-file runtime hashes. For the default
+release, `runtimeDependencySha256: null` means automatic resolution, not an empty
+closure. The summary identifies both subjects and hashes. Equal identities alone
+do not establish a causal comparison: retain the parent/head build provenance and
+check every dependency difference before attributing a result to the PR.
+
 ## Reading the result
 
 `summary.md` in the output directory lists every run. Each run's directory retains
@@ -118,7 +147,7 @@ because the harness reads local artifacts only from inside its artifact root.
 1. Every row's "Subject JAR" column says `ok`. This requires confirmed class-load
    evidence and observed class sources matching the expected artifact hash. The
    configured `expectedSource` alone does not prove which JAR ran. Candidate runs
-   must have loaded the build under test, and baseline runs the release.
+   must have loaded the build under test, and baseline runs the selected baseline.
 2. Inspect every baseline failure. It may expose a release bug, a harness defect,
    or an environment problem. Preserve its evidence and investigate the cause;
    a failing baseline does not establish an unhealthy environment or let us
@@ -169,6 +198,6 @@ A summary for the pull request names:
 
 - the scenarios and the number of runs;
 - the verdicts on both sides;
-- the candidate's SHA-256.
+- both connector SHA-256 values and the selected baseline provenance.
 
 Posting on the pull request is public. The maintainer decides whether to post and what.
