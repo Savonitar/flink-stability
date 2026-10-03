@@ -10,20 +10,22 @@ import org.savonitar.flink.stability.core.spec.resolution.ResolvedSide;
 import org.savonitar.flink.stability.core.spec.resolution.ResolvedSuiteEntry;
 import org.savonitar.flink.stability.core.spec.resolution.ResolvedSuitePlan;
 import org.savonitar.flink.stability.core.spec.resolution.ScenarioSide;
-import org.savonitar.flink.stability.runtime.api.Digests;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
+
+import org.savonitar.flink.stability.core.artifact.ArtifactWorkspace.StagedArtifact;
+import org.savonitar.flink.stability.core.artifact.ArtifactWorkspace.ChecksumFailure;
+import static org.savonitar.flink.stability.core.artifact.ArtifactWorkspace.uncheckedSha256;
+import static org.savonitar.flink.stability.core.artifact.ArtifactWorkspace.safeMessage;
 
 import java.io.IOException;
 import java.io.InputStream;
 import java.nio.file.DirectoryStream;
 import java.nio.file.DirectoryIteratorException;
-import java.nio.file.FileAlreadyExistsException;
 import java.nio.file.Files;
 import java.nio.file.InvalidPathException;
 import java.nio.file.Path;
-import java.nio.file.StandardCopyOption;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.HashMap;
@@ -42,8 +44,6 @@ import java.util.zip.CRC32;
 
 /** Resolves and checksums every static file artifact after semantic planning. */
 public final class ArtifactPlanResolver {
-    private static final Path STAGING_DIRECTORY = Path.of(
-            ".flink-stability", "artifacts", "prepared");
     private static final Comparator<ArtifactReference> REFERENCE_ORDER = Comparator
             .comparing(ArtifactReference::scope)
             .thenComparing(ArtifactReference::path)
@@ -66,13 +66,13 @@ public final class ArtifactPlanResolver {
         Objects.requireNonNull(plan, "plan");
         Objects.requireNonNull(options, "options");
         Path source = plan.scenario().template().source();
-        Path artifactRoot = canonicalArtifactRoot(options.artifactRoot(), source);
-        ArtifactWorkspace workspace = createWorkspace(artifactRoot, source);
+        Path artifactRoot = ArtifactWorkspace.canonicalArtifactRoot(options.artifactRoot(), source);
+        ArtifactWorkspace workspace = ArtifactWorkspace.createWorkspace(artifactRoot, source);
         PreparationContext context = new PreparationContext(workspace, options.offline());
         try {
             return resolveScenario(plan, context, true);
         } catch (RuntimeException failure) {
-            closeAfterFailure(workspace, failure);
+            workspace.closeAfterFailure(failure);
             throw failure;
         }
     }
@@ -82,9 +82,9 @@ public final class ArtifactPlanResolver {
             ArtifactResolutionOptions options) {
         Objects.requireNonNull(plan, "plan");
         Objects.requireNonNull(options, "options");
-        Path artifactRoot = canonicalArtifactRoot(
+        Path artifactRoot = ArtifactWorkspace.canonicalArtifactRoot(
                 options.artifactRoot(), plan.specification().source());
-        ArtifactWorkspace workspace = createWorkspace(
+        ArtifactWorkspace workspace = ArtifactWorkspace.createWorkspace(
                 artifactRoot, plan.specification().source());
         PreparationContext context = new PreparationContext(workspace, options.offline());
 
@@ -112,7 +112,7 @@ public final class ArtifactPlanResolver {
             }
             return new PreparedSuitePlan(plan, workspace, prepared);
         } catch (RuntimeException failure) {
-            closeAfterFailure(workspace, failure);
+            workspace.closeAfterFailure(failure);
             throw failure;
         }
     }
@@ -1409,60 +1409,8 @@ public final class ArtifactPlanResolver {
             Path artifactRoot,
             Path stagingDirectory,
             List<Diagnostic> issues) {
-        Path temporary = null;
-        try {
-            temporary = Files.createTempFile(stagingDirectory, ".copy-", ".tmp");
-            try (InputStream input = Files.newInputStream(
-                    resolvedPath, java.nio.file.LinkOption.NOFOLLOW_LINKS)) {
-                Files.copy(input, temporary, StandardCopyOption.REPLACE_EXISTING);
-            }
-            String sha256 = uncheckedSha256(temporary);
-            String suffix = reference.role().isJar() ? ".jar" : ".data";
-            Path target = stagingDirectory.resolve(sha256 + suffix);
-            if (!Files.exists(target)) {
-                try {
-                    Files.move(temporary, target);
-                    temporary = null;
-                } catch (FileAlreadyExistsException ignored) {
-                    // Another resolver materialized the same content concurrently.
-                }
-            }
-            if (Files.isSymbolicLink(target)) {
-                issues.add(issue(source, reference, "artifact.staging.invalid",
-                        "Prepared artifact must not be a symbolic link"));
-                return Optional.empty();
-            }
-            Path staged = target.toRealPath();
-            if (!staged.getParent().equals(stagingDirectory)
-                    || !staged.startsWith(artifactRoot)
-                    || !Files.isRegularFile(staged)) {
-                issues.add(issue(source, reference, "artifact.staging.invalid",
-                        "Prepared artifact is not a regular file under the artifact root"));
-                return Optional.empty();
-            }
-            String stagedHash = uncheckedSha256(staged);
-            if (!sha256.equals(stagedHash)) {
-                issues.add(issue(source, reference, "artifact.staging.corrupt",
-                        "Content-addressed artifact cache contains bytes with the wrong SHA-256"));
-                return Optional.empty();
-            }
-            return Optional.of(new StagedArtifact(staged, sha256));
-        } catch (IOException | ChecksumFailure exception) {
-            Throwable detail = exception instanceof ChecksumFailure
-                    ? exception.getCause()
-                    : exception;
-            issues.add(issue(source, reference, "artifact.staging.failed",
-                    "Could not materialize a private artifact copy: " + safeMessage(detail)));
-            return Optional.empty();
-        } finally {
-            if (temporary != null) {
-                try {
-                    Files.deleteIfExists(temporary);
-                } catch (IOException ignored) {
-                    // Best-effort cleanup of a private temporary copy.
-                }
-            }
-        }
+        return ArtifactWorkspace.stage(reference.role(), resolvedPath, artifactRoot, stagingDirectory,
+                (code, message) -> issue(source, reference, code, message), issues);
     }
 
     private static boolean validateJar(
@@ -1707,88 +1655,6 @@ public final class ArtifactPlanResolver {
         }
     }
 
-    private static Path canonicalArtifactRoot(Path artifactRoot, Path source) {
-        if (!Files.isDirectory(artifactRoot)) {
-            throw new SpecificationException(Stage.ARTIFACT, List.of(new Diagnostic(
-                    source,
-                    ResolutionScope.COMMON,
-                    "artifact.root.not-directory",
-                    "$",
-                    "Artifact root is not an existing directory: " + artifactRoot)));
-        }
-        try {
-            return artifactRoot.toRealPath();
-        } catch (IOException exception) {
-            throw new SpecificationException(Stage.ARTIFACT, List.of(new Diagnostic(
-                    source,
-                    ResolutionScope.COMMON,
-                    "artifact.root.unavailable",
-                    "$",
-                    "Artifact root is unavailable: " + safeMessage(exception))));
-        }
-    }
-
-    private static ArtifactWorkspace createWorkspace(Path artifactRoot, Path source) {
-        try {
-            Path realParent = artifactRoot;
-            for (Path component : STAGING_DIRECTORY) {
-                Path next = realParent.resolve(component.toString());
-                if (Files.exists(next, java.nio.file.LinkOption.NOFOLLOW_LINKS)) {
-                    if (Files.isSymbolicLink(next)
-                            || !Files.isDirectory(next, java.nio.file.LinkOption.NOFOLLOW_LINKS)) {
-                        throw new IOException(
-                                "Private artifact staging component is not a real directory: "
-                                        + next);
-                    }
-                } else {
-                    try {
-                        Files.createDirectory(next);
-                    } catch (FileAlreadyExistsException ignored) {
-                        if (Files.isSymbolicLink(next)
-                                || !Files.isDirectory(
-                                        next, java.nio.file.LinkOption.NOFOLLOW_LINKS)) {
-                            throw new IOException(
-                                    "Private artifact staging component is not a real directory: "
-                                            + next);
-                        }
-                    }
-                }
-                Path realNext = next.toRealPath();
-                if (!realNext.getParent().equals(realParent)
-                        || !realNext.startsWith(artifactRoot)) {
-                    throw new IOException(
-                            "Private artifact staging directory resolves outside artifact root");
-                }
-                realParent = realNext;
-            }
-            Path directory = Files.createTempDirectory(realParent, "plan-").toRealPath();
-            if (!directory.getParent().equals(realParent)
-                    || !directory.startsWith(artifactRoot)) {
-                throw new IOException(
-                        "Private artifact plan directory resolves outside artifact root");
-            }
-            return new ArtifactWorkspace(artifactRoot, directory);
-        } catch (IOException exception) {
-            throw new SpecificationException(Stage.ARTIFACT, List.of(new Diagnostic(
-                    source,
-                    ResolutionScope.COMMON,
-                    "artifact.staging.failed",
-                    "$",
-                    "Could not create private artifact staging: "
-                            + safeMessage(exception))));
-        }
-    }
-
-    private static void closeAfterFailure(
-            ArtifactWorkspace workspace,
-            RuntimeException failure) {
-        try {
-            workspace.close();
-        } catch (RuntimeException cleanupFailure) {
-            failure.addSuppressed(cleanupFailure);
-        }
-    }
-
     private static int firstGlobSegment(Path path) {
         for (int index = 0; index < path.getNameCount(); index++) {
             String segment = path.getName(index).toString();
@@ -1808,14 +1674,6 @@ public final class ArtifactPlanResolver {
         return false;
     }
 
-    private static String uncheckedSha256(Path path) {
-        try {
-            return Digests.sha256(path);
-        } catch (IOException exception) {
-            throw new ChecksumFailure(exception);
-        }
-    }
-
     private static Diagnostic issue(
             Path source,
             ArtifactReference reference,
@@ -1823,12 +1681,6 @@ public final class ArtifactPlanResolver {
             String message) {
         return new Diagnostic(
                 source, reference.scope(), code, reference.path(), message);
-    }
-
-    private static String safeMessage(Throwable throwable) {
-        return throwable.getMessage() == null
-                ? throwable.getClass().getSimpleName()
-                : throwable.getMessage();
     }
 
     private static String escapePointer(String value) {
@@ -2072,8 +1924,6 @@ public final class ArtifactPlanResolver {
 
     private record ReferenceIdentity(ArtifactRole role, String path) {}
 
-    private record StagedArtifact(Path path, String sha256) {}
-
     private record MavenPrimaryResolution(Path sourcePath, String sha256) {
         private MavenPrimaryResolution {
             sourcePath = Objects.requireNonNull(sourcePath, "sourcePath")
@@ -2084,9 +1934,5 @@ public final class ArtifactPlanResolver {
 
     private record ClasspathIdentity(String kind, Object identity) {}
 
-    private static final class ChecksumFailure extends RuntimeException {
-        private ChecksumFailure(Throwable cause) {
-            super(cause);
-        }
-    }
+
 }
