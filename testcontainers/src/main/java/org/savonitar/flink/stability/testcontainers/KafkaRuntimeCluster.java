@@ -12,6 +12,10 @@ interface KafkaRuntimeCluster extends org.savonitar.flink.stability.runtime.api.
     void stop();
 
     KafkaRuntimeEndpoints endpoints();
+
+    default java.util.Optional<org.savonitar.flink.stability.runtime.api.KafkaRuntimeEvidence> runtimeEvidence() {
+        return java.util.Optional.empty();
+    }
     default KafkaLogCapture captureKafkaLogs(
             List<KafkaLogCapture.Partition> partitions,
             Path directory, MonotonicDeadline deadline) {

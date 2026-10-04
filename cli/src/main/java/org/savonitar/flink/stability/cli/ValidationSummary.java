@@ -3,8 +3,13 @@ package org.savonitar.flink.stability.cli;
 import java.util.Objects;
 
 /** Small user-facing summary of a successfully prepared validation target. */
-record ValidationSummary(TargetKind kind, String name, int entries, int artifacts) {
+record ValidationSummary(TargetKind kind, String name, int entries, int artifacts,
+                         java.util.Optional<com.fasterxml.jackson.databind.JsonNode> resolvedPlan) {
+    ValidationSummary(TargetKind kind, String name, int entries, int artifacts) {
+        this(kind, name, entries, artifacts, java.util.Optional.empty());
+    }
     ValidationSummary {
+        Objects.requireNonNull(resolvedPlan, "resolvedPlan");
         Objects.requireNonNull(kind, "kind");
         if (Objects.requireNonNull(name, "name").isBlank()) {
             throw new IllegalArgumentException("name must not be blank");

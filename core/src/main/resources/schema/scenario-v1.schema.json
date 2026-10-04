@@ -406,7 +406,18 @@
       "properties": {
         "image": {
           "$ref": "#/$defs/nonEmptyString",
-          "description": "Resolved image must identify the registered Apache Kafka 4.0.x broker line in v1."
+          "description": "Apache Kafka 4.0.x, or an explicitly image_id-pinned custom broker image."
+        },
+        "image_id": {"$ref": "#/$defs/nonEmptyString"},
+        "launch": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["type"],
+          "properties": {"type": {"$ref": "#/$defs/nonEmptyString"}}
+        },
+        "broker_config": {
+          "type": "object",
+          "additionalProperties": {"type": ["string", "integer", "boolean"]}
         },
         "mode": {
           "$ref": "#/$defs/nonEmptyString",
@@ -422,6 +433,7 @@
               "type": "integer",
               "enum": [1, 2]
             },
+            {"const": "broker-default"},
             {
               "$ref": "#/$defs/templateString"
             }
@@ -591,6 +603,7 @@
         "image": {
           "$ref": "#/$defs/nonEmptyString"
         },
+        "line": {"$ref": "#/$defs/nonEmptyString"},
         "image_id": {
           "$ref": "#/$defs/nonEmptyString",
           "description": "Optional expected local Docker image ID (sha256 plus 64 lowercase hexadecimal characters), checked before every Flink process starts. This is not a registry manifest digest."
@@ -747,6 +760,16 @@
       "allOf": [
         {
           "if": {
+            "properties": {"artifact": {"type": "string", "pattern": "^image:"}},
+            "required": ["artifact"]
+          },
+          "then": {
+            "required": ["sha256"],
+            "properties": {"runtime_dependencies": {"maxItems": 0}}
+          }
+        },
+        {
+          "if": {
             "properties": {
               "artifact": {
                 "$ref": "#/$defs/templatedString"
@@ -762,7 +785,7 @@
                 "artifact": {
                   "type": "string",
                   "not": {
-                    "pattern": "^maven:"
+                    "pattern": "^(maven:|image:)"
                   }
                 }
               },

@@ -20,14 +20,25 @@ import static org.savonitar.flink.stability.runtime.api.Checks.requireNonBlank;
 public record FlinkConnectorBundleInstallation(
         String targetFlinkImageReference,
         List<ClosureLockHash> closureLocks,
-        ConnectorClasspathManifest classpathManifest) {
+        ConnectorClasspathManifest classpathManifest, List<ImageConnectorArtifact> imageConnectors) {
     public static final String FORMAT = "flink-stability.connector-cluster-bundle/v1";
+
+    public FlinkConnectorBundleInstallation(String targetFlinkImageReference,
+            List<ClosureLockHash> closureLocks, ConnectorClasspathManifest classpathManifest) {
+        this(targetFlinkImageReference, closureLocks, classpathManifest, List.of());
+    }
 
     public FlinkConnectorBundleInstallation {
         targetFlinkImageReference = requireNonBlank(
                 targetFlinkImageReference, "targetFlinkImageReference");
         closureLocks = sortedClosureLocks(closureLocks);
         classpathManifest = Objects.requireNonNull(classpathManifest, "classpathManifest");
+        imageConnectors = imageConnectors.stream().sorted(Comparator.comparing(ImageConnectorArtifact::alias)).toList();
+        List<ClosureLockHash> stagedLocks = closureLocks;
+        if (imageConnectors.stream().map(ImageConnectorArtifact::alias).distinct().count() != imageConnectors.size()
+                || imageConnectors.stream().anyMatch(image -> stagedLocks.stream().anyMatch(lock -> lock.alias().equals(image.alias())))) {
+            throw new IllegalArgumentException("Duplicate image connector alias or staged primary");
+        }
     }
 
     /** Canonical UTF-8 target-binding JSON; these bytes are report evidence, not container input. */
@@ -56,9 +67,19 @@ public record FlinkConnectorBundleInstallation(
                     .append(closure.closureSha256())
                     .append("\"}");
         }
-        return json.append("],\"format\":\"")
-                .append(FORMAT)
-                .append("\",\"target_flink_image_reference\":\"")
+        json.append("],\"format\":\"").append(FORMAT).append('"');
+        if (!imageConnectors.isEmpty()) {
+            json.append(",\"image_connectors\":[");
+            for (int index = 0; index < imageConnectors.size(); index++) {
+                if (index > 0) json.append(',');
+                ImageConnectorArtifact connector = imageConnectors.get(index);
+                json.append("{\"alias\":\"").append(escapeJson(connector.alias()))
+                        .append("\",\"container_path\":\"").append(escapeJson(connector.containerPath()))
+                        .append("\",\"sha256\":\"").append(connector.sha256()).append("\"}");
+            }
+            json.append(']');
+        }
+        return json.append(",\"target_flink_image_reference\":\"")
                 .append(escapeJson(targetFlinkImageReference))
                 .append("\"}")
                 .toString();

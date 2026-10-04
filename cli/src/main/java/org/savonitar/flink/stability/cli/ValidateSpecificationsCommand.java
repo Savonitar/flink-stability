@@ -49,6 +49,9 @@ public final class ValidateSpecificationsCommand implements Callable<Integer> {
             description = "Resolve Maven artifacts from the local cache only.")
     private boolean offline;
 
+    @CommandLine.Option(names = "--show-plan", description = "Print the resolved executable scenario and custom launch configuration as JSON.")
+    private boolean showPlan;
+
     public ValidateSpecificationsCommand() {
         this(new SpecificationValidationService(), new ValidationDiagnosticRenderer());
     }
@@ -68,12 +71,17 @@ public final class ValidateSpecificationsCommand implements Callable<Integer> {
         ArtifactResolutionOptions artifactOptions =
                 new ArtifactResolutionOptions(artifactRoot, offline);
         try {
+            if (showPlan && target.scenario == null) {
+                throw new CommandLine.ParameterException(specification.commandLine(),
+                        "--show-plan requires --scenario");
+            }
             ValidationSummary summary = target.scenario != null
                     ? validationService.validateScenario(
-                            catalogRoot, target.scenario, overrides, artifactOptions)
+                            catalogRoot, target.scenario, overrides, artifactOptions, showPlan)
                     : validationService.validateSuite(
                             catalogRoot, target.suite, overrides, artifactOptions);
-            specification.commandLine().getOut().println(success(summary));
+            specification.commandLine().getOut().println(summary.resolvedPlan()
+                    .map(Object::toString).orElseGet(() -> success(summary)));
             return CommandLine.ExitCode.OK;
         } catch (UnknownSpecificationTargetException exception) {
             specification.commandLine().getErr().println("error: " + exception.getMessage());

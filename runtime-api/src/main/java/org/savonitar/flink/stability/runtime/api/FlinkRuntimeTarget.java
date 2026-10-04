@@ -3,6 +3,7 @@ package org.savonitar.flink.stability.runtime.api;
 import java.time.Duration;
 import java.util.Objects;
 import java.util.Optional;
+import java.util.Map;
 import java.util.regex.Pattern;
 
 import static org.savonitar.flink.stability.runtime.api.Checks.requireDockerImageId;
@@ -21,6 +22,8 @@ public final class FlinkRuntimeTarget {
     private final int taskManagers;
     private final Optional<HighAvailability> highAvailability;
     private final Optional<TokenProvider> tokenProvider;
+    private final Optional<String> declaredLine;
+    private final Map<String, String> config;
 
     private FlinkRuntimeTarget(
             String imageReference,
@@ -29,7 +32,8 @@ public final class FlinkRuntimeTarget {
             Optional<RuntimeJar> expectedRuntimeJar,
             int taskManagers,
             Optional<HighAvailability> highAvailability,
-            Optional<TokenProvider> tokenProvider) {
+            Optional<TokenProvider> tokenProvider,
+            Optional<String> declaredLine, Map<String, String> config) {
         this.imageReference = requireNonBlank(imageReference, "imageReference");
         this.connectorBundle = Objects.requireNonNull(connectorBundle, "connectorBundle");
         this.expectedImageId = Objects.requireNonNull(expectedImageId, "expectedImageId");
@@ -41,6 +45,8 @@ public final class FlinkRuntimeTarget {
         this.taskManagers = taskManagers;
         this.highAvailability = Objects.requireNonNull(highAvailability, "highAvailability");
         this.tokenProvider = Objects.requireNonNull(tokenProvider, "tokenProvider");
+        this.declaredLine = Objects.requireNonNull(declaredLine, "declaredLine");
+        this.config = FlinkConfiguration.validate(config);
     }
 
     /**
@@ -59,38 +65,57 @@ public final class FlinkRuntimeTarget {
                             + connectorBundle.targetFlinkImageReference());
         }
         return new FlinkRuntimeTarget(imageReference, connectorBundle, Optional.empty(), Optional.empty(),
-                1, Optional.empty(), Optional.empty());
+                1, Optional.empty(), Optional.empty(), Optional.empty(), Map.of());
     }
 
     /** Requires every physical Flink process to use this local Docker image identity. */
     public FlinkRuntimeTarget withExpectedImageId(String imageId) {
         return new FlinkRuntimeTarget(imageReference, connectorBundle,
                 Optional.of(requireDockerImageId(imageId, "expectedImageId")), expectedRuntimeJar,
-                taskManagers, highAvailability, tokenProvider);
+                taskManagers, highAvailability, tokenProvider, declaredLine, config);
     }
 
     /** Requires the selected runtime JAR bytes in every physical Flink process. */
     public FlinkRuntimeTarget withExpectedRuntimeJar(RuntimeJar runtimeJar) {
         return new FlinkRuntimeTarget(imageReference, connectorBundle, expectedImageId,
                 Optional.of(Objects.requireNonNull(runtimeJar, "runtimeJar")), taskManagers,
-                highAvailability, tokenProvider);
+                highAvailability, tokenProvider, declaredLine, config);
     }
 
     /** Keeps one JobManager and provisions this many named TaskManager slots. */
     public FlinkRuntimeTarget withTaskManagers(int count) {
         return new FlinkRuntimeTarget(imageReference, connectorBundle, expectedImageId,
-                expectedRuntimeJar, count, highAvailability, tokenProvider);
+                expectedRuntimeJar, count, highAvailability, tokenProvider, declaredLine, config);
     }
 
     public FlinkRuntimeTarget withHighAvailability(HighAvailability configuration) {
         return new FlinkRuntimeTarget(imageReference, connectorBundle, expectedImageId,
-                expectedRuntimeJar, taskManagers, Optional.of(configuration), tokenProvider);
+                expectedRuntimeJar, taskManagers, Optional.of(configuration), tokenProvider, declaredLine, config);
     }
 
     public FlinkRuntimeTarget withTokenProvider(TokenProvider configuration) {
         return new FlinkRuntimeTarget(imageReference, connectorBundle, expectedImageId,
-                expectedRuntimeJar, taskManagers, highAvailability, Optional.of(configuration));
+                expectedRuntimeJar, taskManagers, highAvailability, Optional.of(configuration), declaredLine, config);
     }
+
+    public FlinkRuntimeTarget withDeclaredLine(String line) {
+        if (line == null || !line.matches("(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)")) {
+            throw new IllegalArgumentException("Declared Flink line must be major.minor");
+        }
+        if (expectedImageId.isEmpty() || expectedRuntimeJar.isEmpty()) {
+            throw new IllegalArgumentException("Declared Flink line requires image_id and runtime_jar pins");
+        }
+        return new FlinkRuntimeTarget(imageReference, connectorBundle, expectedImageId,
+                expectedRuntimeJar, taskManagers, highAvailability, tokenProvider, Optional.of(line), config);
+    }
+
+    public FlinkRuntimeTarget withConfig(Map<String, String> configuration) {
+        return new FlinkRuntimeTarget(imageReference, connectorBundle, expectedImageId,
+                expectedRuntimeJar, taskManagers, highAvailability, tokenProvider, declaredLine, configuration);
+    }
+
+    public Optional<String> declaredLine() { return declaredLine; }
+    public Map<String, String> config() { return config; }
 
     public Optional<HighAvailability> highAvailability() {
         return highAvailability;
@@ -194,13 +219,14 @@ public final class FlinkRuntimeTarget {
                 && expectedRuntimeJar.equals(target.expectedRuntimeJar)
                 && taskManagers == target.taskManagers
                 && highAvailability.equals(target.highAvailability)
-                && tokenProvider.equals(target.tokenProvider);
+                && tokenProvider.equals(target.tokenProvider)
+                && declaredLine.equals(target.declaredLine) && config.equals(target.config);
     }
 
     @Override
     public int hashCode() {
         return Objects.hash(imageReference, connectorBundle, expectedImageId, expectedRuntimeJar,
-                taskManagers, highAvailability, tokenProvider);
+                taskManagers, highAvailability, tokenProvider, declaredLine, config);
     }
 
     @Override

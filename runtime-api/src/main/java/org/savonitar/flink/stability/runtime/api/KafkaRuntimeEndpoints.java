@@ -7,9 +7,14 @@ public record KafkaRuntimeEndpoints(
         String clusterAlias,
         String imageReference,
         String internalBootstrapServers,
-        String hostBootstrapServers) {
+        String hostBootstrapServers, java.util.Optional<KafkaRuntimeEvidence> runtimeEvidence) {
+
+    public KafkaRuntimeEndpoints(String clusterAlias, String imageReference, String internalBootstrapServers, String hostBootstrapServers) {
+        this(clusterAlias, imageReference, internalBootstrapServers, hostBootstrapServers, java.util.Optional.empty());
+    }
 
     public KafkaRuntimeEndpoints {
+        java.util.Objects.requireNonNull(runtimeEvidence, "runtimeEvidence");
         clusterAlias = requireNonBlank(clusterAlias, "clusterAlias");
         imageReference = requireNonBlank(imageReference, "imageReference");
         internalBootstrapServers = requireNonBlank(

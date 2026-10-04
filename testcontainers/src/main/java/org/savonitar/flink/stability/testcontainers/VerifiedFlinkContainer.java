@@ -19,6 +19,8 @@ import org.testcontainers.utility.MountableFile;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
+import java.util.Map;
+import org.savonitar.flink.stability.runtime.api.ImageConnectorArtifact;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.UUID;
@@ -39,6 +41,12 @@ final class VerifiedFlinkContainer extends GenericContainer<VerifiedFlinkContain
     private ConnectorBundleVerification verification;
     private String verifiedImageId;
     private String runtimeJarContainerId;
+    private String imageConnectorContainerId;
+    private List<ImageConnectorArtifact> imageConnectorArtifacts = List.of();
+    private Map<String, String> observedConfig = Map.of();
+    private String configurationContainerId;
+    private byte[] preparedConfiguration;
+    private List<String> configurationLauncher = List.of();
     private SyntheticTokenPlugin tokenPlugin;
     private String tokenPluginContainerId;
     private FlinkSessionLog sessionLog;
@@ -116,6 +124,17 @@ final class VerifiedFlinkContainer extends GenericContainer<VerifiedFlinkContain
                 SyntheticTokenPlugin.CONTAINER_PATH);
     }
 
+    /** Opt-in image contract; no image-specific entrypoint is allowed to reinterpret values. */
+    void useLiteralConfigurationLauncher(String role) {
+        if (runtimeTarget.config().isEmpty()) return;
+        configurationLauncher = FlinkProcessConfiguration.launcher(role);
+        withCopyToContainer(Transferable.of(FlinkProcessConfiguration.launcherBytes(), READ_ONLY_FILE_MODE),
+                FlinkProcessConfiguration.LAUNCHER_PATH);
+        withEnv("FLINK_HOME", "/opt/flink");
+        withEnv("FLINK_CONF_DIR", "/opt/flink/conf");
+        withCreateContainerCmdModifier(cmd -> cmd.withEntrypoint("/bin/bash", FlinkProcessConfiguration.LAUNCHER_PATH));
+    }
+
     void verifyTokenPluginAfterStart(String containerId) {
         if (tokenPlugin != null) {
             if (!containerId.equals(tokenPluginContainerId)) {
@@ -136,10 +155,114 @@ final class VerifiedFlinkContainer extends GenericContainer<VerifiedFlinkContain
                 .inspectContainerCmd(id).exec().getImageId());
         verifyRuntimeJarBeforeStart(containerId, this::readJarSha256);
         verifyCopiedBundle(runtimeTarget.connectorBundle());
+        verifyImageConnectorsBeforeStart(containerId);
+        if (!runtimeTarget.config().isEmpty()) {
+            var config = getDockerClient().inspectContainerCmd(containerId).exec().getConfig();
+            verifyConfigurationLaunch(Arrays.asList(config.getEnv()), Arrays.asList(config.getEntrypoint()),
+                    Arrays.asList(config.getCmd()));
+            prepareProcessConfiguration(containerId, this::readConfiguration,
+                    (path, bytes) -> copyFileToContainer(Transferable.of(bytes, READ_ONLY_FILE_MODE), path));
+        }
         tokenPluginContainerId = null;
         if (tokenPlugin != null) {
             tokenPlugin.verify(this::readJarSha256);
             tokenPluginContainerId = containerId;
+        }
+    }
+
+    void verifyConfigurationLaunch(List<String> environment, List<String> entrypoint, List<String> command) {
+        if (runtimeTarget.config().isEmpty()) return;
+        String expected = "FLINK_PROPERTIES=" + getEnvMap().get("FLINK_PROPERTIES");
+        List<String> actual = environment.stream()
+                .filter(value -> value.startsWith("FLINK_PROPERTIES=")).toList();
+        if (!actual.equals(List.of(expected)) || !entrypoint.equals(configurationLauncher.subList(0, 2))
+                || !command.equals(configurationLauncher.subList(2, 3))) {
+            throw new IllegalStateException("Flink configuration environment or launcher differs from the declared plan");
+        }
+    }
+
+    /** Each stopped physical container receives and verifies its own full standard YAML file. */
+    void prepareProcessConfiguration(String containerId, Function<String, byte[]> reader,
+                                     java.util.function.BiConsumer<String, byte[]> writer) {
+        configurationContainerId = null;
+        preparedConfiguration = null;
+        observedConfig = Map.of();
+        if (runtimeTarget.config().isEmpty()) return;
+        if (configurationLauncher.isEmpty()) throw new IllegalStateException("No literal Flink configuration launcher");
+        byte[] merged = FlinkProcessConfiguration.merge(reader.apply(FlinkProcessConfiguration.PATH),
+                getEnvMap().get("FLINK_PROPERTIES"), runtimeTarget.config(),
+                getEnvMap().get("JOB_MANAGER_RPC_ADDRESS"));
+        writer.accept(FlinkProcessConfiguration.PATH, merged.clone());
+        if (!Arrays.equals(merged, reader.apply(FlinkProcessConfiguration.PATH))) {
+            throw new IllegalStateException("Flink stopped-container configuration copy differs from the prepared file");
+        }
+        preparedConfiguration = merged;
+        configurationContainerId = Objects.requireNonNull(containerId, "containerId");
+    }
+
+    Optional<FlinkComponentProvisioningEvidence.EffectiveConfigurationEvidence> effectiveConfigurationEvidence(
+            String containerId) {
+        if (runtimeTarget.config().isEmpty()) return Optional.empty();
+        return effectiveConfigurationEvidence(containerId, this::readConfiguration, getLogs());
+    }
+
+    Optional<FlinkComponentProvisioningEvidence.EffectiveConfigurationEvidence> effectiveConfigurationEvidence(
+            String containerId, Function<String, byte[]> reader, String startupLog) {
+        if (runtimeTarget.config().isEmpty()) return Optional.empty();
+        if (!Objects.equals(configurationContainerId, containerId) || preparedConfiguration == null) {
+            throw new IllegalStateException("Flink configuration has no stopped-container verification for " + containerId);
+        }
+        byte[] actual = reader.apply(FlinkProcessConfiguration.PATH);
+        observedConfig = FlinkProcessConfiguration.observe(actual, preparedConfiguration, runtimeTarget.config(), startupLog);
+        return Optional.of(new FlinkComponentProvisioningEvidence.EffectiveConfigurationEvidence(
+                FlinkProcessConfiguration.PATH, Digests.sha256(preparedConfiguration), Digests.sha256(actual),
+                configurationLauncher, observedConfig));
+    }
+
+    private byte[] readConfiguration(String path) {
+        return copyFileFromContainer(path, input -> {
+            byte[] bytes = input.readNBytes(FlinkProcessConfiguration.MAX_BYTES + 1);
+            if (bytes.length > FlinkProcessConfiguration.MAX_BYTES) {
+                throw new IllegalStateException("Flink configuration exceeds the 2 MiB evidence limit");
+            }
+            return bytes;
+        });
+    }
+
+    Map<String, String> observedConfig() { return observedConfig; }
+    String classLoadProcess() { return classLoadLog.process(); }
+
+    private void verifyImageConnectorsBeforeStart(String containerId) {
+        imageConnectorContainerId = null;
+        imageConnectorArtifacts = verifyImageConnectors();
+        imageConnectorContainerId = containerId;
+    }
+
+    List<ImageConnectorArtifact> imageConnectorEvidence(String containerId) {
+        if (runtimeTarget.connectorBundle().imageConnectors().isEmpty()) return List.of();
+        if (!Objects.equals(imageConnectorContainerId, containerId)) {
+            throw new ConnectorBundleProvisioningException("Image connector has no pre-start observation for " + containerId);
+        }
+        // Entrypoints may replace JARs. Re-read and rescan before accepting readiness evidence.
+        return verifyImageConnectors();
+    }
+
+    private List<ImageConnectorArtifact> verifyImageConnectors() {
+        List<ImageConnectorArtifact> expected = runtimeTarget.connectorBundle().imageConnectors();
+        if (expected.isEmpty()) return List.of();
+        try {
+            List<ImageConnectorArtifact> observed = new ArrayList<>();
+            for (ImageConnectorArtifact connector : expected) {
+                observed.add(copyFileFromContainer(connector.containerPath(),
+                        input -> ImageConnectorVerification.verifyPrimary(connector, input)));
+            }
+            try (var archive = getDockerClient().copyArchiveFromContainerCmd(getContainerId(), "/opt/flink/lib").exec()) {
+                ImageConnectorVerification.verifyLibraryArchive(archive, expected);
+            }
+            return List.copyOf(observed);
+        } catch (java.io.IOException | RuntimeException failure) {
+            if (failure instanceof ConnectorBundleProvisioningException problem) throw problem;
+            throw new ConnectorBundleProvisioningException("Cannot verify image-supplied connector inventory", failure);
         }
     }
 

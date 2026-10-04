@@ -39,7 +39,7 @@ final class ThreeBrokerKafkaRuntime implements KafkaRuntimeCluster {
         var ports = hostPorts();
         for (int node = 1; node <= 3; node++) {
             String alias = target.brokerAlias(node);
-            var container = new KafkaContainer(target.imageReference()).withNetwork(network)
+            var container = new VerifiedKafkaContainer(target, node).withNetwork(network)
                     .withNetworkAliases(alias).withListener(alias + ":19092")
                     .withEnv(environment(target, node, clusterId))
                     .withCreateContainerCmdModifier(command -> command.withHostName(alias))
@@ -66,8 +66,7 @@ final class ThreeBrokerKafkaRuntime implements KafkaRuntimeCluster {
 
     static Map<String, String> environment(KafkaRuntimeTarget target, int node, String clusterId) {
         var environment = new LinkedHashMap<String, String>();
-        target.brokerPolicy().kafkaConfiguration().forEach((key, value) ->
-                environment.put("KAFKA_" + key.toUpperCase(Locale.ROOT).replace('.', '_'), value));
+        environment.putAll(ApacheKafkaRuntime.brokerEnvironment(target));
         environment.put("CLUSTER_ID", clusterId);
         environment.put("KAFKA_NODE_ID", Integer.toString(node));
         environment.put("KAFKA_PROCESS_ROLES", "broker,controller");
@@ -84,7 +83,10 @@ final class ThreeBrokerKafkaRuntime implements KafkaRuntimeCluster {
         attempted = true;
         // All controllers must start concurrently; allOf waits for every start, even when one fails.
         try (var starters = java.util.concurrent.Executors.newFixedThreadPool(3)) {
-            CompletableFuture.allOf(brokers.stream().map(node -> CompletableFuture.runAsync(node::start, starters))
+            CompletableFuture.allOf(brokers.stream().map(node -> CompletableFuture.runAsync(() -> {
+                node.start();
+                if (node instanceof VerifiedKafkaContainer verified) verified.markReady();
+            }, starters))
                     .toArray(CompletableFuture[]::new)).join();
         }
         started = true;
@@ -104,7 +106,12 @@ final class ThreeBrokerKafkaRuntime implements KafkaRuntimeCluster {
     @Override public KafkaRuntimeEndpoints endpoints() {
         if (!started) throw new IllegalStateException("Kafka is not started");
         return new KafkaRuntimeEndpoints(target.clusterAlias(), target.imageReference(), target.internalBootstrapServers(),
-                brokers.stream().map(KafkaContainer::getBootstrapServers).collect(Collectors.joining(",")));
+                brokers.stream().map(KafkaContainer::getBootstrapServers).collect(Collectors.joining(",")),
+                runtimeEvidence());
+    }
+
+    @Override public Optional<KafkaRuntimeEvidence> runtimeEvidence() {
+        return ApacheKafkaRuntime.customEvidence(target, brokers);
     }
 
     @Override public KafkaBrokerControl.Evidence brokerOperation(String name, boolean restart,

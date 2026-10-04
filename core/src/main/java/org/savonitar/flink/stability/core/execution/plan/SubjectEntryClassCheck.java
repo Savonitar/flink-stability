@@ -19,7 +19,7 @@ import static org.savonitar.flink.stability.core.execution.plan.ExecutableScenar
 
 /**
  * Checks before provisioning that the subject connector supplies the classes the protocol-v1
- * workload runs (SPEC-001 R5.6d, review finding F3). Installed bytes alone prove nothing: an
+ * workload runs (SPEC-001 R5.6d). Installed bytes alone prove nothing: an
  * unrelated primary plus the released connector as a runtime dependency would test the release.
  */
 final class SubjectEntryClassCheck {
@@ -60,7 +60,7 @@ final class SubjectEntryClassCheck {
                     issues.add(issue(source, "runner.subject.entry-class-conflict",
                             artifactPath,
                             "Connector bundle entry " + entry.fileName() + " from "
-                                    + origins(entry) + " also defines " + found
+                                    + origins(entry) + " also defines connector classes " + found
                                     + "; the executed copy would depend on classpath order"));
                 }
             }
@@ -97,9 +97,7 @@ final class SubjectEntryClassCheck {
                         .map(entry -> VERSIONED_CLASS.matcher(entry.getName()))
                         .filter(matcher -> matcher.matches())
                         .map(matcher -> matcher.group(1))
-                        .filter(entry -> PROTOCOL_V1_ENTRY_CLASSES.stream().anyMatch(
-                                entryClass -> entry.equals(
-                                        entryClass.replace('.', '/') + ".class")))
+                        .filter(org.savonitar.flink.stability.runtime.api.ImageConnectorArtifact::connectorClassEntry)
                         .distinct()
                         .sorted()
                         .toList();
@@ -110,10 +108,10 @@ final class SubjectEntryClassCheck {
                                     + "; use a JAR without versioned subject entry classes"));
                 }
             }
-            return PROTOCOL_V1_ENTRY_CLASSES.stream()
-                    .filter(entryClass -> jarFile.getJarEntry(
-                            entryClass.replace('.', '/') + ".class") != null)
-                    .toList();
+            return jarFile.stream().map(java.util.jar.JarEntry::getName)
+                    .filter(org.savonitar.flink.stability.runtime.api.ImageConnectorArtifact::connectorClassEntry)
+                    .map(name -> name.substring(0, name.length() - ".class".length()).replace('/', '.'))
+                    .distinct().sorted().toList();
         } catch (IOException unreadable) {
             issues.add(issue(source, "runner.subject.entry-class-unreadable", path,
                     "Cannot inspect " + jar.getFileName() + " for subject entry classes: "

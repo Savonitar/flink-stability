@@ -28,6 +28,52 @@ class FlinkKafkaCompatibilityValidatorTest {
     private final ScenarioParameterResolver resolver = new ScenarioParameterResolver(loader);
 
     @Test
+    void explicitLineAdmitsOpaqueTagsOnlyWithBothPinsAndRejectsDisagreeingTags() {
+        ScenarioSpecification custom = scenario(document -> {
+            usePinnedExperimentalRuntime(document);
+            flink(document).put("image", "vendor/flink:internal-build").put("line", "1.20");
+        });
+        assertEquals("1.20", resolver.resolve(custom, ResolutionRequest.none()).side(ScenarioSide.SINGLE)
+                .document().at("/setup/flink/line").asText());
+        for (String pin : java.util.List.of("image_id", "runtime_jar")) {
+            ScenarioSpecification missing = scenario(document -> {
+                usePinnedExperimentalRuntime(document);
+                flink(document).put("image", "vendor/flink:custom").put("line", "1.20").remove(pin);
+            });
+            var failure = assertFailsAt(Stage.RESOLUTION, () -> resolver.resolve(missing, ResolutionRequest.none()));
+            assertIssue(failure, "capability.flink-line.pin-required", ResolutionScope.SINGLE, "$/setup/flink/" + pin);
+        }
+        ScenarioSpecification mismatch = scenario(document -> {
+            usePinnedExperimentalRuntime(document);
+            flink(document).put("image", "vendor/flink:2.2.0").put("line", "1.20");
+        });
+        assertIssue(assertFailsAt(Stage.RESOLUTION, () -> resolver.resolve(mismatch, ResolutionRequest.none())),
+                "capability.flink-line.tag-mismatch", ResolutionScope.SINGLE, "$/setup/flink/image");
+        ScenarioSpecification invalidLine = scenario(document -> {
+            usePinnedExperimentalRuntime(document);
+            flink(document).put("line", "${line}");
+            parameter(document, "line", "string", TextNode.valueOf("2.2.0"));
+        });
+        assertIssue(assertFailsAt(Stage.RESOLUTION, () -> resolver.resolve(invalidLine, ResolutionRequest.none())),
+                "capability.flink-line.invalid", ResolutionScope.SINGLE, "$/setup/flink/line");
+    }
+
+    @Test
+    void customKafkaImageNeedsValidLocalImagePin() {
+        var custom = scenario(document -> ((ObjectNode) document.at("/setup/kafka/clusters/main"))
+                .put("image", "vendor/kafka:custom").put("image_id", "sha256:" + "a".repeat(64)));
+        assertEquals("vendor/kafka:custom", resolver.resolve(custom, ResolutionRequest.none())
+                .side(ScenarioSide.SINGLE).document().at("/setup/kafka/clusters/main/image").asText());
+        var invalid = scenario(document -> {
+            ((ObjectNode) document.at("/setup/kafka/clusters/main"))
+                    .put("image", "vendor/kafka:custom").put("image_id", "${id}");
+            parameter(document, "id", "string", TextNode.valueOf("invalid"));
+        });
+        assertIssue(assertFailsAt(Stage.RESOLUTION, () -> resolver.resolve(invalid, ResolutionRequest.none())),
+                "runner.kafka.image-id-invalid", ResolutionScope.SINGLE, "$/setup/kafka/clusters/main/image_id");
+    }
+
+    @Test
     void validatesRuntimeJarIdentityAfterParameterResolution() {
         String path = "/opt/flink/lib/flink-dist-2.2.0.jar";
         String hash = "a".repeat(64);

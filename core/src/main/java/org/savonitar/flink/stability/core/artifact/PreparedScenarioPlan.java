@@ -76,14 +76,25 @@ public final class PreparedScenarioPlan implements AutoCloseable {
 
     /** Declared pins and the observed hashes of the exact staged primary artifacts. */
     public record ConnectorPrimaryEvidence(ScenarioSide side, String alias, String artifact,
-                                          Optional<String> declaredSha256, String observedSha256) {
+                                          Optional<String> declaredSha256, String observedSha256, String origin) {
+        public ConnectorPrimaryEvidence(ScenarioSide side, String alias, String artifact,
+                Optional<String> declaredSha256, String observedSha256) {
+            this(side, alias, artifact, declaredSha256, observedSha256, null);
+        }
         public ConnectorPrimaryEvidence {
             Objects.requireNonNull(side, "side");
             Objects.requireNonNull(alias, "alias");
             Objects.requireNonNull(artifact, "artifact");
             Objects.requireNonNull(declaredSha256, "declaredSha256");
-            Objects.requireNonNull(observedSha256, "observedSha256");
+            if (!"image".equals(origin)) Objects.requireNonNull(observedSha256, "observedSha256");
         }
+    }
+
+    public List<org.savonitar.flink.stability.runtime.api.ImageConnectorArtifact> imageConnectors(ScenarioSide side) {
+        return connectorPrimaries.stream().filter(primary -> primary.side() == side && "image".equals(primary.origin()))
+                .map(primary -> new org.savonitar.flink.stability.runtime.api.ImageConnectorArtifact(
+                        primary.alias(), primary.artifact().substring("image:".length()),
+                        primary.declaredSha256().orElseThrow())).toList();
     }
 
     public List<ConnectorPrimaryEvidence> connectorPrimaries() {

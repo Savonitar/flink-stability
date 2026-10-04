@@ -45,6 +45,10 @@ public final class DockerV1AttemptRuntime implements V1AttemptRuntime {
         return endpoints;
     }
 
+    @Override public Optional<org.savonitar.flink.stability.runtime.api.KafkaRuntimeEvidence> kafkaRuntimeEvidence() {
+        return clusters.kafkaRuntimeEvidence();
+    }
+
     @Override
     public org.savonitar.flink.stability.runtime.api.KafkaProducerSnapshot observeKafkaProducers(
             String cluster, String topic, int partition, String prefix, Duration timeout) throws Exception {

@@ -24,6 +24,51 @@ class FlinkRuntimeIdentityTest {
     static final String OTHER_IMAGE_ID = "sha256:" + "b".repeat(64);
 
     @Test
+    void effectiveConfigurationRequiresEveryInitialAndReplacementReceipt() {
+        Map<String, String> config = Map.of("taskmanager.memory.process.size", "1600m");
+        var expected = new FlinkRuntimeIdentity.ExpectedTarget(Optional.of(IMAGE_ID),
+                expected(Optional.of(IMAGE_ID)).components(), Optional.empty(), Optional.empty(), Optional.empty(), config);
+        var components = provisioning(2).stream().map(component -> withConfiguration(component, config, "a".repeat(64))).toList();
+        var fence = Optional.of(fenceFor(List.of(components.getFirst(), components.getLast())));
+        var phases = Optional.of(restarted());
+        assertEquals(FlinkRuntimeIdentity.Outcome.CONFIRMED,
+                FlinkRuntimeIdentity.evaluate(expected, components, fence, phases).outcome());
+        for (int index = 0; index < components.size(); index++) {
+            var missing = new ArrayList<>(components);
+            missing.set(index, provisioning(2).get(index).withProcessConfiguration(config, "unconfirmed#1"));
+            var result = FlinkRuntimeIdentity.evaluate(expected, missing, fence, phases);
+            assertEquals(FlinkRuntimeIdentity.Outcome.UNCONFIRMED, result.outcome());
+            assertEquals(FlinkRuntimeIdentity.CONFIG_UNCONFIRMED, result.reason());
+        }
+    }
+
+    @Test
+    void changedEffectiveBytesAndObservedValuesHaveConfigurationSpecificReasons() {
+        Map<String, String> config = Map.of("taskmanager.memory.process.size", "1600m");
+        var expected = new FlinkRuntimeIdentity.ExpectedTarget(Optional.of(IMAGE_ID),
+                expected(Optional.of(IMAGE_ID)).components(), Optional.empty(), Optional.empty(), Optional.empty(), config);
+        for (var broken : List.of(withConfiguration(provisioning(1).getLast(), config, "b".repeat(64)),
+                withConfiguration(provisioning(1).getLast(), Map.of("taskmanager.memory.process.size", "1728m"), "a".repeat(64)))) {
+            var components = List.of(withConfiguration(provisioning(1).getFirst(), config, "a".repeat(64)), broken);
+            var result = FlinkRuntimeIdentity.evaluate(expected, components, Optional.of(fenceFor(components)), Optional.of(noPhases()));
+            assertEquals(FlinkRuntimeIdentity.Outcome.MISMATCH, result.outcome());
+            assertEquals(FlinkRuntimeIdentity.CONFIG_MISMATCH, result.reason());
+        }
+        var undeclared = List.of(withConfiguration(provisioning(1).getFirst(), config, "a".repeat(64)), provisioning(1).getLast());
+        assertEquals(FlinkRuntimeIdentity.CONFIG_MISMATCH, FlinkRuntimeIdentity.evaluate(expected(Optional.of(IMAGE_ID)),
+                undeclared, Optional.of(fenceFor(undeclared)), Optional.of(noPhases())).reason());
+    }
+
+    private static FlinkComponentProvisioningEvidence withConfiguration(FlinkComponentProvisioningEvidence component,
+                                                                        Map<String, String> config, String observedHash) {
+        String role = component.role() == FlinkComponentRole.JOB_MANAGER ? "jobmanager" : "taskmanager";
+        return component.withProcessConfiguration(config, component.logicalName() + "#" + component.runtimeId())
+                .withEffectiveConfiguration(new FlinkComponentProvisioningEvidence.EffectiveConfigurationEvidence(
+                        "/opt/flink/conf/config.yaml", "a".repeat(64), observedHash,
+                        List.of("/bin/bash", "/opt/flink/flink-stability-launch.sh", role), config));
+    }
+
+    @Test
     void renamedExpectedSlotsStillConfirmIncludingAReplacement() {
         FlinkRuntimeIdentity.ExpectedTarget expected = new FlinkRuntimeIdentity.ExpectedTarget(
                 Optional.of(IMAGE_ID), Map.of("coordinator", FlinkComponentRole.JOB_MANAGER,

@@ -1001,8 +1001,8 @@ class ExecutableScenarioPlanCompilerTest {
                                     .add("second");
                         }),
                 new CapabilityCase(
-                        "runner.flink.config-unsupported",
-                        "$/setup/flink/config",
+                        "runner.flink.config-reserved-key",
+                        "$/setup/flink/config/taskmanager.numberOfTaskSlots",
                         document -> ((ObjectNode) document.at("/setup/flink"))
                                 .putObject("config")
                                 .put("taskmanager.numberOfTaskSlots", 1)));

@@ -22,6 +22,8 @@ public record FlinkRuntimeIdentity(Outcome outcome, String detail, String reason
     public static final String UNCONFIRMED = "subject.flink.image-id-unconfirmed";
     public static final String RUNTIME_JAR_MISMATCH = "subject.flink.runtime-jar-mismatch";
     public static final String RUNTIME_JAR_UNCONFIRMED = "subject.flink.runtime-jar-unconfirmed";
+    public static final String CONFIG_MISMATCH = "subject.flink.config-mismatch";
+    public static final String CONFIG_UNCONFIRMED = "subject.flink.config-unconfirmed";
     public static final String RESOURCE_MANAGER_CLASS =
             "org.apache.flink.runtime.resourcemanager.ResourceManager";
     public static final String TASK_EXECUTOR_CLASS =
@@ -35,8 +37,18 @@ public record FlinkRuntimeIdentity(Outcome outcome, String detail, String reason
     public record ExpectedTarget(
             Optional<String> imageId,
             Map<String, FlinkComponentRole> components,
-            Optional<FlinkRuntimeTarget.RuntimeJar> runtimeJar) {
+            Optional<FlinkRuntimeTarget.RuntimeJar> runtimeJar,
+            Optional<String> declaredLine,
+            Optional<String> imageReference,
+            Map<String, String> config) {
+        public ExpectedTarget(Optional<String> imageId, Map<String, FlinkComponentRole> components,
+                              Optional<FlinkRuntimeTarget.RuntimeJar> runtimeJar) {
+            this(imageId, components, runtimeJar, Optional.empty(), Optional.empty(), Map.of());
+        }
         public ExpectedTarget {
+            Objects.requireNonNull(declaredLine, "declaredLine");
+            Objects.requireNonNull(imageReference, "imageReference");
+            config = org.savonitar.flink.stability.runtime.api.FlinkConfiguration.validate(config);
             imageId = Objects.requireNonNull(imageId, "imageId");
             runtimeJar = Objects.requireNonNull(runtimeJar, "runtimeJar");
             imageId.ifPresent(id -> org.savonitar.flink.stability.runtime.api.Checks
@@ -68,6 +80,25 @@ public record FlinkRuntimeIdentity(Outcome outcome, String detail, String reason
             Optional<PhaseExecutionEvidence> phases) {
         if (provisioning.isEmpty()) {
             return unconfirmed("No Flink process has observed image identity evidence");
+        }
+        if (!expected.config().isEmpty()) {
+            if (provisioning.stream().anyMatch(component -> component.effectiveConfiguration().isEmpty()
+                    || component.classLoadProcess().isEmpty())) {
+                return new FlinkRuntimeIdentity(Outcome.UNCONFIRMED,
+                        "Every Flink incarnation requires verified effective configuration and its registered process log",
+                        CONFIG_UNCONFIRMED);
+            }
+            if (provisioning.stream().map(component -> component.effectiveConfiguration().orElseThrow())
+                    .anyMatch(receipt -> !receipt.observedValues().equals(expected.config())
+                            || !receipt.sourceSha256().equals(receipt.observedSha256()))) {
+                return new FlinkRuntimeIdentity(Outcome.MISMATCH,
+                        "Effective Flink configuration differs from the staged bytes or resolved custom values",
+                        CONFIG_MISMATCH);
+            }
+        }
+        if (provisioning.stream().anyMatch(component -> !expected.config().equals(component.flinkConfig()))) {
+            return new FlinkRuntimeIdentity(Outcome.MISMATCH,
+                    "Flink process configuration differs from the resolved custom configuration", CONFIG_MISMATCH);
         }
         String observedImageId = provisioning.getFirst().imageId();
         if (provisioning.stream().anyMatch(component ->

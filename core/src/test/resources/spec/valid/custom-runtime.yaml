@@ -1,0 +1,67 @@
+format: v1
+kind: scenario
+meta:
+  name: custom-runtime
+  description: Pinned custom subjects with explicit runtime and configuration assertions.
+runs: 1
+health_retry_limit: 0
+setup:
+  kafka:
+    clusters:
+      main:
+        image: internal/kafka:vendor-build
+        image_id: sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+        launch: { type: generic-kraft }
+        broker_config:
+          transaction.two.phase.commit.enable: true
+        transaction_version: broker-default
+        brokers: 1
+        topics:
+          - name: input
+            partitions: 1
+            replication_factor: 1
+            input_source: { mode: generated, format: integer-sequence, total: 10 }
+          - name: output
+            partitions: 1
+            replication_factor: 1
+  flink:
+    image: internal/flink:vendor-build
+    line: "2.3"
+    image_id: sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb
+    runtime_jar:
+      container_path: /opt/flink/lib/flink-dist-vendor.jar
+      sha256: cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc
+    config:
+      execution.checkpointing.unaligned.enabled: true
+      pipeline.auto-watermark-interval: 200
+subject:
+  connectors:
+    kafka:
+      artifact: image:/opt/flink/lib/vendor-connector.jar
+      sha256: dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd
+workload:
+  jobs:
+    - alias: eos-job
+      jar: workload.jar
+      connectors: [kafka]
+      parallelism: 1
+      source: { cluster: main, topic: input }
+      sink:
+        cluster: main
+        topic: output
+        delivery_guarantee: EXACTLY_ONCE
+        transactional_id_prefix: custom-runtime
+        transaction_id_naming_strategy: connector-default
+      checkpointing: { interval: 5s, mode: EXACTLY_ONCE }
+phases:
+  - name: verify-running
+    steps:
+      - await:
+          condition: { type: job-state, job: eos-job, state: RUNNING }
+          timeout: 2m
+          on_timeout: inconclusive
+terminal_validations:
+  - type: kafka.id-set
+    cluster: main
+    topic: output
+    expected: input-manifest

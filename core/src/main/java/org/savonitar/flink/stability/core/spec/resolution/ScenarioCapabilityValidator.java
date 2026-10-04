@@ -19,7 +19,7 @@ final class ScenarioCapabilityValidator {
     private static final Set<String> DELIVERY_GUARANTEES =
             Set.of("NONE", "AT_LEAST_ONCE", "EXACTLY_ONCE");
     private static final Set<String> TRANSACTION_ID_NAMING_STRATEGIES =
-            Set.of("INCREMENTING", "POOLING");
+            Set.of("INCREMENTING", "POOLING", "connector-default");
     private static final Set<String> RESTORE_MODES = Set.of("claim", "no-claim");
 
     List<Diagnostic> validate(Path source, ResolutionScope scope, ObjectNode document) {

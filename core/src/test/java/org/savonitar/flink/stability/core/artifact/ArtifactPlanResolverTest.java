@@ -60,6 +60,74 @@ class ArtifactPlanResolverTest {
     Path artifactRoot;
 
     @Test
+    void imageSubjectsRemainUnstagedAndUnobservedUntilRuntimeVerification() throws IOException {
+        createJar(artifactRoot.resolve("job.jar"), true);
+        ResolvedScenarioPlan plan = plainPlan("image-primary", document -> {
+            setCoreArtifacts(document, "image:/opt/flink/lib/subject.jar", "job.jar");
+            ((ObjectNode) document.at("/subject/connectors/kafka")).put("sha256", "a".repeat(64));
+        });
+        try (var prepared = new ArtifactPlanResolver().resolve(plan, new ArtifactResolutionOptions(artifactRoot, true))) {
+            assertEquals(1, prepared.artifacts().size());
+            assertTrue(prepared.connectorClosures().isEmpty());
+            var primary = prepared.connectorPrimaries().getFirst();
+            assertEquals("image", primary.origin());
+            assertEquals(null, primary.observedSha256());
+            var bundle = new ConnectorClusterBundleBuilder().build(prepared, ScenarioSide.SINGLE, "flink:2.2.0");
+            assertTrue(bundle.entries().isEmpty());
+            assertTrue(bundle.closureLocks().isEmpty());
+            assertEquals("/opt/flink/lib/subject.jar", bundle.primaryContainerPath("kafka").orElseThrow());
+            assertEquals(bundle.targetBindingSha256(), new PreparedConnectorRuntimeTargetFactory().create(bundle)
+                    .connectorBundle().targetBindingSha256());
+        }
+    }
+
+    @Test
+    void imageSubjectPinIsMandatoryAndAWorkloadCopyCannotShadowIt() throws IOException {
+        assertFailsAt(Stage.DOCUMENT, () -> plainPlan("image-no-pin", document ->
+                setCoreArtifacts(document, "image:/opt/flink/lib/subject.jar", "job.jar")));
+        createJar(artifactRoot.resolve("job.jar"), true);
+        var manifest = new Manifest();
+        manifest.getMainAttributes().put(Attributes.Name.MANIFEST_VERSION, "1.0");
+        manifest.getMainAttributes().put(Attributes.Name.MAIN_CLASS, "example.Main");
+        manifest.getMainAttributes().putValue("Flink-Stability-Workload-Protocol", "v1");
+        try (var jar = new JarOutputStream(Files.newOutputStream(artifactRoot.resolve("job.jar")), manifest)) {
+            jar.putNextEntry(new JarEntry("org/apache/flink/connector/kafka/sink/internal/KafkaCommitter.class"));
+            jar.write(new byte[] {1, 2, 3});
+            jar.closeEntry();
+        }
+        var plan = plainPlan("image-shadowed", document -> {
+            document.put("health_retry_limit", 0);
+            setCoreArtifacts(document, "image:/opt/flink/lib/subject.jar", "job.jar");
+            ((ObjectNode) document.at("/subject/connectors/kafka")).put("sha256", "a".repeat(64));
+        });
+        try (var prepared = new ArtifactPlanResolver().resolve(plan, new ArtifactResolutionOptions(artifactRoot, true))) {
+            var compiler = new org.savonitar.flink.stability.core.execution.plan.ExecutableScenarioPlanCompiler();
+            var executable = compiler.compile(plan);
+            var failure = assertFailsAt(Stage.RUNNER_CAPABILITY, () -> compiler.bind(prepared, executable));
+            assertTrue(failure.diagnostics().stream().anyMatch(issue -> issue.code().equals("runner.subject.entry-class-conflict")));
+        }
+    }
+
+    @Test
+    void imageSubjectsRejectMalformedPathAndExtraDependencies() throws IOException {
+        createJar(artifactRoot.resolve("job.jar"), true);
+        var plan = plainPlan("bad-image", document -> {
+            setCoreArtifacts(document, "image:/opt/flink/lib/../subject.jar", "job.jar");
+            ((ObjectNode) document.at("/subject/connectors/kafka")).put("sha256", "a".repeat(64));
+        });
+        var failure = assertFailsAt(Stage.ARTIFACT, () -> new ArtifactPlanResolver().resolve(
+                plan, new ArtifactResolutionOptions(artifactRoot, true)));
+        assertTrue(failure.diagnostics().stream().anyMatch(issue -> issue.code().equals("artifact.connector.image-invalid")));
+        var extra = assertFailsAt(Stage.DOCUMENT, () -> plainPlan("image-extra-dependency", document -> {
+            setCoreArtifacts(document, "image:/opt/flink/lib/subject.jar", "job.jar");
+            var connector = (ObjectNode) document.at("/subject/connectors/kafka");
+            connector.put("sha256", "a".repeat(64));
+            connector.putArray("runtime_dependencies").add("missing.jar");
+        }));
+        assertTrue(extra.diagnostics().stream().anyMatch(issue -> issue.code().equals("schema.max-items")));
+    }
+
+    @Test
     void resolvesRelativeLocalFilesAgainstTheExactArtifactRootAndComputesSha256()
             throws IOException {
         Files.createDirectories(artifactRoot.resolve("inputs"));

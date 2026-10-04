@@ -28,13 +28,37 @@ final class KafkaTopologyCompiler {
             ObjectNode cluster = (ObjectNode) first.getValue();
             String clusterPath = "$/setup/kafka/clusters/" + pointer(first.getKey());
             String image = cluster.path("image").textValue();
-            if (image == null || !KafkaBrokerImagePolicy.isSupportedV1(image)) {
+            if (image == null || (!cluster.has("image_id") && !KafkaBrokerImagePolicy.isSupportedV1(image))) {
                 issues.add(issue(
                         source,
                         "runner.kafka.image-version-unsupported",
                         clusterPath + "/image",
                         "The first runner requires an official apache/kafka:4.0.x image"));
             }
+            if (cluster.has("image_id")) {
+                try {
+                    org.savonitar.flink.stability.runtime.api.Checks.requireDockerImageId(
+                            cluster.path("image_id").asText(), "Kafka image_id");
+                } catch (IllegalArgumentException invalid) {
+                    issues.add(issue(source, "runner.kafka.image-id-invalid", clusterPath + "/image_id", invalid.getMessage()));
+                }
+            }
+            String launch = cluster.path("launch").path("type").asText("apache-kafka");
+            if (!java.util.Set.of("apache-kafka", "generic-kraft").contains(launch)) {
+                issues.add(issue(source, "runner.kafka.launch-unsupported", clusterPath + "/launch/type",
+                        "Kafka launch type must be apache-kafka or generic-kraft"));
+            }
+            cluster.path("broker_config").fields().forEachRemaining(entry -> {
+                try {
+                    org.savonitar.flink.stability.runtime.api.KafkaRuntimeTarget.validateBrokerConfig(
+                            Map.of(entry.getKey(), entry.getValue().asText()), launch);
+                } catch (IllegalArgumentException invalid) {
+                    issues.add(issue(source,
+                            org.savonitar.flink.stability.runtime.api.KafkaRuntimeTarget.isReservedBrokerConfigKey(entry.getKey(), launch)
+                                    ? "runner.kafka.config-reserved-key" : "runner.kafka.config-invalid",
+                            clusterPath + "/broker_config/" + pointer(entry.getKey()), invalid.getMessage()));
+                }
+            });
             if (!"kraft".equals(cluster.path("mode").textValue())) {
                 issues.add(issue(
                         source,

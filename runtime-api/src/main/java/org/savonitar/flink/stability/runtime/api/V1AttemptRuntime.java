@@ -9,6 +9,9 @@ import java.util.Optional;
 public interface V1AttemptRuntime extends KafkaBrokerControl, PacketFaultControl, TaskManagerControl, FlinkHaControl, AutoCloseable {
     KafkaRuntimeEndpoints startKafka(KafkaRuntimeTarget target);
 
+    /** Retained created-container receipts, including failed startup, without additional Docker reads. */
+    default Optional<KafkaRuntimeEvidence> kafkaRuntimeEvidence() { return Optional.empty(); }
+
     /**
      * Starts a protocol-aware proxy in front of the started Kafka cluster. Its rules and evidence
      * live in the returned control directory, which exists only for this attempt.

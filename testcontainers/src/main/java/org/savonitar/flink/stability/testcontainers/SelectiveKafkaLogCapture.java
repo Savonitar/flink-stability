@@ -13,8 +13,8 @@ import java.util.Set;
 
 /** One diagnostic collection from the exact live owner, after the data oracle. */
 final class SelectiveKafkaLogCapture {
-    // The registered official Apache Kafka 4.0 runtime uses this directory. Never search other roots.
-    static final String LOG_ROOT = "/tmp/kafka-logs";
+    // Both launchers explicitly configure this directory. Never search other roots.
+    static final String LOG_ROOT = org.savonitar.flink.stability.runtime.api.KafkaRuntimeTarget.LOG_DIRECTORY;
     private SelectiveKafkaLogCapture() {}
 
     static KafkaLogCapture collect(OwnedKafkaArchiveCapture.Binding binding,

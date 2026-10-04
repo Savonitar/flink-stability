@@ -52,6 +52,9 @@ public final class ConnectorClusterBundleBuilder {
         for (Map.Entry<String, String> reference : referencedAliases.entrySet()) {
             PreparedConnectorClosure closure = plan.connectorClosure(side, reference.getKey())
                     .orElse(null);
+            if (closure == null && plan.imageConnectors(side).stream().anyMatch(image -> image.alias().equals(reference.getKey()))) {
+                continue;
+            }
             if (closure == null) {
                 issues.add(issue(
                         plan,
@@ -137,7 +140,7 @@ public final class ConnectorClusterBundleBuilder {
         String classpathManifest = canonicalClasspathManifest(entries);
         String classpathManifestSha256 = Digests.sha256(classpathManifest);
         String targetBinding = canonicalTargetBinding(
-                targetFlinkImageReference, selectedLocks, classpathManifestSha256);
+                targetFlinkImageReference, selectedLocks, classpathManifestSha256, plan.imageConnectors(side));
         return new PreparedConnectorBundle(
                 side,
                 targetFlinkImageReference,
@@ -147,7 +150,7 @@ public final class ConnectorClusterBundleBuilder {
                 targetBinding,
                 Digests.sha256(targetBinding),
                 classpathManifest,
-                classpathManifestSha256);
+                classpathManifestSha256, plan.imageConnectors(side));
     }
 
     private void verifyLock(
@@ -264,8 +267,21 @@ public final class ConnectorClusterBundleBuilder {
             String targetFlinkImageReference,
             List<ConnectorClosureLock> locks,
             String classpathManifestSha256) {
+        return canonicalTargetBinding(targetFlinkImageReference, locks, classpathManifestSha256, List.of());
+    }
+
+    static String canonicalTargetBinding(String targetFlinkImageReference, List<ConnectorClosureLock> locks,
+            String classpathManifestSha256,
+            List<org.savonitar.flink.stability.runtime.api.ImageConnectorArtifact> images) {
         Map<String, Object> projection = new TreeMap<>();
         projection.put("classpath_manifest_sha256", classpathManifestSha256);
+        if (!images.isEmpty()) projection.put("image_connectors", images.stream().map(image -> {
+            Map<String, Object> value = new TreeMap<>();
+            value.put("alias", image.alias());
+            value.put("container_path", image.containerPath());
+            value.put("sha256", image.sha256());
+            return value;
+        }).toList());
         projection.put("closures", locks.stream().map(lock -> {
             Map<String, Object> item = new TreeMap<>();
             item.put("alias", lock.alias());
