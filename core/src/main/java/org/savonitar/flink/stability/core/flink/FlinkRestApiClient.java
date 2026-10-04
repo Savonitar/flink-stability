@@ -278,6 +278,21 @@ public final class FlinkRestApiClient implements FlinkScenarioControl {
         }
     }
 
+    @Override
+    public JsonNode checkpointOverview(FlinkJobHandle job, Duration timeout) throws IOException {
+        MonotonicDeadline deadline = MonotonicDeadline.start(timeout, nanoTime);
+        String jobPath = "/jobs/" + pathSegment(job.jobId());
+        JsonNode response = get(jobPath + "/checkpoints", deadline);
+        if (!(response instanceof com.fasterxml.jackson.databind.node.ObjectNode object))
+            throw new IOException("Checkpoint overview is not an object");
+        long id = org.savonitar.flink.stability.core.execution.CheckpointKillWindow.eligibleCheckpoint(response);
+        if (id > 1) {
+            object.set("observedCheckpointDetails", get(jobPath + "/checkpoints/details/" + id, deadline));
+            object.set("observedJobVertices", get(jobPath, deadline).path("vertices"));
+        }
+        return object;
+    }
+
     private long completedCheckpointCount(
             FlinkJobHandle job,
             MonotonicDeadline deadline) throws IOException {

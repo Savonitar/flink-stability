@@ -26,6 +26,17 @@ class ScenarioPhasePreflightValidatorTest {
     private final ScenarioPreflightValidator validator = new ScenarioPreflightValidator();
 
     @Test
+    void checkpointInProgressReferencesMustResolveEvenInsideLoops() {
+        assertAccepts(document -> addJobAwait(replaceSteps(document), "checkpoint-in-progress", "eos-job"));
+        var failure = reject(document -> {
+            var steps = replaceSteps(document).addObject().putObject("loop").put("times", 1).putArray("steps");
+            addJobAwait(steps, "checkpoint-in-progress", "missing-job");
+        });
+        assertHasIssue(failure, ResolutionScope.COMMON, "preflight.reference.job-not-found",
+                "$/phases/0/steps/0/loop/steps/0/await/condition/job");
+    }
+
+    @Test
     void rejectsDuplicatePhaseNames() {
         SpecificationException exception = reject(document ->
                 phases(document).add(phase(document).deepCopy()));

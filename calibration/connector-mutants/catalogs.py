@@ -15,7 +15,7 @@ from subject_catalog import (artifact_reference, check_released_subject,  # noqa
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--harness-root", type=Path, default=Path.cwd(), help="FU-7-capable checkout")
+    parser.add_argument("--harness-root", type=Path, default=Path.cwd(), help="Checkout with canonical EndTxn fault scenarios")
     parser.add_argument("--artifact-root", type=Path, help="Root containing harness and generated artifacts")
     parser.add_argument("--output", type=Path, required=True, help="New directory; existing evidence is never overwritten")
     parser.add_argument("--flink-image", choices=("docker.io/library/flink:2.2.0",), help="Full image spelling in new catalogs only")
@@ -36,7 +36,7 @@ def main():
         scenario = harness / "scenarios" / (name + ".yaml")
         expected = harness / "scenarios" / (name + ".expected.yaml")
         if not scenario.is_file() or not expected.is_file():
-            raise SystemExit("Canonical EndTxn scenarios absent: use a FU-7-capable harness checkout.")
+            raise SystemExit("Canonical EndTxn scenarios absent: use a checkout containing commit-request-lost and commit-response-lost.")
         text = scenario.read_text()
         anchor = "        transaction_id_naming_strategy: INCREMENTING\n"
         if text.count(anchor) != 1 or "transaction_timeout:" in text:

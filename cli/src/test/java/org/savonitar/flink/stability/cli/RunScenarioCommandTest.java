@@ -545,6 +545,35 @@ class RunScenarioCommandTest {
     }
 
     @Test
+    void rendersCheckpointWindowFailuresAndEveryBrokerPartitionWithoutDiscardingRawObservations() throws Exception {
+        var overview = JSON.readTree("{\"history\":[{\"id\":2,\"status\":\"IN_PROGRESS\"}]}");
+        var snapshots = List.of(
+                new org.savonitar.flink.stability.runtime.api.KafkaProducerSnapshot("output", 0, 30,
+                        List.of(new org.savonitar.flink.stability.runtime.api.KafkaProducerSnapshot.Producer(1, 2, 29, 10L)), List.of()),
+                new org.savonitar.flink.stability.runtime.api.KafkaProducerSnapshot("output", 1, 40, List.of(),
+                        List.of(new org.savonitar.flink.stability.runtime.api.KafkaProducerSnapshot.Transaction(
+                                "reuse-0-0", "Ongoing", 1, 2, 7200000, 100L))));
+        var window = new org.savonitar.flink.stability.core.execution.CheckpointKillWindow(
+                2, overview, overview, null, "HTTP 500: NullArgumentException: input array", snapshots, List.of());
+        var kill = new PhaseExecutionEvidence.TaskManagerKill("$/phases/0/steps/1", List.of(), "taskmanager-1",
+                new FlinkJobObservation.Attempt(Optional.empty(), Optional.of("unavailable")),
+                java.util.OptionalLong.of(100), java.util.OptionalLong.of(110), Optional.empty(), Optional.empty(), Optional.of(window));
+        JsonNode rendered = renderIncompletePhases(new PhaseExecutionEvidence(List.of(), List.of(kill), List.of()))
+                .at("/taskManagerKills/0/checkpointWindow");
+        assertEquals(2, rendered.path("checkpointId").longValue());
+        assertFalse(rendered.path("restWindowConfirmed").booleanValue());
+        assertEquals(window.observationFailure(), rendered.path("observationFailure").textValue());
+        assertEquals(overview, rendered.path("armed"));
+        assertEquals(overview, rendered.path("beforeKill"));
+        assertTrue(rendered.path("afterKill").isNull());
+        assertEquals(2, rendered.path("brokerBeforeKill").size());
+        assertEquals(10, rendered.at("/brokerBeforeKill/0/producers/0/transactionStartOffset").longValue());
+        assertEquals(1, rendered.at("/brokerBeforeKill/1/partition").intValue());
+        assertEquals(7200000, rendered.at("/brokerBeforeKill/1/transactions/0/timeoutMs").longValue());
+        assertTrue(rendered.path("brokerAfterKill").isEmpty());
+    }
+
+    @Test
     void rendersPeerAttributionWithoutReplacingTheReportingTaskManagerIdentity() throws Exception {
         String type = "org.apache.flink.runtime.io.network.netty.exception.RemoteTransportException";
         String target = "flink-stability-taskmanager-2-1-6fc0d9a9-9fda-4d54-8c99-352bb2f1318b";

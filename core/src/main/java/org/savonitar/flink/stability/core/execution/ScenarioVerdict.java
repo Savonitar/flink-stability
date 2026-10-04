@@ -48,6 +48,10 @@ public record ScenarioVerdict(Status status, String reason, String message, bool
         }
         boolean attemptPassed = attempt.status() == V1ScenarioExecutionResult.Status.PASS;
         if (expected.outcome() == ExecutableScenarioPlan.ExpectedOutcome.Outcome.PASS) {
+            if (attemptPassed) {
+                ScenarioVerdict window = unconfirmedWindow(attempt);
+                if (window != null) return window;
+            }
             return attemptPassed
                     ? new ScenarioVerdict(Status.PASS, attempt.reason(), attempt.message(), true)
                     : new ScenarioVerdict(
@@ -65,8 +69,24 @@ public record ScenarioVerdict(Status status, String reason, String message, bool
                 false);
     }
 
+    /** Window evidence may prevent a match, never hide an unexpected failure (R8.7a). */
+    private static ScenarioVerdict unconfirmedWindow(V1ScenarioExecutionResult attempt) {
+        var windows = attempt.phaseEvidence().stream().flatMap(phase -> phase.taskManagerKills().stream())
+                .flatMap(kill -> kill.checkpointWindow().stream()).toList();
+        if (windows.stream().anyMatch(window -> window.observationFailure() != null)) {
+            return unconfirmed(ExecutablePhaseExecutor.CHECKPOINT_OBSERVATION_INFRASTRUCTURE,
+                    "Checkpoint-window observation failed; see retained REST and broker evidence");
+        }
+        return windows.stream().anyMatch(window -> !window.confirmed())
+                ? unconfirmed(ExecutablePhaseExecutor.CHECKPOINT_WINDOW_MISSED,
+                        "The selected checkpoint or sink acknowledgement was not confirmed across the kill")
+                : null;
+    }
+
     /** Keep the observed data failure, but do not bless an invalid negative control. */
     private static ScenarioVerdict matchingFailure(V1ScenarioExecutionResult attempt) {
+        ScenarioVerdict window = unconfirmedWindow(attempt);
+        if (window != null) return window;
         if (attempt.phaseEvidence().isEmpty()
                 || attempt.phaseEvidence().orElseThrow().steps().stream().anyMatch(step ->
                         step.status() == PhaseExecutionEvidence.StepStatus.FAILED)

@@ -814,7 +814,7 @@ public final class ExecutableScenarioPlan {
         }
     }
 
-    public sealed interface Step permits AwaitJobState, AwaitCheckpoints, Wait,
+    public sealed interface Step permits AwaitJobState, AwaitCheckpoints, AwaitCheckpointInProgress, Wait,
             KillTaskManager, RestartTaskManager, BrokerOperation, BrokerFault, PacketFault, SavepointRestore, Loop, ProtocolFault, LeaderFault {}
 
     public record SavepointRestore(int parallelism, TransactionIdNamingStrategy strategy, Duration timeout) implements Step {
@@ -867,6 +867,14 @@ public final class ExecutableScenarioPlan {
             if (completedCount < 1) {
                 throw new IllegalArgumentException("completedCount must be positive");
             }
+            timeout = requirePositive(timeout, "timeout");
+            Objects.requireNonNull(onTimeout, "onTimeout");
+        }
+    }
+
+    public record AwaitCheckpointInProgress(String jobAlias, Duration timeout, TimeoutOutcome onTimeout) implements Step {
+        public AwaitCheckpointInProgress {
+            jobAlias = requireNonBlank(jobAlias, "jobAlias");
             timeout = requirePositive(timeout, "timeout");
             Objects.requireNonNull(onTimeout, "onTimeout");
         }

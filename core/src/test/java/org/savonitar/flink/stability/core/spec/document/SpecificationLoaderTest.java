@@ -26,6 +26,27 @@ class SpecificationLoaderTest {
     Path temporaryDirectory;
 
     @Test
+    void checkpointInProgressConditionRequiresJobAndRejectsUnrelatedOptions() {
+        Path source = resource("minimal.yaml");
+        ObjectNode document = loader.loadScenario(source).document();
+        ObjectNode await = document.putArray("phases").addObject().put("name", "window")
+                .putArray("steps").addObject().putObject("await");
+        await.put("timeout", "2s").put("on_timeout", "inconclusive");
+        ObjectNode condition = await.putObject("condition").put("type", "checkpoint-in-progress").put("job", "eos-job");
+        loader.validateScenarioDocument(source, document);
+        loader.validateResolvedScenario(source, document);
+        for (String extra : List.of("count", "state", "unknown")) {
+            ObjectNode invalid = document.deepCopy();
+            ((ObjectNode) invalid.at("/phases/0/steps/0/await/condition")).put(extra, 1);
+            assertFailsAt(Stage.DOCUMENT, () -> loader.validateScenarioDocument(source, invalid));
+            assertFailsAt(Stage.DOCUMENT, () -> loader.validateResolvedScenario(source, invalid));
+        }
+        condition.remove("job");
+        assertFailsAt(Stage.DOCUMENT, () -> loader.validateScenarioDocument(source, document));
+        assertFailsAt(Stage.DOCUMENT, () -> loader.validateResolvedScenario(source, document));
+    }
+
+    @Test
     void connectorPinsRequireLowercaseSha256AfterParameterResolution() {
         Path source = resource("minimal.yaml");
         for (var pin : List.of(JsonNodeFactory.instance.textNode("a".repeat(64)),
