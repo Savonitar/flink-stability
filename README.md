@@ -11,9 +11,12 @@ The current prototype supports bounded Flink 2.2 jobs using Kafka 4.0 and Kafka
 connector 5.0.0-2.2, including distributed TaskManager recovery, ZooKeeper-backed
 JobManager HA, and synthetic delegation-token acquisition and distribution faults.
 Unsupported topologies and scenario features fail before Docker starts.
-Experimental Flink 2.4 builds require explicit image/JAR pins and a local connector
-closure; see [runtime build testing](docs/FLINK-RUNTIME-TESTING.md) for the compatibility
-and build-evidence requirements.
+Experimental Flink 2.4 builds require explicit image/JAR pins and a local or
+image-supplied connector; see [runtime build testing](docs/FLINK-RUNTIME-TESTING.md) for the compatibility
+and build-evidence requirements. Explicitly declared custom Flink lines, pinned
+broker images, image-supplied connectors and rebuilt workloads use the
+[custom runtime subject contract](docs/CUSTOM-RUNTIME-SUBJECTS.md); acceptance of
+those declarations does not claim live support for an untested build.
 
 ## Execution boundary
 
@@ -24,7 +27,7 @@ v1 YAML
   -> structural and semantic validation
   -> immutable artifact/dependency preparation
   -> Kafka topic creation and reconciled input preload
-  -> connector installation and Flink job execution
+  -> connector verification and Flink job execution
   -> natural FINISHED
   -> irreversible TaskManager-then-JobManager process fence
   -> fixed read_uncommitted Kafka high-watermark boundary
@@ -36,7 +39,8 @@ Important properties of this boundary:
 
 - scenario and expected-result documents are selected by `meta.name` from a complete catalog;
 - connector Maven closures and local artifacts are resolved, hashed, and privately staged;
-- the connector classpath is copied and verified before each Flink process starts;
+- staged connector classpaths are copied and verified before each Flink process starts;
+  image-supplied subjects are verified in place;
 - each created Flink container's actual Docker image ID is checked before process start;
   an optional `setup.flink.image_id` pins the intended local build, and every initial or
   replacement process must use the same image throughout the attempt;
@@ -48,8 +52,9 @@ Important properties of this boundary:
 - the bundled workload JAR is thin and declares `Flink-Stability-Workload-Protocol: v1`;
 - generated input is acknowledged and reconciled before its exclusive stopping offsets are used;
 - optional Kafka-cluster `transaction_version: 1` or `2` selects and verifies the
-  finalized feature level before proxy/input/Flink startup; a rejected or unconfirmed
-  safe transition stops the attempt and retains its error, without an unsafe fallback;
+  finalized feature level before proxy/input/Flink startup; `broker-default` observes
+  that level without changing it. Failed selection or observation prevents PASS and
+  retains its error;
 - terminal Kafka validation never runs unless the Flink process fence succeeds;
 - timeouts, partial evidence, cleanup failures, and validation failures have stable reason codes;
 - operational logs use stderr and the command result is emitted as one JSON document on stdout.
@@ -60,8 +65,8 @@ evidence gates and observed results. These capabilities retain the same exact-ID
 oracle. A passing data check does not dismiss component errors or establish that
 every recovery or token path was exercised.
 
-Kafka transaction feature selection must be confirmed by the broker before the
-workload starts. A declared version alone does not prove that the broker accepted
+A requested Kafka transaction feature selection or `broker-default` observation
+must be confirmed by the broker before the workload starts. A declared version alone does not prove that the broker accepted
 the transition or that a transaction behaved correctly.
 
 The Flink REST client retains non-success HTTP response status and full error bodies
@@ -210,8 +215,10 @@ does not establish coverage of a PR's changed behavior.
 The runner supports:
 
 - one plain scenario, one run, and no health retry;
-- one Apache Kafka 4.0 broker with the input and sink topics;
-- Flink 2.2 or explicitly pinned experimental 2.4, with one JobManager or a
+- one Kafka cluster with one or three brokers and the input/sink topics, using
+  Apache Kafka 4.0 or a pinned custom image with an explicit launch contract;
+- Flink 2.2, explicitly pinned experimental 2.4, or a declared and pinned custom
+  runtime subject, with one JobManager or a
   ZooKeeper-backed HA pair, and 1–16 TaskManagers;
 - one auto-started protocol-v1 job with positive parallelism up to the provisioned
   capacity (two slots per TaskManager), and an `EXACTLY_ONCE` or `AT_LEAST_ONCE` Kafka sink;

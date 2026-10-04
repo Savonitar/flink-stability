@@ -135,6 +135,28 @@ class ChaosCommandTest(fixtures.GateCommandTest):
     def test_full_image_name_changes_copies_only(self):
         invocation,output=self.command(extra=('--flink-image','docker.io/library/flink:2.2.0'))
         self.assertEqual(0,invocation.returncode,invocation.stderr)
+        manifest = json.loads((output / 'manifest.json').read_text())
+        self.assertEqual('auto', manifest['baseline']['dependencyMode'])
+        self.assertEqual(pr_gate.RELEASED_SHA256, manifest['baseline']['connectorSha256'])
+        self.assertFalse(manifest['plan']['strictArmInputs'])
         for side in ('baseline','candidate'):
             self.assertIn('image: docker.io/library/flink:2.2.0',(output/(side+'-catalog/bounded-eos.yaml')).read_text())
         self.assertIn('image: flink:2.2.0',(self.root/'scenarios/bounded-eos.yaml').read_text())
+
+    def test_legacy_full_image_dry_run_keeps_the_automatic_release_baseline(self):
+        invocation, output = self.command(extra=('--flink-image', 'docker.io/library/flink:2.2.0', '--dry-run'))
+        self.assertEqual(0, invocation.returncode, invocation.stderr)
+        plan = json.loads(invocation.stdout.splitlines()[0].removeprefix('Plan: '))
+        self.assertEqual('released 5.0.0-2.2', plan['baseline'])
+        self.assertFalse(plan['strictArmInputs'])
+        self.assertFalse(output.exists())
+        self.assertFalse(self.calls.exists())
+
+    def test_legacy_full_image_still_rejects_a_changed_canonical_image(self):
+        scenario = self.root / 'scenarios/bounded-eos.yaml'
+        scenario.write_text(scenario.read_text().replace('image: flink:2.2.0', 'image: private/flink:custom'))
+        invocation, output = self.command(extra=('--flink-image', 'docker.io/library/flink:2.2.0'))
+        self.assertNotEqual(0, invocation.returncode)
+        self.assertIn('Expected one canonical Flink 2.2 image', invocation.stderr)
+        self.assertFalse(output.exists())
+        self.assertFalse(self.calls.exists())
