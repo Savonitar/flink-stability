@@ -18,9 +18,16 @@ import org.apache.kafka.clients.producer.RecordMetadata;
 import org.apache.kafka.common.TopicPartition;
 import org.apache.kafka.common.config.ConfigResource;
 import org.apache.kafka.common.config.TopicConfig;
+import org.apache.kafka.common.errors.RetriableException;
+import org.apache.kafka.common.errors.UnknownTopicOrPartitionException;
 import org.apache.kafka.common.serialization.ByteArrayDeserializer;
 import org.apache.kafka.common.serialization.ByteArraySerializer;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
+import java.io.EOFException;
+import java.net.SocketException;
+import java.net.SocketTimeoutException;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.util.ArrayList;
@@ -31,16 +38,21 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.Properties;
 import java.util.TreeMap;
+import java.util.concurrent.Callable;
+import java.util.concurrent.ExecutionException;
 import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
 
 /** Kafka 4.0 client implementation for explicit topic creation and bounded input preparation. */
 final class KafkaClientInputOperations implements KafkaInputOperations {
+    private static final Logger LOG = LoggerFactory.getLogger(KafkaClientInputOperations.class);
 
     private final String bootstrapServers;
     private final Admin admin;
     private final ProducerFactory producerFactory;
     private final ConsumerFactory consumerFactory;
+    private final KafkaBrokerTopicReadiness.Observer topicObserver;
+    private final RetryPause retryPause;
 
     KafkaClientInputOperations(String bootstrapServers, Duration timeout) {
         this(
@@ -70,11 +82,21 @@ final class KafkaClientInputOperations implements KafkaInputOperations {
             Admin admin,
             ProducerFactory producerFactory,
             ConsumerFactory consumerFactory) {
+        this(bootstrapServers, timeout, admin, producerFactory, consumerFactory,
+                KafkaBrokerTopicReadiness::observe, Thread::sleep);
+    }
+
+    KafkaClientInputOperations(
+            String bootstrapServers, Duration timeout, Admin admin,
+            ProducerFactory producerFactory, ConsumerFactory consumerFactory,
+            KafkaBrokerTopicReadiness.Observer topicObserver, RetryPause retryPause) {
         this.bootstrapServers = Objects.requireNonNull(bootstrapServers, "bootstrapServers");
         Objects.requireNonNull(timeout, "timeout");
         this.admin = Objects.requireNonNull(admin, "admin");
         this.producerFactory = Objects.requireNonNull(producerFactory, "producerFactory");
         this.consumerFactory = Objects.requireNonNull(consumerFactory, "consumerFactory");
+        this.topicObserver = Objects.requireNonNull(topicObserver, "topicObserver");
+        this.retryPause = Objects.requireNonNull(retryPause, "retryPause");
     }
 
     @Override
@@ -86,23 +108,47 @@ final class KafkaClientInputOperations implements KafkaInputOperations {
                                 topic.name(), topic.partitions(), topic.replicationFactor())
                         .configs(topicConfiguration(topic)))
                 .toList();
-        admin.createTopics(requested)
-                .all()
-                .get(deadline.requireRemaining("creating Kafka topics").toNanos(),
-                        TimeUnit.NANOSECONDS);
+        List<String> topicNames = topics.stream().map(TopicDefinition::name).toList();
+        try (var calls = new KafkaInputCallBoundary("kafka-input-topic-readiness")) {
+            // Creation is a single mutation. Only observations are retried after it succeeds.
+            invoke("creating Kafka topics", deadline, calls, () -> admin.createTopics(requested)
+                    .all().get(deadline.requireRemaining("creating Kafka topics").toNanos(),
+                            TimeUnit.NANOSECONDS));
+            for (String endpoint : bootstrapServers.split(",")) {
+                String broker = endpoint.trim();
+                observeWithRetry("observing created Kafka topics " + topicNames + " at broker " + broker,
+                        deadline, calls, () -> {
+                            topicObserver.observe(broker, topics, deadline);
+                            return null;
+                        });
+            }
+            observeWithRetry("describing created Kafka topics", deadline, calls, () -> {
+                verifyTopics(topics, deadline);
+                return null;
+            });
+            observeWithRetry("describing Kafka topic configuration", deadline, calls, () -> {
+                verifyTopicConfiguration(topics, deadline);
+                return null;
+            });
+        }
+    }
 
+    private void verifyTopics(List<TopicDefinition> topics, KafkaInputPreparationDeadline deadline)
+            throws Exception {
         Map<String, TopicDescription> actual = admin.describeTopics(
                         topics.stream().map(TopicDefinition::name).toList())
                 .allTopicNames()
                 .get(deadline.requireRemaining("describing created Kafka topics").toNanos(),
                         TimeUnit.NANOSECONDS);
         if (actual.size() != topics.size()) {
-            throw new IllegalStateException("Kafka did not create every declared topic");
+            throw new UnknownTopicOrPartitionException("Kafka has not observed every declared topic");
         }
         for (TopicDefinition expected : topics) {
             TopicDescription description = actual.get(expected.name());
-            if (description == null
-                    || description.isInternal()
+            if (description == null) {
+                throw new UnknownTopicOrPartitionException("Kafka has not observed topic " + expected.name());
+            }
+            if (description.isInternal()
                     || description.partitions().size() != expected.partitions()
                     || description.partitions().stream().anyMatch(
                             partition -> partition.replicas().size()
@@ -111,7 +157,10 @@ final class KafkaClientInputOperations implements KafkaInputOperations {
                         "Kafka topic does not match its declaration: " + expected.name());
             }
         }
+    }
 
+    private void verifyTopicConfiguration(List<TopicDefinition> topics,
+            KafkaInputPreparationDeadline deadline) throws Exception {
         List<ConfigResource> resources = topics.stream()
                 .map(topic -> new ConfigResource(
                         ConfigResource.Type.TOPIC, topic.name()))
@@ -135,6 +184,85 @@ final class KafkaClientInputOperations implements KafkaInputOperations {
                                 + expected.name());
             }
         }
+    }
+
+    private <T> T observeWithRetry(String operation, KafkaInputPreparationDeadline deadline,
+            KafkaInputCallBoundary calls, Callable<T> observation) throws Exception {
+        Throwable lastTransient = null;
+        int attempts = 0;
+        while (true) {
+            try {
+                attempts++;
+                T result = calls.call(operation, deadline, observation);
+                if (lastTransient != null) {
+                    LOG.info("Kafka input observation succeeded while {} after {} attempts", operation, attempts);
+                }
+                return result;
+            } catch (InterruptedException failure) {
+                throw interrupted(operation, failure);
+            } catch (Exception failure) {
+                Throwable cause = underlying(failure);
+                boolean deadlineFailure = cause instanceof KafkaInputPreparationDeadline
+                        .KafkaInputPreparationDeadlineExceededException
+                        || (cause instanceof java.util.concurrent.TimeoutException
+                                && deadline.remaining().isZero());
+                if (lastTransient != null && deadlineFailure) {
+                    var exhausted = deadline.exceeded(operation, lastTransient);
+                    exhausted.addSuppressed(failure);
+                    throw exhausted;
+                }
+                if (!isTransientObservationFailure(cause)) throw contextual(operation, cause);
+                if (lastTransient == null) {
+                    LOG.info("Kafka input observation temporarily unavailable while {}; retrying within "
+                                    + "the preparation deadline: {}: {}",
+                            operation, cause.getClass().getSimpleName(), cause.getMessage());
+                }
+                lastTransient = cause;
+                Duration remaining = deadline.remaining();
+                if (remaining.isZero()) throw deadline.exceeded(operation, cause);
+                try {
+                    retryPause.pause(remaining.compareTo(Duration.ofMillis(50)) < 0
+                            ? remaining : Duration.ofMillis(50));
+                } catch (InterruptedException interrupted) {
+                    throw interrupted(operation, interrupted);
+                }
+                if (deadline.remaining().isZero()) throw deadline.exceeded(operation, cause);
+            }
+        }
+    }
+
+    private static <T> T invoke(String operation, KafkaInputPreparationDeadline deadline,
+            KafkaInputCallBoundary calls, Callable<T> invocation) throws Exception {
+        try {
+            return calls.call(operation, deadline, invocation);
+        } catch (InterruptedException failure) {
+            throw interrupted(operation, failure);
+        } catch (Exception failure) {
+            throw contextual(operation, underlying(failure));
+        }
+    }
+
+    private static Throwable underlying(Throwable failure) {
+        while (failure instanceof ExecutionException && failure.getCause() != null) {
+            failure = failure.getCause();
+        }
+        return failure;
+    }
+
+    private static boolean isTransientObservationFailure(Throwable failure) {
+        return failure instanceof RetriableException
+                || failure instanceof SocketTimeoutException || failure instanceof SocketException
+                || failure instanceof EOFException;
+    }
+
+    private static IllegalStateException contextual(String operation, Throwable failure) {
+        return new IllegalStateException("Kafka input preparation failed while " + operation, failure);
+    }
+
+    private static InterruptedException interrupted(String operation, InterruptedException failure) {
+        InterruptedException contextual = new InterruptedException("Interrupted while " + operation);
+        contextual.initCause(failure);
+        return contextual;
     }
 
     @Override
@@ -229,8 +357,8 @@ final class KafkaClientInputOperations implements KafkaInputOperations {
             ends.put(topicPartition, OffsetSpec.latest());
         }
         // Freeze the bounded source cut before checking its origin.
-        Map<TopicPartition, Long> endValues = readOffsetValues(ends, deadline);
-        Map<TopicPartition, Long> beginningValues = readOffsetValues(beginnings, deadline);
+        Map<TopicPartition, Long> endValues = readOffsetValues(ends, "latest", deadline);
+        Map<TopicPartition, Long> beginningValues = readOffsetValues(beginnings, "earliest", deadline);
 
         Map<Integer, Long> beginningOffsets = new TreeMap<>();
         Map<Integer, Long> exclusiveEndOffsets = new TreeMap<>();
@@ -400,15 +528,21 @@ final class KafkaClientInputOperations implements KafkaInputOperations {
 
     private Map<TopicPartition, Long> readOffsetValues(
             Map<TopicPartition, OffsetSpec> requested,
+            String bound,
             KafkaInputPreparationDeadline deadline) throws Exception {
-        Map<TopicPartition, org.apache.kafka.clients.admin.ListOffsetsResult.ListOffsetsResultInfo>
-                values = admin.listOffsets(requested)
-                        .all()
-                        .get(deadline.requireRemaining("capturing Kafka source offsets").toNanos(),
-                                TimeUnit.NANOSECONDS);
-        Map<TopicPartition, Long> offsets = new LinkedHashMap<>();
-        values.forEach((partition, result) -> offsets.put(partition, result.offset()));
-        return offsets;
+        String operation = "capturing Kafka source " + bound + " offsets";
+        try (var calls = new KafkaInputCallBoundary("kafka-input-offsets")) {
+            return observeWithRetry(operation, deadline, calls, () -> {
+                Map<TopicPartition, org.apache.kafka.clients.admin.ListOffsetsResult.ListOffsetsResultInfo>
+                        values = admin.listOffsets(requested)
+                                .all()
+                                .get(deadline.requireRemaining(operation).toNanos(),
+                                        TimeUnit.NANOSECONDS);
+                Map<TopicPartition, Long> offsets = new LinkedHashMap<>();
+                values.forEach((partition, result) -> offsets.put(partition, result.offset()));
+                return offsets;
+            });
+        }
     }
 
     private static Map<Integer, Long> immutableCopy(Map<Integer, Long> offsets) {
@@ -421,6 +555,11 @@ final class KafkaClientInputOperations implements KafkaInputOperations {
 
     private record PendingRecord(
             long id, int partition, Future<RecordMetadata> acknowledgement) {}
+
+    @FunctionalInterface
+    interface RetryPause {
+        void pause(Duration duration) throws InterruptedException;
+    }
 
     private static InputProducer createProducer(Properties properties) {
         KafkaProducer<byte[], byte[]> producer = new KafkaProducer<>(properties);
