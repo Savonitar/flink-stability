@@ -550,6 +550,9 @@ expected validation code.
 | Case | Input | Required result |
 | --- | --- | --- |
 | SV-224 | Docker start reuses the Kafka starter script after a broker kill. | Allocate distinct explicit host-port bindings before provisioning; the real Testcontainers script retains the same advertised endpoint. Reject any observed changed mapping; preserve container/log identity and single-broker behavior. |
+| SV-224a | Docker omits the runtime port map while the owned broker is running and paused. | Accept only after the same fault driver verified the live mapping before pause and the inspected configured fixed binding still matches. Retain the paused snapshot; require the live mapping again after resume. |
+| SV-224b | A paused broker's runtime mapping is omitted without a previously verified live mapping or matching unchanged configured binding; or its runtime binding explicitly conflicts. | Leave the effect unconfirmed; report expected and observed binding details without treating an absent mapping as proof of reassignment. |
+| SV-224c | An unpaused broker's runtime mapping is absent or changed, including after resume; or container/image/network identity changes while paused. | Reject confirmation and retain existing identity guards. The paused-state exception cannot excuse missing endpoint or ownership evidence in other states. |
 
 ### Runtime broker targets
 
