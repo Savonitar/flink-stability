@@ -62,6 +62,89 @@ class ExecutablePhaseExecutorTest {
     Path temporaryDirectory;
 
     @Test
+    void checkpointPollArmsTheNextKillAndObservesAllSinkPartitions() throws Exception {
+        var plan = plan(document -> {
+            ((ObjectNode) document.at("/setup/kafka/clusters/main/topics/1")).put("partitions", 3);
+            var steps = replaceSteps(document);
+            addAwaitInProgress(steps, "inconclusive");
+            steps.addObject().putObject("kill").putObject("target")
+                    .put("kind", "named").put("role", "taskmanager").put("name", "taskmanager-1");
+            steps.addObject().putObject("restart").put("component", "taskmanager");
+        });
+        var events = new ArrayList<String>();
+        var flink = new FakeFlink(events);
+        var stats = CheckpointKillWindowTest.overview();
+        flink.checkpointOverviews.add(new ObjectMapper().createObjectNode());
+        flink.checkpointOverviews.add(stats);
+        flink.checkpointOverviews.add(stats);
+        flink.checkpointOverviews.add(stats);
+        var runtime = new FakeTaskManagers(events);
+        var clock = new java.util.concurrent.atomic.AtomicLong();
+        var executor = new ExecutablePhaseExecutor(flink, runtime, ExecutablePhaseExecutor.NetworkFaults.NONE,
+                duration -> clock.addAndGet(duration.toNanos()), clock::get);
+        var evidence = executor.execute(plan, JOB);
+        assertEquals(4, flink.overviewCalls);
+        assertEquals(PhaseExecutionEvidence.StepKind.AWAIT_CHECKPOINT_IN_PROGRESS, evidence.steps().getFirst().kind());
+        var window = evidence.taskManagerKills().getFirst().checkpointWindow().orElseThrow();
+        assertTrue(window.confirmed());
+        assertEquals(stats, window.armed());
+        assertEquals(List.of(0, 1, 2), window.brokerBeforeKill().stream().map(value -> value.partition()).toList());
+        assertEquals(List.of(0, 1, 2), window.brokerAfterKill().stream().map(value -> value.partition()).toList());
+        assertEquals(List.of("main/output/0", "main/output/1", "main/output/2",
+                "main/output/0", "main/output/1", "main/output/2"), runtime.producerRequests);
+    }
+
+    @Test
+    void absenceOfAnEligibleCheckpointUsesTheDeclaredTimeoutPolicy() {
+        for (String policy : List.of("fail", "inconclusive")) {
+            var plan = plan(document -> addAwaitInProgress(replaceSteps(document), policy));
+            var clock = new java.util.concurrent.atomic.AtomicLong();
+            var executor = new ExecutablePhaseExecutor(new FakeFlink(new ArrayList<>()),
+                    new FakeTaskManagers(new ArrayList<>()), ExecutablePhaseExecutor.NetworkFaults.NONE,
+                    duration -> clock.addAndGet(duration.toNanos()), clock::get);
+            var failure = assertThrows(PhaseExecutionException.class, () -> executor.execute(plan, JOB));
+            assertEquals("checkpoint-window.missed", failure.reason());
+            assertEquals(policy.toUpperCase(java.util.Locale.ROOT), failure.outcome().name());
+            assertEquals(PhaseExecutionEvidence.StepStatus.FAILED, failure.evidence().steps().getFirst().status());
+        }
+    }
+
+    @Test
+    void checkpointPollingErrorsAreInfrastructureAndRetainTheCause() {
+        for (IOException problem : List.of(new IOException("HTTP 500: NullArgumentException: input array"),
+                new FlinkRestTimeoutException("HTTP 500 retries exhausted"), new IOException("malformed JSON"))) {
+            var plan = plan(document -> addAwaitInProgress(replaceSteps(document), "fail"));
+            var flink = new FakeFlink(new ArrayList<>());
+            flink.overviewFailure = problem;
+            var failure = assertThrows(PhaseExecutionException.class, () -> executor(flink).execute(plan, JOB));
+            assertEquals(ExecutablePhaseExecutor.AWAIT_CHECKPOINT_IN_PROGRESS_INFRASTRUCTURE, failure.reason());
+            assertEquals(PhaseExecutionException.Outcome.INCONCLUSIVE, failure.outcome());
+            assertEquals(problem, failure.getCause());
+        }
+    }
+
+    @Test
+    void checkpointPollInterruptionRestoresInterruptFlag() {
+        var plan = plan(document -> addAwaitInProgress(replaceSteps(document), "fail"));
+        var executor = new ExecutablePhaseExecutor(new FakeFlink(new ArrayList<>()),
+                new FakeTaskManagers(new ArrayList<>()), ExecutablePhaseExecutor.NetworkFaults.NONE,
+                duration -> { throw new InterruptedException("stop"); });
+        try {
+            var failure = assertThrows(PhaseExecutionException.class, () -> executor.execute(plan, JOB));
+            assertEquals(ExecutablePhaseExecutor.AWAIT_CHECKPOINT_IN_PROGRESS_INFRASTRUCTURE, failure.reason());
+            assertTrue(Thread.currentThread().isInterrupted());
+        } finally {
+            Thread.interrupted();
+        }
+    }
+
+    private static void addAwaitInProgress(ArrayNode steps, String policy) {
+        var await = steps.addObject().putObject("await");
+        await.putObject("condition").put("type", "checkpoint-in-progress").put("job", "eos-job");
+        await.put("timeout", "200ms").put("on_timeout", policy);
+    }
+
+    @Test
     void executesAtomicStepsInDocumentOrderAndReturnsImmutableEvidence() throws Exception {
         ExecutableScenarioPlan plan = plan(document -> {
             ArrayNode steps = replaceSteps(document);
@@ -815,6 +898,14 @@ class ExecutablePhaseExecutorTest {
         private java.util.function.Function<LeaderFaultRequest, LeaderFaultEvidence> leaderEvidence;
         private Duration leaderBudget;
         private boolean packetUnconfirmed;
+        private final List<String> producerRequests = new ArrayList<>();
+        @Override
+        public org.savonitar.flink.stability.runtime.api.KafkaProducerSnapshot observeKafkaProducers(
+                String cluster, String topic, int partition, String prefix, Duration timeout) {
+            producerRequests.add(cluster + "/" + topic + "/" + partition);
+            assertTrue(timeout.compareTo(Duration.ZERO) > 0);
+            return new org.savonitar.flink.stability.runtime.api.KafkaProducerSnapshot(topic, partition, 100, List.of(), List.of());
+        }
         @Override public org.savonitar.flink.stability.runtime.api.PacketFaultControl.Evidence packetFault(
                 org.savonitar.flink.stability.runtime.api.PacketFaultControl.Request request) {
             events.add("packet-fault");
@@ -905,6 +996,15 @@ class ExecutablePhaseExecutorTest {
 
     private static final class FakeFlink implements FlinkScenarioControl {
         private final List<String> events;
+        private final java.util.Deque<com.fasterxml.jackson.databind.JsonNode> checkpointOverviews = new java.util.ArrayDeque<>();
+        private IOException overviewFailure;
+        private int overviewCalls;
+        @Override
+        public com.fasterxml.jackson.databind.JsonNode checkpointOverview(FlinkJobHandle job, Duration timeout) throws IOException {
+            overviewCalls++;
+            if (overviewFailure != null) throw overviewFailure;
+            return checkpointOverviews.isEmpty() ? new ObjectMapper().createObjectNode() : checkpointOverviews.removeFirst();
+        }
         private IOException awaitStateFailure;
         private IOException checkpointFailure;
         private IOException observeFailure;

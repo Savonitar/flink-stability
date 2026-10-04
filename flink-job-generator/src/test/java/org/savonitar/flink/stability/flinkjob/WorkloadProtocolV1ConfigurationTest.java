@@ -109,6 +109,21 @@ class WorkloadProtocolV1ConfigurationTest {
     }
 
     @Test
+    void usesOriginalMapUnlessAsyncSnapshotDelayIsExplicitlyPositive() {
+        for (int delay : new int[]{0, 8000}) {
+            StreamExecutionEnvironment env = StreamExecutionEnvironment.getExecutionEnvironment(
+                    Configuration.fromMap(baseExactlyOnceValues()));
+            FlinkKafkaEosJob.buildPipeline(env, WorkloadProtocolV1Configuration.from(env.getConfiguration()),
+                    FlinkKafkaEosJobArguments.from(new String[]{"--snapshotAsyncDelayMs", Integer.toString(delay)}));
+            StreamNode node = env.getStreamGraph().getStreamNodes().stream()
+                    .filter(value -> FlinkKafkaEosJob.THROTTLE_UID.equals(value.getTransformationUID())).findFirst().orElseThrow();
+            var factory = (org.apache.flink.streaming.api.operators.SimpleOperatorFactory<?>) node.getOperatorFactory();
+            assertEquals(delay == 0 ? org.apache.flink.streaming.api.operators.StreamMap.class : AsyncSnapshotDelay.class,
+                    factory.getOperator().getClass());
+        }
+    }
+
+    @Test
     void chainsTheProcessingDelayToTheSourceBeforeTheKeyedShuffle() {
         Configuration configuration = Configuration.fromMap(baseExactlyOnceValues());
         StreamExecutionEnvironment env =

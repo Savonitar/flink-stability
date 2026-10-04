@@ -89,12 +89,12 @@ final class PhasePlanCompiler {
         requireDuration(source, await.path("timeout"), path + "/timeout", issues);
         ObjectNode condition = (ObjectNode) await.get("condition");
         String type = condition.path("type").textValue();
-        if (!Set.of("job-state", "checkpoint-completed").contains(type)) {
+        if (!Set.of("job-state", "checkpoint-completed", "checkpoint-in-progress").contains(type)) {
             issues.add(issue(
                     source,
                     "runner.phase.await-condition-unsupported",
                     path + "/condition/type",
-                    "The first runner awaits only job-state and checkpoint-completed"));
+                    "The first runner awaits job-state, checkpoint-completed and checkpoint-in-progress"));
             return;
         }
         if (!jobAlias.equals(condition.path("job").textValue())) {
@@ -147,6 +147,9 @@ final class PhasePlanCompiler {
                             ExecutableScenarioPlan.JobState.RUNNING,
                             parseDuration(await.path("timeout").textValue()),
                             onTimeout));
+                } else if ("checkpoint-in-progress".equals(condition.path("type").textValue())) {
+                    steps.add(new ExecutableScenarioPlan.AwaitCheckpointInProgress(
+                            condition.path("job").textValue(), parseDuration(await.path("timeout").textValue()), onTimeout));
                 } else {
                     steps.add(new ExecutableScenarioPlan.AwaitCheckpoints(
                             condition.path("job").textValue(),

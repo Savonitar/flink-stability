@@ -33,6 +33,11 @@ public interface FlinkScenarioControl extends FlinkJobControl, AutoCloseable {
         throw new UnsupportedOperationException("Deadline-bound restored submission unavailable");
     }
 
+    /** Read-only raw checkpoint statistics; callers retain identity and timestamps, not only counts. */
+    default com.fasterxml.jackson.databind.JsonNode checkpointOverview(FlinkJobHandle job, Duration timeout) throws IOException {
+        throw new UnsupportedOperationException("Checkpoint overview unavailable");
+    }
+
     /** Every received HTTP error, including failures followed by a successful retry. */
     default List<RestError> restErrors() {
         return List.of();

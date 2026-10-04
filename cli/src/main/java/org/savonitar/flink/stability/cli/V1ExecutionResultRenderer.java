@@ -187,6 +187,17 @@ final class V1ExecutionResultRenderer {
             effect.kill().loopIterations().forEach(iteration -> iterations.add(
                     iteration.iteration() + "/" + iteration.totalIterations()));
             kill.put("target", effect.kill().target());
+            effect.kill().checkpointWindow().ifPresent(window -> {
+                ObjectNode node = kill.putObject("checkpointWindow");
+                node.put("checkpointId", window.checkpointId());
+                node.put("restWindowConfirmed", window.confirmed());
+                node.put("observationFailure", window.observationFailure());
+                node.set("armed", window.armed());
+                node.set("beforeKill", window.beforeKill());
+                node.set("afterKill", window.afterKill());
+                node.set("brokerBeforeKill", JSON.valueToTree(window.brokerBeforeKill()));
+                node.set("brokerAfterKill", JSON.valueToTree(window.brokerAfterKill()));
+            });
             putIdentity(kill, "identity", effect.kill().identity());
             kill.put("identityFailure", effect.kill().identityFailure().orElse(null));
             kill.put("outcome", effect.outcome().name().toLowerCase(Locale.ROOT)

@@ -11,15 +11,18 @@ final class FlinkKafkaEosJobArguments {
     private static final String PRODUCER_MAX_BLOCK_OPTION = "--producerMaxBlockMs";
 
     private static final String PRODUCER_REQUEST_TIMEOUT_OPTION = "--producerRequestTimeoutMs";
+    private static final String SNAPSHOT_ASYNC_DELAY_OPTION = "--snapshotAsyncDelayMs";
 
     private final int processingDelayMs;
     private final Integer producerMaxBlockMs;
     private final Integer producerRequestTimeoutMs;
+    private final int snapshotAsyncDelayMs;
 
-    private FlinkKafkaEosJobArguments(int processingDelayMs, Integer producerMaxBlockMs, Integer producerRequestTimeoutMs) {
+    private FlinkKafkaEosJobArguments(int processingDelayMs, Integer producerMaxBlockMs, Integer producerRequestTimeoutMs, int snapshotAsyncDelayMs) {
         this.processingDelayMs = processingDelayMs;
         this.producerMaxBlockMs = producerMaxBlockMs;
         this.producerRequestTimeoutMs = producerRequestTimeoutMs;
+        this.snapshotAsyncDelayMs = snapshotAsyncDelayMs;
     }
 
     static FlinkKafkaEosJobArguments from(String[] args) {
@@ -27,7 +30,7 @@ final class FlinkKafkaEosJobArguments {
         Map<String, Integer> values = new HashMap<>();
         for (int index = 0; index < args.length; index++) {
             String option = Objects.requireNonNull(args[index], "Program arguments must not be null");
-            if (!PROCESSING_DELAY_OPTION.equals(option) && !PRODUCER_MAX_BLOCK_OPTION.equals(option) && !PRODUCER_REQUEST_TIMEOUT_OPTION.equals(option)) {
+            if (!PROCESSING_DELAY_OPTION.equals(option) && !PRODUCER_MAX_BLOCK_OPTION.equals(option) && !PRODUCER_REQUEST_TIMEOUT_OPTION.equals(option) && !SNAPSHOT_ASYNC_DELAY_OPTION.equals(option)) {
                 throw new IllegalArgumentException("Unknown program argument: " + option);
             }
             if (values.containsKey(option)) {
@@ -42,7 +45,7 @@ final class FlinkKafkaEosJobArguments {
             }
             try {
                 int value = Integer.parseInt(raw);
-                if (!PROCESSING_DELAY_OPTION.equals(option) && value == 0) {
+                if (!PROCESSING_DELAY_OPTION.equals(option) && !SNAPSHOT_ASYNC_DELAY_OPTION.equals(option) && value == 0) {
                     throw new IllegalArgumentException(option + " must be positive");
                 }
                 values.put(option, value);
@@ -51,12 +54,15 @@ final class FlinkKafkaEosJobArguments {
             }
         }
         return new FlinkKafkaEosJobArguments(values.getOrDefault(PROCESSING_DELAY_OPTION, 0),
-                values.get(PRODUCER_MAX_BLOCK_OPTION), values.get(PRODUCER_REQUEST_TIMEOUT_OPTION));
+                values.get(PRODUCER_MAX_BLOCK_OPTION), values.get(PRODUCER_REQUEST_TIMEOUT_OPTION),
+                values.getOrDefault(SNAPSHOT_ASYNC_DELAY_OPTION, 0));
     }
 
     int processingDelayMs() {
         return processingDelayMs;
     }
+
+    int snapshotAsyncDelayMs() { return snapshotAsyncDelayMs; }
 
     Integer producerRequestTimeoutMs() { return producerRequestTimeoutMs; }
 
