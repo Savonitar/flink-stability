@@ -3,7 +3,7 @@ package org.savonitar.flink.stability.flinkjob;
 import org.apache.flink.api.connector.source.Boundedness;
 import org.apache.flink.configuration.Configuration;
 import org.apache.flink.connector.base.DeliveryGuarantee;
-import org.apache.flink.connector.kafka.sink.TransactionNamingStrategy;
+import org.savonitar.flink.stability.flinkjob.WorkloadProtocolV1Configuration.TransactionIdNamingStrategy;
 import org.apache.flink.runtime.jobgraph.JobVertex;
 import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
 import org.apache.flink.streaming.api.graph.StreamGraph;
@@ -24,6 +24,22 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class WorkloadProtocolV1ConfigurationTest {
+
+    @Test
+    void connectorDefaultIsAnExplicitExactlyOnceChoice() {
+        Map<String, String> values = baseExactlyOnceValues();
+        values.put(WorkloadProtocolV1Configuration.SINK_TRANSACTION_ID_NAMING_STRATEGY, "connector-default");
+        WorkloadProtocolV1Configuration workload = parse(values);
+        assertEquals(TransactionIdNamingStrategy.CONNECTOR_DEFAULT, workload.transactionNamingStrategy());
+        assertDoesNotThrow(() -> FlinkKafkaEosJob.createSink(workload));
+        for (String guarantee : new String[]{"NONE", "AT_LEAST_ONCE"}) {
+            values.put(WorkloadProtocolV1Configuration.SINK_DELIVERY_GUARANTEE, guarantee);
+            values.remove(WorkloadProtocolV1Configuration.SINK_TRANSACTIONAL_ID_PREFIX);
+            values.remove(WorkloadProtocolV1Configuration.SINK_TRANSACTION_TIMEOUT_MS);
+            assertTrue(assertThrows(IllegalArgumentException.class, () -> parse(values))
+                    .getMessage().contains("transaction-id-naming-strategy"));
+        }
+    }
 
     @Test
     void calibrationChangesOnlyTheRequestedProducerProperty() throws Exception {
@@ -51,7 +67,7 @@ class WorkloadProtocolV1ConfigurationTest {
         assertEquals("sink-topic", workload.sinkTopic());
         assertEquals(DeliveryGuarantee.EXACTLY_ONCE, workload.deliveryGuarantee());
         assertEquals("scenario-attempt-job", workload.transactionalIdPrefix());
-        assertEquals(TransactionNamingStrategy.INCREMENTING, workload.transactionNamingStrategy());
+        assertEquals(TransactionIdNamingStrategy.INCREMENTING, workload.transactionNamingStrategy());
         assertEquals(7_200_000, workload.transactionTimeoutMs());
         assertFalse(workload.stateTtl().enabled());
         assertEquals("no-watermarks", workload.watermarks().strategy());

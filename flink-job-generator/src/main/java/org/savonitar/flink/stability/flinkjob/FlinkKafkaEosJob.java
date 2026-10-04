@@ -121,7 +121,7 @@ public class FlinkKafkaEosJob {
 
         if (workload.deliveryGuarantee() == DeliveryGuarantee.EXACTLY_ONCE) {
             builder.setTransactionalIdPrefix(workload.transactionalIdPrefix());
-            builder.setTransactionNamingStrategy(workload.transactionNamingStrategy());
+            ConnectorNamingStrategy.configure(builder, workload.transactionNamingStrategy());
         }
         return builder.build();
     }
