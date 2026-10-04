@@ -5,7 +5,7 @@
 
     <parent>
         <groupId>org.savonitar.flink.stability</groupId>
-        <artifactId>flink-stability-inevitable</artifactId>
+        <artifactId>flink-stability</artifactId>
         <version>0.1.0-SNAPSHOT</version>
     </parent>
 

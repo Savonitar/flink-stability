@@ -29,8 +29,10 @@ They suit a change to the commit, recovery, or transactional-producer code, such
 do not cover multiple partitions, parallelism above 1, JobManager failover or broker
 failover. The build under test must run on Flink 2.2 with Kafka 4.0.
 
-The [connector-mutant calibration](../calibration/connector-mutants/README.md) shows that
-the EndTxn scenarios catch two wrong commit decisions. The
+The historical [connector-mutant calibration](../calibration/connector-mutants/README.md)
+showed that the EndTxn scenarios caught two wrong commit decisions on the
+2026-09-26 engine. The current common filter still requires the complete six-cell
+requalification described below. The
 [recovery-mutant calibration](../calibration/recovery-mutant/README.md) separately
 checks a source checkpoint-offset error across TaskManager recovery. A passing
 candidate shows only that the selected faults did not break the checked guarantees
@@ -234,11 +236,13 @@ sides), roughly **60–120 minutes** with warm images and artifacts. This is a
 planning estimate, not measured throughput or a timeout. Pulls, startup and
 recovery can increase it.
 
-`--profile chaos-full` is the explicit superset: explicit TV1/TV2 broker catalogs,
-all protocol catalogs (including Produce errors after append) and applicable TV
-pairs, and all four coordinator-commit catalogs. AddPartitionsToTxn is TV1 only:
-the TV2 sink normally does not send it. At two runs it plans 112 independent
-runs, roughly 168–336 minutes. The sole authoritative membership lists are in
+`--profile chaos-full` contains 130 scenarios: the quick profile plus explicit
+TV1/TV2 broker and protocol catalogs, POOLING and rolling faults, packet faults,
+parallelism-four and at-least-once variants, and savepoint/restore catalogs with
+their controls. AddPartitionsToTxn is TV1 only: the TV2 sink normally does not
+send it. With two runs per side, it plans **520 independent attempts**. The gate's
+generic 1.5–3 minute estimate gives 780–1560 minutes (13–26 hours); longer fault
+holds and lifecycle operations can exceed that estimate. The sole authoritative membership lists are in
 [`tools/chaos_profiles.py`](../tools/chaos_profiles.py); adding a filename does
 not silently expand either profile. Version copies change only scenario identity
 and the explicit transaction feature level; original catalogs remain untouched.
@@ -306,22 +310,27 @@ Require release PASS across `chaos-quick`, a verified mutant FAIL with positive
 missing IDs in a protocol/coordinator scenario, and a passing no-fault paired control.
 A failed command alone is not calibration. The recipe's `check.py` rejects missing
 cells, unconfirmed effects, unknown counts, wrong artifact/closure hashes and failed
-healthy controls. The prepared live matrix has **not been run**; unit checks establish
-the mutation and artifact identity, not profile sensitivity or release health.
+healthy controls. This profile's live qualification remains open; the recipe
+reports build and decision checks, without a qualified live matrix. Those checks
+establish mutation and artifact identity, not profile sensitivity or release health.
 
 ## Live qualification is still pending
 
-The replacement common filter has not yet requalified the historical
+The current common filter remains unqualified against the historical
 [connector-mutant six-cell matrix](../calibration/connector-mutants/README.md#revalidation-required-after-the-proxy-replacement).
-That complete matrix is mandatory before merging the filter replacement, even
-though canonical EndTxn YAML is unchanged. Require the original sensitive and
-harmless outcomes and complete interpretation evidence; the new mutant is not
-its replacement.
+The qualification gate requires all six cells on the current harness, even
+though canonical EndTxn YAML is unchanged: both controls and both harmless mutant
+cells must PASS, assume/request must FAIL with missing IDs, and rewrite/response
+must FAIL with duplicates. Every cell also needs complete interpretation evidence.
+The published 2026-09-26 results apply to their recorded engine; the new mutant
+does not substitute for this still-open qualification gate.
 
-Broker runtime targets, protocol and coordinator-commit catalogs, profiles and
-the new mutant currently have offline/fake/serialization validation only. No
-real-Kafka success is claimed. The new post-append Produce timeout scenarios are
-also pending live runs. `error-response` still acts before broker forwarding;
+The broker-fault, protocol and coordinator-commit profiles and the new mutant
+have offline/fake/serialization coverage, without a qualified live matrix reported
+here. The public single-broker smoke results in the
+[custom runtime guide](CUSTOM-RUNTIME-SUBJECTS.md#verification-scope) do not qualify
+these fault profiles. Post-append Produce timeout qualification is also open.
+`error-response` acts before broker forwarding;
 `error-after-append` is a separate response-path action. Keep all live results
 and classify anomalies before interpreting any profile as qualified.
 
@@ -363,11 +372,11 @@ are bound to the harness root before entering the isolated build directories.
 Project `.mvn` JVM/argument/extension overrides, symlinks, submodules and alternate
 object stores are refused for separate review. The mirror constrains Maven
 resolution, not arbitrary network code executed by a build plugin. Use only a
-checkout whose build is authorized; this tool is not an OS sandbox.
+trusted checkout; this tool is not an OS sandbox.
 
 The `brokers`, `protocol`, `pooling`, `rolling`, `packet`, and `at-least-once`
 profiles are explicit scenario lists in `tools/chaos_profiles.py`, including the
-applicable controls and parallel variants. `chaos-quick` remains the calibrated
+applicable controls and parallel variants. `chaos-quick` remains the explicit
 10-scenario list; `chaos-full` currently includes 130 scenarios. An automatic
 suggestion uses the following first-matching path-prefix table (under
 `flink-connector-kafka/src/`); the exact table and each matched path are retained in

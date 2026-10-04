@@ -4,7 +4,8 @@
   "indexDigest": "sha256:7f08c4aff13ff61a35d30e30c5c1ea8396eac6ab4ce19fd02d5a4b3b5d0d09a2",
   "platform": "linux/arm64",
   "platformManifestDigest": null,
-  "platformManifestStatus": "Unavailable from this Docker image store, including image inspect --platform linux/arm64; no registry query outside the authorized Docker commands was made.",
+  "platformManifestStatus": "unavailable",
+  "platformManifestReason": "Docker image inspect, including --platform linux/arm64, did not expose the platform manifest digest.",
   "configImageId": "sha256:3be5270ddd56ae26af7c6ea7ac66c393dbe1d8cb8bceb46ec0b1f4a55c1574ad",
   "toolCheck": {
     "date": "2026-10-03",
@@ -23,5 +24,9 @@
     "iptables": "1.8.11 (nf_tables)",
     "architecture": "aarch64"
   },
-  "netAdminProbe": "NOT RUN; first live packet stage must pass the isolated probe."
+  "netAdminProbe": {
+    "status": "not-run",
+    "reason": "The tool check did not exercise NET_ADMIN, netem, or iptables rules.",
+    "requiredBefore": "first-live-packet-stage"
+  }
 }

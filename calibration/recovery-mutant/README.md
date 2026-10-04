@@ -13,19 +13,19 @@ committed before the kill.
 
 ## Build without a broker
 
-Use an approved JDK 21, Python 3.9 or later, Maven, and `patch`. Supply an existing
+Use JDK 21, Python 3.9 or later, Maven, and `patch`. Supply an existing
 Maven cache and settings file inside this repository explicitly. Maven runs
 offline with those settings for both user and global scopes; the recipe does not
 select `~/.m2`. Cache/settings symlinks are rejected before following them. Maven
 RC loading is disabled, JVM user-home and temporary paths live under `target`,
 and only PATH plus explicit JDK settings are carried into subprocesses. The release
 source JAR, dependencies and dependency plugin 3.8.1
-must already be cached. For example, after setting these variables to approved
-paths:
+must already be cached. Set `JDK_21_HOME` to the JDK 21 directory and the Maven
+variables below to the existing cache and settings file:
 
 ```sh
 python3 calibration/recovery-mutant/build.py \
-  --java-home "$APPROVED_JDK_21" \
+  --java-home "$JDK_21_HOME" \
   --maven-repo "$REPOSITORY_LOCAL_MAVEN_CACHE" \
   --maven-settings "$REPOSITORY_LOCAL_MAVEN_SETTINGS"
 ```
@@ -82,7 +82,7 @@ For the canonical single partition, 3,000 records and one restore, the designate
 mutant cell must observe 2,999 distinct expected IDs, exactly one missing ID and
 zero duplicate, unexpected or malformed records. Its nonzero command exit and
 raw failure must be preserved. The other three cells must pass with exact output.
-Run the cells serially only after approving the Docker batch. Retain each catalog,
+Run the cells serially. Retain each catalog,
 manifest, build evidence, command exit, stdout JSON, stderr and all attempt logs
 before `mvn clean` removes runtime artifacts.
 

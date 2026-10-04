@@ -389,7 +389,7 @@ def transaction_history(evidence, log_root, prefix, reader):
 
 def taskmanager_markers(directory, patterns, reader):
     if directory is None:
-        reader.diagnostic('flink.logs-missing', 'No authorized TaskManager log directory; use --flink-log-dir')
+        reader.diagnostic('flink.logs-missing', 'No TaskManager log directory found; use --flink-log-dir')
         return []
     try:
         directory = guarded_path(directory, reader.roots)
@@ -550,7 +550,7 @@ def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('result', type=Path)
     parser.add_argument('kafka_log_output', type=Path)
-    parser.add_argument('--evidence-root', action='append', type=Path, default=[], help='Additional authorized retained-evidence root')
+    parser.add_argument('--evidence-root', action='append', type=Path, default=[], help='Additional retained-evidence root for path checks')
     parser.add_argument('--flink-log-dir', type=Path, help='Explicit retained TaskManager output directory')
     parser.add_argument('--marker', action='append', default=[], help='TaskManager Python regex; repeatable, replaces the upstream recovery default')
     parser.add_argument('--output-topic', help='Required when decoded transactional output topic is ambiguous')

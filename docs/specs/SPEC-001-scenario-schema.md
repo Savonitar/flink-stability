@@ -17,7 +17,7 @@ and validation deadlines. Broader v1 execution capabilities, runtime OCI-digest
 capture, the complete R8.2 replay report, and health/repetition/experiment verdict
 logic remain roadmap work.
 
-**Last updated:** 2026-08-26.
+**Last updated:** 2026-10-04.
 
 This document captures *what the scenario format must express* and why. The JSON
 Schema captures structural constraints; this requirements document remains the
@@ -34,7 +34,7 @@ later work can cite them.
   exact kill/stop/start operations; retryable cleanup; per-manager checkpoint
   storage; and connector copy, host/container checksum, manifest, and pre-start
   lifecycle verification. `run` wires those primitives for exactly one
-  compiler-approved bounded plain-scenario subset and emits its machine-readable
+  compiler-supported bounded plain-scenario subset and emits its machine-readable
   attempt result/evidence. Suites, experiments, repetitions, broader phase/input/
   validator capabilities, OCI-digest capture, complete replay-report assembly,
   and health/verdict processing remain roadmap work.
@@ -2607,21 +2607,23 @@ the shape the schema accepts and the scenario style reviewers should expect.
 
 The canonical scenario is a realistic, non-minimal example. It includes fields
 that teach important v1 behavior, but it does not include every optional field.
-It describes the broad v1 contract and intentionally exceeds some first-runner
-capabilities (for example multi-broker topology and RocksDB); §10.5 is the narrow
-first-vertical shape. Unsupported runner capabilities fail before provisioning,
+It describes the broad v1 contract and intentionally exceeds current runner
+capabilities (for example RocksDB); §10.5 is the narrow first-vertical shape.
+Unsupported runner capabilities fail before provisioning,
 not by narrowing this schema example.
 In particular, it omits `meta.tickets` because this example is not tied to a
 real upstream issue. A real bug-reproduction or regression guard should list its
 tracking issue there, for example `tickets: [FLINK-xxxxx]`; placeholder tickets
 are forbidden because they create false traceability.
 
-The canonical example below has three documents: the scenario, its
-expected-result sibling, and a suite.
+The example below has three documents: the scenario, its expected-result
+sibling, and a suite. Their paths are illustrative filenames, not files shipped
+with the repository. Use the executable catalogs under `scenarios/` for runs;
+these examples demonstrate the broader schema, including unimplemented features.
 
 ### 10.1 Scenario
 
-`scenarios/kafka/eos-statebackend-independence.yaml`
+Illustrative filename: `scenarios/kafka/eos-statebackend-independence.yaml`
 
 ```yaml
 format: v1
@@ -2785,7 +2787,7 @@ terminal_validations:
 
 ### 10.2 Expected result
 
-`scenarios/kafka/eos-statebackend-independence.expected.yaml`
+Illustrative filename: `scenarios/kafka/eos-statebackend-independence.expected.yaml`
 
 R1.3b and §11.3: this file holds the expected **outcome** only. The expected
 **data** — the actual record IDs — is the run-time input manifest, never a
@@ -2818,7 +2820,7 @@ silently from `default`.
 
 ### 10.3 Suite
 
-`suites/eos-nightly.yaml`
+Illustrative filename: `suites/eos-nightly.yaml`
 
 R6.13: membership lives here, and parameter binding at membership is how coverage
 is served without N-way experiments (§11.1).
@@ -3718,7 +3720,8 @@ subsequent named restart is still mandatory.
 New `pooling-*` catalogs cover TV1/TV2 controls, bounded EOS, lost commit requests
 and responses, selected coordinator failure, and both recovery APIs with delay,
 transient errors and response loss, with and without a broker down. They extend
-`chaos-full`; the calibrated `chaos-quick` list and all prior catalogs are unchanged.
+`chaos-full`; the `chaos-quick` list and all prior catalogs are unchanged.
+Profile calibration remains pending as described in [PR-TESTING](../PR-TESTING.md#live-qualification-is-still-pending).
 POOLING coordinator variants use exact-ID and selected-broker evidence without
 `require_commit`: reused transaction IDs cannot establish the existing
 INCREMENTING-specific commit window. No live calibration is claimed.
@@ -3769,7 +3772,8 @@ retains the watchdog and namespace ownership lock; it cannot become a PASS.
 
 The initial runtime slice has now been connected to the canonical packet schema
 below. Tool availability and an immutable index/config pin have been recorded;
-NET_ADMIN fault execution remains pending the separately approved first probe.
+NET_ADMIN fault execution requires a successful isolated probe before the first
+live packet stage; no such probe result is recorded in the pin file.
 The platform child-manifest limitation is explicit in the image record.
 Chaos-quick is unchanged.
 
@@ -3785,7 +3789,7 @@ Loss uses `loss_percent` (1–100); delay uses `delay_ms` (1–5000) and optiona
 `jitter_ms` (0–delay); blackhole accepts neither parameter. Holds are bounded to
 2m, with a strictly larger timeout no greater than 3m. The pinned public image and
 verified ARM64 config ID are in `docs/packet-image-pin.json`; the platform child
-manifest digest remains unavailable from the authorized Docker inspect interface.
+manifest digest was not available from Docker image inspect when the pin was recorded.
 A different host platform requires its own verified pin. Tool presence does not
 establish NET_ADMIN support: the first live stage must pass an isolated probe.
 

@@ -77,7 +77,7 @@ transaction attribution. Live collection must happen before the attempt removes
 its owned Kafka container and must retain independent coverage and identity evidence.
 
 The adapter also has an internal, opt-in archive capability for an attempt's retained
-Kafka owner. It requires an observed owner identity, an explicit approved log root
+Kafka owner. It requires an observed owner identity, an explicitly supplied log root
 and the caller's shared deadline; collection is opt-in through `run --kafka-log-output DIR`.
 The runner binds declared source/sink partitions to its owned broker and the registered
 Apache Kafka `/tmp/kafka-logs` layout; it never searches alternative roots.
@@ -109,12 +109,15 @@ parent. Receipts and partial diagnostics appear under `evidence.kafkaLogs`; deco
 physical facts remain separate hashed JSON files. Collection never changes verdicts.
 Fake-driver coverage is in `SelectiveKafkaLogCaptureTest`, strict archive cases in
 `KafkaLogArchiveReaderTest`, and caller/cleanup/CLI cases in `V1ScenarioExecutorTest`
-and `RunScenarioCommandTest`. Actual Docker TAR compatibility still needs a live run.
+and `RunScenarioCommandTest`. The public Flink 2.2.0 controls described in
+[CUSTOM-RUNTIME-SUBJECTS.md](CUSTOM-RUNTIME-SUBJECTS.md#verification-scope) retained
+and decoded broker archives successfully. That covers those image combinations;
+another broker layout still needs its own capture evidence.
 
 ## Optional real-container runs
 
-These commands start Docker workloads. Run them only when container execution is
-authorized, after building the same checkout:
+These commands start Docker workloads. Build the same checkout first and retain
+each command's result and logs in a fresh output directory:
 
 ```sh
 mvn -q -o exec:java -pl cli -Dexec.args="run --catalog-root scenarios --scenario bounded-eos --artifact-root . --offline"

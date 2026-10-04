@@ -114,6 +114,7 @@ class FlinkHaEndpointTest {
         try (FlinkRestApiClient client = new FlinkRestApiClient(url(server))) {
             client.useEndpointResolver(timeout -> {
                 try {
+                    // Exceed the 1 ms observation deadline during discovery, before any HTTP request.
                     Thread.sleep(20);
                 } catch (InterruptedException interrupted) {
                     Thread.currentThread().interrupt();
