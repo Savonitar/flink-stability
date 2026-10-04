@@ -807,6 +807,26 @@ Connector pull-request gating is the same mechanism with one axis:
   Without `line`, tag parsing and the registered 2.2 / pinned experimental 2.4
   behavior remain unchanged. An explicit line is the author's compatibility
   assertion, not a claim of tested support for that version.
+- **R4.13k** Optional `setup.flink.log_markers` is a list of `{name, regex, scope,
+  required}` declarations. Names are unique nonempty identifiers starting with
+  a letter/digit and using letters, digits, dots, underscores and hyphens.
+  `regex` must be a nonblank valid Java regular expression; `scope` is
+  `taskmanager` or `jobmanager`; `required` is boolean and defaults to false.
+  Malformed expressions/names or duplicate names reject before execution with
+  `runner.flink.log-marker-invalid`; missing fields/types/scopes reject structurally.
+  Retain declarations in the resolved plan and runtime target. After the physical
+  process fence, search each registered incarnation's retained output line by line.
+  `evidence.flinkRuntime.logMarkers` records each physical runtime ID and log binding,
+  the complete first matching line (`firstMatch`), matched substring (`matchedText`),
+  or explicit absence/error. Every replacement needs its own observation; duplicate,
+  missing or unassociated log bindings cannot substitute for another incarnation.
+  Reads use the existing 4 MiB per-process/32 MiB aggregate log bounds; matching has
+  one second per marker/process. Incomplete capture cannot establish absence;
+  complete matching lines in a retained prefix remain positive observations.
+  Missing required evidence makes an otherwise passing attempt inconclusive with
+  `subject.flink.log-marker-missing`. Preserve every data FAIL and original reason;
+  a matching negative control also requires every required marker (R8.7a).
+  Optional missing markers are evidence only. Omission adds no marker JSON fields.
 - **R4.14** A generated-input topic uses `cleanup.policy: delete`, never
   compaction, and retains data for longer than the maximum attempt duration.
   This makes the manifest's reconciliation snapshot observable.
@@ -1426,6 +1446,10 @@ Connector pull-request gating is the same mechanism with one axis:
   `/opt/flink/lib`, checks staged/workload JARs and verifies observed class loads;
   it is not a filesystem-wide inventory of dormant code or proof against bytecode
   transformation in an untrusted image.
+  Generated hidden lambdas of either `Host$$Lambda$<n>/0x<id>` (JDK 17) or
+  `Host$$Lambda/0x<id>` (JDK 21) use their concrete declaring-class origin.
+  Host-named and `__JVM_LookupDefineClass__` generated definitions cannot bypass
+  missing or foreign host provenance; an explicit foreign JAR origin still rejects.
   Apply R5.6d's origin-mismatch/unconfirmed outcomes and preserve data failures.
   `evidence.connectorPrimaries` records `origin: image`, the declared reference
   and hash; `observedSha256` stays null during Docker-free preparation and becomes
@@ -2535,6 +2559,22 @@ Connector pull-request gating is the same mechanism with one axis:
   failure expected to pass or an expectation mismatch. In particular, lost,
   duplicate, unexpected and malformed ID failures keep their original
   `validator.kafka.id-set.*` reasons regardless of missing window evidence.
+  Required log-marker evidence follows the same preservation rule: missing markers
+  prevent an otherwise matching negative control, but never hide a data FAIL or
+  substitute for its oracle reason.
+- **R8.7b** Optional CLI `run --retain-checkpoints DIR` copies the attempt checkpoint
+  root to a new `DIR/checkpoints` after the latest provisioned process for every
+  expected Flink slot has a matching stopped-process receipt. Its `ha/` subtree is
+  preserved as `DIR/checkpoints/ha`; the original state remains untouched.
+  Never merge into an existing destination or follow symbolic/special filesystem
+  entries; reject overlapping paths. Stream regular files, check source identity,
+  size and modification time for concurrent change, and verify each destination's
+  SHA-256. `evidence.checkpointRetention` records source/output/checkpoint/HA paths,
+  per-file relative paths, verified sizes and hashes, and total verified bytes.
+  An incomplete or unsafe copy is explicitly `incomplete`; an unconfirmed fence
+  is `not-copied`. Keep partial output and diagnostics with
+  `checkpoint.retention-incomplete`. Retention is diagnostic and never changes an
+  attempt status, oracle reason, or expectation match. Omission adds no JSON field.
 - **R8.8** N-of-K is reported as evidence strength, never used as a threshold to
   dismiss a clean expectation mismatch. `inconclusive` is reserved for invalid
   evidence, including dirty health, retry exhaustion, an invalid baseline, or an

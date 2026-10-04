@@ -2,6 +2,7 @@ package org.savonitar.flink.stability.cli;
 
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.io.TempDir;
 import org.savonitar.flink.stability.core.campaign.CampaignDocuments;
 import org.savonitar.flink.stability.core.spec.document.SpecificationCatalogLoader;
@@ -17,6 +18,11 @@ import static org.junit.jupiter.api.Assertions.*;
 
 class CampaignCommandTest {
     @TempDir Path root;
+
+    @BeforeEach void resolveTemporaryRoot() throws java.io.IOException {
+        // macOS may allocate @TempDir below /var -> /private/var; keep production path guards strict.
+        root = root.toRealPath();
+    }
 
     @Test void generateReplayAndShrinkProduceOfflineValidCatalogsWithoutExecution() throws Exception {
         fixture();

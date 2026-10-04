@@ -51,6 +51,7 @@ public final class PreparedExecutableScenarioPlan {
             throw new IllegalArgumentException("Runtime HA/token configuration differs from executable plan");
         }
         if (!flinkRuntimeTarget.declaredLine().equals(executablePlan.flink().declaredLine())
+                || !flinkRuntimeTarget.logMarkers().equals(executablePlan.flink().logMarkers())
                 || !flinkRuntimeTarget.config().equals(executablePlan.flink().config())) {
             throw new IllegalArgumentException("Runtime declared line/config differs from executable plan");
         }

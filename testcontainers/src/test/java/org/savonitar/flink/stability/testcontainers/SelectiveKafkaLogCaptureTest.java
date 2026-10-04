@@ -1,6 +1,7 @@
 package org.savonitar.flink.stability.testcontainers;
 
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.io.TempDir;
 import org.savonitar.flink.stability.runtime.api.KafkaLogCapture;
 import org.savonitar.flink.stability.runtime.api.MonotonicDeadline;
@@ -19,6 +20,11 @@ class SelectiveKafkaLogCaptureTest {
     private static final OwnedKafkaArchiveCapture.Binding OWNER = new OwnedKafkaArchiveCapture.Binding(
             ID, NETWORK, "kafka-main", "main", "apache/kafka:4.0.0", 1);
     @TempDir Path directory;
+
+    @BeforeEach void resolveTemporaryRoot() throws java.io.IOException {
+        // macOS may allocate @TempDir below /var -> /private/var; keep production path guards strict.
+        directory = directory.toRealPath();
+    }
     @Test void inventoriesBothTopicsAndCopiesOnlyOwnedLogFiles() {
         Driver driver = new Driver();
         var result = capture(driver, List.of(new KafkaLogCapture.Partition("input", 0), new KafkaLogCapture.Partition("output", 0)));

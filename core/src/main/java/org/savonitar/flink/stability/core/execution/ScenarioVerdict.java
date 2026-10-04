@@ -85,6 +85,8 @@ public record ScenarioVerdict(Status status, String reason, String message, bool
 
     /** Keep the observed data failure, but do not bless an invalid negative control. */
     private static ScenarioVerdict matchingFailure(V1ScenarioExecutionResult attempt) {
+        if (attempt.flinkLogMarkers().filter(markers -> !markers.requiredConfirmed()).isPresent())
+            return unconfirmed(FlinkLogMarkerEvidence.MISSING, "The expected data failure lacks required per-incarnation log markers");
         ScenarioVerdict window = unconfirmedWindow(attempt);
         if (window != null) return window;
         if (attempt.phaseEvidence().isEmpty()

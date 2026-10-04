@@ -53,7 +53,35 @@ class RuntimeSubstitutionTest(unittest.TestCase):
 
     def test_omitted_options_return_identical_catalog_bytes(self):
         common, candidate = self.options()
+        self.assertNotIn('logMarkers', common)
         self.assertEqual(self.canonical, subjects.with_runtime_substitutions(self.canonical, common, candidate))
+
+    def test_log_marker_regexes_remain_literal_java_patterns(self):
+        pattern = r'\Qrecovery [id]: "value" # foo=bar\E'
+        common, _ = self.options('--log-marker', 'recover=' + pattern,
+                                 '--required-log-marker', 'recover',
+                                 '--required-log-marker', 'startup=ready.*',
+                                 '--log-marker-scope', 'startup=jobmanager')
+        expected = [{'name': 'recover', 'regex': pattern, 'scope': 'taskmanager', 'required': True},
+                    {'name': 'startup', 'regex': 'ready.*', 'scope': 'jobmanager', 'required': True}]
+        self.assertEqual(expected, common['logMarkers'])
+        generated = subjects.with_runtime_substitutions(self.canonical, common)
+        marker_line = next(line for line in generated.splitlines() if 'log_markers:' in line)
+        self.assertEqual(expected, json.loads(marker_line.split('log_markers: ', 1)[1]))
+        self.assertEqual(self.canonical.split('\nphases:\n')[1], generated.split('\nphases:\n')[1])
+        with self.assertRaises(SystemExit):
+            subjects.with_runtime_substitutions(generated, common)
+
+    def test_rejects_ambiguous_log_marker_declarations(self):
+        for flags in (('--log-marker', 'missing'), ('--log-marker', 'bad name=x'),
+                      ('--log-marker', 'name= '), ('--required-log-marker', 'unknown'),
+                      ('--log-marker', 'a=x', '--log-marker', 'a=y'),
+                      ('--required-log-marker', 'a=x', '--required-log-marker', 'a'),
+                      ('--log-marker', 'a=x', '--log-marker-scope', 'unknown=jobmanager'),
+                      ('--log-marker', 'a=x', '--log-marker-scope', 'a=broker'),
+                      ('--log-marker', 'a=x', '--log-marker-scope', 'a=jobmanager', '--log-marker-scope', 'a=taskmanager')):
+            with self.subTest(flags=flags), self.assertRaises(SystemExit):
+                self.options(*flags)
 
     def test_generic_layout_is_explicit_and_preserves_faults(self):
         for layout in ('apache', 'confluent-platform'):
@@ -127,6 +155,49 @@ class CustomRuntimeCommandTest(unittest.TestCase):
     setUp = fixtures.GateCommandTest.setUp
     command = fixtures.GateCommandTest.command
     raw_command = fixtures.GateCommandTest.raw_command
+
+    def test_single_arm_prepares_one_catalog_with_identity_and_markers(self):
+        original = (self.root / 'scenarios/bounded-eos.yaml').read_bytes()
+        result, output = self.command(extra=('--single-arm', '--prepare-only',
+            '--flink-image', 'private/flink:custom', '--flink-image-id', 'sha256:' + 'a' * 64,
+            '--flink-line', '2.9', '--runtime-jar', '/opt/flink/lib/flink-dist-private.jar=' + 'b' * 64,
+            '--required-log-marker', r'recover=\QRecovered [state]\E'))
+        self.assertEqual(0, result.returncode, result.stderr)
+        self.assertFalse(self.calls.exists())
+        manifest = json.loads((output / 'manifest.json').read_text())
+        self.assertEqual('single-arm-prepare', manifest['mode'])
+        self.assertEqual(['subject'], list(manifest['arms']))
+        self.assertNotIn('baseline', manifest)
+        self.assertNotIn('baseline', manifest['plan'])
+        self.assertNotIn('candidate', manifest)
+        self.assertEqual(['subject'], list(manifest['catalogHashes']))
+        self.assertEqual(fixtures.CANDIDATE_HASH, manifest['arms']['subject']['connectorSha256'])
+        self.assertEqual('sha256:' + 'a' * 64, manifest['plan']['runtimeSubstitutions']['flinkImageId'])
+        self.assertTrue(manifest['plan']['runtimeSubstitutions']['logMarkers'][0]['required'])
+        self.assertTrue((output / 'subject-catalog/bounded-eos.yaml').exists())
+        self.assertFalse((output / 'baseline-catalog').exists())
+        self.assertFalse((output / 'candidate-catalog').exists())
+        self.assertEqual(original, (self.root / 'scenarios/bounded-eos.yaml').read_bytes())
+
+    def test_single_arm_rejects_implicit_run_or_comparison_inputs(self):
+        for extra in (('--single-arm',),
+                      ('--single-arm', '--prepare-only', '--baseline-connector-jar', 'candidate.jar', '--baseline-runtime-dir', 'runtime'),
+                      ('--single-arm', '--prepare-only', '--candidate-flink-config', 'pipeline.name=candidate')):
+            result, output = self.command(extra=extra)
+            self.assertEqual(2, result.returncode, result.stderr)
+            self.assertFalse(output.exists())
+            self.assertFalse(self.calls.exists())
+
+    def test_two_arm_log_markers_require_explicit_baseline_and_are_identical(self):
+        result, output = self.command(extra=('--prepare-only', '--log-marker', 'recover=Recovered'))
+        self.assertEqual(2, result.returncode)
+        self.assertFalse(output.exists())
+        result, output = self.command(extra=('--prepare-only', '--log-marker', 'recover=Recovered',
+            '--baseline-connector-jar', 'candidate.jar', '--baseline-runtime-dir', 'runtime'))
+        self.assertEqual(0, result.returncode, result.stderr)
+        for side in ('baseline', 'candidate'):
+            self.assertIn('"name": "recover", "regex": "Recovered", "scope": "taskmanager", "required": false',
+                          (output / (side + '-catalog/bounded-eos.yaml')).read_text())
 
     def test_prepare_only_retains_full_manifest_both_hashes_and_untouched_canonical(self):
         original = (self.root / 'scenarios/bounded-eos.yaml').read_bytes()

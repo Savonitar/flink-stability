@@ -44,6 +44,7 @@ class CustomRuntimePlanTest {
         var resolved = resolved(doc -> {});
         var plan = compiler.compile(resolved);
         assertEquals("2.3", plan.flink().declaredLine().orElseThrow());
+        assertEquals("vendor-startup", plan.flink().logMarkers().getFirst().name());
         assertEquals("/opt/flink/lib/flink-dist_2.12-2.3-vendor.jar",
                 plan.flink().expectedRuntimeJar().orElseThrow().containerPath());
         assertEquals("generic-kraft", plan.kafka().launchType());
@@ -60,6 +61,7 @@ class CustomRuntimePlanTest {
             assertEquals(plan.flink().config(), bound.flinkRuntimeTarget().config());
             assertEquals(plan.flink().declaredLine(), bound.flinkRuntimeTarget().declaredLine());
             assertEquals(plan.flink().expectedRuntimeJar(), bound.flinkRuntimeTarget().expectedRuntimeJar());
+            assertEquals(plan.flink().logMarkers(), bound.flinkRuntimeTarget().logMarkers());
             assertEquals(1, bound.connectorBundle().imageConnectors().size());
             assertEquals("/opt/flink/lib/vendor-connector.jar", bound.connectorBundle().imageConnectors().getFirst().containerPath());
             assertEquals("image", prepared.connectorPrimaries().getFirst().origin());
@@ -74,6 +76,32 @@ class CustomRuntimePlanTest {
                 "env.java.opts.taskmanager", "flink-stability.workload.protocol")) {
             rejects(doc -> ((ObjectNode)doc.at("/setup/flink/config")).put(key, "forbidden"),
                     "runner.flink.config-reserved-key");
+        }
+    }
+
+    @Test void logMarkerDeclarationsResolveAndRejectInvalidPatternsOrDuplicateNames() throws Exception {
+        var plan = compiler.compile(resolved(doc -> ((ObjectNode)doc.at("/setup/flink")).putArray("log_markers")
+                .addObject().put("name", "patched").put("regex", "CUSTOM-FIX (?<id>[0-9]+)").put("scope", "taskmanager").put("required", true)));
+        assertEquals("patched", plan.flink().logMarkers().getFirst().name());
+        assertTrue(plan.flink().logMarkers().getFirst().required());
+        for (String value : List.of("[", " ")) rejects(doc -> ((ObjectNode)doc.at("/setup/flink")).putArray("log_markers")
+                .addObject().put("name", "marker").put("regex", value).put("scope", "taskmanager"), "runner.flink.log-marker-invalid");
+        rejects(doc -> {
+            var markers = ((ObjectNode)doc.at("/setup/flink")).putArray("log_markers");
+            for (int i = 0; i < 2; i++) markers.addObject().put("name", "duplicate").put("regex", "x").put("scope", "jobmanager");
+        }, "runner.flink.log-marker-invalid");
+        rejects(doc -> ((ObjectNode)doc.at("/setup/flink")).putArray("log_markers").addObject()
+                .put("name", "bad name").put("regex", "x").put("scope", "jobmanager"), "runner.flink.log-marker-invalid");
+    }
+
+    @Test void logMarkerShapeRejectsMissingScopeAndNonbooleanRequired() {
+        for (String invalid : List.of("scope", "required")) {
+            var failure = assertThrows(SpecificationException.class, () -> resolved(doc -> {
+                var marker = ((ObjectNode)doc.at("/setup/flink")).putArray("log_markers").addObject()
+                        .put("name", "marker").put("regex", "x");
+                if (invalid.equals("required")) marker.put("scope", "taskmanager").put("required", "yes");
+            }));
+            assertTrue(failure.diagnostics().stream().anyMatch(issue -> issue.path().contains("log_markers")));
         }
     }
 

@@ -1,0 +1,129 @@
+{
+  "scenario": "synthetic-duplicate-attempt",
+  "status": "fail",
+  "reason": "validator.kafka.id-set.duplicate-ids",
+  "message": "Synthetic duplicate fixture",
+  "attempt": {
+    "status": "fail",
+    "reason": "validator.kafka.id-set.duplicate-ids",
+    "checkpointRoot": "flink-logs"
+  },
+  "expectation": {
+    "outcome": "pass",
+    "matched": false
+  },
+  "evidence": {
+    "terminalValidation": {
+      "status": "fail",
+      "reason": "validator.kafka.id-set.duplicate-ids",
+      "mode": "exactly-once",
+      "snapshotComplete": true,
+      "expected": 2,
+      "observed": 4,
+      "distinctExpected": 2,
+      "missing": 0,
+      "duplicates": 2,
+      "malformed": 0,
+      "unexpected": 0,
+      "missingSamples": [],
+      "duplicateSamples": [
+        {
+          "partition": 0,
+          "offset": 3,
+          "rawValue": "1"
+        },
+        {
+          "partition": 0,
+          "offset": 4,
+          "rawValue": "2"
+        }
+      ],
+      "completed": true
+    },
+    "flinkJob": {
+      "status": "observed",
+      "completedCheckpoints": 2,
+      "restoredCheckpoints": 1,
+      "latestRestoredCheckpoint": 1
+    },
+    "taskManagerKills": [
+      {
+        "restoredCheckpoint": 1,
+        "checkpointWindow": {
+          "checkpointId": 2,
+          "restWindowConfirmed": true,
+          "observationFailure": null,
+          "brokerBeforeKill": [
+            {
+              "topic": "output",
+              "partition": 0,
+              "logEndOffset": 2,
+              "producers": [
+                {
+                  "producerId": 7,
+                  "epoch": 2,
+                  "lastSequence": 1,
+                  "transactionStartOffset": 0
+                }
+              ],
+              "transactions": [
+                {
+                  "transactionalId": "fixture-sink-0-0",
+                  "state": "Ongoing",
+                  "producerId": 7,
+                  "epoch": 2,
+                  "startTimeMs": 1000,
+                  "timeoutMs": 7200000
+                }
+              ]
+            }
+          ],
+          "brokerAfterKill": [
+            {
+              "topic": "output",
+              "partition": 0,
+              "logEndOffset": 2,
+              "producers": [
+                {
+                  "producerId": 7,
+                  "epoch": 2,
+                  "lastSequence": 1,
+                  "transactionStartOffset": 0
+                }
+              ],
+              "transactions": [
+                {
+                  "transactionalId": "fixture-sink-0-0",
+                  "state": "Ongoing",
+                  "producerId": 7,
+                  "epoch": 2,
+                  "startTimeMs": 1500,
+                  "timeoutMs": 7200000
+                }
+              ]
+            }
+          ]
+        }
+      }
+    ],
+    "sinkTransactions": {
+      "transactionalIdPrefix": "fixture-sink"
+    },
+    "kafkaLogs": {
+      "status": "collected",
+      "diagnostics": [],
+      "decoded": [
+        {
+          "evidence": "decoded-0.json",
+          "sha256": "f36c9d828606943690e557710c8377879353fe6be6ff8a962c2cd5c4d1e15d9f",
+          "status": "PARSED_AND_DECODED"
+        }
+      ],
+      "transactions": {
+        "evidence": "transactions.json",
+        "sha256": "04519869578e84e4e8ae63374e8a6a0a650f37ca3df98090c88749800aceb6aa",
+        "status": "DECODED"
+      }
+    }
+  }
+}

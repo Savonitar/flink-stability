@@ -1,6 +1,7 @@
 package org.savonitar.flink.stability.testcontainers;
 
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.io.TempDir;
 import org.savonitar.flink.stability.runtime.api.KafkaBrokerPolicy;
 import org.savonitar.flink.stability.runtime.api.KafkaRuntimeTarget;
@@ -35,6 +36,11 @@ class OwnedKafkaArchiveCaptureTest {
             Set.of("/tmp/kafka-logs"), "/tmp/kafka-logs", "declared-output", 0);
 
     @TempDir Path directory;
+
+    @BeforeEach void resolveTemporaryRoot() throws java.io.IOException {
+        // macOS may allocate @TempDir below /var -> /private/var; keep production path guards strict.
+        directory = directory.toRealPath();
+    }
 
     @Test void exactOwnedTransportIsHashedButDoesNotClaimTarValidity() throws Exception {
         byte[] bytes = "not-a-tar-but-transport-complete".getBytes(java.nio.charset.StandardCharsets.UTF_8);

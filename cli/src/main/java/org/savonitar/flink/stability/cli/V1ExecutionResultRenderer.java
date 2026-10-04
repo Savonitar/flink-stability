@@ -22,7 +22,7 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
 
-/** Renders one stable, machine-readable summary without dumping record-level evidence. */
+/** Renders one stable, machine-readable summary with bounded anomaly samples. */
 final class V1ExecutionResultRenderer {
     private static final ObjectMapper JSON = new ObjectMapper();
 
@@ -448,6 +448,12 @@ final class V1ExecutionResultRenderer {
             terminal.put("snapshotComplete", validation.evidence().snapshotComplete());
             ArrayNode missingSamples = terminal.putArray("missingSamples");
             validation.evidence().missingSamples().forEach(missingSamples::add);
+            if (!validation.evidence().duplicateSamples().isEmpty())
+                terminal.set("duplicateSamples", JSON.valueToTree(validation.evidence().duplicateSamples()));
+            if (!validation.evidence().malformedSamples().isEmpty())
+                terminal.set("malformedSamples", JSON.valueToTree(validation.evidence().malformedSamples()));
+            if (!validation.evidence().unexpectedSamples().isEmpty())
+                terminal.set("unexpectedSamples", JSON.valueToTree(validation.evidence().unexpectedSamples()));
             validation.evidence().defectTotals().ifPresent(totals -> {
                 terminal.put("distinctExpected", totals.distinctExpectedCount());
                 terminal.put("malformed", totals.malformedCount());
@@ -494,6 +500,8 @@ final class V1ExecutionResultRenderer {
         });
         evidence.put("flinkComponents", result.flinkProvisioningEvidence().size());
         ObjectNode runtime = evidence.putObject("flinkRuntime");
+        result.flinkLogMarkers().ifPresent(markers -> runtime.set("logMarkers", JSON.valueToTree(markers)));
+        result.checkpointRetention().ifPresent(retained -> evidence.set("checkpointRetention", JSON.valueToTree(retained)));
         runtime.put("identityKind", "docker-image-id");
         runtime.put("status", result.flinkRuntimeIdentity().outcome().name().toLowerCase(Locale.ROOT));
         runtime.put("detail", result.flinkRuntimeIdentity().detail());

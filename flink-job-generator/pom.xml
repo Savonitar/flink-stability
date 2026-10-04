@@ -13,7 +13,8 @@
 
     <properties>
         <!-- Keep the workload bytecode Java-11-compatible; Flink 2.2 sets the runtime JDK floor. -->
-        <maven.compiler.release>11</maven.compiler.release>
+        <workload.compiler.release>11</workload.compiler.release>
+        <maven.compiler.release>${workload.compiler.release}</maven.compiler.release>
         <flink.version>2.2.0</flink.version>
         <flink.kafka.connector.version>5.0.0-2.2</flink.kafka.connector.version>
         <!-- Preserve the older property as the default for existing build scripts. -->
@@ -65,6 +66,30 @@
     <build>
         <finalName>flink-job-generator</finalName>
         <plugins>
+            <plugin>
+                <groupId>org.codehaus.mojo</groupId>
+                <artifactId>exec-maven-plugin</artifactId>
+                <version>3.1.0</version>
+                <executions>
+                    <execution>
+                        <id>require-clean-workload-version-change</id>
+                        <phase>validate</phase>
+                        <goals><goal>exec</goal></goals>
+                        <configuration>
+                            <executable>${java.home}/bin/java</executable>
+                            <arguments>
+                                <argument>${project.basedir}/WorkloadBuildGuard.java</argument>
+                                <argument>${project.build.directory}</argument>
+                                <argument>${flink.version}</argument>
+                                <argument>${kafka.connector.groupId}</argument>
+                                <argument>${kafka.connector.version}</argument>
+                                <argument>${maven.compiler.release}</argument>
+                                <argument>${kafka.clients.version}</argument>
+                            </arguments>
+                        </configuration>
+                    </execution>
+                </executions>
+            </plugin>
             <plugin>
                 <groupId>org.apache.maven.plugins</groupId>
                 <artifactId>maven-compiler-plugin</artifactId>

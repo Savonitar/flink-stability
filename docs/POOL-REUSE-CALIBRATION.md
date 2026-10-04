@@ -85,3 +85,41 @@ confirmed runs; write each audit to a fresh output file.
 Keep validation builds in a separate Maven cache and output directory from frozen
 experiments. Reproduction requires the recorded harness and connector hashes;
 mutable Maven SNAPSHOT artifacts do not preserve a historical harness version.
+
+The runner can retain the fenced attempt's checkpoints with its other evidence:
+
+```sh
+mvn -q -o exec:java -pl cli \
+  -Dexec.args="run --catalog-root jobs/my-run/catalog --scenario pool-reuse-inflight-control-v1 --artifact-root . --offline --kafka-log-output jobs/my-run/kafka-logs --retain-checkpoints jobs/my-run/retained" \
+  > jobs/my-run/result.json
+```
+
+Create the parent evidence directory first and use fresh output directories.
+`--retain-checkpoints` copies the attempt root to `retained/checkpoints/` after a
+confirmed process fence, including its `ha/` subtree when present. The original
+stays in place. `evidence.checkpointRetention` records copied paths, sizes and
+hashes, or an explicit incomplete/not-copied receipt. Retention is diagnostic:
+it does not reinterpret the data oracle's verdict. Existing destinations,
+overlapping source/destination paths, links and nonregular files are rejected.
+The copy preserves what remains at the fence. Flink may already have disposed
+checkpoint state after a bounded job finishes; in that case the attempt root can
+contain only process logs. This option does not change Flink's checkpoint
+retention policy or recover state that the runtime already deleted.
+
+Analyze a retained attempt with:
+
+```sh
+python3 tools/analyze_attempt.py jobs/my-run/result.json jobs/my-run/kafka-logs
+```
+
+The report joins the verdict and ID counts, checkpoints and restores, kill-window
+broker snapshots, decoded producer/epoch transactions and their commit/abort
+markers, duplicate-ID locations, transaction-state history and matching
+TaskManager log lines. Missing or incomplete evidence is reported explicitly;
+the report does not replace the calibration checker or upgrade a missed window.
+Use repeatable `--marker '<Python regex>'` arguments to select component
+messages instead of the default upstream committer recovery messages. Defaults
+contain no vendor-specific patterns. When Flink logs live outside the result's
+directory, supply their explicit `--flink-log-dir`; receipt paths are confined to
+the supplied evidence roots. `--json` emits the same analysis as structured data.
+An in-directory completed `--retain-checkpoints` copy is selected automatically.

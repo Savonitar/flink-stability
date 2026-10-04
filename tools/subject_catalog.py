@@ -167,6 +167,45 @@ def configuration_pairs(values, option):
     return result
 
 
+def log_marker_declarations(markers, required, scopes):
+    """Retain Java regexes literally; the Java compiler validates their syntax."""
+    declarations = {}
+
+    def declare(value, option, mandatory):
+        name, separator, regex = value.partition('=')
+        if (not separator or re.fullmatch(r'[A-Za-z0-9][A-Za-z0-9._-]*', name) is None
+                or not regex.strip()):
+            raise SystemExit(option + ' requires NAME=REGEX with a nonblank Java regex')
+        if name in declarations:
+            raise SystemExit('Duplicate log marker declaration: ' + name)
+        declarations[name] = {'name': name, 'regex': regex, 'scope': 'taskmanager', 'required': mandatory}
+
+    for value in markers or ():
+        declare(value, '--log-marker', False)
+    references = []
+    for value in required or ():
+        if '=' in value:
+            declare(value, '--required-log-marker', True)
+        else:
+            references.append(value)
+    for name in references:
+        if name not in declarations:
+            raise SystemExit('--required-log-marker references an undeclared marker: ' + name)
+        if declarations[name]['required']:
+            raise SystemExit('--required-log-marker repeats marker: ' + name)
+        declarations[name]['required'] = True
+    seen_scopes = set()
+    for value in scopes or ():
+        name, separator, scope = value.partition('=')
+        if not separator or scope not in ('taskmanager', 'jobmanager') or name not in declarations:
+            raise SystemExit('--log-marker-scope requires a declared NAME=taskmanager|jobmanager')
+        if name in seen_scopes:
+            raise SystemExit('--log-marker-scope repeats marker: ' + name)
+        seen_scopes.add(name)
+        declarations[name]['scope'] = scope
+    return list(declarations.values())
+
+
 def add_runtime_arguments(parser):
     parser.add_argument('--flink-image', help='Common Flink image reference in both copied catalogs')
     parser.add_argument('--flink-image-id', help='Common local Docker image ID, sha256:<64 hex>')
@@ -186,6 +225,12 @@ def add_runtime_arguments(parser):
                         help='Explicit common transaction feature selection; omission preserves the catalog')
     parser.add_argument('--transaction-id-naming-strategy', choices=('INCREMENTING', 'POOLING', 'connector-default'),
                         help='Explicit common naming choice; omission preserves the catalog')
+    parser.add_argument('--log-marker', action='append', default=[], metavar='NAME=REGEX',
+                        help='Optional common Java-regex log marker; default scope is taskmanager')
+    parser.add_argument('--required-log-marker', action='append', default=[], metavar='NAME[=REGEX]',
+                        help='Declare a required marker or require a previously declared --log-marker')
+    parser.add_argument('--log-marker-scope', action='append', default=[], metavar='NAME=SCOPE',
+                        help='Set a declared marker scope to taskmanager or jobmanager')
 
 
 def runtime_substitutions(args, root):
@@ -221,6 +266,9 @@ def runtime_substitutions(args, root):
         'transactionIdNamingStrategy': args.transaction_id_naming_strategy,
     }
     candidate_config = configuration_pairs(args.candidate_flink_config, '--candidate-flink-config')
+    markers = log_marker_declarations(args.log_marker, args.required_log_marker, args.log_marker_scope)
+    if markers:
+        common['logMarkers'] = markers
     return common, candidate_config
 
 
@@ -235,6 +283,10 @@ def with_runtime_substitutions(document, common, candidate_config=None):
         if re.search(r'(?m)^    config:', document):
             raise SystemExit('Canonical Flink config already exists; refusing to replace it')
         flink['config'] = config
+    if common.get('logMarkers'):
+        if re.search(r'(?m)^    log_markers:', document):
+            raise SystemExit('Canonical Flink log_markers already exist; refusing to replace them')
+        flink['log_markers'] = common['logMarkers']
     if flink:
         document = _set_mapping_values(document, ('setup', 'flink'), flink)
     kafka = {field: common[key] for key, field in (

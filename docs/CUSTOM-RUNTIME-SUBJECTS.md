@@ -26,6 +26,7 @@ pool-reuse calibration's separate transaction-reuse checks.
 | `setup.kafka.clusters.main.broker_config` | Literal broker property overrides. Harness-owned listeners, node/broker/cluster IDs, process roles, log directories, controller quorum and automatic topic creation cannot be overridden (`runner.kafka.config-reserved-key`). Invalid property names or multiline values reject. | Resolved overrides and actual broker launch configuration under `evidence.kafka`. |
 | `setup.kafka.clusters.main.transaction_version: broker-default` | Calls `describeFeatures`, records the observed finalized `transaction.version`, and never calls `updateFeatures`. Failed observation prevents PASS with inconclusive `kafka.feature.observation-unavailable`. Explicit `1`/`2` retain strict feature selection. | `evidence.kafkaTransactionVersion` reports `requested: broker-default`, observations, and `observed` or `unavailable` status with the error. |
 | `setup.flink.config` | Supplies scalar values to every process's `FLINK_PROPERTIES` and the REST job submission's `flinkConfiguration`. Reserved keys reject with `runner.flink.config-reserved-key`; invalid values reject with `runner.flink.config-invalid`. | The resolved map, `evidence.flinkRuntime.config`, and each successfully started TaskManager incarnation's configuration. |
+| `setup.flink.log_markers` | Named Java regular expressions with explicit `taskmanager` or `jobmanager` scope and optional `required: true`. A required marker must match every incarnation in its scope; absence prevents PASS with `subject.flink.log-marker-missing`. | `evidence.flinkRuntime.logMarkers` retains the first matching line or the reason no match was established, bound to each process incarnation. A data failure keeps its original status and reason. |
 | `workload.jobs[].jar` | A workload built for the selected runtime and connector, retained inside the artifact root. It must remain thin and declare `Flink-Stability-Workload-Protocol: v1`. | `evidence.customRuntimeSubject.workload` retains `artifact` and `sha256`; preparation also binds the staged bytes. |
 | `workload.jobs[].sink.transaction_id_naming_strategy: connector-default` | Valid only for `EXACTLY_ONCE`. The workload does not inspect or invoke the optional naming setter for this choice. `INCREMENTING` and `POOLING` use reflection and fail clearly if the connector cannot implement the request. | `evidence.customRuntimeSubject.transactionIdNamingStrategy` and `jobFlinkConfiguration` retain the choice and compiled typed/pass-through job settings. |
 
@@ -55,6 +56,14 @@ as literal strings. An unknown Flink option can still be rejected or ignored by
 the selected Flink runtime; the harness records what it supplied and does not
 claim that every vendor option changed behavior.
 
+Process-level confirmation proves delivery to the process; the submission
+evidence separately records the REST job configuration. Neither proves that the
+job graph or an operator consumed an option. Flink builds the job's
+`ExecutionConfig` from selected configuration options during graph generation,
+so an option delivered to the process can still be omitted at the job or operator
+level. Use a component's own log marker to establish that it observed the value,
+and interpret that marker according to what the component actually reports.
+
 Nonempty Flink configuration uses an explicit launcher requiring `/bin/bash`,
 `/opt/flink/bin/jobmanager.sh`, `/opt/flink/bin/taskmanager.sh` and standard YAML
 at `/opt/flink/conf/config.yaml`. It merges the image configuration with harness
@@ -76,6 +85,32 @@ launcher and observed values. The container ID and `classLoadProcess` bind that
 receipt to one incarnation. Missing receipts are
 `subject.flink.config-unconfirmed`; mismatched bytes or values are
 `subject.flink.config-mismatch`, and neither can produce PASS.
+
+For component-level observations, declare markers on a copied catalog:
+
+```yaml
+setup:
+  flink:
+    log_markers:
+      - name: taskmanager-started
+        regex: 'Starting TaskManager with ResourceID:'
+        scope: taskmanager
+        required: true
+      - name: resource-manager-started
+        regex: 'Starting the resource manager\.'
+        scope: jobmanager
+        required: false
+```
+
+Markers use Java regular-expression syntax and search individual component log
+lines after the process fence. Select a precise message from the component whose
+behavior matters. A startup marker such as the example above proves only that
+the startup message was observed, not that an arbitrary configuration option
+took effect. Each initial and replacement process needs its own observation;
+a replacement cannot satisfy its predecessor's required marker. Optional missing
+markers remain evidence without changing the verdict. Required missing markers
+make a passing result inconclusive and cannot turn an observed data failure into
+a different outcome.
 
 Maven subjects and local-JAR subjects retain their previous artifact handling.
 A local primary needs explicit `runtime_dependencies`; the gate's `--runtime-dir`
@@ -130,16 +165,53 @@ leaves the raw finalized entry absent. Missing supporting metadata remains
 
 ## Build the workload against the subject
 
+First build or select the runtime image. The
+[distribution image builder](FLINK-RUNTIME-TESTING.md#select-the-image) packages a
+complete local `flink-dist` output with one connector and its explicit closure
+on a public Java 17 or 21 Flink base:
+
+```sh
+tools/build_runtime_image.sh jobs/runtime/dist jobs/runtime/connector.jar \
+  jobs/runtime/closure local/flink:2.2.0-java21-candidate \
+  --java 21 --output jobs/runtime/image-build
+```
+
+Retain its Dockerfile, manifest and output. Use the returned image ID and the
+observed in-image distribution/connector hashes as catalog pins. The script
+rejects duplicate connector class sources in `/opt/flink/lib`, separate runtime JARs, incompatible
+class-file versions, input links and an existing output tag. A private version
+can explicitly choose a public `--base-image flink:<release>-java<N>` with the
+same selected Java. The chosen base must supply a compatible official
+entrypoint; building an image does not establish workload compatibility.
+Omitting `--output` retains the build context and manifest under
+`jobs/runtime-images/build-*`.
+
 Use JDK 21 and an isolated Maven cache for the custom build. For artifacts already
 installed in that cache, an offline build avoids contacting a repository:
 
 ```sh
-mvn -B -o -pl flink-job-generator -am package \
+mvn -B -o -pl flink-job-generator clean package \
   -Dmaven.repo.local="$PWD/jobs/custom-runtime/maven" \
   -Dflink.version=<exact-runtime-version> \
   -Dkafka.connector.version=<exact-connector-version> \
   -Dkafka.connector.groupId=<connector-group-id>
 ```
+
+Use `clean package` whenever the Flink, connector or compiler-release inputs
+change. The module records `target/flink.version` and its build settings, and
+fails before compilation when an existing output belongs to another or
+unrecorded configuration. Clean only this module when retaining an experiment:
+the root project's `clean` also removes checkpoints and other run directories.
+
+`-Dworkload.compiler.release=17` (or `21`) selects the workload's emitted
+bytecode level; the default remains 11. For example, add
+`-Dworkload.compiler.release=17` to the clean build above for a Java 17 workload.
+The compiler JDK and the target release are different settings. A recent
+compiler can read Java 17 dependencies while emitting Java 11 bytecode; a
+"class file has wrong version 61.0, should be 55.0" diagnostic instead requires
+checking which compiler/toolchain Maven actually launched. Raising the target
+release does not upgrade an older compiler. Keep the harness build on JDK 21
+and choose a workload release supported by the selected runtime image.
 
 The group ID defaults to `org.apache.flink`. The older
 `-Dflink.kafka.connector.version=...` remains a compatible default when
@@ -240,6 +312,23 @@ and copied expected-result document. The canonical files are never rewritten.
 Configuration values are evidence, so do not put passwords or other secrets in
 these options.
 
+To prepare a runtime comparison as independent arms, invoke the same command
+once per image with `--single-arm --prepare-only`, a fresh `--output` directory,
+and that image's runtime and connector pins. Omit `--baseline-*` and
+`--candidate-flink-config`; use `--flink-config` for the one selected arm. Each
+invocation writes `subject-catalog/` and a manifest with
+`mode: single-arm-prepare`, the subject identity, every runtime substitution and
+the resulting catalog hashes. This mode prepares evidence inputs only; it does
+not execute or qualify a comparison. Keep both manifests and compare the
+resolved plans before running the two catalog directories.
+
+The gate also accepts repeatable `--log-marker 'name=Java regex'` and
+`--required-log-marker 'name=Java regex'`. A bare
+`--required-log-marker name` makes an already declared marker required. Markers
+default to TaskManagers; `--log-marker-scope name=jobmanager` selects JobManagers.
+In the two-arm mode the same marker declarations apply to both arms. Regex text
+is preserved for Java preflight validation, including Java-specific syntax.
+
 For a Confluent Platform-style tool layout, supply both `--kafka-launch generic-kraft`
 and `--kafka-layout confluent-platform`, along with `--kafka-image` and its
 `--kafka-image-id` pin. The layout is shared by both arms and recorded in the
@@ -308,10 +397,27 @@ start command and readiness command. Broker output and four physical segment
 archives were retained; all four archives parsed and decoded successfully.
 This attempt did not run the kill scenario against Confluent Kafka.
 
-These live results cover the stated public, single-broker combinations. Private
+Two additional public ARM64 controls on 2026-10-04 passed using
+`flink:2.2.0-java21` and that image's distribution repackaged by
+`tools/build_runtime_image.sh`. Both used the pinned public
+`confluentinc/cp-kafka:8.3.2` generic launcher and released connector 5.0.0-2.2;
+the official image used a local connector with an explicit closure, while the
+repackaged image supplied the connector from `/opt/flink/lib`. Each observed
+exactly 14,000 IDs without defects, confirmed runtime and connector origins, and
+decoded four retained Kafka archives. The image-supplied run attributed 61
+connector hidden lambdas in its TaskManager using the JDK 21 name form.
+Both required JobManager/TaskManager startup markers matched, and an optional
+absent marker did not change PASS. The post-fence copies and file hashes were
+verified; these completed jobs had already disposed checkpoint state, leaving
+four process logs in each copied attempt root. HA-state copying is covered by
+Docker-free tests, not these controls. These runs preserve the canonical
+control's input, timing, naming strategy and expected outcome; `broker-default`
+observed transaction level **2**.
+
+The local live results cover the stated public, single-broker combinations. Private
 images, `confluentinc/cp-server`, Scala-suffixed Flink distributions, other
-Flink/connector versions, image-supplied connectors, three-node
-generic clusters and the pinned `apache-kafka` launcher have not been exercised.
+Flink/connector versions, three-node generic clusters and the pinned
+`apache-kafka` launcher have not been exercised locally.
 The full calibration matrix has not been rerun with the rebuilt workload.
 Docker-free tests and offline fixtures cover the remaining configuration and
 verification paths without claiming live compatibility.
