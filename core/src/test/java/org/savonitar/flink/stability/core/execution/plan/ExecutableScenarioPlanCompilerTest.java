@@ -803,6 +803,22 @@ class ExecutableScenarioPlanCompilerTest {
     }
 
     @Test
+    void compilesCheckpointInProgressTimeoutAndPolicy() {
+        for (String policy : List.of("fail", "inconclusive")) {
+            var plan = compiler.compile(resolved(document -> {
+                var phases = document.putArray("phases");
+                var await = phases.addObject().put("name", "window").putArray("steps")
+                        .addObject().putObject("await");
+                await.putObject("condition").put("type", "checkpoint-in-progress").put("job", "eos-job");
+                await.put("timeout", "1500ms").put("on_timeout", policy);
+            }));
+            var step = (ExecutableScenarioPlan.AwaitCheckpointInProgress) plan.phases().getFirst().steps().getFirst();
+            assertEquals(Duration.ofMillis(1500), step.timeout());
+            assertEquals(policy.toUpperCase(java.util.Locale.ROOT), step.onTimeout().name());
+        }
+    }
+
+    @Test
     void mapsSupportedTypedOptionsAndBalancedTaskmanagerChaos() {
         ExecutableScenarioPlan plan = compiler.compile(resolved(document -> {
             ObjectNode job = (ObjectNode) document.at("/workload/jobs/0");

@@ -34,6 +34,11 @@ public interface V1AttemptRuntime extends KafkaBrokerControl, PacketFaultControl
 
     default List<FlinkComponentLog> flinkComponentLogs() { return List.of(); }
 
+    default KafkaProducerSnapshot observeKafkaProducers(String cluster, String topic, int partition,
+            String transactionalIdPrefix, Duration timeout) throws Exception {
+        throw new UnsupportedOperationException("Broker producer observation unavailable");
+    }
+
     default Optional<String> tokenPluginSha256() {
         return Optional.empty();
     }

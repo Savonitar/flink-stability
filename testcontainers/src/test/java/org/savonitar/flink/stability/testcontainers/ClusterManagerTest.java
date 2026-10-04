@@ -48,6 +48,19 @@ class ClusterManagerTest {
     Path temporaryDirectory;
 
     @Test
+    void brokerObservationSelectsTheNamedClusterAndNeverFallsBack() {
+        var sink = new org.savonitar.flink.stability.runtime.api.KafkaRuntimeEndpoints("sink", "apache/kafka:4.0.0", "sink:9092", "localhost:9093");
+        var other = new org.savonitar.flink.stability.runtime.api.KafkaRuntimeEndpoints("other", "apache/kafka:4.0.0", "other:9092", "localhost:9094");
+        var endpoints = new java.util.LinkedHashMap<String, org.savonitar.flink.stability.runtime.api.KafkaRuntimeEndpoints>();
+        endpoints.put("sink", sink);
+        endpoints.put("other", other);
+        assertEquals(sink, DockerV1AttemptRuntime.observationEndpoint(endpoints, "sink"));
+        assertThrows(IllegalArgumentException.class, () -> DockerV1AttemptRuntime.observationEndpoint(endpoints, "absent"));
+        endpoints.put("sink", other);
+        assertThrows(IllegalArgumentException.class, () -> DockerV1AttemptRuntime.observationEndpoint(endpoints, "sink"));
+    }
+
+    @Test
     void endpointAdapterPreservesTypedBudgetExpiryAndDoesNotUnwrapOtherResolverFailures() throws Exception {
         RecordingFactory factory = new RecordingFactory();
         AtomicLong nanos = new AtomicLong();

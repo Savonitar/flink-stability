@@ -1,0 +1,9 @@
+format: v1
+kind: expected-result
+
+meta:
+  name: pool-reuse-inflight-kill-v1.expected
+  scenario: pool-reuse-inflight-kill-v1
+
+default:
+  outcome: pass

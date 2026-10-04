@@ -1824,6 +1824,9 @@
           "$ref": "#/$defs/checkpointCompletedCondition"
         },
         {
+          "$ref": "#/$defs/checkpointInProgressCondition"
+        },
+        {
           "$ref": "#/$defs/savepointCompletedCondition"
         },
         {
@@ -1912,6 +1915,15 @@
         "count": {
           "$ref": "#/$defs/positiveIntegerOrTemplate"
         }
+      }
+    },
+    "checkpointInProgressCondition": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["type", "job"],
+      "properties": {
+        "type": {"const": "checkpoint-in-progress"},
+        "job": {"$ref": "#/$defs/kebabName"}
       }
     },
     "savepointCompletedCondition": {

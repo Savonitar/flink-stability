@@ -720,7 +720,7 @@ final class ScenarioPreflightValidator {
         ObjectNode condition = (ObjectNode) await.get("condition");
         String conditionPath = path + "/condition";
         switch (condition.path("type").textValue()) {
-            case "job-state", "checkpoint-completed", "savepoint-completed" ->
+            case "job-state", "checkpoint-completed", "checkpoint-in-progress", "savepoint-completed" ->
                     validateJobReference(
                             source, index, condition.path("job").textValue(),
                             conditionPath + "/job", "Await condition", issues);

@@ -6,6 +6,7 @@ import org.apache.flink.api.common.functions.RichMapFunction;
 import org.apache.flink.api.common.serialization.SimpleStringSchema;
 import org.apache.flink.api.common.state.ValueState;
 import org.apache.flink.api.common.state.ValueStateDescriptor;
+import org.apache.flink.api.common.typeinfo.Types;
 import org.apache.flink.connector.base.DeliveryGuarantee;
 import org.apache.flink.connector.kafka.sink.KafkaRecordSerializationSchema;
 import org.apache.flink.connector.kafka.sink.KafkaSink;
@@ -58,10 +59,14 @@ public class FlinkKafkaEosJob {
         // A delay after the keyBy shuffle would let the source fill the network buffers
         // first; every checkpoint barrier would then wait behind that backlog, and a short
         // bounded input would finish before its first checkpoint completed.
-        env.fromSource(source, workload.watermarks().toFlinkStrategy(), "Kafka Source")
-                .uid(SOURCE_UID)
-                .map(new SourceThrottle(arguments.processingDelayMs()))
-                .name("Source Throttle")
+        var records = env.fromSource(source, workload.watermarks().toFlinkStrategy(), "Kafka Source")
+                .uid(SOURCE_UID);
+        var throttle = new SourceThrottle(arguments.processingDelayMs());
+        var throttled = arguments.snapshotAsyncDelayMs() == 0
+                ? records.map(throttle)
+                : records.transform("Source Throttle", Types.STRING,
+                        new AsyncSnapshotDelay(throttle, arguments.snapshotAsyncDelayMs()));
+        throttled.name("Source Throttle")
                 .uid(THROTTLE_UID)
                 .keyBy(value -> value)
                 .map(new ManagedStatePassThrough(workload.stateTtl()))

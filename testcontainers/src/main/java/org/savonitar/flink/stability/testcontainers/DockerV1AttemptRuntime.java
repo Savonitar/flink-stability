@@ -27,6 +27,7 @@ public final class DockerV1AttemptRuntime implements V1AttemptRuntime {
     private static final String PRIMARY_TASK_MANAGER = "taskmanager-1";
 
     private final ClusterManager clusters;
+    private final java.util.Map<String, KafkaRuntimeEndpoints> observedKafkaEndpoints = new java.util.HashMap<>();
 
     public DockerV1AttemptRuntime(Path checkpointStorageRoot) {
         this(new ClusterManager(Objects.requireNonNull(
@@ -39,7 +40,25 @@ public final class DockerV1AttemptRuntime implements V1AttemptRuntime {
 
     @Override
     public KafkaRuntimeEndpoints startKafka(KafkaRuntimeTarget target) {
-        return clusters.startKafka(target);
+        KafkaRuntimeEndpoints endpoints = clusters.startKafka(target);
+        observedKafkaEndpoints.put(target.clusterAlias(), endpoints);
+        return endpoints;
+    }
+
+    @Override
+    public org.savonitar.flink.stability.runtime.api.KafkaProducerSnapshot observeKafkaProducers(
+            String cluster, String topic, int partition, String prefix, Duration timeout) throws Exception {
+        return KafkaProducerObserver.observe(observationEndpoint(observedKafkaEndpoints, cluster).hostBootstrapServers(),
+                topic, partition, prefix, timeout);
+    }
+
+    static KafkaRuntimeEndpoints observationEndpoint(
+            java.util.Map<String, KafkaRuntimeEndpoints> endpoints, String cluster) {
+        KafkaRuntimeEndpoints selected = endpoints.get(cluster);
+        if (selected == null || !selected.clusterAlias().equals(cluster)) {
+            throw new IllegalArgumentException("No owned Kafka observation endpoint for cluster " + cluster);
+        }
+        return selected;
     }
 
     @Override

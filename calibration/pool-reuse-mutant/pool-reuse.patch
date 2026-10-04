@@ -1,0 +1,28 @@
+--- a/org/apache/flink/connector/kafka/sink/internal/ProducerPoolImpl.java
++++ b/org/apache/flink/connector/kafka/sink/internal/ProducerPoolImpl.java
+@@ -225,10 +225,13 @@
+     public FlinkKafkaInternalProducer<byte[], byte[]> getTransactionalProducer(
+             String transactionalId, long checkpointId) {
+         FlinkKafkaInternalProducer<byte[], byte[]> producer = producerPool.poll();
++        // Deliberately wrong: retain the old session on same-ID reuse.
++        boolean reuseSession = producer != null && transactionalId != null
++                && transactionalId.equals(producer.getTransactionalId());
+         if (producer == null) {
+             producer = new FlinkKafkaInternalProducer<>(kafkaProducerConfig, transactionalId);
+             producerInit.accept(producer);
+-        } else if (transactionalId != null) {
++        } else if (transactionalId != null && !reuseSession) {
+             producer.setTransactionId(transactionalId);
+         }
+         if (transactionalId != null) {
+@@ -246,7 +249,9 @@
+                     transactionalId,
+                     existing,
+                     producer);
+-            producer.initTransactions();
++            if (!reuseSession) {
++                producer.initTransactions();
++            }
+         }
+         LOG.debug("getProducer {}, new pool size {}", producer, producerPool.size());
+         return producer;

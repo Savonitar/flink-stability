@@ -186,6 +186,19 @@ A pull request that changes dependencies is therefore tested with its own depend
 
 ## Testing the gate
 
+The four `pool-reuse-inflight-{kill,control}-{v1,v2}` catalogs exercise POOLING
+reuse while the next checkpoint is pending. Select them explicitly with repeated
+`--scenario` flags. Their [calibration report](POOL-REUSE-CALIBRATION.md) explains
+the asynchronous snapshot delay, required kill-window audit, pinned single-class
+mutant, measured timings and retained live results. A terminal PASS alone does
+not establish that this window was hit; retain and audit its checkpoint and broker
+observations. The generic gate preserves the raw verdict, while the calibration
+checker rejects a margin below three seconds as `checkpoint-window.missed`.
+Unexpected data failures keep their original failing verdict and reason even
+when window evidence is missing. REST observation failures retain their separate
+infrastructure reason and original error evidence. A successful calibration audit
+means the evidence satisfies the recipe's [qualification rules](../calibration/pool-reuse-mutant/README.md#calibration-contract).
+
 Run the Python checks without Docker:
 
 ```bash

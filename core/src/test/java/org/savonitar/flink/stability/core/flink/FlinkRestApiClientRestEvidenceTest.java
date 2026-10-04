@@ -35,6 +35,42 @@ class FlinkRestApiClientRestEvidenceTest {
     Path temporaryDirectory;
 
     @Test
+    void checkpointWindowRequestKeepsServerErrorsAndUsesOneBudgetForDetailsAndVertices() throws Exception {
+        AtomicLong clock = new AtomicLong();
+        List<String> endpoints = new ArrayList<>();
+        List<Duration> timeouts = new ArrayList<>();
+        FlinkRestApiClient client = timedClient((method, endpoint, body, timeout) -> {
+            endpoints.add(endpoint);
+            timeouts.add(timeout);
+            if (endpoints.size() == 1) return response(500, "NullArgumentException: input array");
+            if (endpoint.endsWith("/checkpoints")) return response(200,
+                    "{\"latest\":{\"completed\":{\"id\":1,\"status\":\"COMPLETED\",\"latest_ack_timestamp\":10}},"
+                    + "\"history\":[{\"id\":2,\"status\":\"IN_PROGRESS\",\"trigger_timestamp\":20}]}");
+            clock.addAndGet(Duration.ofMillis(100).toNanos());
+            if (endpoint.endsWith("/details/2")) return response(200, "{\"id\":2,\"status\":\"IN_PROGRESS\"}");
+            return response(200, "{\"vertices\":[{\"id\":\"sink\",\"name\":\"Kafka Sink: Writer\"}]}");
+        }, clock);
+        var result = client.checkpointOverview(job(), Duration.ofSeconds(1));
+        assertEquals(2, result.at("/observedCheckpointDetails/id").intValue());
+        assertEquals("sink", result.at("/observedJobVertices/0/id").textValue());
+        assertEquals(List.of("/jobs/" + JOB_ID + "/checkpoints", "/jobs/" + JOB_ID + "/checkpoints",
+                "/jobs/" + JOB_ID + "/checkpoints/details/2", "/jobs/" + JOB_ID), endpoints);
+        assertEquals(List.of(Duration.ofMillis(1000), Duration.ofMillis(750), Duration.ofMillis(750), Duration.ofMillis(650)), timeouts);
+        assertEquals(List.of(new FlinkScenarioControl.RestError(1, "GET", endpoints.getFirst(), 500,
+                "NullArgumentException: input array")), client.restErrors());
+    }
+
+    @Test
+    void checkpointWindowServerFailureRetainsErrorOnDeadlineExhaustion() {
+        AtomicLong clock = new AtomicLong();
+        FlinkRestApiClient client = timedClient((method, endpoint, body, timeout) ->
+                response(500, "NullArgumentException: input array"), clock);
+        assertThrows(FlinkRestTimeoutException.class, () -> client.checkpointOverview(job(), Duration.ofMillis(200)));
+        assertEquals(500, client.restErrors().getFirst().httpStatus());
+        assertEquals("NullArgumentException: input array", client.restErrors().getFirst().body());
+    }
+
+    @Test
     void successfulRetriesKeepEveryOriginalBodyAndImmutableSnapshotsAfterClose() throws Exception {
         String original = "NullArgumentException: input array\n" + "λ".repeat(5_000);
         AtomicInteger calls = new AtomicInteger();

@@ -1281,7 +1281,7 @@ Connector pull-request gating is the same mechanism with one axis:
   The phase may still begin with an `await job-state RUNNING`; that wait observes
   readiness and recovery, not submission itself.
 - **R6.4** **`await` takes a typed condition from a closed enum**, never an
-  expression string: job state, TaskManager count, checkpoint completed,
+  expression string: job state, TaskManager count, checkpoint completed, checkpoint in progress,
   savepoint completed, log marker, Kafka transaction state, record threshold.
   Adding a condition requires code — which it needs anyway, to be implemented and
   tested.
@@ -1300,6 +1300,39 @@ Connector pull-request gating is the same mechanism with one axis:
   error remains evidence of a component anomaly; retry success does not classify or
   close the finding. Failed body reads remain I/O failures, not fabricated complete
   HTTP bodies.
+- **R6.4b** `await: { condition: { type: checkpoint-in-progress, job: <alias> },
+  timeout: <duration>, on_timeout: fail | inconclusive }` observes the referenced
+  job; `job` is required and must resolve, including inside a loop. The condition
+  accepts no `count`, `state`, or arbitrary extra fields. It succeeds only when
+  exactly one checkpoint k is `IN_PROGRESS`, k > 1, the latest completed
+  checkpoint is k-1, and its acknowledgement timestamp precedes k's trigger.
+  This does not by itself prove a Kafka commit or completed sink snapshot.
+  Polls and pauses share the declared monotonic timeout. A deadline reached after
+  successful observations without an eligible checkpoint reports
+  `checkpoint-window.missed` with the declared `on_timeout` outcome. A failed REST
+  request (including exhausted HTTP retries), malformed JSON, a non-object
+  checkpoint overview or interruption
+  reports `inconclusive / await.checkpoint-in-progress.infrastructure`, retains
+  its cause and original REST error evidence (R6.4a), and is not a timing miss.
+  Interruption restores the thread's interrupt flag.
+- **R6.4c** A successful `checkpoint-in-progress` await arms the next TaskManager
+  kill with its selected k and raw overview. The kill records observations before
+  and after physical process exit. REST window confirmation requires the same k
+  to remain pending with k-1 completed at each observation, and the identified
+  Kafka sink writer vertex to have acknowledged all its subtasks before the kill.
+  A task's global `IN_PROGRESS` status does not disprove its acknowledgement.
+  Read-only producer observations select the sink's declared Kafka cluster and
+  include every declared sink partition; they must never use an unrelated
+  cluster or silently substitute partition zero. JSON retains the raw checkpoint
+  observations, observation failure, per-partition broker snapshots and a
+  `restWindowConfirmed` flag under each kill's `checkpointWindow`. Broker samples
+  are arrays; old retained single-partition objects remain historical evidence.
+  Observation failures report `checkpoint-window.observation-infrastructure`
+  when they prevent an otherwise passing verdict. An observed absent/changed
+  checkpoint or unacknowledged sink reports `checkpoint-window.missed` instead.
+  Neither reason replaces an unexpected data failure (R8.7a). REST confirmation
+  alone does not establish transaction reuse or remaining checkpoint duration;
+  a calibration must audit those with transaction and asynchronous-snapshot evidence.
 - **R6.5** A plain time `wait: { duration: <duration> }` remains available but is
   never the primary trigger for a race-window scenario.
 - **R6.6** Repetition is an explicit `loop` step containing nested steps.
@@ -2266,6 +2299,11 @@ Connector pull-request gating is the same mechanism with one axis:
   was expected to pass keeps its own reason; an expected failure that did not
   occur, or occurred with another reason, reports `expectation.mismatch`. A
   negative control is therefore green only when it fails exactly as pinned.
+  An unconfirmed checkpoint kill window (R6.4c) may prevent an otherwise passing
+  verdict, including a matching negative control, but must never replace a
+  failure expected to pass or an expectation mismatch. In particular, lost,
+  duplicate, unexpected and malformed ID failures keep their original
+  `validator.kafka.id-set.*` reasons regardless of missing window evidence.
 - **R8.8** N-of-K is reported as evidence strength, never used as a threshold to
   dismiss a clean expectation mismatch. `inconclusive` is reserved for invalid
   evidence, including dirty health, retry exhaustion, an invalid baseline, or an

@@ -26,6 +26,55 @@ class ScenarioVerdictTest {
             ExpectedOutcome.failure("kafka.id-set", DUPLICATES);
 
     @Test
+    void missedCheckpointWindowNeverMasksUnexpectedDataFailures() {
+        for (String reason : List.of(DUPLICATES, "validator.kafka.id-set.missing-ids",
+                "validator.kafka.id-set.unexpected-ids", "validator.kafka.id-set.malformed-ids")) {
+            for (String observationFailure : java.util.Arrays.asList(null, "HTTP 500: NullArgumentException: input array")) {
+                var failed = terminalAttempt(V1ScenarioExecutionResult.Status.FAIL, reason,
+                        missedWindow(observationFailure), Optional.of(V1ScenarioExecutorTest.confirmedOrigins()));
+                var verdict = ScenarioVerdict.of(ExpectedOutcome.pass(), failed);
+                assertEquals(ScenarioVerdict.Status.FAIL, verdict.status());
+                assertEquals(reason, verdict.reason());
+                assertEquals(failed.message(), verdict.message());
+                assertFalse(verdict.matched());
+            }
+        }
+    }
+
+    @Test
+    void missingWindowOnlyPreventsAnOtherwiseMatchingVerdict() {
+        var passed = terminalAttempt(V1ScenarioExecutionResult.Status.PASS, "validator.kafka.id-set.match",
+                missedWindow(null), Optional.of(V1ScenarioExecutorTest.confirmedOrigins()));
+        assertEquals("checkpoint-window.missed", ScenarioVerdict.of(ExpectedOutcome.pass(), passed).reason());
+        assertEquals(ScenarioVerdict.Status.INCONCLUSIVE, ScenarioVerdict.of(ExpectedOutcome.pass(), passed).status());
+        // A negative control that unexpectedly passes must still fail its expectation.
+        assertEquals(ScenarioVerdict.EXPECTATION_MISMATCH, ScenarioVerdict.of(EXPECT_DUPLICATES, passed).reason());
+        var duplicate = terminalAttempt(V1ScenarioExecutionResult.Status.FAIL, DUPLICATES,
+                missedWindow(null), Optional.of(V1ScenarioExecutorTest.confirmedOrigins()));
+        assertEquals("checkpoint-window.missed", ScenarioVerdict.of(EXPECT_DUPLICATES, duplicate).reason());
+        assertEquals(V1ScenarioExecutionResult.Status.FAIL, duplicate.status());
+        assertEquals(DUPLICATES, duplicate.reason());
+        var observationFailed = terminalAttempt(V1ScenarioExecutionResult.Status.PASS, "validator.kafka.id-set.match",
+                missedWindow("HTTP 500"), Optional.of(V1ScenarioExecutorTest.confirmedOrigins()));
+        assertEquals(ExecutablePhaseExecutor.CHECKPOINT_OBSERVATION_INFRASTRUCTURE,
+                ScenarioVerdict.of(ExpectedOutcome.pass(), observationFailed).reason());
+    }
+
+    private static PhaseExecutionEvidence missedWindow(String failure) {
+        var kill = new PhaseExecutionEvidence.TaskManagerKill("$/phases/0/steps/1", List.of(), "taskmanager-1",
+                new FlinkJobObservation.Attempt(Optional.of(new FlinkJobObservation(50, FlinkJobState.RUNNING,
+                        1, 0, Optional.empty(), List.of(), List.of(new FlinkJobObservation.Subtask(
+                                "sink", 0, 0, "RUNNING", Optional.of("tm-resource"))))), Optional.empty()),
+                OptionalLong.of(100), OptionalLong.of(110),
+                Optional.of(new org.savonitar.flink.stability.runtime.api.TaskManagerControl.Identity(
+                        "taskmanager-1", "tm-1", "tm-resource")), Optional.empty(),
+                Optional.of(new CheckpointKillWindow(2, null, null, null, failure)));
+        return new PhaseExecutionEvidence(List.of(new PhaseExecutionEvidence.StepEvidence(
+                0, "window", kill.path(), List.of(), PhaseExecutionEvidence.StepKind.KILL_TASKMANAGER,
+                PhaseExecutionEvidence.StepStatus.SUCCEEDED, "killed")), List.of(kill), List.of());
+    }
+
+    @Test
     void unconfirmedRequestedFeatureCannotBlessANegativeControlOrConstructAPass() {
         var missing = new KafkaTransactionVersion.Selection(Optional.of(1), List.of(), Optional.empty());
         V1ScenarioExecutionResult failed = attempt(V1ScenarioExecutionResult.Status.FAIL, DUPLICATES);
@@ -326,10 +375,13 @@ class ScenarioVerdictTest {
             Optional<SubjectClassOrigins> origins) {
         FlinkProcessWriteFenceEvidence processes =
                 FlinkRuntimeIdentityTest.fence(1);
+        boolean windowFixture = phases.taskManagerKills().stream().anyMatch(kill -> kill.checkpointWindow().isPresent());
         FlinkJobObservation.Attempt finished = new FlinkJobObservation.Attempt(
                 Optional.of(new FlinkJobObservation(
-                        1_000, FlinkJobState.FINISHED, 1, 0, Optional.empty(),
-                        List.of(), List.of())),
+                        1_000, FlinkJobState.FINISHED, 1, windowFixture ? 1 : 0,
+                        windowFixture ? Optional.of(new FlinkJobObservation.Restore(1, 200)) : Optional.empty(),
+                        windowFixture ? List.of(new FlinkJobObservation.Failure(120, "Task failure",
+                                "TaskManager lost", Optional.of("tm-resource"))) : List.of(), List.of())),
                 Optional.empty());
         KafkaIdSetValidationResult oracle = new KafkaIdSetValidationResult(
                 status == V1ScenarioExecutionResult.Status.PASS

@@ -33,6 +33,11 @@ public final class ExecutablePhaseExecutor {
             "await.job-state.infrastructure";
     public static final String AWAIT_CHECKPOINT_INFRASTRUCTURE =
             "await.checkpoint-completed.infrastructure";
+    public static final String CHECKPOINT_WINDOW_MISSED = "checkpoint-window.missed";
+    public static final String AWAIT_CHECKPOINT_IN_PROGRESS_INFRASTRUCTURE =
+            "await.checkpoint-in-progress.infrastructure";
+    public static final String CHECKPOINT_OBSERVATION_INFRASTRUCTURE =
+            "checkpoint-window.observation-infrastructure";
     public static final String WAIT_INFRASTRUCTURE = "wait.infrastructure";
     public static final String TASKMANAGER_KILL_INFRASTRUCTURE =
             "taskmanager.kill.infrastructure";
@@ -132,7 +137,7 @@ public final class ExecutablePhaseExecutor {
                     !binding.jobId().equals(job.jobId()) || !binding.jobAlias().equals(plan.job().alias())).isPresent()) {
             throw new IllegalArgumentException("Token proof does not match the declared scope and submitted job");
         }
-        Recorder evidence = new Recorder(plan.flink().taskmanagers(), tokenProof, plan.kafka());
+        Recorder evidence = new Recorder(plan.flink().taskmanagers(), tokenProof, plan.kafka(), plan.job().sink());
         for (int phaseIndex = 0; phaseIndex < plan.phases().size(); phaseIndex++) {
             if (evidence.stopFurtherSteps) break;
             ExecutableScenarioPlan.Phase phase = plan.phases().get(phaseIndex);
@@ -167,6 +172,8 @@ public final class ExecutablePhaseExecutor {
             } else if (step instanceof ExecutableScenarioPlan.AwaitCheckpoints await) {
                 awaitCheckpoints(
                         phaseIndex, phaseName, path, loopIterations, job, await, evidence);
+            } else if (step instanceof ExecutableScenarioPlan.AwaitCheckpointInProgress await) {
+                awaitCheckpointInProgress(phaseIndex, phaseName, path, loopIterations, job, await, evidence);
             } else if (step instanceof ExecutableScenarioPlan.Wait wait) {
                 wait(phaseIndex, phaseName, path, loopIterations, wait, evidence);
             } else if (step instanceof ExecutableScenarioPlan.KillTaskManager kill) {
@@ -320,6 +327,36 @@ public final class ExecutablePhaseExecutor {
         }
     }
 
+    private void awaitCheckpointInProgress(int phaseIndex, String phaseName, String path,
+            List<PhaseExecutionEvidence.LoopIteration> iterations, FlinkJobHandle job,
+            ExecutableScenarioPlan.AwaitCheckpointInProgress await, Recorder evidence) throws PhaseExecutionException {
+        var deadline = org.savonitar.flink.stability.runtime.api.MonotonicDeadline.start(await.timeout(), nanoTime);
+        try {
+            while (!deadline.remaining().isZero()) {
+                var observation = flink.checkpointOverview(job, deadline.remaining());
+                long checkpoint = CheckpointKillWindow.eligibleCheckpoint(observation);
+                if (checkpoint > 1) {
+                    evidence.armedCheckpoint = observation;
+                    evidence.armedCheckpointId = checkpoint;
+                    succeeded(evidence, phaseIndex, phaseName, path, iterations,
+                            PhaseExecutionEvidence.StepKind.AWAIT_CHECKPOINT_IN_PROGRESS, "checkpoint=" + checkpoint);
+                    return;
+                }
+                sleeper.sleep(Duration.ofMillis(Math.min(100, deadline.remaining().toMillis())));
+            }
+        } catch (Exception failure) {
+            if (failure instanceof InterruptedException) Thread.currentThread().interrupt();
+            // A failed request is not an observed absence of an eligible checkpoint.
+            // This includes HTTP retries exhausting the shared REST deadline.
+            throw failed(evidence, phaseIndex, phaseName, path, iterations,
+                    PhaseExecutionEvidence.StepKind.AWAIT_CHECKPOINT_IN_PROGRESS, PhaseExecutionException.Outcome.INCONCLUSIVE,
+                    AWAIT_CHECKPOINT_IN_PROGRESS_INFRASTRUCTURE, failure);
+        }
+        throw failed(evidence, phaseIndex, phaseName, path, iterations,
+                PhaseExecutionEvidence.StepKind.AWAIT_CHECKPOINT_IN_PROGRESS, timeoutOutcome(await.onTimeout()),
+                CHECKPOINT_WINDOW_MISSED, new IOException("No eligible checkpoint observed before deadline"));
+    }
+
     private void awaitCheckpoints(
             int phaseIndex,
             String phaseName,
@@ -413,6 +450,18 @@ public final class ExecutablePhaseExecutor {
         }
     }
 
+    private List<org.savonitar.flink.stability.runtime.api.KafkaProducerSnapshot> observeSinkProducers(
+            Recorder evidence) throws Exception {
+        var deadline = org.savonitar.flink.stability.runtime.api.MonotonicDeadline.start(Duration.ofSeconds(5), nanoTime);
+        var observations = new ArrayList<org.savonitar.flink.stability.runtime.api.KafkaProducerSnapshot>();
+        for (int partition = 0; partition < evidence.sinkPartitions; partition++) {
+            observations.add(runtime.observeKafkaProducers(evidence.sink.topic().cluster(),
+                    evidence.sink.topic().topic(), partition,
+                    evidence.sink.transactionalIdPrefix().orElseThrow(), deadline.remaining()));
+        }
+        return List.copyOf(observations);
+    }
+
     private void killTaskManager(
             int phaseIndex,
             String phaseName,
@@ -426,12 +475,35 @@ public final class ExecutablePhaseExecutor {
         FlinkJobObservation.Attempt jobBeforeKill = FlinkJobObservation.Attempt.of(flink, job);
         IdentityObservation identity = taskManagerIdentity(kill.targetName());
         // The baseline spans multiple REST calls; its initial timestamp is not the kill boundary.
+        com.fasterxml.jackson.databind.JsonNode checkpointBefore = null;
+        String checkpointFailure = null;
+        List<org.savonitar.flink.stability.runtime.api.KafkaProducerSnapshot> brokerBefore = List.of(), brokerAfter = List.of();
+        if (evidence.armedCheckpoint != null) {
+            try {
+                checkpointBefore = flink.checkpointOverview(job, Duration.ofSeconds(5));
+                brokerBefore = observeSinkProducers(evidence);
+            }
+            catch (Exception failure) { checkpointFailure = failure.toString(); }
+        }
         OptionalLong beforeInjection = jobManagerTimeForKill(job);
         try {
             runtime.killTaskManager(kill.targetName(), TASKMANAGER_ACTION_TIMEOUT);
+            OptionalLong afterInjection = jobManagerTimeForKill(job);
+            Optional<CheckpointKillWindow> checkpointWindow = Optional.empty();
+            if (evidence.armedCheckpoint != null) {
+                com.fasterxml.jackson.databind.JsonNode checkpointAfter = null;
+                try {
+                    checkpointAfter = flink.checkpointOverview(job, Duration.ofSeconds(5));
+                    brokerAfter = observeSinkProducers(evidence);
+                }
+                catch (Exception failure) { checkpointFailure = checkpointFailure == null ? failure.toString() : checkpointFailure + "; " + failure; }
+                checkpointWindow = Optional.of(new CheckpointKillWindow(evidence.armedCheckpointId,
+                        evidence.armedCheckpoint, checkpointBefore, checkpointAfter, checkpointFailure, brokerBefore, brokerAfter));
+                evidence.armedCheckpoint = null;
+            }
             evidence.kills.add(new PhaseExecutionEvidence.TaskManagerKill(
                     path, loopIterations, kill.targetName(), jobBeforeKill,
-                    beforeInjection, jobManagerTimeForKill(job), identity.identity(), identity.failure()));
+                    beforeInjection, afterInjection, identity.identity(), identity.failure(), checkpointWindow));
             succeeded(
                     evidence,
                     phaseIndex,
@@ -798,9 +870,19 @@ public final class ExecutablePhaseExecutor {
         private final int expectedTaskManagers;
         private final Optional<TokenScopeProof.Requirement> tokenProof;
         private boolean stopFurtherSteps;
+        private com.fasterxml.jackson.databind.JsonNode armedCheckpoint;
+        private long armedCheckpointId;
+        private final ExecutableScenarioPlan.Sink sink;
+        private final int sinkPartitions;
 
         private Recorder(int expectedTaskManagers, Optional<TokenScopeProof.Requirement> tokenProof,
-                         ExecutableScenarioPlan.KafkaCluster kafka) {
+                         ExecutableScenarioPlan.KafkaCluster kafka, ExecutableScenarioPlan.Sink sink) {
+            this.sink = sink;
+            if (!kafka.alias().equals(sink.topic().cluster())) {
+                throw new IllegalArgumentException("Sink cluster differs from the executable Kafka cluster");
+            }
+            sinkPartitions = kafka.topics().stream().filter(topic -> topic.name().equals(sink.topic().topic()))
+                    .findFirst().orElseThrow().partitions();
             kafkaPartitions = kafka.brokers() == 1 ? List.of() : kafka.topics().stream().flatMap(topic -> java.util.stream.IntStream.range(0, topic.partitions())
                     .mapToObj(partition -> new org.savonitar.flink.stability.runtime.api.KafkaLogCapture.Partition(topic.name(), partition))).toList();
             this.expectedTaskManagers = expectedTaskManagers;
