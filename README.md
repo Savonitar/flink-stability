@@ -1,4 +1,16 @@
+<p align="center">
+  <img src="docs/assets/flink-stability-logo.png" width="360" alt="Project mascot: a happy squirrel beside an acorn resting on a spirit level with a centered bubble">
+</p>
+<p align="center">
+  <strong>Independent hobby project</strong><br>
+  Not affiliated with, endorsed by, or sponsored by the Apache Software Foundation.
+</p>
+
 # Flink Stability Testing Framework
+
+Apache, Apache Flink, Flink, and the Apache Flink logo are trademarks of
+the [Apache Software Foundation](https://www.apache.org/). The squirrel artwork above
+is this project's mascot, not the official Apache Flink logo.
 
 An experimental fault-injection and correctness-testing harness for [Apache Flink](https://flink.apache.org/)
 and the systems around it, starting with Kafka. It supports on-demand testing of
