@@ -55,8 +55,35 @@ class RuntimeSubstitutionTest(unittest.TestCase):
         common, candidate = self.options()
         self.assertEqual(self.canonical, subjects.with_runtime_substitutions(self.canonical, common, candidate))
 
+    def test_generic_layout_is_explicit_and_preserves_faults(self):
+        for layout in ('apache', 'confluent-platform'):
+            with self.subTest(layout=layout):
+                common, candidate = self.options('--kafka-launch', 'generic-kraft', '--kafka-layout', layout)
+                result = subjects.with_runtime_substitutions(self.canonical, common, candidate)
+                self.assertEqual(layout, common['kafkaLayout'])
+                self.assertIn('launch: ' + json.dumps({'type': 'generic-kraft', 'layout': layout}), result)
+                self.assertEqual(self.canonical.split('\nphases:\n')[1], result.split('\nphases:\n')[1])
+        common, _ = self.options('--kafka-launch', 'generic-kraft')
+        self.assertIn('launch: {"type": "generic-kraft"}', subjects.with_runtime_substitutions(self.canonical, common))
+
+    def test_runtime_jar_accepts_both_spellings_without_weakening_pins(self):
+        for filename in ('flink-dist-2.2.0.jar', 'flink-dist_2.12-1.20.2-vendor.jar',
+                         'flink-dist_2.12-2.2.0+vendor_1.jar'):
+            path = '/opt/flink/lib/' + filename
+            pin = subjects.runtime_jar_pin(path + '=' + 'b' * 64)
+            self.assertEqual({'container_path': path, 'sha256': 'b' * 64}, pin)
+        for value in ('flink-dist_-2.2.0.jar', 'flink-dist_2.12-.jar', 'flink-dist_2.12.jar',
+                      'flink-dist_2.12-../2.2.0.jar', 'flink-dist_2.12-2.2.0$.jar'):
+            with self.subTest(value=value), self.assertRaises(SystemExit):
+                subjects.runtime_jar_pin('/opt/flink/lib/' + value + '=' + 'b' * 64)
+        with self.assertRaises(SystemExit):
+            subjects.runtime_jar_pin('/opt/flink/lib/flink-dist_2.12-2.2.0.jar')
+
     def test_rejects_ambiguous_or_unpinned_inputs(self):
         for flags in (
+            ('--kafka-layout', 'confluent-platform'),
+            ('--kafka-launch', 'apache-kafka', '--kafka-layout', 'apache'),
+            ('--kafka-launch', 'generic-kraft', '--kafka-layout', 'other'),
             ('--flink-line', '2.9'), ('--flink-line', '02.9'),
             ('--flink-image-id', 'sha256:abc'), ('--kafka-image-id', 'latest'),
             ('--flink-image', 'image with spaces'), ('--kafka-image', ''),
@@ -108,9 +135,10 @@ class CustomRuntimeCommandTest(unittest.TestCase):
             '--prepare-only', '--baseline-connector-jar', 'candidate.jar', '--baseline-runtime-dir', 'runtime',
             '--flink-image', 'private/runtime:custom',
             '--flink-image-id', 'sha256:' + 'a' * 64, '--flink-line', '2.9',
-            '--runtime-jar', '/opt/flink/lib/flink-dist-private.jar=' + 'b' * 64,
+            '--runtime-jar', '/opt/flink/lib/flink-dist_2.12-private.jar=' + 'b' * 64,
             '--kafka-image', 'private/broker:custom', '--kafka-image-id', 'sha256:' + 'c' * 64,
-            '--kafka-launch', 'generic-kraft', '--broker-config', 'transaction.two.phase.commit.enable=true',
+            '--kafka-launch', 'generic-kraft', '--kafka-layout', 'confluent-platform',
+            '--broker-config', 'transaction.two.phase.commit.enable=true',
             '--flink-config', 'pipeline.name=shared', '--candidate-flink-config', 'pipeline.name=candidate',
             '--workload-jar', 'workload.jar', '--transaction-version', 'broker-default',
             '--transaction-id-naming-strategy', 'connector-default'))
@@ -122,6 +150,8 @@ class CustomRuntimeCommandTest(unittest.TestCase):
         self.assertEqual('sha256:' + 'a' * 64, common['flinkImageId'])
         self.assertEqual('private/broker:custom', common['kafkaImage'])
         self.assertEqual('sha256:' + 'c' * 64, common['kafkaImageId'])
+        self.assertEqual('confluent-platform', common['kafkaLayout'])
+        self.assertEqual('/opt/flink/lib/flink-dist_2.12-private.jar', common['runtimeJar']['container_path'])
         self.assertEqual({'pipeline.name': 'candidate'}, manifest['plan']['candidateFlinkConfig'])
         self.assertEqual(hashlib.sha256(b'custom workload fixture').hexdigest(), common['workloadJarSha256'])
         for side in ('baseline', 'candidate'):
@@ -132,6 +162,7 @@ class CustomRuntimeCommandTest(unittest.TestCase):
                              (catalog / 'bounded-eos.expected.yaml').read_bytes())
             text = (catalog / 'bounded-eos.yaml').read_text()
             self.assertIn('jar: "./workload.jar"', text)
+            self.assertIn('launch: {"type": "generic-kraft", "layout": "confluent-platform"}', text)
             self.assertEqual(original.decode().split('\nphases:\n')[1], text.split('\nphases:\n')[1])
         self.assertEqual(original, (self.root / 'scenarios/bounded-eos.yaml').read_bytes())
 

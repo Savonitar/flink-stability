@@ -10,20 +10,43 @@ import java.util.stream.IntStream;
 /** Explicit launcher contract; only host and hostPort differ between plan and created container. */
 public record KafkaRuntimeLaunch(String brokerAlias, Map<String, String> brokerProperties,
                                  Map<String, String> environment, List<String> command,
-                                 String logDirectory, String readinessCommand) {
+                                 String logDirectory, String readinessCommand, String layout) {
     public static final String CLUSTER_ID = "MkU3OEVBNTcwNTJENDM2Qk";
     public static final String CONFIG_FILE = "/tmp/flink-stability-kafka.properties";
-    public static final String READINESS_COMMAND =
-            "/opt/kafka/bin/kafka-broker-api-versions.sh --bootstrap-server localhost:19092";
-    public static final List<String> COMMAND = List.of("/bin/sh", "-ec",
+    public static final String READINESS_COMMAND = readinessCommand(KafkaRuntimeTarget.APACHE_LAYOUT);
+    public static final List<String> COMMAND = command(KafkaRuntimeTarget.APACHE_LAYOUT);
+
+    public KafkaRuntimeLaunch(String brokerAlias, Map<String, String> brokerProperties,
+                              Map<String, String> environment, List<String> command,
+                              String logDirectory, String readinessCommand) {
+        this(brokerAlias, brokerProperties, environment, command, logDirectory, readinessCommand,
+                KafkaRuntimeTarget.APACHE_LAYOUT);
+    }
+
+    public static String tool(String layout, String name) {
+        return switch (KafkaRuntimeTarget.requireLayout(layout)) {
+            case KafkaRuntimeTarget.APACHE_LAYOUT -> "/opt/kafka/bin/" + name + ".sh";
+            case KafkaRuntimeTarget.CONFLUENT_PLATFORM_LAYOUT -> "/usr/bin/" + name;
+            default -> throw new IllegalArgumentException("Unsupported Kafka tool layout: " + layout);
+        };
+    }
+
+    public static String readinessCommand(String layout) {
+        return tool(layout, "kafka-broker-api-versions") + " --bootstrap-server localhost:19092";
+    }
+
+    public static List<String> command(String layout) {
+        return List.of("/bin/sh", "-ec",
             "printf '%s\\n' \"$FLINK_STABILITY_KAFKA_PROPERTIES\" > " + CONFIG_FILE + "\n"
-                    + "/opt/kafka/bin/kafka-storage.sh format --ignore-formatted -t \"$CLUSTER_ID\" -c " + CONFIG_FILE + "\n"
-                    + "exec /opt/kafka/bin/kafka-server-start.sh " + CONFIG_FILE);
+                    + tool(layout, "kafka-storage") + " format --ignore-formatted -t \"$CLUSTER_ID\" -c " + CONFIG_FILE + "\n"
+                    + "exec " + tool(layout, "kafka-server-start") + " " + CONFIG_FILE);
+    }
 
     public KafkaRuntimeLaunch {
         brokerProperties = Collections.unmodifiableMap(new TreeMap<>(brokerProperties));
         environment = Collections.unmodifiableMap(new TreeMap<>(environment));
         command = List.copyOf(command);
+        layout = KafkaRuntimeTarget.requireLayout(layout);
     }
 
     public static KafkaRuntimeLaunch genericKraft(KafkaRuntimeTarget target, int node,
@@ -49,7 +72,7 @@ public record KafkaRuntimeLaunch(String brokerAlias, Map<String, String> brokerP
                 .map(entry -> entry.getKey() + "=" + escapePropertyValue(entry.getValue())).collect(Collectors.joining("\n"));
         return new KafkaRuntimeLaunch(alias, properties,
                 Map.of("CLUSTER_ID", CLUSTER_ID, "FLINK_STABILITY_KAFKA_PROPERTIES", serialized),
-                COMMAND, KafkaRuntimeTarget.LOG_DIRECTORY, READINESS_COMMAND);
+                command(target.layout()), KafkaRuntimeTarget.LOG_DIRECTORY, readinessCommand(target.layout()), target.layout());
     }
 
     /** Encode a literal scalar for both the direct properties file and the Apache Docker wrapper. */

@@ -75,6 +75,8 @@ final class SpecificationValidationService {
                 if (executable.kafka().runtimeTarget().customConfiguration()) {
                     var kafka = rendered.putObject("kafkaRuntime");
                     kafka.put("launchType", executable.kafka().launchType());
+                    if ("generic-kraft".equals(executable.kafka().launchType()))
+                        kafka.put("layout", executable.kafka().layout());
                     executable.kafka().imageId().ifPresent(value -> kafka.put("imageId", value));
                     kafka.set("brokerConfig", mapper.valueToTree(executable.kafka().brokerConfig()));
                     kafka.set("launches", mapper.valueToTree(executable.kafka().runtimeTarget().resolvedLaunches()));

@@ -111,19 +111,39 @@ class FlinkRuntimeTargetTest {
     }
 
     @Test
+    void runtimeJarAcceptsPlainAndScalaSuffixedDistributionNamesWithTheSamePinContract() {
+        for (String filename : List.of("flink-dist-2.2.0.jar", "flink-dist-vendor_2.4+build-1.jar",
+                "flink-dist_2.12-1.20.2.jar", "flink-dist_2.12-2.3-vendor.jar",
+                "flink-dist_2.13-2.4-SNAPSHOT+build_1.jar")) {
+            String path = "/opt/flink/lib/" + filename;
+            var jar = new FlinkRuntimeTarget.RuntimeJar(path, "a".repeat(64));
+            assertEquals(path, jar.containerPath());
+            assertEquals("a".repeat(64), jar.sha256());
+        }
+    }
+
+    @Test
     void runtimeJarRejectsTraversalOtherFilesAndMalformedChecksums() {
         for (String path : List.of("/opt/flink/lib/flink-dist-../escape.jar",
                 "/opt/flink/lib/../flink-dist-2.2.1.jar", "/opt/flink/lib/flink-runtime-2.2.1.jar",
                 "/opt/flink/lib/nested/flink-dist-2.2.1.jar", "/tmp/flink-dist-2.2.1.jar",
                 "file:/opt/flink/lib/flink-dist-2.2.1.jar", "/opt/flink/lib/flink-dist-.jar",
-                "/opt/flink/lib/flink-dist-2.2.1.jar;echo", "/opt/flink/lib/flink-dist-2.2.1 jar")) {
+                "/opt/flink/lib/flink-dist-2.2.1.jar;echo", "/opt/flink/lib/flink-dist-2.2.1 jar",
+                "/opt/flink/lib/flink-dist_2.12-.jar", "/opt/flink/lib/flink-dist_-2.3.jar",
+                "/opt/flink/lib/flink-dist_2.12.jar", "/opt/flink/lib/flink-dist_2.12-../escape.jar",
+                "/opt/flink/lib/../flink-dist_2.12-2.3.jar", "/opt/flink/lib/nested/flink-dist_2.12-2.3.jar",
+                "/tmp/flink-dist_2.12-2.3.jar", "/opt/flink/lib/flink-dist_2.12-.hidden.jar",
+                "/opt/flink/lib/flink-dist_2.12-2.3.jar;echo", "/opt/flink/lib/flink-dist_2.12-2.3 jar",
+                "/opt/flink/lib/flink-dist_2.12-2.3\n.jar", "/opt/flink/lib/flink-dist_2.12-$VERSION.jar")) {
             assertThrows(IllegalArgumentException.class,
                     () -> new FlinkRuntimeTarget.RuntimeJar(path, "a".repeat(64)), path);
         }
-        for (String checksum : List.of("", "A".repeat(64), "a".repeat(63),
-                "sha256:" + "a".repeat(64))) {
-            assertThrows(IllegalArgumentException.class, () -> new FlinkRuntimeTarget.RuntimeJar(
-                    "/opt/flink/lib/flink-dist-2.2.1.jar", checksum), checksum);
+        for (String path : List.of("/opt/flink/lib/flink-dist-2.2.1.jar", "/opt/flink/lib/flink-dist_2.12-2.3.jar")) {
+            for (String checksum : List.of("", "A".repeat(64), "a".repeat(63), "a".repeat(65),
+                    "sha256:" + "a".repeat(64))) {
+                assertThrows(IllegalArgumentException.class, () -> new FlinkRuntimeTarget.RuntimeJar(path, checksum), checksum);
+            }
+            assertThrows(NullPointerException.class, () -> new FlinkRuntimeTarget.RuntimeJar(path, null));
         }
     }
 

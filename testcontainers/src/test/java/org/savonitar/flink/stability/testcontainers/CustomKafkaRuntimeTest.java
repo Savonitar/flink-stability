@@ -7,6 +7,8 @@ import org.testcontainers.containers.Network;
 
 import java.util.Map;
 import java.util.Optional;
+import java.util.List;
+import org.savonitar.flink.stability.runtime.api.KafkaRuntimeLaunch;
 
 import static org.junit.jupiter.api.Assertions.*;
 
@@ -69,7 +71,7 @@ class CustomKafkaRuntimeTest {
         var container = new GenericKraftKafkaContainer(Network.SHARED, target, 1, 29092);
         container.configureLaunch("localhost");
         String actual = "sha256:" + "b".repeat(64);
-        assertThrows(IllegalStateException.class, () -> container.verifyCreated("1".repeat(64), actual));
+        assertThrows(IllegalStateException.class, () -> verifyCreated(container, target, actual));
         var runtime = new GenericKraftKafkaRuntime(Network.SHARED, target, java.util.List.of(container));
         var receipt = runtime.runtimeEvidence().orElseThrow().containers().getFirst();
         assertEquals("1".repeat(64), receipt.containerId());
@@ -79,12 +81,54 @@ class CustomKafkaRuntimeTest {
         assertFalse(runtime.runtimeEvidence().orElseThrow().confirms(target));
         assertTrue(receipt.environment().get("FLINK_STABILITY_KAFKA_PROPERTIES").contains("EXTERNAL://localhost:29092"));
         assertThrows(IllegalArgumentException.class, container::markReady);
-        container.verifyCreated("1".repeat(64), IMAGE_ID);
+        verifyCreated(container, target, IMAGE_ID);
         assertTrue(container.evidence().imageVerified());
         assertFalse(container.evidence().ready());
         container.markReady();
         assertTrue(container.evidence().ready());
         assertTrue(runtime.runtimeEvidence().orElseThrow().confirms(target));
+    }
+
+    @Test void eachLayoutUsesItsResolvedCommandReadinessAndObservedContainerInputs() {
+        for (String layout : List.of("apache", "confluent-platform")) {
+            var target = new KafkaRuntimeTarget("main", "vendor/kafka:private", KafkaBrokerPolicy.v1SingleBroker(), 1,
+                    Optional.of(IMAGE_ID), "generic-kraft", Map.of("log.retention.ms", "3600000"), layout);
+            var container = new GenericKraftKafkaContainer(Network.SHARED, target, 1, 29092);
+            container.configureLaunch("localhost");
+            var launch = KafkaRuntimeLaunch.genericKraft(target, 1, "localhost", "29092");
+            assertArrayEquals(new String[] {launch.command().getLast()}, container.getCommandParts());
+            var environment = launch.environment().entrySet().stream().map(e -> e.getKey() + "=" + e.getValue()).toList();
+            assertThrows(IllegalStateException.class, () -> container.verifyCreated("1".repeat(64), IMAGE_ID,
+                    List.of(), launch.command().subList(0, 2), launch.command().subList(2, 3)));
+            assertFalse(container.evidence().imageVerified());
+            assertThrows(IllegalStateException.class, () -> container.verifyCreated("1".repeat(64), IMAGE_ID,
+                    environment, List.of("/bin/bash", "-ec"), launch.command().subList(2, 3)));
+            assertThrows(IllegalStateException.class, () -> container.verifyCreated("1".repeat(64), IMAGE_ID,
+                    environment, launch.command().subList(0, 2), List.of("ignored-command")));
+            var duplicated = new java.util.ArrayList<>(environment);
+            duplicated.add(environment.getFirst());
+            assertThrows(IllegalStateException.class, () -> container.verifyCreated("1".repeat(64), IMAGE_ID,
+                    duplicated, launch.command().subList(0, 2), launch.command().subList(2, 3)));
+            verifyCreated(container, target, IMAGE_ID);
+            container.markReady();
+            var runtime = new GenericKraftKafkaRuntime(Network.SHARED, target, List.of(container));
+            var receipt = runtime.runtimeEvidence().orElseThrow();
+            assertEquals(layout, receipt.layout());
+            assertEquals(launch.readinessCommand(), receipt.containers().getFirst().readinessCommand());
+            assertEquals(launch.command(), receipt.containers().getFirst().command());
+            assertTrue(receipt.confirms(target));
+            var otherLayout = new KafkaRuntimeTarget("main", "vendor/kafka:private", KafkaBrokerPolicy.v1SingleBroker(), 1,
+                    Optional.of(IMAGE_ID), "generic-kraft", target.brokerConfig(),
+                    "apache".equals(layout) ? "confluent-platform" : "apache");
+            assertFalse(receipt.confirms(otherLayout));
+        }
+    }
+
+    private static void verifyCreated(GenericKraftKafkaContainer container, KafkaRuntimeTarget target, String imageId) {
+        var launch = KafkaRuntimeLaunch.genericKraft(target, 1, "localhost", "29092");
+        container.verifyCreated("1".repeat(64), imageId,
+                launch.environment().entrySet().stream().map(e -> e.getKey() + "=" + e.getValue()).toList(),
+                launch.command().subList(0, 2), launch.command().subList(2, 3));
     }
 
     @Test void apacheWrapperPropertiesKeepLiteralWhitespaceBackslashesAndSeparators() throws Exception {

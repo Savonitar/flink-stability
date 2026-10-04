@@ -13,11 +13,13 @@ public record KafkaRuntimeTarget(
         String clusterAlias,
         String imageReference,
         KafkaBrokerPolicy brokerPolicy, int brokers,
-        Optional<String> imageId, String launchType, Map<String, String> brokerConfig) {
+        Optional<String> imageId, String launchType, Map<String, String> brokerConfig, String layout) {
 
     public static final int INTERNAL_LISTENER_PORT = 19_092;
     public static final String APACHE_KAFKA = "apache-kafka";
     public static final String GENERIC_KRAFT = "generic-kraft";
+    public static final String APACHE_LAYOUT = "apache";
+    public static final String CONFLUENT_PLATFORM_LAYOUT = "confluent-platform";
     public static final String LOG_DIRECTORY = "/tmp/kafka-logs";
     private static final Set<String> OWNED_KEYS = Set.of("node.id", "broker.id", "cluster.id",
             "process.roles", "listeners", "advertised.listeners", "listener.security.protocol.map",
@@ -42,6 +44,17 @@ public record KafkaRuntimeTarget(
 
     public KafkaRuntimeTarget(String clusterAlias, String imageReference, KafkaBrokerPolicy policy, int brokers) {
         this(clusterAlias, imageReference, policy, brokers, Optional.empty(), APACHE_KAFKA, Map.of());
+    }
+
+    public KafkaRuntimeTarget(String clusterAlias, String imageReference, KafkaBrokerPolicy policy, int brokers,
+                              Optional<String> imageId, String launchType, Map<String, String> brokerConfig) {
+        this(clusterAlias, imageReference, policy, brokers, imageId, launchType, brokerConfig, APACHE_LAYOUT);
+    }
+
+    public static String requireLayout(String layout) {
+        if (!Set.of(APACHE_LAYOUT, CONFLUENT_PLATFORM_LAYOUT).contains(Objects.requireNonNull(layout, "layout")))
+            throw new IllegalArgumentException("Kafka generic-kraft layout must be apache or confluent-platform");
+        return layout;
     }
 
     public static boolean isReservedBrokerConfigKey(String key) {
@@ -114,6 +127,9 @@ public record KafkaRuntimeTarget(
         Objects.requireNonNull(brokerPolicy, "brokerPolicy");
         Objects.requireNonNull(imageId, "imageId");
         Objects.requireNonNull(launchType, "launchType");
+        layout = requireLayout(layout);
+        if (APACHE_KAFKA.equals(launchType) && !APACHE_LAYOUT.equals(layout))
+            throw new IllegalArgumentException("Kafka layout applies only to generic-kraft launch");
         imageId.ifPresent(value -> {
             if (!value.matches("sha256:[0-9a-f]{64}"))
                 throw new IllegalArgumentException("Kafka image_id must be a full local sha256 image ID");

@@ -54,7 +54,7 @@ class ValidateSpecificationsCommandTest {
         ObjectNode broker = (ObjectNode) document.at("/setup/kafka/clusters/main");
         broker.put("image", "internal/kafka:vendor").put("image_id", "sha256:" + "c".repeat(64))
                 .put("transaction_version", "broker-default");
-        broker.putObject("launch").put("type", "generic-kraft");
+        broker.putObject("launch").put("type", "generic-kraft").put("layout", "confluent-platform");
         broker.putObject("broker_config").put("transaction.two.phase.commit.enable", true);
         ObjectNode connector = (ObjectNode) document.at("/subject/connectors/kafka");
         connector.remove("runtime_dependencies");
@@ -69,7 +69,12 @@ class ValidateSpecificationsCommandTest {
         var plan = new com.fasterxml.jackson.databind.ObjectMapper().readTree(result.stdout());
         assertEquals("2.3", plan.at("/resolved/setup/flink/line").asText());
         assertEquals("generic-kraft", plan.at("/kafkaRuntime/launchType").asText());
+        assertEquals("confluent-platform", plan.at("/kafkaRuntime/layout").asText());
         assertEquals(1, plan.at("/kafkaRuntime/launches").size());
+        assertEquals("confluent-platform", plan.at("/kafkaRuntime/launches/0/layout").asText());
+        assertEquals("/usr/bin/kafka-broker-api-versions --bootstrap-server localhost:19092",
+                plan.at("/kafkaRuntime/launches/0/readinessCommand").asText());
+        assertTrue(plan.at("/kafkaRuntime/launches/0/command/2").asText().contains("/usr/bin/kafka-storage format"));
         assertEquals("custom-test", plan.at("/flinkConfig/pipeline.name").asText());
         assertEquals("connector-default", plan.at("/customRuntimeSubject/transactionIdNamingStrategy").asText());
         assertEquals("job.jar", plan.at("/customRuntimeSubject/workload/artifact").asText());
@@ -85,6 +90,24 @@ class ValidateSpecificationsCommandTest {
                 "--suite", "unused", "--show-plan");
         assertEquals(CommandLine.ExitCode.USAGE, result.exitCode());
         assertTrue(result.stderr().contains("--show-plan requires --scenario"));
+    }
+
+    @Test
+    void rejectsUnsupportedAndIgnoredKafkaLayoutsWithoutShowPlanOrArtifactAccess() throws IOException {
+        for (var example : List.of(
+                List.of("generic-kraft", "unknown", "runner.kafka.layout-unsupported"),
+                List.of("apache-kafka", "apache", "runner.kafka.layout-not-applicable"),
+                List.of("apache-kafka", "confluent-platform", "runner.kafka.layout-not-applicable"))) {
+            Path catalog = Files.createDirectories(temporaryDirectory.resolve(example.get(0) + "-" + example.get(1)));
+            writePair(catalog, "bad-layout", "missing-connector.jar", "missing-job.jar", "");
+            updateDocument(catalog.resolve("bad-layout.yaml"), document ->
+                    ((ObjectNode)document.at("/setup/kafka/clusters/main")).putObject("launch")
+                            .put("type", example.get(0)).put("layout", example.get(1)));
+            Invocation result = execute("validate", "--catalog-root", catalog.toString(),
+                    "--scenario", "bad-layout", "--artifact-root", temporaryDirectory.toString(), "--offline");
+            assertValidationFailure(result, "bad-layout.yaml [single] " + example.get(2)
+                    + " at $/setup/kafka/clusters/main/launch/layout");
+        }
     }
 
     @Test

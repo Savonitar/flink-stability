@@ -29,7 +29,7 @@ setup:
     line: "2.3"
     image_id: sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb
     runtime_jar:
-      container_path: /opt/flink/lib/flink-dist-vendor.jar
+      container_path: /opt/flink/lib/flink-dist_2.12-2.3-vendor.jar
       sha256: cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc
     config:
       execution.checkpointing.unaligned.enabled: true

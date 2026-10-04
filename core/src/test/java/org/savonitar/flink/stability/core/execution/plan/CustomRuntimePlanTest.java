@@ -44,6 +44,8 @@ class CustomRuntimePlanTest {
         var resolved = resolved(doc -> {});
         var plan = compiler.compile(resolved);
         assertEquals("2.3", plan.flink().declaredLine().orElseThrow());
+        assertEquals("/opt/flink/lib/flink-dist_2.12-2.3-vendor.jar",
+                plan.flink().expectedRuntimeJar().orElseThrow().containerPath());
         assertEquals("generic-kraft", plan.kafka().launchType());
         assertTrue(plan.kafka().transactionVersionBrokerDefault());
         assertTrue(plan.kafka().transactionVersion().isEmpty());
@@ -57,6 +59,7 @@ class CustomRuntimePlanTest {
             var bound = compiler.bind(prepared, plan);
             assertEquals(plan.flink().config(), bound.flinkRuntimeTarget().config());
             assertEquals(plan.flink().declaredLine(), bound.flinkRuntimeTarget().declaredLine());
+            assertEquals(plan.flink().expectedRuntimeJar(), bound.flinkRuntimeTarget().expectedRuntimeJar());
             assertEquals(1, bound.connectorBundle().imageConnectors().size());
             assertEquals("/opt/flink/lib/vendor-connector.jar", bound.connectorBundle().imageConnectors().getFirst().containerPath());
             assertEquals("image", prepared.connectorPrimaries().getFirst().origin());
@@ -85,6 +88,29 @@ class CustomRuntimePlanTest {
                     "runner.kafka.config-reserved-key");
     }
 
+    @Test void genericLayoutDefaultsToApacheAndResolvesConfluentCommands() throws Exception {
+        var defaultPlan = compiler.compile(resolved(doc -> {}));
+        assertEquals("apache", defaultPlan.kafka().layout());
+        assertEquals("apache", defaultPlan.kafka().runtimeTarget().resolvedLaunches().getFirst().layout());
+        for (String layout : List.of("apache", "confluent-platform")) {
+            var plan = compiler.compile(resolved(doc ->
+                    ((ObjectNode)doc.at("/setup/kafka/clusters/main/launch")).put("layout", layout)));
+            assertEquals(layout, plan.kafka().layout());
+            assertEquals(layout, plan.kafka().runtimeTarget().resolvedLaunches().getFirst().layout());
+            String executable = "apache".equals(layout) ? "/opt/kafka/bin/kafka-storage.sh" : "/usr/bin/kafka-storage";
+            assertTrue(plan.kafka().runtimeTarget().resolvedLaunches().getFirst().command().getLast().contains(executable));
+        }
+    }
+
+    @Test void rejectsUnknownOrInapplicableKafkaLayoutWithExactReasons() throws Exception {
+        rejects(doc -> ((ObjectNode)doc.at("/setup/kafka/clusters/main/launch")).put("layout", "unknown"),
+                "runner.kafka.layout-unsupported");
+        for (String layout : List.of("apache", "confluent-platform")) {
+            rejects(doc -> ((ObjectNode)doc.at("/setup/kafka/clusters/main/launch"))
+                    .put("type", "apache-kafka").put("layout", layout), "runner.kafka.layout-not-applicable");
+        }
+    }
+
     @Test void apacheLauncherRejectsAmbiguousAndWrapperOwnedPropertyKeysWithExactReasons() throws Exception {
         for (String key : List.of("custom..flag", "custom._flag", "custom_-flag")) {
             rejects(doc -> {
@@ -107,8 +133,7 @@ class CustomRuntimePlanTest {
     }
 
     private void rejects(Consumer<ObjectNode> edit, String code) throws Exception {
-        var plan = resolved(edit);
-        var failure = assertThrows(SpecificationException.class, () -> compiler.compile(plan));
+        var failure = assertThrows(SpecificationException.class, () -> compiler.compile(resolved(edit)));
         assertTrue(failure.diagnostics().stream().anyMatch(d -> d.code().equals(code)), failure.getMessage());
     }
 }

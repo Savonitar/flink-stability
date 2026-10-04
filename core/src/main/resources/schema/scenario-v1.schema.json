@@ -413,7 +413,13 @@
           "type": "object",
           "additionalProperties": false,
           "required": ["type"],
-          "properties": {"type": {"$ref": "#/$defs/nonEmptyString"}}
+          "properties": {
+            "type": {"$ref": "#/$defs/nonEmptyString"},
+            "layout": {
+              "$ref": "#/$defs/nonEmptyString",
+              "description": "generic-kraft only: apache (default) or confluent-platform. Selects all formatting, startup and readiness executables."
+            }
+          }
         },
         "broker_config": {
           "type": "object",

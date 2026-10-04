@@ -431,15 +431,25 @@ Connector pull-request gating is the same mechanism with one axis:
   omission retains `apache-kafka`. Unknown types reject with
   `runner.kafka.launch-unsupported`. `generic-kraft` starts the one- or three-node
   combined broker/controller topology of R4.2b using explicit properties,
-  environment and command. It requires `/bin/sh` and the distribution tools
-  `/opt/kafka/bin/kafka-storage.sh`, `kafka-server-start.sh` and
-  `kafka-broker-api-versions.sh`; it overrides the image entrypoint, writes
-  `/tmp/flink-stability-kafka.properties`, formats KRaft storage and starts Kafka.
+  environment and command. Its optional `launch.layout` is `apache` (default)
+  or `confluent-platform`. The Apache layout uses `/opt/kafka/bin/kafka-storage.sh`,
+  `/opt/kafka/bin/kafka-server-start.sh` and `/opt/kafka/bin/kafka-broker-api-versions.sh`.
+  The Confluent Platform layout uses `/usr/bin/kafka-storage`,
+  `/usr/bin/kafka-server-start` and `/usr/bin/kafka-broker-api-versions`, without
+  `.sh` suffixes. Unknown values reject with `runner.kafka.layout-unsupported`;
+  declaring any layout for `apache-kafka` rejects with
+  `runner.kafka.layout-not-applicable`. Layout is explicit, never inferred from
+  an image reference. Both layouts require `/bin/sh`, override the image entrypoint,
+  write `/tmp/flink-stability-kafka.properties`, format KRaft storage and start Kafka.
   Readiness invokes the broker's API-version tool on `localhost:19092`, rather
   than inferring health from an open port. The resolved plan shows the complete
-  command, environment, broker properties and `/tmp/kafka-logs` directory, with
+  layout, format/start command, readiness command, environment, broker properties
+  and `/tmp/kafka-logs` directory, with
   explicit placeholders for dynamically allocated external endpoints. Runtime
-  evidence retains the concrete launch and observed container/image identities.
+  evidence retains the concrete launch and observed container/image identities,
+  including `evidence.kafka.layout` and each generic container's
+  `readinessCommand`. Layout does not change harness-owned listeners, quorum,
+  properties-file placement or log-directory ownership.
 
   Optional `broker_config` maps property names to scalar values. Overrides are
   applied after the harness's ordinary policy and retained in both plan and
@@ -765,9 +775,12 @@ Connector pull-request gating is the same mechanism with one axis:
   does not prove that a particular Flink runtime class or PR code path executed.
 - **R4.13f** The first runner accepts optional `setup.flink.runtime_jar` with
   `container_path` and `sha256` strings, resolved after parameter interpolation.
-  The path must name a direct `/opt/flink/lib/flink-dist-<version>.jar` file; the
-  version uses only letters, digits, `.`, `_`, `+`, and `-`, beginning with a letter
-  or digit. The checksum is 64 lowercase hexadecimal characters, without a prefix.
+  The path must name a direct `/opt/flink/lib/flink-dist-<version>.jar` or
+  `/opt/flink/lib/flink-dist_<scala>-<version>.jar` file. The optional Scala label
+  and mandatory version each begin with a letter or digit and use only letters,
+  digits, `.`, `_`, `+`, and `-`. Neither label may be empty; nested paths and
+  shell metacharacters are rejected. The checksum remains mandatory: 64 lowercase
+  hexadecimal characters, without a prefix.
   This declares expected bytes already present in the image; the engine does not
   install or replace the distribution. Reject invalid descriptors before provisioning.
   Read and hash the file from every created container before starting Flink, and

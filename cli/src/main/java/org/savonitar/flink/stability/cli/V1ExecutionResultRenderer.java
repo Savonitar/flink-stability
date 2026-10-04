@@ -125,6 +125,7 @@ final class V1ExecutionResultRenderer {
                 kafka.put("compatibilityBasis", "author-assertion");
             });
             kafka.put("launchType", value.launchType());
+            if (value.layout() != null) kafka.put("layout", value.layout());
             kafka.set("brokerConfig", JSON.valueToTree(value.brokerConfig()));
             kafka.set("containers", JSON.valueToTree(value.containers()));
         });

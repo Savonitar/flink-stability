@@ -19,10 +19,10 @@ pool-reuse calibration's separate transaction-reuse checks.
 | --- | --- | --- |
 | `setup.flink.line: "major.minor"` | Declares the runtime line for an opaque tag. Requires `image_id` and `runtime_jar`. A parseable tag naming another line rejects with `capability.flink-line.tag-mismatch`; missing pins reject with `capability.flink-line.pin-required`. Without this field, the existing 2.2 and pinned experimental 2.4 policy applies. | `evidence.flinkRuntime.declaredLine` and `tag`; observed `imageId` / `runtimeJarSha256` only after unanimous provisioning receipts, plus per-process verification and runtime class origins. Declared pins remain under `expectedImageId` and `runtimeJar.expected`. |
 | `setup.flink.image_id` | Full local Docker `sha256:` image ID. Every created Flink container, including replacements, must match before process start. | Declared ID and every observed container image ID. |
-| `setup.flink.runtime_jar: {container_path: /opt/flink/lib/flink-dist-<version>.jar, sha256: ...}` | Pins the distribution JAR inside every Flink container; the path must directly name `/opt/flink/lib/flink-dist-<version>.jar`. JAR bytes and runtime class origins must agree. Missing or mismatched identity prevents PASS. | Per-incarnation JAR hashes and JobManager `ResourceManager` / TaskManager `TaskExecutor` origins. |
+| `setup.flink.runtime_jar: {container_path: /opt/flink/lib/flink-dist-<version>.jar, sha256: ...}` | Pins the distribution JAR inside every Flink container. Both `flink-dist-<version>.jar` and `flink-dist_<scala>-<version>.jar` are accepted directly under `/opt/flink/lib`; each label starts with a letter or digit and uses only letters, digits, dots, underscores, pluses and hyphens. The SHA-256 remains mandatory. JAR bytes and runtime class origins must agree. Missing or mismatched identity prevents PASS. | Per-incarnation JAR hashes and JobManager `ResourceManager` / TaskManager `TaskExecutor` origins. |
 | `subject.connectors.kafka.artifact: image:/opt/flink/lib/subject.jar` with `sha256` | Selects an existing image JAR; installs nothing. The path must be a normalized absolute JAR path and the pin must contain 64 lowercase hex characters. Dependencies must be absent or empty. Connector classes in another `/opt/flink/lib` JAR, staged dependency or workload are rejected, as are observed concrete connector classes loaded from elsewhere. | `evidence.connectorPrimaries` with `origin: image`, declared and observed hashes; per-container verification and class origins from every TaskManager incarnation. |
 | `setup.kafka.clusters.main.image_id` | Pins the broker image and permits a custom image reference. Without the pin the Apache Kafka 4.0 tag policy remains. A mismatched created-container image stops startup. | `evidence.kafka` retains the requested and observed image identities. |
-| `setup.kafka.clusters.main.launch: {type: generic-kraft}` | Explicit one- or three-node KRaft launcher described below. `apache-kafka` preserves the Testcontainers Apache launcher. Unknown types and unsupported broker counts reject. | Resolved plan and `evidence.kafka` retain the command, environment, properties/log directory and actual container identities. |
+| `setup.kafka.clusters.main.launch: {type: generic-kraft, layout: apache}` | Explicit one- or three-node KRaft launcher described below. Generic layout defaults to `apache`; `confluent-platform` selects Confluent tool paths. Unknown layouts reject with `runner.kafka.layout-unsupported`. Layout is not accepted with `apache-kafka` (`runner.kafka.layout-not-applicable`), which preserves the Testcontainers Apache launcher. | Resolved plan and `evidence.kafka` retain the layout, format/start command, readiness command, environment, properties/log directory and actual container identities. |
 | `setup.kafka.clusters.main.broker_config` | Literal broker property overrides. Harness-owned listeners, node/broker/cluster IDs, process roles, log directories, controller quorum and automatic topic creation cannot be overridden (`runner.kafka.config-reserved-key`). Invalid property names or multiline values reject. | Resolved overrides and actual broker launch configuration under `evidence.kafka`. |
 | `setup.kafka.clusters.main.transaction_version: broker-default` | Calls `describeFeatures`, records the observed finalized `transaction.version`, and never calls `updateFeatures`. Failed observation prevents PASS with inconclusive `kafka.feature.observation-unavailable`. Explicit `1`/`2` retain strict feature selection. | `evidence.kafkaTransactionVersion` reports `requested: broker-default`, observations, and `observed` or `unavailable` status with the error. |
 | `setup.flink.config` | Supplies scalar values to every process's `FLINK_PROPERTIES` and the REST job submission's `flinkConfiguration`. Reserved keys reject with `runner.flink.config-reserved-key`; invalid values reject with `runner.flink.config-invalid`. | The resolved map, `evidence.flinkRuntime.config`, and each successfully started TaskManager incarnation's configuration. |
@@ -94,19 +94,25 @@ launcher. Both launchers escape property values so leading whitespace and
 backslashes remain literal. The generic launcher writes property names directly
 and does not apply Apache's environment-name restrictions.
 
-`generic-kraft` requires `/bin/sh` and a Kafka distribution exposing
-`/opt/kafka/bin/kafka-storage.sh`, `kafka-server-start.sh`, and
-`kafka-broker-api-versions.sh`. It overrides the image entrypoint and writes an
-explicit properties file at `/tmp/flink-stability-kafka.properties`, formats the
-KRaft storage and starts the broker. Properties arrive through
+`generic-kraft` requires `/bin/sh` and an explicit tool layout. Omitting `layout`
+selects `apache`; it never infers the layout from the image name.
+
+| `launch.layout` | Format tool | Start tool | Readiness tool |
+| --- | --- | --- | --- |
+| `apache` (default) | `/opt/kafka/bin/kafka-storage.sh` | `/opt/kafka/bin/kafka-server-start.sh` | `/opt/kafka/bin/kafka-broker-api-versions.sh` |
+| `confluent-platform` | `/usr/bin/kafka-storage` | `/usr/bin/kafka-server-start` | `/usr/bin/kafka-broker-api-versions` |
+
+Both layouts override the image entrypoint and write an explicit properties file
+at `/tmp/flink-stability-kafka.properties`, format KRaft storage and start the
+broker. Properties arrive through
 `FLINK_STABILITY_KAFKA_PROPERTIES`; `CLUSTER_ID` is also explicit. The resolved
 plan contains the full command and properties, with host-port placeholders that
 are replaced and retained in actual container evidence.
 
 Each node has broker and controller roles, an internal listener on 19092, an
 external mapped listener on 9092 and a controller listener on 9094. The harness
-owns the voter set and node identities. Readiness executes the broker's own
-`kafka-broker-api-versions.sh` against the internal listener. A vendor image with
+owns the voter set and node identities. Readiness executes the selected layout's
+API-version tool against the internal listener. A vendor image with
 another filesystem layout or incompatible tools must be adapted explicitly;
 choosing an image ID does not make that layout compatible.
 
@@ -234,6 +240,12 @@ and copied expected-result document. The canonical files are never rewritten.
 Configuration values are evidence, so do not put passwords or other secrets in
 these options.
 
+For a Confluent Platform-style tool layout, supply both `--kafka-launch generic-kraft`
+and `--kafka-layout confluent-platform`, along with `--kafka-image` and its
+`--kafka-image-id` pin. The layout is shared by both arms and recorded in the
+manifest. `--runtime-jar /opt/flink/lib/flink-dist_2.12-<version>.jar=<sha256>`
+selects a Scala-suffixed runtime filename with the same mandatory pin.
+
 Validate the prepared copy before starting containers:
 
 ```sh
@@ -284,8 +296,21 @@ and confirmed the omitted finalized entry was interpreted as `implicit-zero`
 without a feature update. That probe covers observation, not an end-to-end
 pool-reuse run at level zero.
 
-These live results cover the stated public, single-broker combination. Private
-images, other Flink/connector versions, image-supplied connectors, three-node
+Also on 2026-10-04, `pool-reuse-inflight-control-v1` passed with the public ARM64
+`confluentinc/cp-kafka:8.3.2` image, pinned by local image ID, through
+`generic-kraft` with `layout: confluent-platform`. It used the same pinned public
+Flink 2.2.0 runtime and released connector 5.0.0-2.2 with unchanged POOLING naming,
+input, timing and expected result. The oracle observed exactly 14,000 records
+with no missing, duplicate, malformed or unexpected IDs. `broker-default`
+observed finalized transaction level **2** without requesting a feature update.
+The result retained the verified image identity, selected layout, actual format/
+start command and readiness command. Broker output and four physical segment
+archives were retained; all four archives parsed and decoded successfully.
+This attempt did not run the kill scenario against Confluent Kafka.
+
+These live results cover the stated public, single-broker combinations. Private
+images, `confluentinc/cp-server`, Scala-suffixed Flink distributions, other
+Flink/connector versions, image-supplied connectors, three-node
 generic clusters and the pinned `apache-kafka` launcher have not been exercised.
 The full calibration matrix has not been rerun with the rebuilt workload.
 Docker-free tests and offline fixtures cover the remaining configuration and

@@ -58,9 +58,14 @@ class RunScenarioCommandTest {
 
     @Test
     void customKafkaReceiptsSurviveLogSnapshotsAndBothCleanupPaths() throws Exception {
+        var launch = org.savonitar.flink.stability.runtime.api.KafkaRuntimeLaunch.command("confluent-platform");
+        String readiness = org.savonitar.flink.stability.runtime.api.KafkaRuntimeLaunch.readinessCommand("confluent-platform");
         var receipt = new org.savonitar.flink.stability.runtime.api.KafkaRuntimeEvidence(
                 "main", "custom/kafka:vendor", Optional.of("sha256:" + "a".repeat(64)),
-                "generic-kraft", Map.of("transaction.two.phase.commit.enable", "true"), List.of());
+                "generic-kraft", Map.of("transaction.two.phase.commit.enable", "true"),
+                List.of(new org.savonitar.flink.stability.runtime.api.KafkaRuntimeEvidence.Container(
+                        "kafka-main", "1".repeat(64), "sha256:" + "a".repeat(64), Map.of(), launch,
+                        "/tmp/kafka-logs", true, true, null, readiness)), "confluent-platform");
         var base = passResult().withKafkaRuntime(Optional.of(receipt));
         for (var result : List.of(base.withKafkaLogs(base.kafkaLogs()),
                 base.withComponentErrors(base.componentErrors()), base.withFlinkRestErrors(List.of()),
@@ -71,9 +76,22 @@ class RunScenarioCommandTest {
             var rendered = JSON.readTree(new V1ExecutionResultRenderer().render(
                     "custom", context("1234abcd"), expectation, result));
             assertEquals("generic-kraft", rendered.at("/evidence/kafka/launchType").asText());
+            assertEquals("confluent-platform", rendered.at("/evidence/kafka/layout").asText());
+            assertEquals(readiness, rendered.at("/evidence/kafka/containers/0/readinessCommand").asText());
+            assertEquals(launch.getLast(), rendered.at("/evidence/kafka/containers/0/command/2").asText());
             assertEquals("author-assertion", rendered.at("/evidence/kafka/compatibilityBasis").asText());
             assertEquals("true", rendered.at("/evidence/kafka/brokerConfig/transaction.two.phase.commit.enable").asText());
         }
+    }
+
+    @Test
+    void apacheWrapperEvidenceDoesNotClaimAGenericToolLayout() throws Exception {
+        var receipt = new org.savonitar.flink.stability.runtime.api.KafkaRuntimeEvidence(
+                "main", "apache/kafka:4.0.0", Optional.of("sha256:" + "a".repeat(64)),
+                "apache-kafka", Map.of(), List.of());
+        var rendered = JSON.readTree(new V1ExecutionResultRenderer().render("custom", context("1234abcd"),
+                expectation, passResult().withKafkaRuntime(Optional.of(receipt))));
+        assertFalse(rendered.at("/evidence/kafka").has("layout"));
     }
 
     @Test

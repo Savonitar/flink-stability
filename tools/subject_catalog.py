@@ -138,8 +138,8 @@ def path_digest(value, label):
 
 def runtime_jar_pin(value):
     pin = path_digest(value, '--runtime-jar')
-    if re.fullmatch(r'/opt/flink/lib/flink-dist-[A-Za-z0-9][A-Za-z0-9._+-]*\.jar', pin['container_path']) is None:
-        raise SystemExit('--runtime-jar must directly name /opt/flink/lib/flink-dist-<version>.jar')
+    if re.fullmatch(r'/opt/flink/lib/flink-dist(?:_[A-Za-z0-9][A-Za-z0-9._+-]*)?-[A-Za-z0-9][A-Za-z0-9._+-]*\.jar', pin['container_path']) is None:
+        raise SystemExit('--runtime-jar must directly name /opt/flink/lib/flink-dist-<version>.jar or flink-dist_<scala>-<version>.jar')
     return pin
 
 
@@ -175,6 +175,8 @@ def add_runtime_arguments(parser):
     parser.add_argument('--kafka-image', help='Common Kafka image reference')
     parser.add_argument('--kafka-image-id', help='Common local Kafka Docker image ID')
     parser.add_argument('--kafka-launch', choices=('apache-kafka', 'generic-kraft'))
+    parser.add_argument('--kafka-layout', choices=('apache', 'confluent-platform'),
+                        help='Generic KRaft tool layout; requires --kafka-launch generic-kraft (default: apache)')
     parser.add_argument('--broker-config', action='append', default=[], metavar='KEY=VALUE')
     parser.add_argument('--flink-config', action='append', default=[], metavar='KEY=VALUE')
     parser.add_argument('--candidate-flink-config', action='append', default=[], metavar='KEY=VALUE',
@@ -188,6 +190,8 @@ def add_runtime_arguments(parser):
 
 def runtime_substitutions(args, root):
     """Validate and retain every explicit common input before writing any catalogs."""
+    if args.kafka_layout is not None and args.kafka_launch != 'generic-kraft':
+        raise SystemExit('--kafka-layout requires --kafka-launch generic-kraft')
     for name in ('flink_image_id', 'kafka_image_id'):
         value = getattr(args, name)
         if value is not None and re.fullmatch(r'sha256:[0-9a-f]{64}', value) is None:
@@ -207,6 +211,7 @@ def runtime_substitutions(args, root):
         'runtimeJar': runtime_jar_pin(args.runtime_jar) if args.runtime_jar else None,
         'kafkaImage': args.kafka_image, 'kafkaImageId': args.kafka_image_id,
         'kafkaLaunch': args.kafka_launch,
+        'kafkaLayout': args.kafka_layout,
         'brokerConfig': configuration_pairs(args.broker_config, '--broker-config'),
         'flinkConfig': configuration_pairs(args.flink_config, '--flink-config'),
         'workloadJar': artifact_reference(args.workload_jar, root) if args.workload_jar else None,
@@ -237,6 +242,10 @@ def with_runtime_substitutions(document, common, candidate_config=None):
         if common.get(key) is not None}
     if common.get('kafkaLaunch') is not None:
         kafka['launch'] = {'type': common['kafkaLaunch']}
+    if common.get('kafkaLayout') is not None:
+        if common.get('kafkaLaunch') != 'generic-kraft' or common['kafkaLayout'] not in ('apache', 'confluent-platform'):
+            raise SystemExit('Kafka layout must be apache or confluent-platform with generic-kraft launch')
+        kafka['launch']['layout'] = common['kafkaLayout']
     if common.get('brokerConfig'):
         if re.search(r'(?m)^        broker_config:', document):
             raise SystemExit('Canonical broker config already exists; refusing to replace it')

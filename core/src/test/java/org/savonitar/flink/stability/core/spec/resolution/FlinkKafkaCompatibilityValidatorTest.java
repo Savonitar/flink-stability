@@ -77,18 +77,25 @@ class FlinkKafkaCompatibilityValidatorTest {
     void validatesRuntimeJarIdentityAfterParameterResolution() {
         String path = "/opt/flink/lib/flink-dist-2.2.0.jar";
         String hash = "a".repeat(64);
-        ScenarioSpecification valid = scenario(document -> {
-            parameter(document, "runtime_hash", "string", TextNode.valueOf(hash));
-            flink(document).putObject("runtime_jar").put("container_path", path)
-                    .put("sha256", "${runtime_hash}");
-        });
-        assertEquals(hash, resolver.resolve(valid, ResolutionRequest.none())
-                .side(ScenarioSide.SINGLE).document().at("/setup/flink/runtime_jar/sha256").textValue());
+        for (String accepted : java.util.List.of(path, "/opt/flink/lib/flink-dist_2.12-2.2.0-vendor.jar")) {
+            ScenarioSpecification valid = scenario(document -> {
+                parameter(document, "runtime_hash", "string", TextNode.valueOf(hash));
+                flink(document).putObject("runtime_jar").put("container_path", accepted)
+                        .put("sha256", "${runtime_hash}");
+            });
+            var resolvedJar = resolver.resolve(valid, ResolutionRequest.none())
+                    .side(ScenarioSide.SINGLE).document().at("/setup/flink/runtime_jar");
+            assertEquals(hash, resolvedJar.path("sha256").textValue());
+            assertEquals(accepted, resolvedJar.path("container_path").textValue());
+        }
 
         for (String[] invalid : java.util.List.of(
                 new String[] {"/opt/flink/lib/../flink-dist-2.2.0.jar", hash},
                 new String[] {"/tmp/flink-dist-2.2.0.jar", hash},
                 new String[] {"/opt/flink/lib/connector.jar", hash},
+                new String[] {"/opt/flink/lib/flink-dist_2.12-.jar", hash},
+                new String[] {"/opt/flink/lib/flink-dist_-2.2.0.jar", hash},
+                new String[] {"/opt/flink/lib/flink-dist_2.12-../escape.jar", hash},
                 new String[] {path, "sha256:" + hash},
                 new String[] {path, "A".repeat(64)})) {
             ScenarioSpecification bad = scenario(document -> {
@@ -108,6 +115,8 @@ class FlinkKafkaCompatibilityValidatorTest {
     void runtimeJarPinRequiresBothPathAndHashAndKeepsTheSupportedVersionBoundary() {
         assertFailsAt(Stage.DOCUMENT, () -> scenario(document -> flink(document)
                 .putObject("runtime_jar").put("sha256", "a".repeat(64))));
+        assertFailsAt(Stage.DOCUMENT, () -> scenario(document -> flink(document)
+                .putObject("runtime_jar").put("container_path", "/opt/flink/lib/flink-dist_2.12-2.2.0.jar")));
         ScenarioSpecification unsupported = scenario(document -> {
             flink(document).put("image", "local/flink:2.3-SNAPSHOT");
             flink(document).putObject("runtime_jar")

@@ -197,7 +197,7 @@ public final class FlinkRuntimeTarget {
     /** One directly addressed distribution JAR, with no host path or shell interpretation. */
     public record RuntimeJar(String containerPath, String sha256) {
         private static final Pattern PATH = Pattern.compile(
-                "/opt/flink/lib/flink-dist-[A-Za-z0-9][A-Za-z0-9._+-]*\\.jar");
+                "/opt/flink/lib/flink-dist(?:_[A-Za-z0-9][A-Za-z0-9._+-]*)?-[A-Za-z0-9][A-Za-z0-9._+-]*\\.jar");
 
         public RuntimeJar {
             containerPath = requireNonBlank(containerPath, "containerPath");
@@ -205,6 +205,7 @@ public final class FlinkRuntimeTarget {
             if (!PATH.matcher(containerPath).matches()) {
                 throw new IllegalArgumentException(
                         "Runtime JAR path must directly name /opt/flink/lib/flink-dist-<version>.jar"
+                                + " or /opt/flink/lib/flink-dist_<scala>-<version>.jar"
                                 + " using only letters, digits, dots, underscores, pluses, and hyphens");
             }
         }

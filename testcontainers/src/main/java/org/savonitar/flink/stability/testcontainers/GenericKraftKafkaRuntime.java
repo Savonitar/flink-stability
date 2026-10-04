@@ -11,7 +11,7 @@ import java.util.*;
 import java.util.concurrent.CompletableFuture;
 import java.util.stream.Collectors;
 
-/** Explicit one- or three-node KRaft launcher using the declared /opt/kafka binary layout. */
+/** Explicit one- or three-node KRaft launcher using the declared distribution's binary layout. */
 final class GenericKraftKafkaRuntime implements KafkaRuntimeCluster {
     private final KafkaRuntimeTarget target;
     private final Network network;
@@ -87,7 +87,7 @@ final class GenericKraftKafkaRuntime implements KafkaRuntimeCluster {
     @Override public Optional<KafkaRuntimeEvidence> runtimeEvidence() {
         return Optional.of(new KafkaRuntimeEvidence(target.clusterAlias(), target.imageReference(), target.imageId(),
                 target.launchType(), target.brokerConfig(), brokers.stream()
-                        .flatMap(broker -> broker.retainedEvidence().stream()).toList()));
+                        .flatMap(broker -> broker.retainedEvidence().stream()).toList(), target.layout()));
     }
 
     @Override public KafkaBrokerControl.Evidence brokerOperation(String name, boolean restart,

@@ -514,7 +514,8 @@ public final class ExecutableScenarioPlanCompiler {
                 Optional.ofNullable(clusterNode.path("image_id").textValue()),
                 clusterNode.path("launch").path("type").asText("apache-kafka"),
                 scalarMap(clusterNode.path("broker_config")),
-                "broker-default".equals(clusterNode.path("transaction_version").asText()));
+                "broker-default".equals(clusterNode.path("transaction_version").asText()),
+                clusterNode.path("launch").path("layout").asText("apache"));
         ObjectNode flinkNode = (ObjectNode) document.at("/setup/flink");
         ExecutableScenarioPlan.FlinkCluster flink = new ExecutableScenarioPlan.FlinkCluster(
                 flinkNode.path("image").textValue(),

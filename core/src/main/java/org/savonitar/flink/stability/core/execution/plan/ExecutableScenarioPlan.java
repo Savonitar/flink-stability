@@ -204,7 +204,16 @@ public final class ExecutableScenarioPlan {
             Optional<String> imageId,
             String launchType,
             Map<String, String> brokerConfig,
-            boolean transactionVersionBrokerDefault) {
+            boolean transactionVersionBrokerDefault,
+            String layout) {
+        public KafkaCluster(String alias, String imageReference, KafkaMode mode, int brokers,
+                            KafkaBrokerPolicy brokerPolicy, List<KafkaTopic> topics,
+                            Optional<Integer> transactionVersion, Optional<KafkaProxy> proxy,
+                            Optional<String> imageId, String launchType, Map<String, String> brokerConfig,
+                            boolean transactionVersionBrokerDefault) {
+            this(alias, imageReference, mode, brokers, brokerPolicy, topics, transactionVersion, proxy,
+                    imageId, launchType, brokerConfig, transactionVersionBrokerDefault, KafkaRuntimeTarget.APACHE_LAYOUT);
+        }
         public KafkaCluster(String alias, String imageReference, KafkaMode mode, int brokers,
                             KafkaBrokerPolicy brokerPolicy, List<KafkaTopic> topics,
                             Optional<Integer> transactionVersion, Optional<KafkaProxy> proxy) {
@@ -215,6 +224,7 @@ public final class ExecutableScenarioPlan {
             Objects.requireNonNull(imageId, "imageId");
             brokerConfig = immutableSortedMap(brokerConfig, "brokerConfig");
             Objects.requireNonNull(launchType, "launchType");
+            layout = KafkaRuntimeTarget.requireLayout(layout);
             if (transactionVersionBrokerDefault && transactionVersion.isPresent())
                 throw new IllegalArgumentException("broker-default cannot also select a feature level");
             alias = requireNonBlank(alias, "alias");
@@ -248,7 +258,7 @@ public final class ExecutableScenarioPlan {
         /** What the runtime needs to start this cluster; the broker policy is passed as is. */
         public KafkaRuntimeTarget runtimeTarget() {
             return new KafkaRuntimeTarget(alias, imageReference, brokerPolicy, brokers,
-                    imageId, launchType, brokerConfig);
+                    imageId, launchType, brokerConfig, layout);
         }
     }
 

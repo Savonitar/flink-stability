@@ -48,6 +48,17 @@ final class KafkaTopologyCompiler {
                 issues.add(issue(source, "runner.kafka.launch-unsupported", clusterPath + "/launch/type",
                         "Kafka launch type must be apache-kafka or generic-kraft"));
             }
+            if (cluster.path("launch").has("layout")) {
+                String layout = cluster.path("launch").path("layout").asText();
+                if (!java.util.Set.of("apache", "confluent-platform").contains(layout)) {
+                    issues.add(issue(source, "runner.kafka.layout-unsupported", clusterPath + "/launch/layout",
+                            "Kafka generic-kraft layout must be apache or confluent-platform"));
+                }
+                if (!"generic-kraft".equals(launch)) {
+                    issues.add(issue(source, "runner.kafka.layout-not-applicable", clusterPath + "/launch/layout",
+                            "Explicit Kafka tool layout applies only to generic-kraft launch"));
+                }
+            }
             cluster.path("broker_config").fields().forEachRemaining(entry -> {
                 try {
                     org.savonitar.flink.stability.runtime.api.KafkaRuntimeTarget.validateBrokerConfig(

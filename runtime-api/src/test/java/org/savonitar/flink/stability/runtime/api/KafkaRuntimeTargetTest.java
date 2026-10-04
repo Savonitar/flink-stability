@@ -79,12 +79,45 @@ class KafkaRuntimeTargetTest {
                 Optional.of("sha256:" + "a".repeat(64)), "generic-kraft", Map.of());
         assertEquals("vendor/private:build", target.imageReference());
         assertEquals(1, target.resolvedLaunches().size());
+        assertEquals("apache", target.layout());
         assertThrows(IllegalArgumentException.class, () -> new KafkaRuntimeTarget("main", "vendor/private:build",
                 policy(), 1, Optional.of("sha256:abc"), "generic-kraft", Map.of()));
         assertThrows(IllegalArgumentException.class, () -> new KafkaRuntimeTarget("main", "vendor/private:build",
                 policy(), 1, Optional.empty(), "generic-kraft", Map.of()));
         assertThrows(IllegalArgumentException.class, () -> new KafkaRuntimeTarget("main", "apache/kafka:4.0.0",
                 policy(), 1, Optional.empty(), "vendor", Map.of()));
+    }
+
+    @Test
+    void layoutsResolveAllCommandsAgainstIndependentFixtures() throws Exception {
+        for (String layout : List.of("apache", "confluent-platform")) {
+            var target = new KafkaRuntimeTarget("main", "vendor/kafka:private", policy(), 1,
+                    Optional.of("sha256:" + "a".repeat(64)), "generic-kraft", Map.of("log.retention.ms", "3600000"), layout);
+            var fixture = new Properties();
+            try (var input = getClass().getResourceAsStream("/kafka-runtime-launch/" + layout + ".properties")) {
+                fixture.load(java.util.Objects.requireNonNull(input));
+            }
+            var launch = target.resolvedLaunches().getFirst();
+            assertEquals(fixture.getProperty("layout"), launch.layout());
+            assertEquals(List.of("/bin/sh", "-ec", fixture.getProperty("command")), launch.command());
+            assertEquals(fixture.getProperty("readiness"), launch.readinessCommand());
+            assertEquals("/tmp/kafka-logs", launch.logDirectory());
+            assertEquals("3600000", launch.brokerProperties().get("log.retention.ms"));
+            assertEquals("INTERNAL://0.0.0.0:19092,EXTERNAL://0.0.0.0:9092,CONTROLLER://0.0.0.0:9094",
+                    launch.brokerProperties().get("listeners"));
+        }
+    }
+
+    @Test
+    void layoutCannotBeUnknownOrSelectDifferentToolsForTheApacheWrapper() {
+        for (String layout : List.of("unknown", "", "Confluent-platform", "/usr/bin")) {
+            assertThrows(IllegalArgumentException.class, () -> new KafkaRuntimeTarget("main", "apache/kafka:4.0.0",
+                    policy(), 1, Optional.empty(), "generic-kraft", Map.of(), layout));
+            assertThrows(IllegalArgumentException.class, () -> KafkaRuntimeLaunch.command(layout));
+            assertThrows(IllegalArgumentException.class, () -> KafkaRuntimeLaunch.readinessCommand(layout));
+        }
+        assertThrows(IllegalArgumentException.class, () -> new KafkaRuntimeTarget("main", "apache/kafka:4.0.0",
+                policy(), 1, Optional.empty(), "apache-kafka", Map.of(), "confluent-platform"));
     }
 
     @Test
