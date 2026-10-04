@@ -34,6 +34,8 @@ setup:
     config:
       execution.checkpointing.unaligned.enabled: true
       pipeline.auto-watermark-interval: 200
+    log_markers:
+      - {name: vendor-startup, regex: 'Vendor runtime ready', scope: taskmanager, required: false}
 subject:
   connectors:
     kafka:

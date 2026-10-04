@@ -122,6 +122,17 @@ class FlinkRuntimeTargetTest {
         }
     }
 
+    @Test void explicitLogMarkersSurviveTargetConfigurationAndAreImmutable() {
+        var marker = new FlinkLogMarker("patched", "CUSTOM-FIX", "taskmanager", true);
+        var original = target();
+        var configured = original.withLogMarkers(List.of(marker)).withConfig(java.util.Map.of("pipeline.name", "subject"))
+                .withExpectedImageId(IMAGE_ID).withTaskManagers(2);
+        assertTrue(original.logMarkers().isEmpty());
+        assertEquals(List.of(marker), configured.logMarkers());
+        assertThrows(UnsupportedOperationException.class, () -> configured.logMarkers().add(marker));
+        assertThrows(IllegalArgumentException.class, () -> original.withLogMarkers(List.of(marker, marker)));
+    }
+
     @Test
     void runtimeJarRejectsTraversalOtherFilesAndMalformedChecksums() {
         for (String path : List.of("/opt/flink/lib/flink-dist-../escape.jar",

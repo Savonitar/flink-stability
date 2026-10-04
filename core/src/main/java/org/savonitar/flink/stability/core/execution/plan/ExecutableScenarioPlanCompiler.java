@@ -146,7 +146,7 @@ public final class ExecutableScenarioPlanCompiler {
                 .map(runtimeTarget::withTokenProvider).orElse(runtimeTarget);
         runtimeTarget = executablePlan.flink().declaredLine()
                 .map(runtimeTarget::withDeclaredLine).orElse(runtimeTarget);
-        runtimeTarget = runtimeTarget.withConfig(executablePlan.flink().config());
+        runtimeTarget = runtimeTarget.withConfig(executablePlan.flink().config()).withLogMarkers(executablePlan.flink().logMarkers());
         return new PreparedExecutableScenarioPlan(
                 preparedPlan,
                 executablePlan,
@@ -159,6 +159,14 @@ public final class ExecutableScenarioPlanCompiler {
         Map<String, String> values = new java.util.TreeMap<>();
         node.fields().forEachRemaining(entry -> values.put(entry.getKey(), entry.getValue().asText()));
         return java.util.Collections.unmodifiableMap(values);
+    }
+
+    private static List<org.savonitar.flink.stability.runtime.api.FlinkLogMarker> logMarkers(JsonNode node) {
+        var markers = new ArrayList<org.savonitar.flink.stability.runtime.api.FlinkLogMarker>();
+        for (var value : node) markers.add(new org.savonitar.flink.stability.runtime.api.FlinkLogMarker(
+                value.path("name").asText(), value.path("regex").asText(), value.path("scope").asText(),
+                value.path("required").asBoolean(false)));
+        return org.savonitar.flink.stability.runtime.api.FlinkLogMarker.validate(markers);
     }
 
     private static void validateInvocation(
@@ -213,6 +221,10 @@ public final class ExecutableScenarioPlanCompiler {
                             "$/setup/flink/config/" + pointer(entry.getKey()), invalid.getMessage()));
                 }
             });
+        }
+        try { logMarkers(flink.path("log_markers")); }
+        catch (IllegalArgumentException invalid) {
+            issues.add(issue(source, "runner.flink.log-marker-invalid", "$/setup/flink/log_markers", invalid.getMessage()));
         }
     }
 
@@ -527,7 +539,7 @@ public final class ExecutableScenarioPlanCompiler {
                 HighAvailabilityPlanCompiler.highAvailability(flinkNode),
                 HighAvailabilityPlanCompiler.tokenProvider(flinkNode),
                 Optional.ofNullable(flinkNode.path("line").textValue()),
-                scalarMap(flinkNode.path("config")));
+                scalarMap(flinkNode.path("config")), logMarkers(flinkNode.path("log_markers")));
         ExecutableScenarioPlan.GeneratedIntegerSequenceInput input =
                 new ExecutableScenarioPlan.GeneratedIntegerSequenceInput(
                         clusterAlias,

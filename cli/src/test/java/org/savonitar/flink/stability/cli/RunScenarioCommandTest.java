@@ -102,6 +102,8 @@ class RunScenarioCommandTest {
         assertFalse(ordinary.at("/evidence/flinkRuntime").has("declaredLine"));
         assertFalse(ordinary.at("/evidence/flinkRuntime").has("compatibilityBasis"));
         assertFalse(ordinary.at("/evidence/flinkRuntime/components/0").has("effectiveConfiguration"));
+        assertFalse(ordinary.at("/evidence/flinkRuntime").has("logMarkers"));
+        assertFalse(ordinary.path("evidence").has("checkpointRetention"));
         assertFalse(ordinary.path("evidence").has("kafka"));
         var metadata = JSON.createObjectNode();
         metadata.putObject("workload").put("artifact", "subject-workload.jar").put("sha256", "a".repeat(64));
@@ -132,6 +134,32 @@ class RunScenarioCommandTest {
         assertEquals("pass", json.path("status").asText());
         assertEquals("partial", json.at("/evidence/kafkaLogs/status").asText());
         assertEquals("transport failure", json.at("/evidence/kafkaLogs/diagnostics/0").asText());
+    }
+
+    @Test void checkpointDestinationAndMarkerEvidenceReachCliOutputWithoutChangingDataReasons() throws Exception {
+        var seen = new AtomicReference<V1AttemptContext>();
+        var marker = new org.savonitar.flink.stability.runtime.api.FlinkLogMarker("patched", "CUSTOM-FIX", "taskmanager", false);
+        var markers = new org.savonitar.flink.stability.core.execution.FlinkLogMarkerEvidence(List.of(marker),
+                List.of(new org.savonitar.flink.stability.core.execution.FlinkLogMarkerEvidence.Observation(
+                        "patched", "taskmanager-1", "tm", "taskmanager-1#1", "process.log",
+                        "INFO CUSTOM-FIX ready", "CUSTOM-FIX", null, false)), List.of(), true);
+        var retained = new org.savonitar.flink.stability.core.execution.CheckpointRetentionEvidence("source", "output",
+                "output/checkpoints", "output/checkpoints/ha", "incomplete", List.of(), 0, List.of("copy error"));
+        var command = new RunScenarioCommand((root, name, overrides, options) -> new RunScenarioCommand.PreparedExecution() {
+            @Override public V1ScenarioExecutionResult execute(V1AttemptContext context) {
+                seen.set(context); return passResult().withFlinkLogMarkers(markers).withCheckpointRetention(retained);
+            }
+            @Override public ExecutableScenarioPlan.ExpectedOutcome expectedOutcome() { return expectation; }
+            @Override public void close() {}
+        }, () -> context("1234abcd"), new V1ExecutionResultRenderer(), new ValidationDiagnosticRenderer());
+        Path directory = temporaryDirectory.resolve("retained");
+        var result = execute(command, "--catalog-root", temporaryDirectory.toString(), "--scenario", "bounded-eos",
+                "--retain-checkpoints", directory.toString());
+        assertEquals(0, result.exitCode(), result.stderr());
+        assertEquals(directory, seen.get().retainCheckpoints().orElseThrow());
+        var json = JSON.readTree(result.stdout());
+        assertEquals("INFO CUSTOM-FIX ready", json.at("/evidence/flinkRuntime/logMarkers/observations/0/firstMatch").asText());
+        assertEquals("incomplete", json.at("/evidence/checkpointRetention/status").asText());
     }
 
     @Test
@@ -645,6 +673,45 @@ class RunScenarioCommandTest {
         assertEquals(terminal.reason(), output.at("/attempt/reason").textValue());
         assertEquals(JSON.readTree("[1]"), output.at("/evidence/terminalValidation/missingSamples"));
         assertEquals(1, output.at("/evidence/terminalValidation/missing").intValue());
+    }
+
+    @Test
+    void nonemptyAnomalySamplesRetainRawValuesAndCoordinatesWithoutChangingTheFailure() throws Exception {
+        var duplicate = new KafkaIdSetValidationResult.RecordSample(1, 7, "42");
+        var malformed = new KafkaIdSetValidationResult.RecordSample(2, 11, "not-an-id");
+        var unexpected = new KafkaIdSetValidationResult.RecordSample(3, 19, "999");
+        KafkaIdSetValidationResult terminal = new KafkaIdSetValidationResult(
+                KafkaIdSetValidationResult.Status.FAIL,
+                "validator.kafka.id-set.malformed-ids", "Malformed output",
+                new KafkaIdSetValidationResult.Evidence(
+                        1, 4, Optional.of(new KafkaIdSetValidationResult.DefectTotals(1, 1, 1, 1, 0)),
+                        List.of(), List.of(malformed), List.of(unexpected), List.of(duplicate), List.of(),
+                        Map.of(1, 0L, 2, 0L, 3, 0L), Map.of(1, 8L, 2, 12L, 3, 20L), true));
+        V1ScenarioExecutionResult result = new V1ScenarioExecutionResult(
+                V1ScenarioExecutionResult.Status.FAIL, terminal.reason(), terminal.message(),
+                Optional.empty(), Optional.empty(), Optional.empty(), Optional.of(runtimeFence()),
+                Optional.empty(), Optional.of(terminal), Optional.empty(), SUBJECT_ORIGINS,
+                runtimeComponents(), EXPECTED_RUNTIME, List.of());
+        JsonNode output = JSON.readTree(new V1ExecutionResultRenderer().render(
+                "bounded-eos", context("1234abcd"), expectation, result));
+        JsonNode validation = output.at("/evidence/terminalValidation");
+        assertEquals("fail", output.path("status").textValue());
+        assertEquals(terminal.reason(), output.at("/attempt/reason").textValue());
+        Map.of("duplicateSamples", duplicate, "malformedSamples", malformed,
+                "unexpectedSamples", unexpected).forEach((name, sample) -> {
+            JsonNode samples = validation.path(name);
+            assertEquals(1, samples.size());
+            assertEquals(sample.partition(), samples.get(0).path("partition").intValue());
+            assertEquals(sample.offset(), samples.get(0).path("offset").longValue());
+            assertEquals(sample.rawValue(), samples.get(0).path("rawValue").textValue());
+        });
+
+        JsonNode passing = JSON.readTree(new V1ExecutionResultRenderer().render(
+                "bounded-eos", context("1234abcd"), expectation, passResult()))
+                .at("/evidence/terminalValidation");
+        assertFalse(passing.has("duplicateSamples"));
+        assertFalse(passing.has("malformedSamples"));
+        assertFalse(passing.has("unexpectedSamples"));
     }
 
     @Test

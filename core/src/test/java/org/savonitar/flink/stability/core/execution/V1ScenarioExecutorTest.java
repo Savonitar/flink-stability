@@ -83,9 +83,37 @@ class V1ScenarioExecutorTest {
     @TempDir
     Path temporaryDirectory;
 
+    @org.junit.jupiter.api.BeforeEach
+    void normalizeTemporaryRoot() throws IOException { temporaryDirectory = temporaryDirectory.toRealPath(); }
+
     private int coordinatorPartitionCount = 7;
 
     private V1ScenarioExecutor.TransactionVersionSelection featureSelection = new KafkaTransactionVersion()::select;
+
+    @Test void markerEvidenceAndCheckpointRetentionAreCapturedAfterFenceBeforeCleanup() throws Exception {
+        for (boolean markerPresent : List.of(true, false)) {
+            var events = new ArrayList<String>();
+            try (var fixture = fixture(document -> ((ObjectNode)document.at("/setup/flink")).putArray("log_markers")
+                    .addObject().put("name", "patched").put("regex", "CUSTOM-FIX").put("scope", "taskmanager").put("required", true))) {
+                var runtime = new FakeRuntime(events);
+                runtime.componentLogs = List.of(new org.savonitar.flink.stability.runtime.api.FlinkComponentLog("taskmanager-1#tm-1",
+                        Files.writeString(temporaryDirectory.resolve("marker.log"), markerPresent ? "INFO CUSTOM-FIX ready\n" : "ordinary output\n"),
+                        false, Optional.empty()));
+                var context = attemptContext().withRetainCheckpoints(temporaryDirectory.resolve("retained-" + markerPresent));
+                Files.createDirectories(context.checkpointStorageRoot().resolve("ha"));
+                Files.writeString(context.checkpointStorageRoot().resolve("state"), "state-bytes");
+                var result = executor(events, runtime, new FakeFlink(events),
+                        (bootstrap, topic, ids, timeout) -> passResult()).execute(fixture.bound(), context);
+                assertEquals(markerPresent ? V1ScenarioExecutionResult.Status.PASS : V1ScenarioExecutionResult.Status.INCONCLUSIVE,
+                        result.status(), result.toString());
+                assertEquals(markerPresent, result.flinkLogMarkers().orElseThrow().requiredConfirmed());
+                assertEquals("complete", result.checkpointRetention().orElseThrow().status(), result.checkpointRetention().toString());
+                assertEquals("state-bytes", Files.readString(context.retainCheckpoints().orElseThrow().resolve("checkpoints/state")));
+                assertEquals(1, runtime.closeCalls.get());
+                assertTrue(runtime.fenced);
+            }
+        }
+    }
 
     private V1ScenarioExecutor.TransactionListing transactionListing =
             (bootstrapServers, prefix, timeout) -> new KafkaTransactionListing(prefix,
@@ -2427,6 +2455,7 @@ class V1ScenarioExecutorTest {
         /** Replaces the source that the fake class-load log reports, to model a mismatch. */
         private String loadedFrom;
         private Optional<FlinkRuntimeTarget.RuntimeJar> expectedRuntimeJar = Optional.empty();
+        private boolean logMarkersRequested;
         private String runtimeLoadedFrom;
         private boolean duplicateRuntimeLogPaths;
         private RuntimeException classLoadLogsFailure;
@@ -2562,6 +2591,7 @@ class V1ScenarioExecutorTest {
             primarySource = target.connectorBundle().classpathManifest().entries()
                     .getFirst().containerPath();
             expectedRuntimeJar = target.expectedRuntimeJar();
+            logMarkersRequested = !target.logMarkers().isEmpty();
             return "http://localhost:8081";
         }
 
@@ -2661,6 +2691,8 @@ class V1ScenarioExecutorTest {
 
         private List<FlinkComponentProvisioningEvidence> runtimeProvisioning() {
             return FlinkRuntimeIdentityTest.provisioning(taskManagerIncarnations).stream()
+                    .map(component -> logMarkersRequested ? component.withProcessConfiguration(Map.of(),
+                            component.logicalName() + "#" + component.runtimeId()) : component)
                     .map(component -> expectedRuntimeJar.map(jar -> component.withRuntimeJarEvidence(
                             jar, component.logicalName() + "#" + component.runtimeId())).orElse(component))
                     .toList();

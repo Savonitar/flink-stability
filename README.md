@@ -93,6 +93,18 @@ sshd 1.2.0 to 1.3.0. The host-port tunnel carries HA ZooKeeper-gate and token-se
 traffic, so compatibility checks must include a live HA token control.
 Live compatibility still depends on the Docker engine and images used for a run.
 
+If a Docker Engine 29 host rejects container startup with an API-version
+negotiation error (for example, a client API version below the daemon's minimum),
+set both the Docker client environment and the Java client's Maven property:
+
+```sh
+export DOCKER_API_VERSION=1.44
+mvn -Dapi.version=1.44 ...
+```
+
+Apply both settings to the same build or scenario-run command; setting only one
+does not configure every Docker client used by the harness.
+
 `validate` is Docker-free. It checks the broad v1 document, semantic, and artifact
 contract. `run` additionally checks the narrower capabilities implemented by the current
 prototype, so a valid broad-v1 scenario may still be rejected as not yet executable. The

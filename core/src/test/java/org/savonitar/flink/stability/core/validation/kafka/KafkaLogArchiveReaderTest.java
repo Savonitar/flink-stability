@@ -1,6 +1,7 @@
 package org.savonitar.flink.stability.core.validation.kafka;
 
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.io.TempDir;
 import org.savonitar.flink.stability.runtime.api.Digests;
 import org.savonitar.flink.stability.runtime.api.MonotonicDeadline;
@@ -14,6 +15,11 @@ import static org.junit.jupiter.api.Assertions.*;
 class KafkaLogArchiveReaderTest {
     private static final String NAME = "00000000000000000000.log";
     @TempDir Path directory;
+
+    @BeforeEach void resolveTemporaryRoot() throws java.io.IOException {
+        // macOS may allocate @TempDir below /var -> /private/var; keep production path guards strict.
+        directory = directory.toRealPath();
+    }
     private int sequence;
     private KafkaLogArchiveReader.Result inspect(byte[] bytes, boolean finished, String hash) throws Exception {
         Path file = directory.resolve("archive-" + sequence++ + ".tar"); Files.write(file, bytes);

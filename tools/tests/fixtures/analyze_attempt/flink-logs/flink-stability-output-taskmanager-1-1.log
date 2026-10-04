@@ -1,0 +1,2 @@
+INFO org.apache.flink.connector.kafka.sink.internal.KafkaCommitter - Recovered transaction fixture-sink-0-0
+INFO custom.logger - optional test marker

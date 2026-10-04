@@ -163,8 +163,30 @@ public final class V1ScenarioExecutor {
                     : KafkaLogEvidence.notRun();
             result = result.withKafkaLogs(logs);
         }
+        if (!prepared.executablePlan().flink().logMarkers().isEmpty()) {
+            List<org.savonitar.flink.stability.runtime.api.FlinkComponentLog> logs = List.of();
+            try { if (resources.runtime != null) logs = resources.runtime.flinkComponentLogs(); }
+            catch (RuntimeException ignored) { /* Empty inventory records missing evidence for every declaration. */ }
+            result = result.withFlinkLogMarkers(FlinkLogMarkerEvidence.collect(prepared.executablePlan().flink().logMarkers(),
+                    result.flinkProvisioningEvidence(), logs, confirmedPhysicalFence(result)));
+        }
+        if (context.retainCheckpoints().isPresent()) {
+            result = result.withCheckpointRetention(CheckpointRetentionEvidence.copy(context.checkpointStorageRoot(),
+                    context.retainCheckpoints().orElseThrow(), confirmedPhysicalFence(result)));
+        }
         RuntimeException cleanupFailure = resources.cleanup(cleanupBoundary);
         return cleanupFailure == null ? result : result.withCleanupFailure(cleanupFailure);
+    }
+
+    private static boolean confirmedPhysicalFence(V1ScenarioExecutionResult result) {
+        if (result.processFenceEvidence().isEmpty()) return false;
+        var stopped = result.processFenceEvidence().orElseThrow().components();
+        return result.expectedFlinkRuntime().components().entrySet().stream().allMatch(slot ->
+                result.flinkProvisioningEvidence().stream().filter(component -> component.logicalName().equals(slot.getKey())
+                        && component.role() == slot.getValue()).reduce((before, latest) -> latest)
+                        .filter(latest -> stopped.stream().anyMatch(component -> component.logicalName().equals(slot.getKey())
+                                && component.role() == slot.getValue() && component.runtimeId().filter(latest.runtimeId()::equals).isPresent()))
+                        .isPresent());
     }
 
     private V1ScenarioExecutionResult executeAttempt(

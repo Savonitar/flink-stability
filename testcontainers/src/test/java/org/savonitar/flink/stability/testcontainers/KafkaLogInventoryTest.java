@@ -3,6 +3,7 @@ package org.savonitar.flink.stability.testcontainers;
 import com.github.dockerjava.api.model.Frame;
 import com.github.dockerjava.api.model.StreamType;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.io.TempDir;
 import org.savonitar.flink.stability.runtime.api.MonotonicDeadline;
 
@@ -29,6 +30,11 @@ class KafkaLogInventoryTest {
     private static final OwnedKafkaArchiveCapture.Partition PARTITION = new OwnedKafkaArchiveCapture.Partition(
             Set.of("/tmp/kafka-logs"), "/tmp/kafka-logs", "output", 0);
     @TempDir Path directory;
+
+    @BeforeEach void resolveTemporaryRoot() throws java.io.IOException {
+        // macOS may allocate @TempDir below /var -> /private/var; keep production path guards strict.
+        directory = directory.toRealPath();
+    }
 
     @Test void inventoryBindsExactLogAndOmitsIndexPayloads() {
         FakeDriver driver = new FakeDriver();

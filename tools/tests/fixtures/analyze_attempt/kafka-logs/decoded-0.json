@@ -1,0 +1,208 @@
+{
+  "status": "PARSED_AND_DECODED",
+  "detail": "Synthetic decoded records for analyzer regression tests",
+  "expectedPartitionRoot": "output-0",
+  "inputVerified": true,
+  "tarComplete": true,
+  "allLogsDecoded": true,
+  "archiveBytes": 1000,
+  "archiveSha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "entries": [],
+  "logs": [
+    {
+      "path": "00000000000000000000.log",
+      "fileBaseOffset": 0,
+      "decoded": true,
+      "detail": "Synthetic fixture",
+      "segment": {
+        "batches": [
+          {
+            "fileByteOffset": 0,
+            "sizeBytes": 100,
+            "magic": 2,
+            "baseOffset": 0,
+            "lastOffset": 1,
+            "producerId": 7,
+            "producerEpoch": 2,
+            "baseSequence": 0,
+            "lastSequence": 1,
+            "leaderEpoch": 0,
+            "transactional": true,
+            "control": false,
+            "compression": "NONE",
+            "records": [
+              {
+                "offset": 0,
+                "sequence": 0,
+                "timestamp": 1000,
+                "keyBase64": null,
+                "valueBase64": null,
+                "canonicalId": 1,
+                "marker": null
+              },
+              {
+                "offset": 1,
+                "sequence": 1,
+                "timestamp": 1001,
+                "keyBase64": null,
+                "valueBase64": null,
+                "canonicalId": 2,
+                "marker": null
+              }
+            ]
+          },
+          {
+            "fileByteOffset": 200,
+            "sizeBytes": 100,
+            "magic": 2,
+            "baseOffset": 2,
+            "lastOffset": 2,
+            "producerId": 7,
+            "producerEpoch": 2,
+            "baseSequence": 0,
+            "lastSequence": 0,
+            "leaderEpoch": 0,
+            "transactional": true,
+            "control": true,
+            "compression": "NONE",
+            "records": [
+              {
+                "offset": 2,
+                "sequence": -1,
+                "timestamp": 1002,
+                "keyBase64": null,
+                "valueBase64": null,
+                "canonicalId": null,
+                "marker": {
+                  "type": "COMMIT",
+                  "coordinatorEpoch": 0
+                }
+              }
+            ]
+          },
+          {
+            "fileByteOffset": 300,
+            "sizeBytes": 100,
+            "magic": 2,
+            "baseOffset": 3,
+            "lastOffset": 4,
+            "producerId": 7,
+            "producerEpoch": 2,
+            "baseSequence": 0,
+            "lastSequence": 1,
+            "leaderEpoch": 0,
+            "transactional": true,
+            "control": false,
+            "compression": "NONE",
+            "records": [
+              {
+                "offset": 3,
+                "sequence": 0,
+                "timestamp": 1003,
+                "keyBase64": null,
+                "valueBase64": null,
+                "canonicalId": 1,
+                "marker": null
+              },
+              {
+                "offset": 4,
+                "sequence": 1,
+                "timestamp": 1004,
+                "keyBase64": null,
+                "valueBase64": null,
+                "canonicalId": 2,
+                "marker": null
+              }
+            ]
+          },
+          {
+            "fileByteOffset": 500,
+            "sizeBytes": 100,
+            "magic": 2,
+            "baseOffset": 5,
+            "lastOffset": 5,
+            "producerId": 7,
+            "producerEpoch": 2,
+            "baseSequence": 0,
+            "lastSequence": 0,
+            "leaderEpoch": 0,
+            "transactional": true,
+            "control": true,
+            "compression": "NONE",
+            "records": [
+              {
+                "offset": 5,
+                "sequence": -1,
+                "timestamp": 1005,
+                "keyBase64": null,
+                "valueBase64": null,
+                "canonicalId": null,
+                "marker": {
+                  "type": "COMMIT",
+                  "coordinatorEpoch": 0
+                }
+              }
+            ]
+          },
+          {
+            "fileByteOffset": 600,
+            "sizeBytes": 100,
+            "magic": 2,
+            "baseOffset": 6,
+            "lastOffset": 6,
+            "producerId": 8,
+            "producerEpoch": 0,
+            "baseSequence": 0,
+            "lastSequence": 0,
+            "leaderEpoch": 0,
+            "transactional": true,
+            "control": false,
+            "compression": "NONE",
+            "records": [
+              {
+                "offset": 6,
+                "sequence": 0,
+                "timestamp": 1006,
+                "keyBase64": null,
+                "valueBase64": null,
+                "canonicalId": 3,
+                "marker": null
+              }
+            ]
+          },
+          {
+            "fileByteOffset": 700,
+            "sizeBytes": 100,
+            "magic": 2,
+            "baseOffset": 7,
+            "lastOffset": 7,
+            "producerId": 8,
+            "producerEpoch": 0,
+            "baseSequence": 0,
+            "lastSequence": 0,
+            "leaderEpoch": 0,
+            "transactional": true,
+            "control": true,
+            "compression": "NONE",
+            "records": [
+              {
+                "offset": 7,
+                "sequence": -1,
+                "timestamp": 1007,
+                "keyBase64": null,
+                "valueBase64": null,
+                "canonicalId": null,
+                "marker": {
+                  "type": "ABORT",
+                  "coordinatorEpoch": 0
+                }
+              }
+            ]
+          }
+        ],
+        "recordCount": 8
+      }
+    }
+  ],
+  "expectedArchiveRoot": "00000000000000000000.log"
+}

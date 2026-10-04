@@ -33,7 +33,7 @@ public record SubjectClassOrigins(
     private static final Pattern CLASS_LOAD = Pattern.compile(
             "\\[class,load\\] (\\S+) source: (\\S+)");
     private static final Pattern HIDDEN_CLASS = Pattern.compile("[^/]+/0x[0-9a-fA-F]+");
-    private static final Pattern HIDDEN_LAMBDA = Pattern.compile("(.+)\\$\\$Lambda\\$[0-9]+/0x[0-9a-fA-F]+");
+    private static final Pattern HIDDEN_LAMBDA = Pattern.compile("(.+)\\$\\$Lambda(?:\\$[0-9]+)?/0x[0-9a-fA-F]+");
     private static final String FILE_URL = "file:";
 
     public SubjectClassOrigins {

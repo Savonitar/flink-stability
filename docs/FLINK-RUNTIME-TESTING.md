@@ -17,6 +17,38 @@ of the project under test. Keep the source revision and build commands with your
 evidence. The engine does not patch Flink, inject tests into its source tree, or infer a
 source commit from a Docker tag.
 
+To package a local `flink-dist` output without a private base image, use the
+runtime image builder:
+
+```sh
+tools/build_runtime_image.sh \
+  jobs/runtime/dist \
+  jobs/runtime/flink-connector-kafka.jar \
+  jobs/runtime/connector-closure \
+  local/flink:2.2.0-java21-candidate \
+  --java 21 --output jobs/runtime/image-build
+```
+
+The first argument is the complete distribution directory containing `bin/`,
+`conf/` and `lib/`, not the `flink-dist` Maven module. The closure is a flat
+directory of reviewed runtime dependency JARs; it may be empty. Use a fresh
+output directory and image tag. The builder stages only those inputs, replaces
+the stock distribution in a public `flink:<version>-java<N>` base, and applies
+the official image's bind-address edits with the distribution's configuration
+parser. Java defaults to 17; select 21 explicitly when needed. For a private
+version without a public tag, select a compatible public release base with
+`--base-image flink:2.2.0-java21` (and `--java 21`); this is an explicit
+entrypoint/layout choice, not a compatibility guarantee.
+
+The builder checks effective class-file versions against the selected Java,
+rejects separate `flink-runtime-*.jar` files and duplicate Kafka connector class
+sources, and verifies the built image's JAR inventory and hashes. Its JSON output
+and retained manifest provide the local image ID, distribution JAR path/hash and
+image-supplied connector path/hash. Use these as `image_id`, `runtime_jar`, and
+`subject.connectors.<alias>.artifact: image:<path>` with its `sha256` in a copied
+catalog. The image is built locally and is not pushed. Packaging success proves
+the recorded bytes and layout checks, not a successful scenario run.
+
 For an already-built image, obtain its local image ID:
 
 ```sh

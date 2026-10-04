@@ -6,6 +6,7 @@ an explicit baseline. Runtime substitutions apply to both copied catalogs, with 
 explicit candidate Flink configuration overlay when requested. Faults, timing and
 expectations stay unchanged. Run from the repository root after `mvn install`, or
 use --prepare-only to retain catalogs and hashes without starting Maven or Docker.
+Add --single-arm to prepare one subject catalog without a baseline or comparison.
 """
 import argparse
 from collections import Counter
@@ -45,6 +46,8 @@ def main():
     parser.add_argument("--profile", choices=tuple(PROFILES), help="Reviewed chaos coverage; requires an explicit parent baseline")
     parser.add_argument("--dry-run", action="store_true", help="Print the plan only; do not create files or invoke Maven/Docker")
     parser.add_argument("--prepare-only", action="store_true", help="Write both catalogs and their hashed manifest without running Maven/Docker")
+    parser.add_argument("--single-arm", action="store_true",
+                        help="With --prepare-only, write one subject catalog and no baseline comparison")
     add_runtime_arguments(parser)
     parser.add_argument("--producer-max-block-ms", type=int, help="Calibration only: identical positive max.block.ms for both copied workloads")
     parser.add_argument("--scenario", action="append", help="Canonical scenario name; repeatable")
@@ -66,6 +69,13 @@ def main():
         parser.error("Choose --profile or repeated --scenario, not both")
     root = Path.cwd().resolve()
     common_runtime, candidate_config = runtime_substitutions(args, root)
+    if args.single_arm:
+        if not args.prepare_only:
+            parser.error("--single-arm requires --prepare-only; it does not execute a comparison")
+        if args.baseline_connector_jar or args.baseline_runtime_dir or args.baseline_subject or args.profile:
+            parser.error("--single-arm cannot be combined with baseline options or a comparison profile")
+        if candidate_config:
+            parser.error("--single-arm uses --flink-config; omit --candidate-flink-config")
     # Image declarations can be checked even for a dry run; there is no host file to read.
     for reference in (args.subject, args.baseline_subject):
         if reference is not None:
@@ -76,7 +86,7 @@ def main():
                              if not (key == "flinkImage" and value == "docker.io/library/flink:2.2.0")}
     strict_inputs = (any(value not in (None, {}) for value in custom_runtime_values.values())
                      or bool(candidate_config) or args.subject is not None or args.baseline_subject is not None)
-    if strict_inputs:
+    if strict_inputs and not args.single_arm:
         if args.baseline_connector_jar is None and args.baseline_subject is None:
             parser.error("Custom runtime comparison requires an explicit baseline with the same subject source mode")
         if (args.subject is None) != (args.baseline_subject is None):
@@ -97,6 +107,13 @@ def main():
             "runtimeSubstitutions": common_runtime, "candidateFlinkConfig": candidate_config,
             "strictArmInputs": bool(strict_inputs),
             "producerMaxBlockMs": args.producer_max_block_ms}
+    if args.single_arm:
+        plan.update(mode="single-arm-prepare", arms=["subject"], subject=plan.pop("candidate"),
+                    totalRuns=len(names) * args.runs,
+                    estimatedMinutes=[len(names) * args.runs * 1.5, len(names) * args.runs * 3])
+        del plan["baseline"]
+        del plan["candidateFlinkConfig"]
+        del plan["strictArmInputs"]
     print("Plan: " + json.dumps(plan, sort_keys=True), flush=True)
     print("Estimate assumes warm images/artifacts: 1.5–3 minutes per independent run; not a deadline or measured guarantee.", flush=True)
     if args.dry_run:
@@ -112,25 +129,25 @@ def main():
             root, args.baseline_connector_jar, args.baseline_runtime_dir)
     if args.baseline_subject is not None:
         baseline, baseline_snippet = image_subject(args.baseline_subject)
-    if strict_inputs and baseline["dependencyMode"] == candidate["dependencyMode"] == "explicit":
+    if not args.single_arm and strict_inputs and baseline["dependencyMode"] == candidate["dependencyMode"] == "explicit":
         if sorted(baseline["runtimeDependencySha256"].values()) != sorted(candidate["runtimeDependencySha256"].values()):
             raise SystemExit("Baseline and candidate runtime dependency bytes must match; only connector artifact and explicit candidate Flink config may differ")
     # Validate every scenario before creating any output.
     requirements = {name: fault_requirements(path.read_text()) for name, path in scenarios.items()}
-    replacements = {"candidate": {name: replace_subject(path.read_text(), candidate_snippet)
+    replacements = {"subject" if args.single_arm else "candidate": {name: replace_subject(path.read_text(), candidate_snippet)
                                    for name, path in scenarios.items()}}
     if baseline_snippet is not None:
         replacements["baseline"] = {name: replace_subject(path.read_text(), baseline_snippet)
                                     for name, path in scenarios.items()}
     if args.producer_max_block_ms is not None:
-        if "baseline" not in replacements:
+        if not args.single_arm and "baseline" not in replacements:
             replacements["baseline"] = {name: path.read_text() for name, path in scenarios.items()}
         for documents in replacements.values():
             for name, document in documents.items():
                 documents[name] = with_producer_max_block(document, args.producer_max_block_ms)
     has_runtime_substitutions = any(value not in (None, {}) for value in common_runtime.values())
     if has_runtime_substitutions or candidate_config or args.prepare_only:
-        if "baseline" not in replacements:
+        if not args.single_arm and "baseline" not in replacements:
             replacements["baseline"] = {name: path.read_text() for name, path in scenarios.items()}
         for side, documents in replacements.items():
             for name, document in documents.items():
@@ -142,7 +159,7 @@ def main():
     if not output.is_relative_to(root):
         raise SystemExit("Output directory must stay inside the artifact root")
     output.mkdir(parents=True, exist_ok=False)
-    catalogs = {"baseline": root / "scenarios"}
+    catalogs = {} if args.single_arm else {"baseline": root / "scenarios"}
     for side, documents in replacements.items():
         catalog = output / (side + "-catalog")
         catalog.mkdir()
@@ -157,6 +174,10 @@ def main():
         for side, catalog in catalogs.items()}
     manifest = {"baseline": baseline, "candidate": candidate, "scenarios": names, "runs": args.runs,
                 "plan": plan, "faultRequirements": requirements, "catalogHashes": catalog_hashes}
+    if args.single_arm:
+        del manifest["baseline"]
+        del manifest["candidate"]
+        manifest.update(mode="single-arm-prepare", arms={"subject": candidate})
 
     (output / "manifest.json").write_text(json.dumps(manifest, indent=2) + "\n")
     if args.prepare_only:

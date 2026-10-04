@@ -194,7 +194,10 @@ class SubjectClassOriginsTest {
                 log("taskmanager-1#1", line(SOURCE, PRIMARY), line(SINK, PRIMARY),
                         line(writer, PRIMARY), line(outer, PRIMARY), line(inner, PRIMARY),
                         line(writer + "$$Lambda$937/0x000000b80166ed48", writer),
+                        line(writer + "$$Lambda/0x000000b80166ed50", writer),
+                        line(inner + "$$Lambda/0x000000a0017a2f21", outer),
                         line(inner + "$$Lambda$1265/0x000000a0017a2f20", outer),
+                        line(writer + "$$Lambda/0x000000b80166ed51", "__JVM_LookupDefineClass__"),
                         line(writer + "$$Lambda$938/0x000000b80166ed49", "__JVM_LookupDefineClass__"))),
                 ENTRY_CLASSES, PRIMARY);
         assertEquals(SubjectClassOrigins.Outcome.CONFIRMED, origins.outcome(ENTRY_CLASSES));
@@ -209,7 +212,10 @@ class SubjectClassOriginsTest {
         String hidden = writer + "$$Lambda$1/0x0123abcd";
         for (String[] loads : List.of(
                 new String[]{line(writer, "/vendor/foreign.jar"), line(hidden, writer)},
+                new String[]{line(writer, "/vendor/foreign.jar"), line(writer + "$$Lambda/0x0123abcd", writer)},
+                new String[]{line(writer, "/vendor/foreign.jar"), line(writer + "$$Lambda/0x0123abcd", "__JVM_LookupDefineClass__")},
                 new String[]{line(writer, PRIMARY), line(hidden, "/vendor/foreign.jar")},
+                new String[]{line(writer, PRIMARY), line(writer + "$$Lambda/0x0123abcd", "/vendor/foreign.jar")},
                 new String[]{line(writer, "__JVM_LookupDefineClass__")},
                 new String[]{line(writer, PRIMARY), line(writer + "$$Lambda$1/not-a-hidden-id", writer)})) {
             var lines = new ArrayList<>(List.of(line(SOURCE, PRIMARY), line(SINK, PRIMARY)));
@@ -223,11 +229,15 @@ class SubjectClassOriginsTest {
     @Test
     void hiddenLambdaWithoutItsConcreteHostIsUnconfirmed() throws IOException {
         String writer = "org.apache.flink.connector.kafka.sink.KafkaWriter";
+        for (String suffix : List.of("$$Lambda$1/0x0123abcd", "$$Lambda/0x0123abcd")) {
+        for (String source : List.of(writer, "__JVM_LookupDefineClass__")) {
         var origins = SubjectClassOrigins.readImageSubject(List.of(
                 log("taskmanager-1#1", line(SOURCE, PRIMARY), line(SINK, PRIMARY),
-                        line(writer + "$$Lambda$1/0x0123abcd", writer))), ENTRY_CLASSES, PRIMARY);
+                        line(writer + suffix, source))), ENTRY_CLASSES, PRIMARY);
         assertEquals(SubjectClassOrigins.Outcome.UNCONFIRMED, origins.outcome(ENTRY_CLASSES));
         assertTrue(origins.failure().orElseThrow().contains("declaring-class origin: " + writer));
+        }
+        }
     }
 
     private static FlinkComponentProvisioningEvidence provisioned(

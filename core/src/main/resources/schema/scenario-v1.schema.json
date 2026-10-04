@@ -655,6 +655,19 @@
             "proof_scope": {"type": "string", "enum": ["bootstrap", "submitted-job"]}
           }
         },
+        "log_markers": {
+          "type": "array",
+          "items": {
+            "type": "object", "additionalProperties": false,
+            "required": ["name", "regex", "scope"],
+            "properties": {
+              "name": {"$ref": "#/$defs/nonEmptyString"},
+              "regex": {"$ref": "#/$defs/nonEmptyString"},
+              "scope": {"type": "string", "enum": ["taskmanager", "jobmanager"]},
+              "required": {"type": "boolean", "default": false}
+            }
+          }
+        },
         "config": {
           "type": "object",
           "additionalProperties": {

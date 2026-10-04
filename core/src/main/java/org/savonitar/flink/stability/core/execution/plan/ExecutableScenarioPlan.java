@@ -308,7 +308,17 @@ public final class ExecutableScenarioPlan {
             Optional<FlinkRuntimeTarget.HighAvailability> highAvailability,
             Optional<FlinkRuntimeTarget.TokenProvider> tokenProvider,
             Optional<String> declaredLine,
-            Map<String, String> config) {
+            Map<String, String> config,
+            @com.fasterxml.jackson.annotation.JsonInclude(com.fasterxml.jackson.annotation.JsonInclude.Include.NON_EMPTY)
+            List<org.savonitar.flink.stability.runtime.api.FlinkLogMarker> logMarkers) {
+        public FlinkCluster(String imageReference, Optional<String> expectedImageId, int jobmanagers, int taskmanagers,
+                            Optional<FlinkRuntimeTarget.RuntimeJar> expectedRuntimeJar,
+                            Optional<FlinkRuntimeTarget.HighAvailability> highAvailability,
+                            Optional<FlinkRuntimeTarget.TokenProvider> tokenProvider, Optional<String> declaredLine,
+                            Map<String, String> config) {
+            this(imageReference, expectedImageId, jobmanagers, taskmanagers, expectedRuntimeJar,
+                    highAvailability, tokenProvider, declaredLine, config, List.of());
+        }
         public FlinkCluster(String imageReference, Optional<String> expectedImageId,
                             int jobmanagers, int taskmanagers,
                             Optional<FlinkRuntimeTarget.RuntimeJar> expectedRuntimeJar,
@@ -329,6 +339,7 @@ public final class ExecutableScenarioPlan {
         }
 
         public FlinkCluster {
+            logMarkers = org.savonitar.flink.stability.runtime.api.FlinkLogMarker.validate(logMarkers);
             Objects.requireNonNull(declaredLine, "declaredLine");
             config = org.savonitar.flink.stability.runtime.api.FlinkConfiguration.validate(config);
             imageReference = requireNonBlank(imageReference, "imageReference");

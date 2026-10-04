@@ -1,0 +1,99 @@
+{
+  "selection": {
+    "partitionCount": 50,
+    "transactionalIds": [
+      {
+        "id": "fixture-sink-0-0",
+        "partition": 3
+      }
+    ]
+  },
+  "observations": {
+    "scope": "Synthetic retained physical records",
+    "decoded": true,
+    "coordinatorRecords": [
+      {
+        "source": {
+          "topic": "__transaction_state",
+          "partition": 3,
+          "file": "synthetic-coordinator.log"
+        },
+        "offset": 0,
+        "record": {
+          "status": "DECODED",
+          "transactionalId": "fixture-sink-0-0",
+          "decoded": {
+            "producerId": 7,
+            "producerEpoch": 2,
+            "stateName": "Ongoing",
+            "startTimestampMs": 1000,
+            "lastUpdateTimestampMs": 1010
+          },
+          "detail": "Synthetic fixture"
+        }
+      },
+      {
+        "source": {
+          "topic": "__transaction_state",
+          "partition": 3,
+          "file": "synthetic-coordinator.log"
+        },
+        "offset": 1,
+        "record": {
+          "status": "DECODED",
+          "transactionalId": "fixture-sink-0-0",
+          "decoded": {
+            "producerId": 7,
+            "producerEpoch": 2,
+            "stateName": "CompleteCommit",
+            "startTimestampMs": 1000,
+            "lastUpdateTimestampMs": 1010
+          },
+          "detail": "Synthetic fixture"
+        }
+      },
+      {
+        "source": {
+          "topic": "__transaction_state",
+          "partition": 3,
+          "file": "synthetic-coordinator.log"
+        },
+        "offset": 2,
+        "record": {
+          "status": "DECODED",
+          "transactionalId": "fixture-sink-0-0",
+          "decoded": {
+            "producerId": 7,
+            "producerEpoch": 2,
+            "stateName": "Ongoing",
+            "startTimestampMs": 1500,
+            "lastUpdateTimestampMs": 1510
+          },
+          "detail": "Synthetic fixture"
+        }
+      },
+      {
+        "source": {
+          "topic": "__transaction_state",
+          "partition": 3,
+          "file": "synthetic-coordinator.log"
+        },
+        "offset": 3,
+        "record": {
+          "status": "DECODED",
+          "transactionalId": "fixture-sink-0-0",
+          "decoded": {
+            "producerId": 7,
+            "producerEpoch": 2,
+            "stateName": "CompleteCommit",
+            "startTimestampMs": 1500,
+            "lastUpdateTimestampMs": 1510
+          },
+          "detail": "Synthetic fixture"
+        }
+      }
+    ],
+    "chains": [],
+    "diagnostics": []
+  }
+}

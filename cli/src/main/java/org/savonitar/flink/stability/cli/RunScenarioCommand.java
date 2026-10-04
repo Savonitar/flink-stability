@@ -70,6 +70,9 @@ public final class RunScenarioCommand implements Callable<Integer> {
     @CommandLine.Option(names = "--kafka-log-output", paramLabel = "DIR",
             description = "Retain selective owned Kafka .log diagnostics in a new directory after data verification.")
     private Path kafkaLogOutput;
+    @CommandLine.Option(names = "--retain-checkpoints", paramLabel = "DIR",
+            description = "Copy the fenced attempt checkpoint and HA state into a new evidence directory.")
+    private Path retainCheckpoints;
 
     public RunScenarioCommand() {
         this(
@@ -109,6 +112,7 @@ public final class RunScenarioCommand implements Callable<Integer> {
                 // context can be handed to the Docker-backed executor.
                 context = attemptContexts.create();
                 if (kafkaLogOutput != null) context = context.withKafkaLogOutput(kafkaLogOutput);
+                if (retainCheckpoints != null) context = context.withRetainCheckpoints(retainCheckpoints);
                 result = Objects.requireNonNull(
                         prepared.execute(context), "scenario execution returned null");
             } catch (IOException | RuntimeException | Error failure) {

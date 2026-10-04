@@ -25,6 +25,44 @@ class ScenarioVerdictTest {
     private static final ExpectedOutcome EXPECT_DUPLICATES =
             ExpectedOutcome.failure("kafka.id-set", DUPLICATES);
 
+    @Test void requiredLogMarkersCannotHideDataFailuresOrBlessNegativeControls() {
+        var marker = new org.savonitar.flink.stability.runtime.api.FlinkLogMarker("patched", "CUSTOM-FIX", "taskmanager", true);
+        var missing = FlinkLogMarkerEvidence.collect(List.of(marker), List.of(), List.of(), true);
+        var passed = attempt(V1ScenarioExecutionResult.Status.PASS, "validator.kafka.id-set.match").withFlinkLogMarkers(missing);
+        assertEquals(V1ScenarioExecutionResult.Status.INCONCLUSIVE, passed.status());
+        assertEquals(FlinkLogMarkerEvidence.MISSING, passed.reason());
+        assertEquals(ScenarioVerdict.Status.INCONCLUSIVE, ScenarioVerdict.of(ExpectedOutcome.pass(), passed).status());
+        for (String reason : List.of(DUPLICATES, "validator.kafka.id-set.missing-ids", "validator.kafka.id-set.malformed-ids",
+                "validator.kafka.id-set.unexpected-ids", "verification.failed")) {
+            var failed = attempt(V1ScenarioExecutionResult.Status.FAIL, reason).withFlinkLogMarkers(missing);
+            assertEquals(V1ScenarioExecutionResult.Status.FAIL, failed.status());
+            assertEquals(reason, failed.reason());
+            assertEquals(ScenarioVerdict.Status.FAIL, ScenarioVerdict.of(ExpectedOutcome.pass(), failed).status());
+        }
+        var negative = attempt(V1ScenarioExecutionResult.Status.FAIL, DUPLICATES).withFlinkLogMarkers(missing);
+        var verdict = ScenarioVerdict.of(EXPECT_DUPLICATES, negative);
+        assertEquals(ScenarioVerdict.Status.INCONCLUSIVE, verdict.status());
+        assertEquals(FlinkLogMarkerEvidence.MISSING, verdict.reason());
+        assertFalse(verdict.matched());
+    }
+
+    @Test void optionalMarkersAndCheckpointCopyDiagnosticsPreserveTheOracle() {
+        var optional = new org.savonitar.flink.stability.runtime.api.FlinkLogMarker("optional", "CUSTOM-FIX", "taskmanager", false);
+        var missing = FlinkLogMarkerEvidence.collect(List.of(optional), List.of(), List.of(), true);
+        var retained = new CheckpointRetentionEvidence("source", "output", null, null, "incomplete", List.of(), 0, List.of("copy error"));
+        for (var status : List.of(V1ScenarioExecutionResult.Status.PASS, V1ScenarioExecutionResult.Status.FAIL)) {
+            String reason = status == V1ScenarioExecutionResult.Status.PASS ? "validator.kafka.id-set.match" : DUPLICATES;
+            var original = attempt(status, reason);
+            var result = original.withFlinkLogMarkers(missing).withCheckpointRetention(retained);
+            assertEquals(original.status(), result.status());
+            assertEquals(original.reason(), result.reason());
+            assertEquals(original.message(), result.message());
+            assertTrue(result.diagnostics().stream().anyMatch(item -> item.startsWith(CheckpointRetentionEvidence.INCOMPLETE)));
+            assertEquals(ScenarioVerdict.Status.PASS, ScenarioVerdict.of(status == V1ScenarioExecutionResult.Status.PASS
+                    ? ExpectedOutcome.pass() : EXPECT_DUPLICATES, result).status());
+        }
+    }
+
     @Test
     void missedCheckpointWindowNeverMasksUnexpectedDataFailures() {
         for (String reason : List.of(DUPLICATES, "validator.kafka.id-set.missing-ids",
