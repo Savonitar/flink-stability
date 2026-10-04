@@ -41,6 +41,13 @@ final class V1ExecutionResultRenderer {
     String render(String scenarioName, V1AttemptContext context,
                   ExecutableScenarioPlan.ExpectedOutcome expected, V1ScenarioExecutionResult result,
                   List<PreparedScenarioPlan.ConnectorPrimaryEvidence> connectorPrimaries) {
+        return render(scenarioName, context, expected, result, connectorPrimaries, Optional.empty());
+    }
+
+    String render(String scenarioName, V1AttemptContext context,
+                  ExecutableScenarioPlan.ExpectedOutcome expected, V1ScenarioExecutionResult result,
+                  List<PreparedScenarioPlan.ConnectorPrimaryEvidence> connectorPrimaries,
+                  Optional<com.fasterxml.jackson.databind.JsonNode> customRuntimeSubject) {
         Objects.requireNonNull(scenarioName, "scenarioName");
         Objects.requireNonNull(context, "context");
         Objects.requireNonNull(expected, "expected");
@@ -66,6 +73,7 @@ final class V1ExecutionResultRenderer {
         expectation.put("matched", verdict.matched());
 
         ObjectNode evidence = root.putObject("evidence");
+        customRuntimeSubject.ifPresent(value -> evidence.set("customRuntimeSubject", value));
         ArrayNode primaries = evidence.putArray("connectorPrimaries");
         connectorPrimaries.forEach(primary -> {
             ObjectNode item = primaries.addObject()
@@ -73,13 +81,26 @@ final class V1ExecutionResultRenderer {
                     .put("alias", primary.alias()).put("artifact", primary.artifact())
                     .put("observedSha256", primary.observedSha256());
             primary.declaredSha256().ifPresent(pin -> item.put("declaredSha256", pin));
+            if (primary.origin() != null) item.put("origin", primary.origin());
+            if ("image".equals(primary.origin()) && !result.flinkProvisioningEvidence().isEmpty()) {
+                String expectedPath = primary.artifact().substring("image:".length());
+                String expectedHash = primary.declaredSha256().orElseThrow();
+                boolean everyProcessVerified = result.flinkProvisioningEvidence().stream().allMatch(component ->
+                        component.imageConnectorArtifacts().stream().anyMatch(artifact ->
+                                artifact.alias().equals(primary.alias()) && artifact.containerPath().equals(expectedPath)
+                                        && artifact.sha256().equals(expectedHash)));
+                if (everyProcessVerified) item.put("observedSha256", expectedHash);
+            }
         });
         FlinkHaEvidenceRenderer.render(evidence.putObject("flinkHa"), result.haEvidence(),
                 result.phaseEvidence().map(PhaseExecutionEvidence::leaderFaults).orElse(List.of()));
         var selection = result.kafkaTransactionVersion();
         ObjectNode transactionVersion = evidence.putObject("kafkaTransactionVersion");
-        transactionVersion.put("status", selection.requested().isEmpty() ? "not-requested"
+        transactionVersion.put("status", selection.brokerDefault()
+                ? (selection.confirmed() ? "observed" : "unavailable")
+                : selection.requested().isEmpty() ? "not-requested"
                 : selection.confirmed() ? "confirmed" : "unconfirmed");
+        if (selection.brokerDefault()) transactionVersion.put("requested", "broker-default");
         selection.requested().ifPresent(value -> transactionVersion.put("requested", value));
         selection.error().ifPresent(value -> transactionVersion.put("error", value));
         ArrayNode observations = transactionVersion.putArray("observations");
@@ -90,6 +111,23 @@ final class V1ExecutionResultRenderer {
                     .put("min", range.minimum()).put("max", range.maximum()));
             observation.supported().ifPresent(range -> observed.putObject("supported")
                     .put("min", range.minimum()).put("max", range.maximum()));
+            if (selection.brokerDefault()) {
+                observation.brokerDefaultLevel().ifPresent(value -> observed.put("observedLevel", value));
+                observation.brokerDefaultLevelSource().ifPresent(value -> observed.put("levelSource", value));
+            }
+        });
+        result.kafkaRuntime().ifPresent(value -> {
+            ObjectNode kafka = evidence.putObject("kafka");
+            kafka.put("clusterAlias", value.clusterAlias());
+            kafka.put("imageReference", value.imageReference());
+            value.imageId().ifPresent(id -> {
+                kafka.put("imageId", id);
+                kafka.put("compatibilityBasis", "author-assertion");
+            });
+            kafka.put("launchType", value.launchType());
+            if (value.layout() != null) kafka.put("layout", value.layout());
+            kafka.set("brokerConfig", JSON.valueToTree(value.brokerConfig()));
+            kafka.set("containers", JSON.valueToTree(value.containers()));
         });
         KafkaLogEvidenceRenderer.render(evidence.putObject("kafkaLogs"), result.kafkaLogs());
         ObjectNode componentErrorsNode = evidence.putObject("componentErrors");
@@ -460,6 +498,30 @@ final class V1ExecutionResultRenderer {
         runtime.put("status", result.flinkRuntimeIdentity().outcome().name().toLowerCase(Locale.ROOT));
         runtime.put("detail", result.flinkRuntimeIdentity().detail());
         result.expectedFlinkRuntime().imageId().ifPresent(id -> runtime.put("expectedImageId", id));
+        result.expectedFlinkRuntime().declaredLine().ifPresent(line -> {
+            runtime.put("declaredLine", line);
+            runtime.put("compatibilityBasis", "author-assertion");
+            result.expectedFlinkRuntime().imageReference().ifPresent(reference -> {
+                String withoutDigest = reference.split("@", 2)[0];
+                int colon = withoutDigest.lastIndexOf(':');
+                runtime.put("tag", colon > withoutDigest.lastIndexOf('/')
+                        ? withoutDigest.substring(colon + 1) : null);
+            });
+            var components = result.flinkProvisioningEvidence();
+            if (!components.isEmpty()) {
+                String observedImage = components.getFirst().imageId();
+                if (components.stream().allMatch(component -> component.imageId().equals(observedImage)))
+                    runtime.put("imageId", observedImage);
+                components.getFirst().runtimeJarEvidence().ifPresent(first -> {
+                    if (components.stream().allMatch(component -> component.runtimeJarEvidence()
+                            .map(observed -> observed.jar().equals(first.jar())).orElse(false)))
+                        runtime.put("runtimeJarSha256", first.jar().sha256());
+                });
+            }
+        });
+        if (!result.expectedFlinkRuntime().config().isEmpty()) {
+            runtime.set("config", JSON.valueToTree(result.expectedFlinkRuntime().config()));
+        }
         ObjectNode runtimeJar = runtime.putObject("runtimeJar");
         runtimeJar.put("status", "not-requested");
         result.expectedFlinkRuntime().runtimeJar().ifPresent(expectedJar -> {
@@ -496,6 +558,15 @@ final class V1ExecutionResultRenderer {
             rendered.put("imageId", component.imageId());
             rendered.put("targetBindingSha256", component.targetBindingSha256());
             rendered.put("classpathManifestSha256", component.classpathManifestSha256());
+            if (!component.flinkConfig().isEmpty()) rendered.set("config", JSON.valueToTree(component.flinkConfig()));
+            component.effectiveConfiguration().ifPresent(receipt -> {
+                rendered.set("effectiveConfiguration", JSON.valueToTree(receipt));
+                component.classLoadProcess().ifPresent(value -> rendered.put("classLoadProcess", value));
+            });
+            if (!component.imageConnectorArtifacts().isEmpty()) {
+                rendered.set("imageConnectorArtifacts", JSON.valueToTree(component.imageConnectorArtifacts()));
+                component.classLoadProcess().ifPresent(value -> rendered.put("classLoadProcess", value));
+            }
             component.runtimeJarEvidence().ifPresent(observed -> {
                 ObjectNode jar = rendered.putObject("runtimeJar");
                 jar.put("containerPath", observed.jar().containerPath());

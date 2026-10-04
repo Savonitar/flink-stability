@@ -256,6 +256,92 @@ class KafkaTransactionVersionTest {
         }
     }
 
+    @Test
+    void brokerDefaultObservesAnyFinalizedLevelWithoutUpdatingFeatures() {
+        var observation = new KafkaTransactionVersion.Observation(Optional.of(range(3, 3)),
+                Optional.empty(), OptionalLong.empty());
+        Fixture fixture = new Fixture(observation);
+        var selected = fixture.selector().select(BOOTSTRAP, Optional.empty(), true);
+        assertTrue(selected.brokerDefault());
+        assertTrue(selected.confirmed());
+        assertTrue(selected.permitsPass());
+        assertEquals(List.of(observation), selected.observations());
+        assertEquals(3, observation.brokerDefaultLevel().orElseThrow());
+        assertEquals(Optional.of("finalized-feature"), observation.brokerDefaultLevelSource());
+        assertEquals(List.of("open", "observe-1", "close"), fixture.names());
+        assertTrue(fixture.updates.isEmpty());
+    }
+
+    @Test
+    void unavailableOrAmbiguousBrokerDefaultObservationCannotPass() {
+        for (var observation : List.of(
+                new KafkaTransactionVersion.Observation(Optional.empty(), Optional.empty(), OptionalLong.of(1)),
+                new KafkaTransactionVersion.Observation(Optional.empty(), Optional.of(range(1, 2)), OptionalLong.of(1)),
+                new KafkaTransactionVersion.Observation(Optional.empty(), Optional.of(range(0, 2)), OptionalLong.empty()),
+                new KafkaTransactionVersion.Observation(Optional.of(range(1, 2)), Optional.of(range(0, 2)), OptionalLong.of(1)))) {
+            Fixture fixture = new Fixture(observation);
+            var selected = fixture.selector().select(BOOTSTRAP, Optional.empty(), true);
+            assertFalse(selected.permitsPass());
+            assertEquals("kafka.feature.observation-unavailable", selected.failureReason());
+            assertTrue(selected.error().isPresent());
+            assertEquals(List.of(observation), selected.observations());
+            assertTrue(observation.brokerDefaultLevel().isEmpty());
+            assertTrue(observation.brokerDefaultLevelSource().isEmpty());
+            assertTrue(fixture.updates.isEmpty());
+        }
+        Fixture fixture = new Fixture();
+        fixture.failures.put("observe-1", new IOException("describeFeatures unsupported"));
+        var selected = fixture.selector().select(BOOTSTRAP, Optional.empty(), true);
+        assertFalse(selected.permitsPass());
+        assertTrue(selected.error().orElseThrow().contains("describeFeatures unsupported"));
+        assertTrue(fixture.updates.isEmpty());
+    }
+
+    @Test
+    void brokerDefaultRecognizesKafkaZeroOmissionWithExplicitInterpretationAndRawEvidence() {
+        var raw = new KafkaTransactionVersion.Observation(Optional.empty(), Optional.of(range(0, 2)), OptionalLong.of(42));
+        Fixture fixture = new Fixture(raw);
+        var selected = fixture.selector().select(BOOTSTRAP, Optional.empty(), true);
+        assertTrue(selected.confirmed());
+        assertTrue(selected.permitsPass());
+        assertEquals(0, raw.brokerDefaultLevel().orElseThrow());
+        assertEquals(Optional.of("implicit-zero"), raw.brokerDefaultLevelSource());
+        assertTrue(selected.observations().getFirst().finalized().isEmpty(), "Do not manufacture a finalized API entry");
+        assertEquals(List.of(raw), selected.observations());
+        assertEquals(List.of("open", "observe-1", "close"), fixture.names());
+        assertTrue(fixture.updates.isEmpty(), "Observing broker-default must never update a feature");
+        assertTrue(selected.error().isEmpty());
+    }
+
+    @Test
+    void implicitZeroDoesNotRelaxExplicitSelectionOrHideMetadataAndCloseFailures() {
+        var raw = new KafkaTransactionVersion.Observation(Optional.empty(), Optional.of(range(0, 2)), OptionalLong.of(42));
+        for (int requested : List.of(1, 2)) {
+            Fixture fixture = new Fixture(raw);
+            var selected = fixture.select(requested);
+            assertFalse(selected.permitsPass());
+            assertEquals(KafkaTransactionVersion.UNCONFIRMED, selected.failureReason());
+            assertTrue(fixture.updates.isEmpty());
+        }
+        for (String operation : List.of("open", "observe-1", "close")) {
+            Fixture fixture = new Fixture(raw);
+            fixture.failures.put(operation, new IOException(operation + " metadata unavailable"));
+            var selected = fixture.selector().select(BOOTSTRAP, Optional.empty(), true);
+            assertFalse(selected.permitsPass());
+            assertEquals(KafkaTransactionVersion.OBSERVATION_UNAVAILABLE, selected.failureReason());
+            assertTrue(selected.error().orElseThrow().contains(operation + " metadata unavailable"));
+            assertTrue(fixture.updates.isEmpty());
+        }
+    }
+
+    @Test
+    void brokerDefaultCannotAlsoSelectAnExplicitLevel() {
+        Fixture fixture = new Fixture();
+        assertThrows(IllegalArgumentException.class,
+                () -> fixture.selector().select(BOOTSTRAP, Optional.of(1), true));
+        assertTrue(fixture.calls.isEmpty());
+    }
+
     private static KafkaTransactionVersion.Range range(int minimum, int maximum) {
         return new KafkaTransactionVersion.Range((short) minimum, (short) maximum);
     }

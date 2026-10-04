@@ -144,12 +144,21 @@ public final class ExecutableScenarioPlanCompiler {
                 .map(runtimeTarget::withHighAvailability).orElse(runtimeTarget);
         runtimeTarget = executablePlan.flink().tokenProvider()
                 .map(runtimeTarget::withTokenProvider).orElse(runtimeTarget);
+        runtimeTarget = executablePlan.flink().declaredLine()
+                .map(runtimeTarget::withDeclaredLine).orElse(runtimeTarget);
+        runtimeTarget = runtimeTarget.withConfig(executablePlan.flink().config());
         return new PreparedExecutableScenarioPlan(
                 preparedPlan,
                 executablePlan,
                 workloadArtifact,
                 connectorBundle,
                 runtimeTarget);
+    }
+
+    static Map<String, String> scalarMap(JsonNode node) {
+        Map<String, String> values = new java.util.TreeMap<>();
+        node.fields().forEachRemaining(entry -> values.put(entry.getKey(), entry.getValue().asText()));
+        return java.util.Collections.unmodifiableMap(values);
     }
 
     private static void validateInvocation(
@@ -192,12 +201,18 @@ public final class ExecutableScenarioPlanCompiler {
                     "$/setup/flink/taskmanagers", "The local runner supports at most "
                             + FlinkRuntimeTarget.MAX_TASK_MANAGERS + " TaskManagers"));
         }
-        if (flink.get("config") instanceof ObjectNode config && !config.isEmpty()) {
-            issues.add(issue(
-                    source,
-                    "runner.flink.config-unsupported",
-                    "$/setup/flink/config",
-                    "The first runner rejects Flink config entries it cannot map explicitly"));
+        if (flink.get("config") instanceof ObjectNode config) {
+            config.fields().forEachRemaining(entry -> {
+                try {
+                    org.savonitar.flink.stability.runtime.api.FlinkConfiguration.validate(
+                            Map.of(entry.getKey(), entry.getValue().asText()));
+                } catch (IllegalArgumentException invalid) {
+                    issues.add(issue(source,
+                            org.savonitar.flink.stability.runtime.api.FlinkConfiguration.reserved(entry.getKey())
+                                    ? "runner.flink.config-reserved-key" : "runner.flink.config-invalid",
+                            "$/setup/flink/config/" + pointer(entry.getKey()), invalid.getMessage()));
+                }
+            });
         }
     }
 
@@ -492,10 +507,15 @@ public final class ExecutableScenarioPlanCompiler {
                 clusterNode.path("brokers").intValue(),
                 clusterNode.path("brokers").intValue() == 3 ? KafkaBrokerPolicy.threeBrokers() : KafkaBrokerPolicy.v1SingleBroker(),
                 topics,
-                clusterNode.has("transaction_version")
+                clusterNode.path("transaction_version").isIntegralNumber()
                         ? Optional.of(clusterNode.path("transaction_version").intValue())
                         : Optional.empty(),
-                NetworkFaultCompiler.proxy(document));
+                NetworkFaultCompiler.proxy(document),
+                Optional.ofNullable(clusterNode.path("image_id").textValue()),
+                clusterNode.path("launch").path("type").asText("apache-kafka"),
+                scalarMap(clusterNode.path("broker_config")),
+                "broker-default".equals(clusterNode.path("transaction_version").asText()),
+                clusterNode.path("launch").path("layout").asText("apache"));
         ObjectNode flinkNode = (ObjectNode) document.at("/setup/flink");
         ExecutableScenarioPlan.FlinkCluster flink = new ExecutableScenarioPlan.FlinkCluster(
                 flinkNode.path("image").textValue(),
@@ -505,7 +525,9 @@ public final class ExecutableScenarioPlanCompiler {
                         new FlinkRuntimeTarget.RuntimeJar(jar.path("container_path").textValue(),
                                 jar.path("sha256").textValue())),
                 HighAvailabilityPlanCompiler.highAvailability(flinkNode),
-                HighAvailabilityPlanCompiler.tokenProvider(flinkNode));
+                HighAvailabilityPlanCompiler.tokenProvider(flinkNode),
+                Optional.ofNullable(flinkNode.path("line").textValue()),
+                scalarMap(flinkNode.path("config")));
         ExecutableScenarioPlan.GeneratedIntegerSequenceInput input =
                 new ExecutableScenarioPlan.GeneratedIntegerSequenceInput(
                         clusterAlias,
@@ -547,10 +569,11 @@ public final class ExecutableScenarioPlanCompiler {
                                 ? ExecutableScenarioPlan.CheckpointStorage.FILESYSTEM
                                 : ExecutableScenarioPlan.CheckpointStorage.JOBMANAGER);
         Map<String, String> standardFlinkConfiguration =
-                ExecutableScenarioPlan.standardFlinkConfiguration(
+                new java.util.TreeMap<>(ExecutableScenarioPlan.standardFlinkConfiguration(
                         jobNode.path("parallelism").intValue(),
                         ExecutableScenarioPlan.StateBackend.HASHMAP,
-                        checkpointing);
+                        checkpointing));
+        standardFlinkConfiguration.putAll(flink.config());
         ExecutableScenarioPlan.Job job = new ExecutableScenarioPlan.Job(
                 jobAlias,
                 jobNode.path("jar").textValue(),

@@ -122,6 +122,7 @@ final class TestcontainersContainerHandle implements ContainerHandle {
 
         VerifiedFlinkContainer.ConnectorBundleVerification verification =
                 verifiedContainer.connectorBundleVerification();
+        var effectiveConfiguration = verifiedContainer.effectiveConfigurationEvidence(runtimeId);
         if (verification == null) {
             throw new ConnectorBundleProvisioningException(
                     "Connector bundle has no pre-process verification evidence for "
@@ -135,10 +136,14 @@ final class TestcontainersContainerHandle implements ContainerHandle {
                 verifiedContainer.verifiedImageId(),
                 installation.targetBindingSha256(),
                 verification.classpathManifestSha256(),
-                verification.connectorArtifacts());
+                verification.connectorArtifacts())
+                .withProcessConfiguration(verifiedContainer.observedConfig(), verifiedContainer.classLoadProcess())
+                .withImageConnectorArtifacts(verifiedContainer.imageConnectorEvidence(runtimeId));
+        FlinkComponentProvisioningEvidence observedEvidence = effectiveConfiguration
+                .map(evidence::withEffectiveConfiguration).orElse(evidence);
         return verifiedContainer.runtimeJarEvidence(runtimeId)
-                .map(jar -> evidence.withRuntimeJarEvidence(jar.jar(), jar.classLoadProcess()))
-                .orElse(evidence);
+                .map(jar -> observedEvidence.withRuntimeJarEvidence(jar.jar(), jar.classLoadProcess()))
+                .orElse(observedEvidence);
     }
 
     /** Docker lifecycle seam kept independent from Flink provisioning evidence. */

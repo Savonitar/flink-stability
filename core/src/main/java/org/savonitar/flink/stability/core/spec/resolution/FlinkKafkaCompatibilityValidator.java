@@ -65,6 +65,13 @@ final class FlinkKafkaCompatibilityValidator {
                         "$/setup/flink/runtime_jar", invalid.getMessage()));
             }
         }
+        JsonNode lineDeclaration = document.at("/setup/flink/line");
+        String declaredLine = lineDeclaration.isTextual() ? lineDeclaration.textValue() : null;
+        if (declaredLine != null && !declaredLine.matches("(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)")) {
+            issues.add(issue(source, scope, "capability.flink-line.invalid", "$/setup/flink/line",
+                    "Declared Flink line must be major.minor"));
+            return List.copyOf(issues);
+        }
         List<ImageReference> images = flinkImages(document);
         boolean flinkLineSupported = true;
         String selectedLine = null;
@@ -75,7 +82,14 @@ final class FlinkKafkaCompatibilityValidator {
             }
             String declared = image.value().textValue();
             Matcher tag = flinkTag(declared);
-            if (tag == null || !isSupportedFlinkLine(tag)) {
+            if (declaredLine != null) {
+                selectedLine = declaredLine;
+                if (tag != null && !declaredLine.equals(tag.group(1) + "." + tag.group(2))) {
+                    flinkLineSupported = false;
+                    issues.add(issue(source, scope, "capability.flink-line.tag-mismatch", image.path(),
+                            "Declared Flink line " + declaredLine + " disagrees with image tag " + declared));
+                }
+            } else if (tag == null || !isSupportedFlinkLine(tag)) {
                 flinkLineSupported = false;
                 issues.add(issue(
                         source,
@@ -101,7 +115,20 @@ final class FlinkKafkaCompatibilityValidator {
                 continue;
             }
             String declared = image.value().textValue();
-            if (!KafkaBrokerImagePolicy.isSupportedV1(declared)) {
+            JsonNode kafkaPin = image.path().startsWith("$/setup/kafka/clusters/")
+                    ? document.at(image.path().substring(1).replaceAll("/image$", "/image_id"))
+                    : com.fasterxml.jackson.databind.node.MissingNode.getInstance();
+            boolean pinned = false;
+            if (kafkaPin.isTextual()) {
+                try {
+                    requireDockerImageId(kafkaPin.textValue(), "Kafka image_id");
+                    pinned = true;
+                } catch (IllegalArgumentException invalid) {
+                    issues.add(issue(source, scope, "runner.kafka.image-id-invalid",
+                            image.path().replaceAll("/image$", "/image_id"), invalid.getMessage()));
+                }
+            }
+            if (!pinned && !KafkaBrokerImagePolicy.isSupportedV1(declared)) {
                 issues.add(issue(
                         source,
                         scope,
@@ -120,16 +147,18 @@ final class FlinkKafkaCompatibilityValidator {
         }
 
         boolean experimental = EXPERIMENTAL_FLINK_LINE.equals(selectedLine);
-        if (experimental) {
+        if (experimental || declaredLine != null) {
+            String pinCode = declaredLine != null ? "capability.flink-line.pin-required" : EXPERIMENTAL_PIN_REQUIRED;
+            String runtimeDescription = declaredLine != null ? "Declared Flink line " + declaredLine : "Experimental Flink 2.4";
             if (imageId.isMissingNode()) {
-                issues.add(issue(source, scope, EXPERIMENTAL_PIN_REQUIRED,
+                issues.add(issue(source, scope, pinCode,
                         "$/setup/flink/image_id",
-                        "Experimental Flink 2.4 requires an explicit local Docker image_id pin"));
+                        runtimeDescription + " requires an explicit local Docker image_id pin"));
             }
             if (runtimeJar.isMissingNode()) {
-                issues.add(issue(source, scope, EXPERIMENTAL_PIN_REQUIRED,
+                issues.add(issue(source, scope, pinCode,
                         "$/setup/flink/runtime_jar",
-                        "Experimental Flink 2.4 requires an explicit runtime_jar path and SHA-256 pin"));
+                        runtimeDescription + " requires an explicit runtime_jar path and SHA-256 pin"));
             }
         }
 
@@ -140,7 +169,7 @@ final class FlinkKafkaCompatibilityValidator {
                     scope,
                     entry.getKey(),
                     entry.getValue().get("artifact"),
-                    experimental,
+                    experimental || (declaredLine != null && !SUPPORTED_FLINK_LINE.equals(declaredLine)),
                     issues));
         }
         return List.copyOf(issues);
@@ -266,7 +295,7 @@ final class FlinkKafkaCompatibilityValidator {
         if (experimental) {
             issues.add(issue(source, scope, CONNECTOR_LOCAL_REQUIRED,
                     "$/subject/connectors/" + escapePointer(alias) + "/artifact",
-                    "Experimental Flink 2.4 requires a local connector primary with explicit "
+                    "This custom Flink line requires an image-supplied or local connector primary with explicit "
                             + "runtime_dependencies; the Flink 2.2 Maven registry does not establish "
                             + "compatibility with this runtime"));
             return;

@@ -1,7 +1,10 @@
 # Testing a Kafka connector pull request
 
 For changes to Flink itself, see [testing a Flink runtime build](FLINK-RUNTIME-TESTING.md).
-The connector gate below changes connector artifacts only.
+The ordinary connector gate below changes connector artifacts. The
+[custom runtime subject guide](CUSTOM-RUNTIME-SUBJECTS.md) adds shared runtime
+substitutions and an explicit candidate-only Flink configuration overlay, with
+strict source/dependency checks for that comparison mode.
 
 When a change to `apache/flink-connector-kafka` looks risky, build it and run it as the
 subject connector. `tools/pr_gate.py` runs each chosen scenario on both sides:
@@ -53,8 +56,11 @@ catalogs. These older calibration matrices do not cover the new broker/protocol 
 
 For a Flink runtime PR, prepare separate image/runtime-JAR pins and compatible
 connector/workload artifacts as described in [runtime build testing](FLINK-RUNTIME-TESTING.md).
-`pr_gate.py` swaps connector artifacts only; it does not construct a runtime pair,
-change token proof scope, or gate fault cells on both healthy controls passing.
+`pr_gate.py` can apply one shared runtime configuration to both arms; it does not
+construct a pair of different Flink images, change token proof scope, or gate fault
+cells on both healthy controls passing. Custom runtime mode requires an explicit
+baseline and permits only the connector primary and declared candidate Flink
+configuration to differ.
 
 Per-job token experiments must explicitly select
 `setup.flink.token_provider.proof_scope: submitted-job` in separately named catalogs.

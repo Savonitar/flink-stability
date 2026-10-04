@@ -22,6 +22,24 @@ final class ConnectorPrimaryPins {
                 String path = "$/subject/connectors/" + entry.getKey().replace("~", "~0").replace("/", "~1");
                 var declared = entry.getValue().get("sha256");
                 Optional<String> pin = declared == null ? Optional.empty() : Optional.of(declared.asText());
+                String reference = entry.getValue().path("artifact").asText();
+                if (reference.startsWith("image:")) {
+                    try {
+                        var image = new org.savonitar.flink.stability.runtime.api.ImageConnectorArtifact(
+                                entry.getKey(), reference.substring("image:".length()), pin.orElse(""));
+                        if (entry.getValue().path("runtime_dependencies").size() > 0) {
+                            issues.add(new Diagnostic(scenario.template().source(), ResolutionScope.valueOf(side.side().name()),
+                                    "artifact.connector.image-dependencies-unsupported", path + "/runtime_dependencies",
+                                    "An image-supplied connector installs nothing; runtime_dependencies must be absent or empty"));
+                        }
+                        evidence.add(new PreparedScenarioPlan.ConnectorPrimaryEvidence(side.side(), entry.getKey(),
+                                reference, pin, null, "image"));
+                    } catch (IllegalArgumentException invalid) {
+                        issues.add(new Diagnostic(scenario.template().source(), ResolutionScope.valueOf(side.side().name()),
+                                "artifact.connector.image-invalid", path + "/artifact", invalid.getMessage()));
+                    }
+                    return;
+                }
                 var resolved = plan.artifact(side.side(), path + "/artifact");
                 if (resolved.isEmpty()) {
                     if (declared != null) issues.add(new Diagnostic(scenario.template().source(),

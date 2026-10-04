@@ -44,6 +44,59 @@ class FlinkContainerTest {
     Path temporaryDirectory;
 
     @Test
+    void customConfigurationRequiresFileAndParsedStartupProofForEveryIncarnation() {
+        Map<String, String> config = Map.of("execution.checkpointing.unaligned.enabled", "true", "custom.value", "# literal: value");
+        FlinkContainer factory = new FlinkContainer(emptyTarget().withConfig(config), Network.SHARED,
+                temporaryDirectory.resolve("custom-config"));
+        for (var process : List.of(factory.createJobManager("jobmanager-1"),
+                factory.createTaskManager("taskmanager-1"), factory.createTaskManager("taskmanager-1"))) {
+            VerifiedFlinkContainer verified = (VerifiedFlinkContainer) process;
+            String properties = process.getEnvMap().get("FLINK_PROPERTIES");
+            assertTrue(properties.contains("execution.checkpointing.unaligned.enabled: 'true'"));
+            assertTrue(properties.contains("custom.value: '# literal: value'"));
+            String role = process.getCommandParts()[0];
+            var launcher = FlinkProcessConfiguration.launcher(role);
+            verified.verifyConfigurationLaunch(List.of("FLINK_PROPERTIES=" + properties),
+                    launcher.subList(0, 2), List.of(role));
+            assertThrows(IllegalStateException.class,
+                    () -> verified.verifyConfigurationLaunch(List.of("FLINK_PROPERTIES=changed"),
+                            launcher.subList(0, 2), List.of(role)));
+            assertThrows(IllegalStateException.class,
+                    () -> verified.verifyConfigurationLaunch(List.of("FLINK_PROPERTIES=" + properties),
+                            List.of("/docker-entrypoint.sh"), List.of(role)));
+            var file = new AtomicReference<>("taskmanager.memory.process.size: 1728m\n".getBytes(java.nio.charset.StandardCharsets.UTF_8));
+            var reader = (Function<String, byte[]>) ignored -> file.get();
+            verified.prepareProcessConfiguration("id", reader, (path, bytes) -> file.set(bytes));
+            assertEquals(Map.of(), verified.observedConfig(), "Requested values are not observations");
+            assertThrows(IllegalStateException.class,
+                    () -> verified.effectiveConfigurationEvidence("other-incarnation", reader, ""));
+            assertThrows(IllegalStateException.class,
+                    () -> verified.effectiveConfigurationEvidence("id", reader, ""));
+            String startup = "Loading configuration property: execution.checkpointing.unaligned.enabled, true\n"
+                    + "Loading configuration property: custom.value, # literal: value\n";
+            var receipt = verified.effectiveConfigurationEvidence("id", reader, startup).orElseThrow();
+            assertEquals(config, verified.observedConfig());
+            assertEquals(receipt.sourceSha256(), receipt.observedSha256());
+            assertEquals(launcher, receipt.launcher());
+            file.set("custom.value: changed\n".getBytes(java.nio.charset.StandardCharsets.UTF_8));
+            assertThrows(IllegalStateException.class,
+                    () -> verified.effectiveConfigurationEvidence("id", reader, startup));
+        }
+    }
+
+    @Test
+    void imageEntrypointAndConfigurationAreUntouchedWithoutCustomValues() {
+        var factory = new FlinkContainer(emptyTarget(), Network.SHARED, temporaryDirectory);
+        for (var container : List.of(factory.createJobManager("jobmanager-1"), factory.createTaskManager("taskmanager-1"))) {
+            assertTrue(!container.getEnvMap().containsKey("FLINK_CONF_DIR"));
+            var verified = (VerifiedFlinkContainer) container;
+            verified.prepareProcessConfiguration("id", unused -> { throw new AssertionError("No file read"); },
+                    (path, bytes) -> { throw new AssertionError("No file write"); });
+            assertTrue(verified.effectiveConfigurationEvidence("id", unused -> { throw new AssertionError("No read"); }, "").isEmpty());
+        }
+    }
+
+    @Test
     void anonymousHaDisablesZooKeeperSaslForInitialAndReplacementProcesses() throws Exception {
         var configuration = new FlinkRuntimeTarget.HighAvailability(
                 "zookeeper:3.9.3", Duration.ofSeconds(6));
@@ -61,6 +114,7 @@ class FlinkContainerTest {
                     factory.createTaskManager("taskmanager-1"), factory.createTaskManager("taskmanager-2"),
                     factory.createJobManager("jobmanager-1"), factory.createTaskManager("taskmanager-2"));
             for (GenericContainer<?> process : processes) {
+                assertHarnessPropertiesReserved(process);
                 assertEquals(List.of("zookeeper.sasl.disable: true"),
                         process.getEnvMap().get("FLINK_PROPERTIES").lines()
                                 .filter(line -> line.startsWith("zookeeper.sasl.disable:")).toList());
@@ -76,9 +130,17 @@ class FlinkContainerTest {
                 factory.createTaskManager("taskmanager-1"), factory.createTaskManager("taskmanager-2"),
                 factory.createJobManager("jobmanager-1"), factory.createTaskManager("taskmanager-2"));
         for (GenericContainer<?> process : processes) {
+            assertHarnessPropertiesReserved(process);
             assertTrue(process.getEnvMap().get("FLINK_PROPERTIES").lines()
                     .noneMatch(line -> line.startsWith("zookeeper.sasl.disable:")));
         }
+    }
+
+    private static void assertHarnessPropertiesReserved(GenericContainer<?> process) {
+        process.getEnvMap().get("FLINK_PROPERTIES").lines().filter(line -> !line.isBlank()).forEach(line -> {
+            String key = line.substring(0, line.indexOf(':'));
+            assertTrue(org.savonitar.flink.stability.runtime.api.FlinkConfiguration.reserved(key), key);
+        });
     }
 
     @Test
@@ -93,6 +155,7 @@ class FlinkContainerTest {
                     factory.createJobManager("jobmanager-2"), factory.createTaskManager("taskmanager-1"),
                     factory.createJobManager("jobmanager-1"));
             for (GenericContainer<?> process : processes) {
+                assertHarnessPropertiesReserved(process);
                 List<String> retries = process.getEnvMap().get("FLINK_PROPERTIES").lines()
                         .filter(line -> line.startsWith("security.delegation.tokens.renewal.retry."))
                         .toList();

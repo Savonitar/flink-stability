@@ -114,6 +114,18 @@ final class ScenarioPreflightValidator {
         clusterNodes.fields().forEachRemaining(clusterEntry -> {
             String clusterName = clusterEntry.getKey();
             ObjectNode cluster = (ObjectNode) clusterEntry.getValue();
+            JsonNode launch = cluster.path("launch");
+            if (launch.has("layout")) {
+                String layoutPath = "$/setup/kafka/clusters/" + pointer(clusterName) + "/launch/layout";
+                if (!Set.of("apache", "confluent-platform").contains(launch.path("layout").asText())) {
+                    issues.add(issue(source, scope, "runner.kafka.layout-unsupported", layoutPath,
+                            "Kafka generic-kraft layout must be apache or confluent-platform"));
+                }
+                if (!"generic-kraft".equals(launch.path("type").asText("apache-kafka"))) {
+                    issues.add(issue(source, scope, "runner.kafka.layout-not-applicable", layoutPath,
+                            "Explicit Kafka tool layout applies only to generic-kraft launch"));
+                }
+            }
             BigInteger brokers = cluster.path("brokers").bigIntegerValue();
             Map<String, String> topics = new LinkedHashMap<>();
             ArrayNode topicNodes = (ArrayNode) cluster.get("topics");

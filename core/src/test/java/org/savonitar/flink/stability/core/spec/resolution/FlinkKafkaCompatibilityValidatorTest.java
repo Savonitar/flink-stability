@@ -28,21 +28,74 @@ class FlinkKafkaCompatibilityValidatorTest {
     private final ScenarioParameterResolver resolver = new ScenarioParameterResolver(loader);
 
     @Test
+    void explicitLineAdmitsOpaqueTagsOnlyWithBothPinsAndRejectsDisagreeingTags() {
+        ScenarioSpecification custom = scenario(document -> {
+            usePinnedExperimentalRuntime(document);
+            flink(document).put("image", "vendor/flink:internal-build").put("line", "1.20");
+        });
+        assertEquals("1.20", resolver.resolve(custom, ResolutionRequest.none()).side(ScenarioSide.SINGLE)
+                .document().at("/setup/flink/line").asText());
+        for (String pin : java.util.List.of("image_id", "runtime_jar")) {
+            ScenarioSpecification missing = scenario(document -> {
+                usePinnedExperimentalRuntime(document);
+                flink(document).put("image", "vendor/flink:custom").put("line", "1.20").remove(pin);
+            });
+            var failure = assertFailsAt(Stage.RESOLUTION, () -> resolver.resolve(missing, ResolutionRequest.none()));
+            assertIssue(failure, "capability.flink-line.pin-required", ResolutionScope.SINGLE, "$/setup/flink/" + pin);
+        }
+        ScenarioSpecification mismatch = scenario(document -> {
+            usePinnedExperimentalRuntime(document);
+            flink(document).put("image", "vendor/flink:2.2.0").put("line", "1.20");
+        });
+        assertIssue(assertFailsAt(Stage.RESOLUTION, () -> resolver.resolve(mismatch, ResolutionRequest.none())),
+                "capability.flink-line.tag-mismatch", ResolutionScope.SINGLE, "$/setup/flink/image");
+        ScenarioSpecification invalidLine = scenario(document -> {
+            usePinnedExperimentalRuntime(document);
+            flink(document).put("line", "${line}");
+            parameter(document, "line", "string", TextNode.valueOf("2.2.0"));
+        });
+        assertIssue(assertFailsAt(Stage.RESOLUTION, () -> resolver.resolve(invalidLine, ResolutionRequest.none())),
+                "capability.flink-line.invalid", ResolutionScope.SINGLE, "$/setup/flink/line");
+    }
+
+    @Test
+    void customKafkaImageNeedsValidLocalImagePin() {
+        var custom = scenario(document -> ((ObjectNode) document.at("/setup/kafka/clusters/main"))
+                .put("image", "vendor/kafka:custom").put("image_id", "sha256:" + "a".repeat(64)));
+        assertEquals("vendor/kafka:custom", resolver.resolve(custom, ResolutionRequest.none())
+                .side(ScenarioSide.SINGLE).document().at("/setup/kafka/clusters/main/image").asText());
+        var invalid = scenario(document -> {
+            ((ObjectNode) document.at("/setup/kafka/clusters/main"))
+                    .put("image", "vendor/kafka:custom").put("image_id", "${id}");
+            parameter(document, "id", "string", TextNode.valueOf("invalid"));
+        });
+        assertIssue(assertFailsAt(Stage.RESOLUTION, () -> resolver.resolve(invalid, ResolutionRequest.none())),
+                "runner.kafka.image-id-invalid", ResolutionScope.SINGLE, "$/setup/kafka/clusters/main/image_id");
+    }
+
+    @Test
     void validatesRuntimeJarIdentityAfterParameterResolution() {
         String path = "/opt/flink/lib/flink-dist-2.2.0.jar";
         String hash = "a".repeat(64);
-        ScenarioSpecification valid = scenario(document -> {
-            parameter(document, "runtime_hash", "string", TextNode.valueOf(hash));
-            flink(document).putObject("runtime_jar").put("container_path", path)
-                    .put("sha256", "${runtime_hash}");
-        });
-        assertEquals(hash, resolver.resolve(valid, ResolutionRequest.none())
-                .side(ScenarioSide.SINGLE).document().at("/setup/flink/runtime_jar/sha256").textValue());
+        for (String accepted : java.util.List.of(path, "/opt/flink/lib/flink-dist_2.12-2.2.0-vendor.jar")) {
+            ScenarioSpecification valid = scenario(document -> {
+                parameter(document, "runtime_hash", "string", TextNode.valueOf(hash));
+                flink(document).putObject("runtime_jar").put("container_path", accepted)
+                        .put("sha256", "${runtime_hash}");
+            });
+            var resolvedJar = resolver.resolve(valid, ResolutionRequest.none())
+                    .side(ScenarioSide.SINGLE).document().at("/setup/flink/runtime_jar");
+            assertEquals(hash, resolvedJar.path("sha256").textValue());
+            assertEquals(accepted, resolvedJar.path("container_path").textValue());
+        }
 
         for (String[] invalid : java.util.List.of(
                 new String[] {"/opt/flink/lib/../flink-dist-2.2.0.jar", hash},
                 new String[] {"/tmp/flink-dist-2.2.0.jar", hash},
                 new String[] {"/opt/flink/lib/connector.jar", hash},
+                new String[] {"/opt/flink/lib/flink-dist_2.12-.jar", hash},
+                new String[] {"/opt/flink/lib/flink-dist_-2.2.0.jar", hash},
+                new String[] {"/opt/flink/lib/flink-dist_2.12-../escape.jar", hash},
                 new String[] {path, "sha256:" + hash},
                 new String[] {path, "A".repeat(64)})) {
             ScenarioSpecification bad = scenario(document -> {
@@ -62,6 +115,8 @@ class FlinkKafkaCompatibilityValidatorTest {
     void runtimeJarPinRequiresBothPathAndHashAndKeepsTheSupportedVersionBoundary() {
         assertFailsAt(Stage.DOCUMENT, () -> scenario(document -> flink(document)
                 .putObject("runtime_jar").put("sha256", "a".repeat(64))));
+        assertFailsAt(Stage.DOCUMENT, () -> scenario(document -> flink(document)
+                .putObject("runtime_jar").put("container_path", "/opt/flink/lib/flink-dist_2.12-2.2.0.jar")));
         ScenarioSpecification unsupported = scenario(document -> {
             flink(document).put("image", "local/flink:2.3-SNAPSHOT");
             flink(document).putObject("runtime_jar")

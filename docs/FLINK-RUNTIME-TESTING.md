@@ -2,7 +2,9 @@
 
 The engine can run its existing Kafka scenarios on a custom Flink **2.2** image and
 admits experimental **2.4** builds with explicit image and runtime JAR pins plus a local
-connector closure. Images use the official entrypoint and filesystem layout.
+connector closure. Images use the official entrypoint and filesystem layout. For an opaque tag or
+another declared line, image-supplied connector, custom broker and configuration
+pass-through, use the [custom runtime subject guide](CUSTOM-RUNTIME-SUBJECTS.md).
 `setup.flink.image_id` pins the
 expected local Docker image ID. The engine checks the created container before starting
 each Flink process, including replacement TaskManagers. A tag alone is not a build
@@ -106,15 +108,21 @@ expected-failure controls require confirmation when the check is requested.
 The release compatibility registry pairs Flink 2.2 with Kafka connector
 `org.apache.flink:flink-connector-kafka:5.0.<patch>-2.2`. Experimental Flink 2.4
 requires both `setup.flink.image_id` and `setup.flink.runtime_jar`, together with
-a local connector primary and its explicit runtime dependency closure. Maven connector
+a local connector primary and its explicit runtime dependency closure, or the
+image-supplied connector form in the custom runtime guide. Maven connector
 primaries are not registered for this experimental line. Setup and explicit Flink
-restart images must use the same supported line. Other Flink lines remain unsupported.
+restart images must use the same supported line when `setup.flink.line` is absent.
+An explicit `line` admits a custom runtime only with image and runtime-JAR pins;
+it must agree with any parseable tag and is an author compatibility assertion,
+not evidence that the build has been run.
 
 Build the distribution from a fixed source revision, retaining the source archive hash,
 exact build command, dependency identities and output hashes. Build the workload against
 the selected runtime APIs and connector. Use immutable local copies of these artifacts;
 the engine continues to reject mutable Maven SNAPSHOT coordinates. The existing workload
-POM exposes `flink.version` and `flink.kafka.connector.version` for this purpose. Preserve
+POM exposes `flink.version`, `kafka.connector.version` and optional
+`kafka.connector.groupId` for this purpose; `flink.kafka.connector.version` remains
+a backward-compatible default. Preserve
 the resulting workload JAR outside its ordinary `target/` directory before another build.
 
 Review the full distribution and connector classpath together: do not introduce an older

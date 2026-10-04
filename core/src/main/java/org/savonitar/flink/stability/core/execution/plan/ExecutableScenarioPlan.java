@@ -200,8 +200,33 @@ public final class ExecutableScenarioPlan {
             KafkaBrokerPolicy brokerPolicy,
             List<KafkaTopic> topics,
             Optional<Integer> transactionVersion,
-            Optional<KafkaProxy> proxy) {
+            Optional<KafkaProxy> proxy,
+            Optional<String> imageId,
+            String launchType,
+            Map<String, String> brokerConfig,
+            boolean transactionVersionBrokerDefault,
+            String layout) {
+        public KafkaCluster(String alias, String imageReference, KafkaMode mode, int brokers,
+                            KafkaBrokerPolicy brokerPolicy, List<KafkaTopic> topics,
+                            Optional<Integer> transactionVersion, Optional<KafkaProxy> proxy,
+                            Optional<String> imageId, String launchType, Map<String, String> brokerConfig,
+                            boolean transactionVersionBrokerDefault) {
+            this(alias, imageReference, mode, brokers, brokerPolicy, topics, transactionVersion, proxy,
+                    imageId, launchType, brokerConfig, transactionVersionBrokerDefault, KafkaRuntimeTarget.APACHE_LAYOUT);
+        }
+        public KafkaCluster(String alias, String imageReference, KafkaMode mode, int brokers,
+                            KafkaBrokerPolicy brokerPolicy, List<KafkaTopic> topics,
+                            Optional<Integer> transactionVersion, Optional<KafkaProxy> proxy) {
+            this(alias, imageReference, mode, brokers, brokerPolicy, topics, transactionVersion,
+                    proxy, Optional.empty(), "apache-kafka", Map.of(), false);
+        }
         public KafkaCluster {
+            Objects.requireNonNull(imageId, "imageId");
+            brokerConfig = immutableSortedMap(brokerConfig, "brokerConfig");
+            Objects.requireNonNull(launchType, "launchType");
+            layout = KafkaRuntimeTarget.requireLayout(layout);
+            if (transactionVersionBrokerDefault && transactionVersion.isPresent())
+                throw new IllegalArgumentException("broker-default cannot also select a feature level");
             alias = requireNonBlank(alias, "alias");
             imageReference = requireNonBlank(imageReference, "imageReference");
             Objects.requireNonNull(mode, "mode");
@@ -232,7 +257,8 @@ public final class ExecutableScenarioPlan {
 
         /** What the runtime needs to start this cluster; the broker policy is passed as is. */
         public KafkaRuntimeTarget runtimeTarget() {
-            return new KafkaRuntimeTarget(alias, imageReference, brokerPolicy, brokers);
+            return new KafkaRuntimeTarget(alias, imageReference, brokerPolicy, brokers,
+                    imageId, launchType, brokerConfig, layout);
         }
     }
 
@@ -280,7 +306,17 @@ public final class ExecutableScenarioPlan {
             int taskmanagers,
             Optional<FlinkRuntimeTarget.RuntimeJar> expectedRuntimeJar,
             Optional<FlinkRuntimeTarget.HighAvailability> highAvailability,
-            Optional<FlinkRuntimeTarget.TokenProvider> tokenProvider) {
+            Optional<FlinkRuntimeTarget.TokenProvider> tokenProvider,
+            Optional<String> declaredLine,
+            Map<String, String> config) {
+        public FlinkCluster(String imageReference, Optional<String> expectedImageId,
+                            int jobmanagers, int taskmanagers,
+                            Optional<FlinkRuntimeTarget.RuntimeJar> expectedRuntimeJar,
+                            Optional<FlinkRuntimeTarget.HighAvailability> highAvailability,
+                            Optional<FlinkRuntimeTarget.TokenProvider> tokenProvider) {
+            this(imageReference, expectedImageId, jobmanagers, taskmanagers, expectedRuntimeJar,
+                    highAvailability, tokenProvider, Optional.empty(), Map.of());
+        }
         public FlinkCluster(String imageReference, Optional<String> expectedImageId,
                             int jobmanagers, int taskmanagers,
                             Optional<FlinkRuntimeTarget.RuntimeJar> expectedRuntimeJar) {
@@ -293,6 +329,8 @@ public final class ExecutableScenarioPlan {
         }
 
         public FlinkCluster {
+            Objects.requireNonNull(declaredLine, "declaredLine");
+            config = org.savonitar.flink.stability.runtime.api.FlinkConfiguration.validate(config);
             imageReference = requireNonBlank(imageReference, "imageReference");
             expectedImageId = Objects.requireNonNull(expectedImageId, "expectedImageId");
             expectedRuntimeJar = Objects.requireNonNull(expectedRuntimeJar, "expectedRuntimeJar");
@@ -382,10 +420,13 @@ public final class ExecutableScenarioPlan {
             Map<String, String> expectedStandardConfiguration =
                     ExecutableScenarioPlan.standardFlinkConfiguration(
                             parallelism, stateBackend, checkpointing);
-            if (!expectedStandardConfiguration.equals(standardFlinkConfiguration)) {
+            if (!standardFlinkConfiguration.entrySet().containsAll(expectedStandardConfiguration.entrySet())) {
                 throw new IllegalArgumentException(
                         "Standard Flink configuration does not match typed job options");
             }
+            Map<String, String> extra = new TreeMap<>(standardFlinkConfiguration);
+            expectedStandardConfiguration.keySet().forEach(extra::remove);
+            org.savonitar.flink.stability.runtime.api.FlinkConfiguration.validate(extra);
         }
 
         /** Materializes one sorted submission map after runtime-only Kafka values exist. */
@@ -488,7 +529,16 @@ public final class ExecutableScenarioPlan {
 
     public enum TransactionIdNamingStrategy {
         INCREMENTING,
-        POOLING
+        POOLING,
+        CONNECTOR_DEFAULT;
+
+        public String wireValue() {
+            return this == CONNECTOR_DEFAULT ? "connector-default" : name();
+        }
+
+        public static TransactionIdNamingStrategy fromWire(String value) {
+            return "connector-default".equals(value) ? CONNECTOR_DEFAULT : valueOf(value);
+        }
     }
 
     public enum StateBackend {
@@ -755,7 +805,7 @@ public final class ExecutableScenarioPlan {
             sink.transactionalIdPrefix().ifPresent(prefix -> {
                 values.put(PREFIX + "sink.transactional-id-prefix", prefix);
                 values.put(PREFIX + "sink.transaction-id-naming-strategy",
-                        sink.transactionIdNamingStrategy().orElseThrow().name());
+                        sink.transactionIdNamingStrategy().orElseThrow().wireValue());
                 values.put(PREFIX + "sink.transaction-timeout-ms",
                         Long.toString(transactionTimeout.toMillis()));
             });

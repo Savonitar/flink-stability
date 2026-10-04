@@ -48,6 +48,12 @@ final class SpecificationValidationService {
             String scenarioName,
             Map<String, ? extends JsonNode> submitOverrides,
             ArtifactResolutionOptions artifactOptions) {
+        return validateScenario(catalogRoot, scenarioName, submitOverrides, artifactOptions, false);
+    }
+
+    ValidationSummary validateScenario(Path catalogRoot, String scenarioName,
+            Map<String, ? extends JsonNode> submitOverrides, ArtifactResolutionOptions artifactOptions,
+            boolean showPlan) {
         Objects.requireNonNull(scenarioName, "scenarioName");
         SpecificationCatalog catalog = load(catalogRoot);
         var bundle = catalog.scenario(scenarioName).orElseThrow(() -> unknown(
@@ -56,11 +62,31 @@ final class SpecificationValidationService {
                 bundle,
                 new ResolutionRequest(Map.of(), submitOverrides));
         try (PreparedScenarioPlan prepared = artifactResolver.resolve(resolved, artifactOptions)) {
-            return new ValidationSummary(
-                    ValidationSummary.TargetKind.SCENARIO,
-                    scenarioName,
-                    1,
-                    prepared.artifacts().size());
+            java.util.Optional<JsonNode> plan = java.util.Optional.empty();
+            if (showPlan) {
+                var compiler = new org.savonitar.flink.stability.core.execution.plan.ExecutableScenarioPlanCompiler();
+                var executable = compiler.compile(resolved);
+                var bound = compiler.bind(prepared, executable);
+                var mapper = new com.fasterxml.jackson.databind.ObjectMapper();
+                var rendered = mapper.createObjectNode();
+                rendered.put("scenario", scenarioName);
+                rendered.set("resolved", resolved.scenario().side(
+                        org.savonitar.flink.stability.core.spec.resolution.ScenarioSide.SINGLE).document());
+                if (executable.kafka().runtimeTarget().customConfiguration()) {
+                    var kafka = rendered.putObject("kafkaRuntime");
+                    kafka.put("launchType", executable.kafka().launchType());
+                    if ("generic-kraft".equals(executable.kafka().launchType()))
+                        kafka.put("layout", executable.kafka().layout());
+                    executable.kafka().imageId().ifPresent(value -> kafka.put("imageId", value));
+                    kafka.set("brokerConfig", mapper.valueToTree(executable.kafka().brokerConfig()));
+                    kafka.set("launches", mapper.valueToTree(executable.kafka().runtimeTarget().resolvedLaunches()));
+                }
+                rendered.set("flinkConfig", mapper.valueToTree(bound.flinkRuntimeTarget().config()));
+                CustomRuntimeSubjectEvidence.from(bound).ifPresent(value -> rendered.set("customRuntimeSubject", value));
+                plan = java.util.Optional.of(rendered);
+            }
+            return new ValidationSummary(ValidationSummary.TargetKind.SCENARIO,
+                    scenarioName, 1, prepared.artifacts().size(), plan);
         }
     }
 

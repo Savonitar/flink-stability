@@ -14,7 +14,7 @@ import static org.savonitar.flink.stability.core.execution.plan.ExecutableScenar
 /** Checks and maps the job's Kafka sink for the first runner (SPEC-001 R5.4, R5.6c). */
 final class SinkCompiler {
     private static final Set<String> GUARANTEES = Set.of("EXACTLY_ONCE", "AT_LEAST_ONCE");
-    private static final Set<String> NAMING_STRATEGIES = Set.of("INCREMENTING", "POOLING");
+    private static final Set<String> NAMING_STRATEGIES = Set.of("INCREMENTING", "POOLING", "connector-default");
 
     private SinkCompiler() {}
 
@@ -36,7 +36,7 @@ final class SinkCompiler {
                 sink.path("transaction_id_naming_strategy").textValue())) {
             issues.add(issue(source, "runner.workload.transaction-id-naming-unsupported",
                     sinkPath + "/transaction_id_naming_strategy",
-                    "Supported transaction ID naming strategies are INCREMENTING and POOLING"));
+                    "Supported transaction ID naming strategies are INCREMENTING, POOLING and connector-default"));
         }
         if (sink.has("transaction_timeout")) {
             int before = issues.size();
@@ -62,7 +62,7 @@ final class SinkCompiler {
                 : ExecutableScenarioPlan.Sink.exactlyOnce(
                         topic,
                         sink.path("transactional_id_prefix").textValue(),
-                        ExecutableScenarioPlan.TransactionIdNamingStrategy.valueOf(
+                        ExecutableScenarioPlan.TransactionIdNamingStrategy.fromWire(
                                 sink.path("transaction_id_naming_strategy").textValue()));
     }
 

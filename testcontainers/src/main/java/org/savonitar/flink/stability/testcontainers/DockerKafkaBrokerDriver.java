@@ -1,17 +1,17 @@
 package org.savonitar.flink.stability.testcontainers;
 
 import org.savonitar.flink.stability.runtime.api.*;
-import org.testcontainers.kafka.KafkaContainer;
+import org.testcontainers.containers.GenericContainer;
 import java.util.*;
 import java.util.function.BooleanSupplier;
 
 /** Physical actions are confined to one exact owned container and stable host endpoint. */
 final class DockerKafkaBrokerDriver implements KafkaBrokerFault.Driver {
-    private final KafkaContainer broker; private final KafkaRuntimeTarget target; private final int node, port;
+    private final GenericContainer<?> broker; private final KafkaRuntimeTarget target; private final int node, port;
     private final String id, networkId; private final BooleanSupplier started; private final KafkaBrokerAdmin admin;
     private final Map<String, KafkaBrokerControl.Snapshot> identities;
     private final String name;
-    DockerKafkaBrokerDriver(KafkaContainer broker, KafkaRuntimeTarget target, int node, String networkId,
+    DockerKafkaBrokerDriver(GenericContainer<?> broker, KafkaRuntimeTarget target, int node, String networkId,
             BooleanSupplier started, KafkaBrokerAdmin admin, Map<String, KafkaBrokerControl.Snapshot> identities) {
         this.broker = broker; this.target = target; this.node = node; this.networkId = networkId;
         this.started = started; this.admin = admin; this.identities = identities; name = "broker-" + node;

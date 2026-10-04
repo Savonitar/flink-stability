@@ -128,7 +128,8 @@ public final class RunScenarioCommand implements Callable<Integer> {
             // the selected expectation; a negative control passes by failing as pinned.
             ScenarioVerdict verdict = ScenarioVerdict.of(prepared.expectedOutcome(), result);
             specification.commandLine().getOut().println(resultRenderer.render(
-                    scenario, context, prepared.expectedOutcome(), result, prepared.connectorPrimaries()));
+                    scenario, context, prepared.expectedOutcome(), result, prepared.connectorPrimaries(),
+                    prepared.customRuntimeSubjectEvidence()));
             return verdict.status() == ScenarioVerdict.Status.PASS
                     ? CommandLine.ExitCode.OK
                     : CommandLine.ExitCode.SOFTWARE;
@@ -163,6 +164,7 @@ public final class RunScenarioCommand implements Callable<Integer> {
         return (catalogRoot, scenarioName, overrides, artifactOptions) -> {
             V1ScenarioPreparationService.PreparedTarget target = preparationService.prepare(
                     catalogRoot, scenarioName, overrides, artifactOptions);
+            var customRuntime = CustomRuntimeSubjectEvidence.from(target.executionPlan());
             return new PreparedExecution() {
                 @Override
                 public V1ScenarioExecutionResult execute(V1AttemptContext context) {
@@ -177,6 +179,11 @@ public final class RunScenarioCommand implements Callable<Integer> {
                 @Override
                 public List<PreparedScenarioPlan.ConnectorPrimaryEvidence> connectorPrimaries() {
                     return target.executionPlan().preparedScenarioPlan().connectorPrimaries();
+                }
+
+                @Override
+                public java.util.Optional<JsonNode> customRuntimeSubjectEvidence() {
+                    return customRuntime;
                 }
 
                 @Override
@@ -203,6 +210,10 @@ public final class RunScenarioCommand implements Callable<Integer> {
 
         default List<PreparedScenarioPlan.ConnectorPrimaryEvidence> connectorPrimaries() {
             return List.of();
+        }
+
+        default java.util.Optional<JsonNode> customRuntimeSubjectEvidence() {
+            return java.util.Optional.empty();
         }
 
         @Override

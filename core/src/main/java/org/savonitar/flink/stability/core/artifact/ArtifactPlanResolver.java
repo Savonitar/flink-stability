@@ -162,6 +162,13 @@ public final class ArtifactPlanResolver {
         Path resolvedPath;
         MavenCoordinate mavenCoordinate = null;
         String declared = reference.reference();
+        if (declared.startsWith("image:")) {
+            if (reference.role() != ArtifactRole.SUBJECT_CONNECTOR) {
+                issues.add(issue(source, reference, "artifact.reference.invalid",
+                        "Image references are supported only for subject connector primaries"));
+            }
+            return Optional.empty();
+        }
         boolean localReference = !declared.startsWith("maven:");
         if (declared.startsWith("maven:")) {
             if (!reference.role().permitsMavenCoordinate()) {
@@ -304,7 +311,9 @@ public final class ArtifactPlanResolver {
                     .ifPresent(closures::add);
             return;
         }
-        if (!baseline.explicit() || !candidate.explicit()) {
+        if (!baseline.explicit() || !candidate.explicit()
+                || baseline.artifactReference().startsWith("image:")
+                || candidate.artifactReference().startsWith("image:")) {
             Optional.ofNullable(resolveConnector(
                             baseline,
                             ResolutionScope.BASELINE,
@@ -443,6 +452,7 @@ public final class ArtifactPlanResolver {
             PreparationContext context,
             List<ResolvedArtifact> resolvedArtifacts,
             List<Diagnostic> issues) {
+        if (declaration.artifactReference().startsWith("image:")) return null;
         if (!declaration.explicit()) {
             return prepareAutoConnector(
                     declaration,

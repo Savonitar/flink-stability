@@ -50,6 +50,10 @@ public final class PreparedExecutableScenarioPlan {
                 || !flinkRuntimeTarget.tokenProvider().equals(executablePlan.flink().tokenProvider())) {
             throw new IllegalArgumentException("Runtime HA/token configuration differs from executable plan");
         }
+        if (!flinkRuntimeTarget.declaredLine().equals(executablePlan.flink().declaredLine())
+                || !flinkRuntimeTarget.config().equals(executablePlan.flink().config())) {
+            throw new IllegalArgumentException("Runtime declared line/config differs from executable plan");
+        }
         if (!flinkRuntimeTarget.expectedImageId().equals(executablePlan.flink().expectedImageId())) {
             throw new IllegalArgumentException("Runtime image ID differs from executable plan");
         }

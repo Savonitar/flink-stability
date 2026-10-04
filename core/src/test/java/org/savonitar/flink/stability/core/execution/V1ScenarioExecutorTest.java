@@ -144,7 +144,7 @@ class V1ScenarioExecutorTest {
 
     @Test
     void coordinatorCommitWitnessGatesPassAndPreservesCommitterErrors() throws Exception {
-        featureSelection = (bootstrap, requested) -> new KafkaTransactionVersion.Selection(Optional.of(1), List.of(
+        featureSelection = (bootstrap, requested, brokerDefault) -> new KafkaTransactionVersion.Selection(Optional.of(1), List.of(
                 new KafkaTransactionVersion.Observation(Optional.of(new KafkaTransactionVersion.Range((short) 1, (short) 1)),
                         Optional.of(new KafkaTransactionVersion.Range((short) 0, (short) 2)), OptionalLong.of(7))), Optional.empty());
         for (boolean witness : List.of(true, false)) for (boolean passes : List.of(true, false)) {
@@ -688,7 +688,7 @@ class V1ScenarioExecutorTest {
                             Optional.of(new KafkaTransactionVersion.Range((short) 1, (short) 1)),
                             Optional.of(new KafkaTransactionVersion.Range((short) 0, (short) 2)),
                             OptionalLong.of(7))), Optional.empty());
-            featureSelection = (bootstrap, requested) -> {
+            featureSelection = (bootstrap, requested, brokerDefault) -> {
                 events.add("feature-selection");
                 assertEquals("localhost:39092", bootstrap);
                 assertEquals(Optional.of(1), requested);
@@ -715,7 +715,7 @@ class V1ScenarioExecutorTest {
                                 Optional.of(new KafkaTransactionVersion.Range((short) 2, (short) 2)),
                                 Optional.of(new KafkaTransactionVersion.Range((short) 0, (short) 2)),
                                 OptionalLong.of(5))), Optional.of("safe downgrade rejected"));
-                featureSelection = (bootstrap, requested) -> wrongRequest
+                featureSelection = (bootstrap, requested, brokerDefault) -> wrongRequest
                         ? KafkaTransactionVersion.Selection.notRequested() : selected;
                 V1ScenarioExecutionResult result = executor(events, new FakeRuntime(events),
                         new FakeFlink(events), (bootstrap, topic, ids, timeout) -> passResult())
@@ -731,6 +731,38 @@ class V1ScenarioExecutorTest {
                 assertFalse(events.contains("flink-open"));
                 assertTrue(events.contains("runtime-close"));
                 assertTrue(result.inputManifest().isEmpty());
+            }
+        }
+    }
+
+    @Test
+    void brokerDefaultObservationIsRequiredAndUnavailableStopsBeforeInput() throws Exception {
+        for (boolean observed : List.of(false, true)) {
+            List<String> events = new ArrayList<>();
+            try (Fixture fixture = fixture(document ->
+                    ((ObjectNode) document.at("/setup/kafka/clusters/main")).put("transaction_version", "broker-default"))) {
+                var selected = new KafkaTransactionVersion.Selection(Optional.empty(), observed ? List.of(
+                        new KafkaTransactionVersion.Observation(
+                                Optional.of(new KafkaTransactionVersion.Range((short) 2, (short) 2)),
+                                Optional.empty(), OptionalLong.empty())) : List.of(),
+                        observed ? Optional.empty() : Optional.of("describeFeatures unsupported"), true);
+                featureSelection = (bootstrap, requested, brokerDefault) -> {
+                    assertTrue(brokerDefault);
+                    assertTrue(requested.isEmpty());
+                    return selected;
+                };
+                var result = executor(events, new FakeRuntime(events), new FakeFlink(events),
+                        (bootstrap, topic, ids, timeout) -> passResult()).execute(fixture.bound(), attemptContext());
+                assertEquals(selected, result.kafkaTransactionVersion());
+                if (observed) {
+                    assertEquals(V1ScenarioExecutionResult.Status.PASS, result.status());
+                    assertTrue(events.contains("input-prepare"));
+                } else {
+                    assertEquals(V1ScenarioExecutionResult.Status.INCONCLUSIVE, result.status());
+                    assertEquals("kafka.feature.observation-unavailable", result.reason());
+                    assertFalse(events.contains("input-prepare"));
+                    assertFalse(events.contains("flink-open"));
+                }
             }
         }
     }
@@ -769,7 +801,7 @@ class V1ScenarioExecutorTest {
                                 Optional.of(new KafkaTransactionVersion.Range((short) 1, (short) 1)),
                                 Optional.of(new KafkaTransactionVersion.Range((short) 0, (short) 2)),
                                 OptionalLong.of(7))), Optional.empty());
-                featureSelection = (bootstrap, requested) -> selected;
+                featureSelection = (bootstrap, requested, brokerDefault) -> selected;
                 FakeFlink flink = new FakeFlink(events);
                 String body = "{\"errors\":[\"NullArgumentException: input array\"]}" + "x".repeat(5000);
                 var error = new FlinkScenarioControl.RestError(1, "GET", "/jobs/job-1/checkpoints", 500, body);

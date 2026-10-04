@@ -142,6 +142,19 @@ public final class V1ScenarioExecutor {
             }
             throw fatal;
         }
+        var kafkaTarget = prepared.executablePlan().kafka().runtimeTarget();
+        var retainedKafka = resources.runtime == null
+                ? Optional.<org.savonitar.flink.stability.runtime.api.KafkaRuntimeEvidence>empty()
+                : resources.runtime.kafkaRuntimeEvidence();
+        if (retainedKafka.isPresent()) {
+            result = result.withKafkaRuntime(retainedKafka);
+        } else if (resources.endpoints != null) {
+            result = result.withKafkaRuntime(resources.endpoints.runtimeEvidence());
+        } else if (kafkaTarget.customConfiguration()) {
+            result = result.withKafkaRuntime(Optional.of(new org.savonitar.flink.stability.runtime.api.KafkaRuntimeEvidence(
+                    kafkaTarget.clusterAlias(), kafkaTarget.imageReference(), kafkaTarget.imageId(), kafkaTarget.launchType(),
+                    kafkaTarget.brokerConfig(), List.of())));
+        }
         if (context.kafkaLogOutput().isPresent()) {
             var logs = result.terminalValidation().isPresent() && resources.runtime != null
                     ? KafkaLogEvidence.collect(resources.runtime, prepared.executablePlan(), context.kafkaLogOutput().orElseThrow(),
@@ -161,7 +174,8 @@ public final class V1ScenarioExecutor {
         ExecutableScenarioPlan plan = prepared.executablePlan();
         FlinkRuntimeIdentity.ExpectedTarget expectedRuntime = new FlinkRuntimeIdentity.ExpectedTarget(
                 plan.flink().expectedImageId(), plan.flink().expectedComponents(),
-                plan.flink().expectedRuntimeJar());
+                plan.flink().expectedRuntimeJar(), plan.flink().declaredLine(),
+                Optional.of(plan.flink().imageReference()), plan.flink().config());
         FlinkHaEvidence.Expected expectedHa = FlinkHaEvidence.Expected.from(
                 plan.phases(), plan.flink().highAvailability().isPresent(), plan.flink().tokenProvider().isPresent(),
                 plan.flink().taskmanagers()).withTokenProof(plan.flink().tokenProvider()
@@ -181,7 +195,7 @@ public final class V1ScenarioExecutor {
         SubjectClassOrigins subjectOrigins = null;
         SubjectClassOrigins runtimeOrigins = null;
         KafkaTransactionVersion.Selection transactionVersion = new KafkaTransactionVersion.Selection(
-                plan.kafka().transactionVersion(), List.of(), Optional.empty());
+                plan.kafka().transactionVersion(), List.of(), Optional.empty(), plan.kafka().transactionVersionBrokerDefault());
         List<String> evidenceDiagnostics = new ArrayList<>();
         V1ScenarioExecutionResult result;
         Stage stage = Stage.RUNTIME_CREATION;
@@ -191,10 +205,14 @@ public final class V1ScenarioExecutor {
             stage = Stage.KAFKA_START;
             KafkaRuntimeEndpoints endpoints = runtime.startKafka(plan.kafka().runtimeTarget());
             resources.endpoints = endpoints;
+            if (plan.kafka().runtimeTarget().customConfiguration()
+                    && endpoints.runtimeEvidence().filter(value -> value.confirms(plan.kafka().runtimeTarget())).isEmpty())
+                throw new IOException("Custom Kafka startup lacks verified image and ready-container configuration evidence");
             stage = Stage.KAFKA_FEATURE_SELECTION;
             KafkaTransactionVersion.Selection selected = transactionVersionSelection.select(
-                    endpoints.hostBootstrapServers(), plan.kafka().transactionVersion());
-            if (!selected.requested().equals(plan.kafka().transactionVersion())) {
+                    endpoints.hostBootstrapServers(), plan.kafka().transactionVersion(), plan.kafka().transactionVersionBrokerDefault());
+            if (!selected.requested().equals(plan.kafka().transactionVersion())
+                    || selected.brokerDefault() != plan.kafka().transactionVersionBrokerDefault()) {
                 throw new IOException("Kafka transaction.version evidence describes another request");
             }
             transactionVersion = selected;
@@ -434,7 +452,7 @@ public final class V1ScenarioExecutor {
             Thread.currentThread().interrupt();
             result = result(
                     stage.failureStatus(),
-                    stage.reason(),
+                    stage == Stage.KAFKA_FEATURE_SELECTION ? transactionVersion.failureReason() : stage.reason(),
                     "Attempt infrastructure failed during " + stage.displayName(),
                     inputEvidence,
                     phases,
@@ -453,7 +471,7 @@ public final class V1ScenarioExecutor {
         } catch (Exception failure) {
             result = result(
                     stage.failureStatus(),
-                    stage.reason(),
+                    stage == Stage.KAFKA_FEATURE_SELECTION ? transactionVersion.failureReason() : stage.reason(),
                     "Attempt infrastructure failed during " + stage.displayName(),
                     inputEvidence,
                     phases,
@@ -478,13 +496,18 @@ public final class V1ScenarioExecutor {
             V1AttemptRuntime runtime,
             PreparedExecutableScenarioPlan prepared) {
         String expectedSource = prepared.connectorBundle()
-                .primaryEntry(prepared.executablePlan().job().connectorAlias())
-                .map(entry -> entry.containerPath())
+                .primaryContainerPath(prepared.executablePlan().job().connectorAlias())
                 .orElseThrow(() -> new IllegalStateException(
                         "The bound connector bundle has no subject primary entry"));
         try {
-            return SubjectClassOrigins.read(
-                    runtime.flinkClassLoadLogs(), ENTRY_CLASSES, expectedSource);
+            var image = prepared.connectorBundle().imageConnectors().stream().filter(connector ->
+                    connector.alias().equals(prepared.executablePlan().job().connectorAlias())).findFirst();
+            var logs = runtime.flinkClassLoadLogs();
+            SubjectClassOrigins observed = image.isPresent()
+                    ? SubjectClassOrigins.readImageSubject(logs, ENTRY_CLASSES, expectedSource)
+                    : SubjectClassOrigins.read(logs, ENTRY_CLASSES, expectedSource);
+            return image.map(connector -> observed.requireEveryTaskManager(
+                    runtime.flinkProvisioningEvidence(), ENTRY_CLASSES, connector)).orElse(observed);
         } catch (RuntimeException unavailable) {
             return new SubjectClassOrigins(expectedSource, List.of(), Optional.of(
                     "Cannot list Flink class-load logs: " + unavailable.getMessage()));
@@ -751,7 +774,7 @@ public final class V1ScenarioExecutor {
 
     @FunctionalInterface
     interface TransactionVersionSelection {
-        KafkaTransactionVersion.Selection select(String bootstrapServers, Optional<Integer> requested);
+        KafkaTransactionVersion.Selection select(String bootstrapServers, Optional<Integer> requested, boolean brokerDefault);
     }
 
     @FunctionalInterface

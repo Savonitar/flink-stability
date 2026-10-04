@@ -25,6 +25,7 @@ public final class PreparedConnectorBundle {
     private final List<String> aliases;
     private final List<ConnectorClosureLock> closureLocks;
     private final List<PreparedConnectorBundleEntry> entries;
+    private final List<org.savonitar.flink.stability.runtime.api.ImageConnectorArtifact> imageConnectors;
     private final String canonicalTargetBindingJson;
     private final String targetBindingSha256;
     private final String classpathManifestJson;
@@ -40,6 +41,15 @@ public final class PreparedConnectorBundle {
             String targetBindingSha256,
             String classpathManifestJson,
             String classpathManifestSha256) {
+        this(side, targetFlinkImageReference, aliases, closureLocks, entries, canonicalTargetBindingJson,
+                targetBindingSha256, classpathManifestJson, classpathManifestSha256, List.of());
+    }
+
+    PreparedConnectorBundle(ScenarioSide side, String targetFlinkImageReference, List<String> aliases,
+            List<ConnectorClosureLock> closureLocks, List<PreparedConnectorBundleEntry> entries,
+            String canonicalTargetBindingJson, String targetBindingSha256,
+            String classpathManifestJson, String classpathManifestSha256,
+            List<org.savonitar.flink.stability.runtime.api.ImageConnectorArtifact> imageConnectors) {
         this.side = Objects.requireNonNull(side, "side");
         this.targetFlinkImageReference = requireNonBlank(
                 targetFlinkImageReference, "targetFlinkImageReference");
@@ -47,6 +57,7 @@ public final class PreparedConnectorBundle {
         this.closureLocks = List.copyOf(Objects.requireNonNull(
                 closureLocks, "closureLocks"));
         this.entries = List.copyOf(Objects.requireNonNull(entries, "entries"));
+        this.imageConnectors = List.copyOf(imageConnectors);
         this.canonicalTargetBindingJson = requireNonBlank(
                 canonicalTargetBindingJson, "canonicalTargetBindingJson");
         this.targetBindingSha256 = Objects.requireNonNull(
@@ -69,8 +80,9 @@ public final class PreparedConnectorBundle {
             throw new IllegalArgumentException(
                     "Bundle aliases must be distinct and lexicographically sorted");
         }
-        if (!this.closureLocks.stream().map(ConnectorClosureLock::alias).toList()
-                .equals(this.aliases)) {
+        List<String> boundAliases = new ArrayList<>(this.closureLocks.stream().map(ConnectorClosureLock::alias).toList());
+        this.imageConnectors.forEach(image -> boundAliases.add(image.alias()));
+        if (!boundAliases.stream().sorted().toList().equals(this.aliases)) {
             throw new IllegalArgumentException(
                     "Bundle locks must occur once in alias order");
         }
@@ -117,6 +129,16 @@ public final class PreparedConnectorBundle {
                         contribution.alias().equals(alias)
                                 && contribution.closureEntry().primary()))
                 .findFirst();
+    }
+
+    public List<org.savonitar.flink.stability.runtime.api.ImageConnectorArtifact> imageConnectors() {
+        return imageConnectors;
+    }
+
+    public Optional<String> primaryContainerPath(String alias) {
+        return primaryEntry(alias).map(PreparedConnectorBundleEntry::containerPath)
+                .or(() -> imageConnectors.stream().filter(image -> image.alias().equals(alias))
+                        .map(org.savonitar.flink.stability.runtime.api.ImageConnectorArtifact::containerPath).findFirst());
     }
 
     public List<PreparedConnectorBundleEntry> entries() {

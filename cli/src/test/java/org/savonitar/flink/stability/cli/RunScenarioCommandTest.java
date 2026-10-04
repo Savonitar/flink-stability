@@ -57,6 +57,61 @@ class RunScenarioCommandTest {
     Path temporaryDirectory;
 
     @Test
+    void customKafkaReceiptsSurviveLogSnapshotsAndBothCleanupPaths() throws Exception {
+        var launch = org.savonitar.flink.stability.runtime.api.KafkaRuntimeLaunch.command("confluent-platform");
+        String readiness = org.savonitar.flink.stability.runtime.api.KafkaRuntimeLaunch.readinessCommand("confluent-platform");
+        var receipt = new org.savonitar.flink.stability.runtime.api.KafkaRuntimeEvidence(
+                "main", "custom/kafka:vendor", Optional.of("sha256:" + "a".repeat(64)),
+                "generic-kraft", Map.of("transaction.two.phase.commit.enable", "true"),
+                List.of(new org.savonitar.flink.stability.runtime.api.KafkaRuntimeEvidence.Container(
+                        "kafka-main", "1".repeat(64), "sha256:" + "a".repeat(64), Map.of(), launch,
+                        "/tmp/kafka-logs", true, true, null, readiness)), "confluent-platform");
+        var base = passResult().withKafkaRuntime(Optional.of(receipt));
+        for (var result : List.of(base.withKafkaLogs(base.kafkaLogs()),
+                base.withComponentErrors(base.componentErrors()), base.withFlinkRestErrors(List.of()),
+                base.withCleanupFailure(new IOException("attempt cleanup")),
+                base.withPreparedArtifactCleanupFailure(new IOException("artifact cleanup")),
+                base.withCleanupFailure(new IOException("first")).withCleanupFailure(new IOException("second")))) {
+            assertEquals(Optional.of(receipt), result.kafkaRuntime());
+            var rendered = JSON.readTree(new V1ExecutionResultRenderer().render(
+                    "custom", context("1234abcd"), expectation, result));
+            assertEquals("generic-kraft", rendered.at("/evidence/kafka/launchType").asText());
+            assertEquals("confluent-platform", rendered.at("/evidence/kafka/layout").asText());
+            assertEquals(readiness, rendered.at("/evidence/kafka/containers/0/readinessCommand").asText());
+            assertEquals(launch.getLast(), rendered.at("/evidence/kafka/containers/0/command/2").asText());
+            assertEquals("author-assertion", rendered.at("/evidence/kafka/compatibilityBasis").asText());
+            assertEquals("true", rendered.at("/evidence/kafka/brokerConfig/transaction.two.phase.commit.enable").asText());
+        }
+    }
+
+    @Test
+    void apacheWrapperEvidenceDoesNotClaimAGenericToolLayout() throws Exception {
+        var receipt = new org.savonitar.flink.stability.runtime.api.KafkaRuntimeEvidence(
+                "main", "apache/kafka:4.0.0", Optional.of("sha256:" + "a".repeat(64)),
+                "apache-kafka", Map.of(), List.of());
+        var rendered = JSON.readTree(new V1ExecutionResultRenderer().render("custom", context("1234abcd"),
+                expectation, passResult().withKafkaRuntime(Optional.of(receipt))));
+        assertFalse(rendered.at("/evidence/kafka").has("layout"));
+    }
+
+    @Test
+    void customSubjectMetadataIsOptionalAndSurvivesRendering() throws Exception {
+        var renderer = new V1ExecutionResultRenderer();
+        var ordinary = JSON.readTree(renderer.render("bounded-eos", context("1234abcd"), expectation, passResult()));
+        assertFalse(ordinary.path("evidence").has("customRuntimeSubject"));
+        assertFalse(ordinary.at("/evidence/flinkRuntime").has("declaredLine"));
+        assertFalse(ordinary.at("/evidence/flinkRuntime").has("compatibilityBasis"));
+        assertFalse(ordinary.at("/evidence/flinkRuntime/components/0").has("effectiveConfiguration"));
+        assertFalse(ordinary.path("evidence").has("kafka"));
+        var metadata = JSON.createObjectNode();
+        metadata.putObject("workload").put("artifact", "subject-workload.jar").put("sha256", "a".repeat(64));
+        metadata.put("transactionIdNamingStrategy", "connector-default");
+        var custom = JSON.readTree(renderer.render("bounded-eos", context("1234abcd"), expectation,
+                passResult(), List.of(), Optional.of(metadata)));
+        assertEquals(metadata, custom.at("/evidence/customRuntimeSubject"));
+    }
+
+    @Test
     void explicitKafkaOutputIsPassedToAttemptAndDiagnosticStatusIsRendered() throws Exception {
         var seen = new AtomicReference<V1AttemptContext>();
         var command = new RunScenarioCommand((root, name, overrides, options) -> new RunScenarioCommand.PreparedExecution() {
@@ -324,6 +379,27 @@ class RunScenarioCommandTest {
     }
 
     @Test
+    void rendersEffectiveConfigurationReceiptWithItsPhysicalProcessIdentity() throws Exception {
+        var config = Map.of("jobmanager.memory.process.size", "1600m", "pipeline.name", "a$HOME b 'quoted': #x");
+        var receipt = new FlinkComponentProvisioningEvidence.EffectiveConfigurationEvidence(
+                "/opt/flink/conf/config.yaml", "a".repeat(64), "a".repeat(64),
+                List.of("/bin/bash", "/opt/flink/flink-stability-launch.sh", "taskmanager"), config);
+        var component = passResult().flinkProvisioningEvidence().getLast()
+                .withProcessConfiguration(config, "taskmanager-1#2").withEffectiveConfiguration(receipt);
+        var rendered = JSON.readTree(new V1ExecutionResultRenderer().render(
+                "bounded-eos", context("1234abcd"), expectation,
+                result(V1ScenarioExecutionResult.Status.INCONCLUSIVE, "test.partial", List.of(component))))
+                .at("/evidence/flinkRuntime/components/0");
+        assertEquals(component.runtimeId(), rendered.path("runtimeId").asText());
+        assertEquals("taskmanager-1#2", rendered.path("classLoadProcess").asText());
+        assertEquals("a".repeat(64), rendered.at("/effectiveConfiguration/sourceSha256").asText());
+        assertEquals("a".repeat(64), rendered.at("/effectiveConfiguration/observedSha256").asText());
+        assertEquals("taskmanager", rendered.at("/effectiveConfiguration/launcher/2").asText());
+        assertEquals(config.get("pipeline.name"), rendered.at("/effectiveConfiguration/observedValues/pipeline.name").asText());
+        assertEquals(config.get("pipeline.name"), rendered.at("/config/pipeline.name").asText());
+    }
+
+    @Test
     void reportsRuntimeJarBytesAndClassLoadsWithTheirPhysicalContainerAssociation() throws Exception {
         var jar = new FlinkRuntimeTarget.RuntimeJar(
                 "/opt/flink/lib/flink-dist-2.2.0.jar", "c".repeat(64));
@@ -344,13 +420,17 @@ class RunScenarioCommandTest {
                     base.flinkProvisioningEvidence().stream().map(component ->
                             component.withRuntimeJarEvidence(jar, component.logicalName() + "#1")).toList(),
                     new FlinkRuntimeIdentity.ExpectedTarget(EXPECTED_RUNTIME.imageId(),
-                            EXPECTED_RUNTIME.components(), Optional.of(jar)),
+                            EXPECTED_RUNTIME.components(), Optional.of(jar), Optional.of("2.2"),
+                            Optional.of("flink:2.2.0"), Map.of()),
                     observed ? Optional.of(origins) : Optional.empty(),
                     KafkaTransactionVersion.Selection.notRequested(), base.expectedHa(), base.tokenEvidence(),
                     base.haObservations(), base.processObservations(), List.of());
             JsonNode runtime = JSON.readTree(new V1ExecutionResultRenderer().render(
                     "bounded-eos", context("1234abcd"), expectation, result)).at("/evidence/flinkRuntime");
             assertEquals(observed ? "confirmed" : "unconfirmed", runtime.at("/runtimeJar/status").textValue());
+            assertEquals("author-assertion", runtime.path("compatibilityBasis").asText());
+            assertEquals("2.2", runtime.path("declaredLine").asText());
+            assertEquals("2.2.0", runtime.path("tag").asText());
             assertEquals(jar.sha256(), runtime.at("/runtimeJar/expected/sha256").textValue());
             assertEquals(jar.containerPath(), runtime.at("/runtimeJar/expected/containerPath").textValue());
             assertEquals("jm", runtime.at("/components/0/runtimeId").textValue());
@@ -428,6 +508,29 @@ class RunScenarioCommandTest {
         assertEquals(0, evidence.at("/observations/0/supported/min").intValue());
         assertEquals(5, evidence.at("/observations/0/metadataEpoch").longValue());
         assertEquals(selection.error().orElseThrow(), evidence.path("error").textValue());
+        assertFalse(evidence.at("/observations/0").has("observedLevel"));
+        assertFalse(evidence.at("/observations/0").has("levelSource"));
+    }
+
+    @Test
+    void brokerDefaultZeroRetainsRawOmissionAndLabelsItsInterpretation() throws Exception {
+        var observation = new KafkaTransactionVersion.Observation(Optional.empty(),
+                Optional.of(new KafkaTransactionVersion.Range((short) 0, (short) 2)),
+                java.util.OptionalLong.of(5));
+        var selection = new KafkaTransactionVersion.Selection(Optional.empty(), List.of(observation),
+                Optional.empty(), true);
+        var result = new V1ScenarioExecutionResult(V1ScenarioExecutionResult.Status.INCONCLUSIVE,
+                "test.partial", "observed zero", Optional.empty(), Optional.empty(), Optional.empty(),
+                Optional.empty(), Optional.empty(), Optional.empty(), Optional.empty(), Optional.empty(),
+                List.of(), EXPECTED_RUNTIME, Optional.empty(), selection, List.of());
+        var evidence = JSON.readTree(new V1ExecutionResultRenderer().render(
+                "bounded-eos", context("1234abcd"), expectation, result)).at("/evidence/kafkaTransactionVersion");
+        assertEquals("observed", evidence.path("status").asText());
+        assertEquals("broker-default", evidence.path("requested").asText());
+        assertFalse(evidence.at("/observations/0").has("finalized"));
+        assertEquals(0, evidence.at("/observations/0/observedLevel").asInt(-1));
+        assertEquals("implicit-zero", evidence.at("/observations/0/levelSource").asText());
+        assertEquals(5, evidence.at("/observations/0/metadataEpoch").asLong());
     }
 
     @Test

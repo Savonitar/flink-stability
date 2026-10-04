@@ -2,7 +2,6 @@ package org.savonitar.flink.stability.testcontainers;
 
 import org.savonitar.flink.stability.runtime.api.KafkaLogCapture;
 import com.github.dockerjava.api.DockerClient;
-import org.savonitar.flink.stability.runtime.api.KafkaBrokerPolicy;
 import org.savonitar.flink.stability.runtime.api.KafkaRuntimeEndpoints;
 import org.savonitar.flink.stability.runtime.api.KafkaRuntimeTarget;
 import org.savonitar.flink.stability.runtime.api.MonotonicDeadline;
@@ -10,7 +9,6 @@ import org.slf4j.LoggerFactory;
 import org.testcontainers.containers.Network;
 import org.testcontainers.containers.output.Slf4jLogConsumer;
 import org.testcontainers.kafka.KafkaContainer;
-import org.testcontainers.utility.DockerImageName;
 
 import java.io.FilterInputStream;
 import java.io.IOException;
@@ -44,10 +42,11 @@ final class ApacheKafkaRuntime implements KafkaRuntimeCluster {
         Objects.requireNonNull(network, "network");
         this.target = Objects.requireNonNull(target, "target");
         Map<String, String> environment = new LinkedHashMap<>(
-                brokerEnvironment(target.brokerPolicy()));
+                brokerEnvironment(target));
         environment.put("KAFKA_AUTO_CREATE_TOPICS_ENABLE", "false");
+        if (target.customConfiguration()) environment.put("KAFKA_LOG_DIRS", KafkaRuntimeTarget.LOG_DIRECTORY);
         this.configuredEnvironment = Collections.unmodifiableMap(environment);
-        this.container = new KafkaContainer(DockerImageName.parse(target.imageReference()))
+        this.container = new VerifiedKafkaContainer(target)
                 .withNetwork(network)
                 .withNetworkAliases(target.networkAlias())
                 .withListener(target.internalBootstrapServers())
@@ -68,8 +67,9 @@ final class ApacheKafkaRuntime implements KafkaRuntimeCluster {
         this.container = Objects.requireNonNull(container);
         this.ownedNetworkId = Objects.requireNonNull(ownedNetworkId);
         this.archiveDriverFactory = Objects.requireNonNull(archiveDriverFactory);
-        var environment = new LinkedHashMap<>(brokerEnvironment(target.brokerPolicy()));
+        var environment = new LinkedHashMap<>(brokerEnvironment(target));
         environment.put("KAFKA_AUTO_CREATE_TOPICS_ENABLE", "false");
+        if (target.customConfiguration()) environment.put("KAFKA_LOG_DIRS", KafkaRuntimeTarget.LOG_DIRECTORY);
         this.configuredEnvironment = Collections.unmodifiableMap(environment);
     }
 
@@ -80,6 +80,7 @@ final class ApacheKafkaRuntime implements KafkaRuntimeCluster {
         }
         startAttempted = true;
         container.start();
+        if (container instanceof VerifiedKafkaContainer verified) verified.markReady();
         started = true;
         generation++;
         startupIdentity = null;
@@ -217,7 +218,7 @@ final class ApacheKafkaRuntime implements KafkaRuntimeCluster {
                 target.clusterAlias(),
                 target.imageReference(),
                 target.internalBootstrapServers(),
-                container.getBootstrapServers());
+                container.getBootstrapServers(), runtimeEvidence());
     }
 
     String configuredImageReference() {
@@ -242,19 +243,28 @@ final class ApacheKafkaRuntime implements KafkaRuntimeCluster {
         }
     }
 
-    private static Map<String, String> brokerEnvironment(KafkaBrokerPolicy policy) {
-        Map<String, String> configuration = policy.kafkaConfiguration();
-        return Map.of(
-                "KAFKA_TRANSACTION_MAX_TIMEOUT_MS",
-                configuration.get("transaction.max.timeout.ms"),
-                "KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR",
-                configuration.get("offsets.topic.replication.factor"),
-                "KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR",
-                configuration.get("transaction.state.log.replication.factor"),
-                "KAFKA_TRANSACTION_STATE_LOG_MIN_ISR",
-                configuration.get("transaction.state.log.min.isr"),
-                "KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS",
-                configuration.get("group.initial.rebalance.delay.ms"));
+    static Map<String, String> brokerEnvironment(KafkaRuntimeTarget target) {
+        var environment = new LinkedHashMap<String, String>();
+        target.resolvedBrokerConfig().forEach((key, value) -> environment.put(environmentKey(key),
+                org.savonitar.flink.stability.runtime.api.KafkaRuntimeLaunch.escapePropertyValue(value)));
+        return environment;
+    }
+
+    static String environmentKey(String key) {
+        return KafkaRuntimeTarget.apacheEnvironmentKey(key);
+    }
+
+    @Override public java.util.Optional<org.savonitar.flink.stability.runtime.api.KafkaRuntimeEvidence> runtimeEvidence() {
+        return customEvidence(target, List.of(container));
+    }
+
+    static java.util.Optional<org.savonitar.flink.stability.runtime.api.KafkaRuntimeEvidence> customEvidence(
+            KafkaRuntimeTarget target, List<? extends KafkaContainer> containers) {
+        if (!target.customConfiguration()) return java.util.Optional.empty();
+        var evidence = containers.stream().filter(VerifiedKafkaContainer.class::isInstance)
+                .map(VerifiedKafkaContainer.class::cast).flatMap(container -> container.retainedEvidence().stream()).toList();
+        return java.util.Optional.of(new org.savonitar.flink.stability.runtime.api.KafkaRuntimeEvidence(
+                target.clusterAlias(), target.imageReference(), target.imageId(), target.launchType(), target.brokerConfig(), evidence));
     }
     public KafkaLogCapture captureKafkaLogs(
             List<KafkaLogCapture.Partition> partitions,

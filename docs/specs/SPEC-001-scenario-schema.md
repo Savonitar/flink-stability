@@ -364,15 +364,16 @@ Connector pull-request gating is the same mechanism with one axis:
   only `mode: kraft` when it is declared. `brokers` is an integer of at least
   one. Other topology modes are rejected before provisioning as
   `unsupported-capability`, never coerced to KRaft.
-- **R4.2a** The first executable v1 broker capability is **Apache Kafka
-  `4.0.x` only**. Every resolved setup image and explicit Kafka restart image
-  must be an exact official `apache/kafka:4.0.<patch>` tag, optionally followed
+- **R4.2a** Without a cluster `image_id` pin, the executable v1 broker capability
+  remains **Apache Kafka `4.0.x`**. Every resolved setup image and explicit Kafka
+  restart image must be an exact official `apache/kafka:4.0.<patch>` tag, optionally followed
   by `@sha256:<64-lowercase-hex>`; `3.x`, `4.1.x`, later lines, and a reference
   whose broker version cannot be established reject before provisioning with
   `runner.kafka.image-version-unsupported`. Parameter interpolation does
   not defer this check past resolved semantic preflight. Adding another broker
-  line requires an explicit capability-registry entry and integration coverage;
-  a permissive image string is not a compatibility assertion.
+  line without a pin requires an explicit capability-registry entry and integration
+  coverage. The opt-in pinned custom-image contract is R4.2d; an arbitrary tag by
+  itself is not a compatibility assertion.
 - **R4.2b** The v1 format continues to express the broker/topic counts in R4.2
   and R4.3, including valid multi-broker scenarios. The first narrow executable
   runner accepts one broker with topic RF=1, or an optional three-broker KRaft
@@ -384,8 +385,10 @@ Connector pull-request gating is the same mechanism with one axis:
   topology before artifact preparation or Docker with
   `runner.kafka.broker-count-unsupported` or
   `runner.kafka.replication-factor-unsupported`; it never rewrites the scenario.
-- **R4.2c** A Kafka cluster may declare `transaction_version: 1` or
-  `transaction_version: 2`, including through integer parameter interpolation.
+- **R4.2c** A Kafka cluster may declare `transaction_version: 1`,
+  `transaction_version: 2`, or the literal string `broker-default`. Explicit
+  integers support integer parameter interpolation; `broker-default` supports
+  string parameter interpolation.
   Omission leaves the broker's feature level unchanged and does not claim that
   either version was selected. This is a pre-workload selection of Kafka's
   finalized `transaction.version` feature, not a broker configuration property or
@@ -403,6 +406,67 @@ Connector pull-request gating is the same mechanism with one axis:
   levels and metadata epoch when available, and selection outcome. This setting
   enables a controlled feature comparison; it does not establish that Kafka 4.0
   accepts every safe transition between these levels.
+
+  `broker-default` is an observation-only alternative: never call `updateFeatures`.
+  Require a successful `describeFeatures` observation of the finalized
+  `transaction.version` level before workload startup. Kafka omits zero-valued
+  features from its finalized map. For this mode only, an absent finalized entry
+  means level zero when the response explicitly supports zero and supplies a
+  nonnegative metadata epoch. Preserve the absent raw entry and label this
+  interpretation `implicit-zero`; do not synthesize a finalized-map entry.
+  Missing feature support or the epoch needed for this interpretation,
+  unavailable observation or Admin failure is inconclusive
+  `kafka.feature.observation-unavailable`, retaining its error and partial
+  observations; it cannot PASS or match an expected data failure. Observing the
+  broker's level does not assert that it is 1 or 2. Omission still performs no
+  feature calls, and explicit 1/2 retain the strict selection procedure above.
+- **R4.2d** Optional cluster `image_id` is a full lowercase local Docker image
+  configuration ID, `sha256:<64-hex>`. It permits an arbitrary image reference as
+  an explicit author-selected subject. Invalid IDs reject with
+  `runner.kafka.image-id-invalid`; the created container must match the pin before
+  broker process start, including a replacement. This grants no compatibility
+  claim for an image that has not been exercised.
+
+  Optional `launch: {type: apache-kafka | generic-kraft}` chooses a launcher;
+  omission retains `apache-kafka`. Unknown types reject with
+  `runner.kafka.launch-unsupported`. `generic-kraft` starts the one- or three-node
+  combined broker/controller topology of R4.2b using explicit properties,
+  environment and command. Its optional `launch.layout` is `apache` (default)
+  or `confluent-platform`. The Apache layout uses `/opt/kafka/bin/kafka-storage.sh`,
+  `/opt/kafka/bin/kafka-server-start.sh` and `/opt/kafka/bin/kafka-broker-api-versions.sh`.
+  The Confluent Platform layout uses `/usr/bin/kafka-storage`,
+  `/usr/bin/kafka-server-start` and `/usr/bin/kafka-broker-api-versions`, without
+  `.sh` suffixes. Unknown values reject with `runner.kafka.layout-unsupported`;
+  declaring any layout for `apache-kafka` rejects with
+  `runner.kafka.layout-not-applicable`. Layout is explicit, never inferred from
+  an image reference. Both layouts require `/bin/sh`, override the image entrypoint,
+  write `/tmp/flink-stability-kafka.properties`, format KRaft storage and start Kafka.
+  Readiness invokes the broker's API-version tool on `localhost:19092`, rather
+  than inferring health from an open port. The resolved plan shows the complete
+  layout, format/start command, readiness command, environment, broker properties
+  and `/tmp/kafka-logs` directory, with
+  explicit placeholders for dynamically allocated external endpoints. Runtime
+  evidence retains the concrete launch and observed container/image identities,
+  including `evidence.kafka.layout` and each generic container's
+  `readinessCommand`. Layout does not change harness-owned listeners, quorum,
+  properties-file placement or log-directory ownership.
+
+  Optional `broker_config` maps property names to scalar values. Overrides are
+  applied after the harness's ordinary policy and retained in both plan and
+  `evidence.kafka`. The harness owns listener settings, `listener.name.*`, node,
+  broker and cluster IDs, process roles, controller quorum, log directories and
+  automatic topic creation and controlled shutdown: these reject with
+  `runner.kafka.config-reserved-key`. The Apache launcher also reserves names
+  mapping to its wrapper/JVM controls, including `opts`, `heap.opts`, `version`
+  and the logging controls. Apache environment-name encoding must decode to
+  the original property name; ambiguous adjacent punctuation such as
+  `custom..flag` rejects with `runner.kafka.config-invalid`. The generic launcher
+  writes names directly and has no environment-name ambiguity. Both launchers
+  escape literal property values, preserving whitespace and backslashes.
+  Invalid property names or multiline values reject with
+  `runner.kafka.config-invalid`. Physical log and archive capture must use the
+  launcher's declared log directory or explicitly report
+  `kafka.log-capture.unsupported`; an unsupported layout is never an empty capture.
 - **R4.3** Topics are declared **under their cluster** — with two clusters, a
   bare `input_topic` is ambiguous. Every topic requires `name`, `partitions`, and
   `replication_factor`; both numeric values are positive integers and replication
@@ -527,7 +591,8 @@ Connector pull-request gating is the same mechanism with one axis:
   resolves to 1; unsupported counts are rejected before
   provisioning rather than silently starting a broken cluster.
 - **R4.13** Every v1 artifact has a **declared reference** (image reference,
-  Maven coordinate where permitted, or local path) *and* a **resolved identity**
+  Maven coordinate where permitted, local path, or image-contained connector path
+  under R5.6f) *and* a **resolved identity**
   (OCI digest or file SHA-256) recorded in the run report. `git ref` is not a v1
   artifact-reference form; repository/ref support requires an explicit future
   source-resolution contract.
@@ -697,8 +762,9 @@ Connector pull-request gating is the same mechanism with one axis:
   replacement TaskManagers must use that same ID. Missing identity, an expected-ID
   mismatch, or a changed tag resolving to another ID prevents process start.
   Retain the declared reference and the independently observed ID for every
-  successfully provisioned incarnation. An image pin does not relax the version
-  compatibility registry or introduce support for image-changing restart steps.
+  successfully provisioned incarnation. An image pin alone does not relax the
+  version compatibility registry or introduce support for image-changing restart
+  steps; the explicit custom-line declaration is R4.13j.
   Before a successful attempt or an expected-failure scenario can pass, its
   provisioning and process-fence evidence must cover every logical component and
   role expected by the executable plan. Observed evidence must not define the
@@ -709,9 +775,12 @@ Connector pull-request gating is the same mechanism with one axis:
   does not prove that a particular Flink runtime class or PR code path executed.
 - **R4.13f** The first runner accepts optional `setup.flink.runtime_jar` with
   `container_path` and `sha256` strings, resolved after parameter interpolation.
-  The path must name a direct `/opt/flink/lib/flink-dist-<version>.jar` file; the
-  version uses only letters, digits, `.`, `_`, `+`, and `-`, beginning with a letter
-  or digit. The checksum is 64 lowercase hexadecimal characters, without a prefix.
+  The path must name a direct `/opt/flink/lib/flink-dist-<version>.jar` or
+  `/opt/flink/lib/flink-dist_<scala>-<version>.jar` file. The optional Scala label
+  and mandatory version each begin with a letter or digit and use only letters,
+  digits, `.`, `_`, `+`, and `-`. Neither label may be empty; nested paths and
+  shell metacharacters are rejected. The checksum remains mandatory: 64 lowercase
+  hexadecimal characters, without a prefix.
   This declares expected bytes already present in the image; the engine does not
   install or replace the distribution. Reject invalid descriptors before provisioning.
   Read and hash the file from every created container before starting Flink, and
@@ -722,6 +791,22 @@ Connector pull-request gating is the same mechanism with one axis:
   startup timeout. Keep the observed path/hash and the explicitly registered
   class-load process key with the physical container ID, including replacements.
   The version compatibility registry and image identity requirements still apply.
+- **R4.13j** Optional `setup.flink.line: "<major.minor>"` declares the effective
+  Flink line independently of an opaque image tag. Each component must still use
+  the pinned image; a parseable setup/restart tag naming a different line rejects
+  with `capability.flink-line.tag-mismatch`, never a warning or inferred override.
+  A malformed line rejects with `capability.flink-line.invalid`. Every explicit
+  declaration, including `2.2`, requires both R4.13e's `image_id` and R4.13f's
+  `runtime_jar`; missing pins reject with `capability.flink-line.pin-required`.
+  The resolved plan retains the declaration and `evidence.flinkRuntime` records
+  `declaredLine` and the image `tag` (null when absent). `imageId` and
+  `runtimeJarSha256` are observed values only when accepted provisioning receipts
+  unanimously agree; no provisioning means no fabricated observed values.
+  Declared pins remain `expectedImageId` and `runtimeJar.expected.sha256`, alongside
+  the existing per-incarnation verification.
+  Without `line`, tag parsing and the registered 2.2 / pinned experimental 2.4
+  behavior remain unchanged. An explicit line is the author's compatibility
+  assertion, not a claim of tested support for that version.
 - **R4.14** A generated-input topic uses `cleanup.policy: delete`, never
   compaction, and retains data for longer than the maximum attempt duration.
   This makes the manifest's reconciliation snapshot observable.
@@ -923,14 +1008,61 @@ Connector pull-request gating is the same mechanism with one axis:
   `max.block.ms` unchanged. Omission keeps Kafka's default. This is an explicit
   calibration input, independent of processing delay and transaction timeout;
   it does not alter the typed workload protocol or canonical catalogs.
+- **R5.2b** `setup.flink.config` passes literal scalar configuration through to
+  `FLINK_PROPERTIES` in every JobManager and TaskManager and to the REST
+  submission's `flinkConfiguration`. The resolved map is immutable and recorded
+  in the plan and `evidence.flinkRuntime.config`; every successful TaskManager
+  incarnation retains its own process configuration. No key is silently dropped.
+  Nonempty custom configuration uses the explicit standard Flink shell launcher
+  and `/opt/flink/conf/config.yaml`, bypassing image entrypoint interpolation.
+  Merge the image's configuration, harness settings and literal custom values
+  before process start. Verify the resulting file after readiness and match
+  runtime configuration-loading log records for every custom key. An environment
+  declaration alone is not process evidence. Missing standard scripts/configuration
+  or unavailable/mismatched observations reject provisioning. Empty configuration
+  retains the existing image entrypoint behavior.
+  Each successful component's `effectiveConfiguration` retains the path, the
+  SHA-256 of the merged file copied before startup (`sourceSha256`), the file hash
+  observed after readiness (`observedSha256`), launcher arguments and observed
+  custom values, joined to its `classLoadProcess` and container ID. Missing
+  receipts prevent PASS with `subject.flink.config-unconfirmed`; differing
+  hashes or values use `subject.flink.config-mismatch`.
+  Invalid names, multiline/null values or unsupported shapes reject with
+  `runner.flink.config-invalid` or structural diagnostics.
+
+  Harness-owned keys reject with `runner.flink.config-reserved-key`:
+  `jobmanager.rpc.address`, `jobmanager.bind-host`, `rest.address`,
+  `rest.bind-address`, `rest.port`, `blob.server.port`, `query.server.port`,
+  `taskmanager.numberOfTaskSlots`,
+  `taskmanager.resource-id`, `parallelism.default`, `state.backend` and
+  `state.backend.type`, `execution.checkpointing.interval`,
+  `execution.checkpointing.mode`, checkpoint-storage/location keys, HA keys,
+  including current and legacy aliases (`state.checkpoint-storage`,
+  `state.backend.fs.checkpointdir`, `execution.checkpointing.savepoint-dir`,
+  `savepoints.state.backend.fs.dir`, `execution.checkpointing.local-backup.dirs`,
+  `taskmanager.state.local.root-dirs`, `recovery.mode`, `recovery.jobmanager.port`,
+  and `recovery.zookeeper.*`),
+  `env.java.opts` and `env.java.opts.*`, `classloader.*`, `pipeline.jars`,
+  `pipeline.classpaths`, `flink-stability.workload.*`,
+  `zookeeper.sasl.disable`, `security.delegation.tokens.enabled`,
+  `security.delegation.token.provider.flink-stability-synthetic.*`,
+  `flink-stability.token-service.*`,
+  `security.delegation.tokens.renewal.time-ratio` and
+  `security.delegation.tokens.renewal.retry.*`.
+  These guards protect typed workload choices, process identities, checkpoint
+  namespaces and class-load evidence. Passing another key records the exact
+  supplied value; it does not prove that a particular runtime recognizes or uses
+  that key. No pass-through fields are synthesized when the map is absent.
 - **R5.3** Job options are parameterizable per R2, because several of them *are*
   the dimension under test — delivery guarantee is how `selftest-duplicates` is
   built; state backend is the §3 example.
 - **R5.4** Kafka transaction ID naming strategy is **mandatory and explicit** for
   exactly-once scenarios. It changes what a correct outcome is (see the plan's
   section on `INCREMENTING` vs `POOLING`), and inheriting the connector default
-  silently would let a connector PR change what the suite tests. The canonical
-  workload field is `transaction_id_naming_strategy` under the Kafka sink.
+  silently would let a connector PR change what the suite tests. Supported values
+  are `INCREMENTING`, `POOLING`, and the explicit opt-in `connector-default`.
+  The latter deliberately delegates naming to the selected connector; it does
+  not assert POOLING behavior or producer reuse. The canonical workload field is `transaction_id_naming_strategy` under the Kafka sink.
   `transactional_id_prefix` and `transaction_id_naming_strategy` are required
   only when the resolved `sink.delivery_guarantee` is `EXACTLY_ONCE`; they are
   invalid for `NONE` and `AT_LEAST_ONCE`, because no Kafka transactions should
@@ -992,15 +1124,18 @@ Connector pull-request gating is the same mechanism with one axis:
   from the workload job JAR. For connector scenarios, `subject.connectors` is a
   non-empty map keyed by scenario-local aliases; each connector declares
   `artifact` (canonical `maven:<groupId>:<artifactId>:<release-version>`, exact
-  local JAR, or final-filename build output pattern per R4.13). Optional `sha256`
-  declares exactly 64 lowercase hexadecimal characters after parameter resolution.
+  local JAR, final-filename build output pattern per R4.13, or `image:/absolute/path.jar`
+  under R5.6f). `sha256` is mandatory for the image form and
+  optional for Maven/local forms; it declares exactly 64 lowercase hexadecimal
+  characters after parameter resolution.
   Preparation compares the pin with the staged primary for each effective side,
   for both local and Maven artifacts; a mismatch rejects before provisioning with
   `artifact.connector.pin-mismatch`. Run JSON retains `evidence.connectorPrimaries`
   entries containing `side`, `alias`, `artifact`, `observedSha256` and, when declared,
   `declaredSha256`. The pin covers the primary; closure hashes retain dependency identity.
   - If `runtime_dependencies` is absent, the literal or resolved primary must be
-    Maven and preparation uses auto mode: its POM supplies the locked closure
+    Maven (auto mode) or image-contained (R5.6f, no installation). In Maven auto
+    mode its POM supplies the locked closure
     under R4.13a–R4.13c. An absent list is invalid for a local primary.
   - If `runtime_dependencies` is present, preparation uses explicit mode for
     either a Maven or local primary. Each entry is either a local connector-JAR
@@ -1017,8 +1152,9 @@ Connector pull-request gating is the same mechanism with one axis:
     so the primary connector bytes are the only varied input.
   - When `artifact` contains a parameter template, raw structural validation
     defers this conditional presence rule. After interpolation, the resolved
-    scenario is validated again: an absent list is valid only for Maven auto
-    mode; a present list selects explicit mode for either reference form. This
+    scenario is validated again: an absent list is valid for Maven auto mode or
+    the image form; a present nonempty list selects explicit mode for Maven/local
+    references and is invalid for an image primary. This
     preserves parameterized artifact references without making the dependency
     mode ambiguous.
   In v1, every connector listed in `subject.connectors` is considered part of the
@@ -1030,7 +1166,8 @@ Connector pull-request gating is the same mechanism with one axis:
   artifact, dependency mode, target-specific closure locks, and resolved checksums.
 - **R5.6a** A v1 attempt deploys the connector closure as a cluster-level
   classpath, not as opaque `program_args` and not by shading it into the workload
-  JAR. The runner computes the side-specific union of connector aliases
+  JAR. This installation procedure covers Maven/local subjects; image subjects
+  use the no-installation procedure in R5.6f. The runner computes the side-specific union of connector aliases
   referenced by workload jobs, removes duplicate references, orders aliases
   lexicographically, and visits each connector in its R4.13b classpath order.
   The merge is computed once per effective side from the image-independent
@@ -1106,29 +1243,28 @@ Connector pull-request gating is the same mechanism with one axis:
   and is submitted through Flink's REST JAR API. Because each attempt owns a fresh
   cluster, this system-classloader placement cannot leak connector versions
   between attempts.
-- **R5.6b** The first executable v1 compatibility line is Flink `2.2.x` with the
-  Kafka connector `5.0.x` built for that line; the canonical released example is
-  `org.apache.flink:flink-connector-kafka:5.0.0-2.2`. Other compatibility lines
-  require an explicit capability-registry addition and integration coverage,
-  rather than being assumed compatible because a JAR happened to load. Every
-  canonical Maven primary must match a coordinate-and-version pattern in that
-  registry; v1 fails closed for an unknown Maven group/artifact even when its
-  version text resembles a supported release. Only a local connector reference
-  is the scenario author's assertion that the build targets this line; its exact
-  bytes and dependency lock still determine replay identity. Setup images and
-  explicit `flink`, `jobmanager`, or `taskmanager` restart images must all identify
-  the same registered Flink line. An experimental Flink `2.4` line, including
-  `2.4-SNAPSHOT` image tags, requires explicit `setup.flink.image_id` and
-  `setup.flink.runtime_jar` pins and local connector primaries with explicit runtime
-  dependency closures. No Maven connector primary is registered for this line.
-  Missing pins reject with `capability.flink-experimental.pin-required`; a Maven
-  connector primary rejects with `capability.connector-local.required`. Existing
-  structural and invalid-pin diagnostics remain applicable. These requirements
-  preserve exact binary selection without asserting arbitrary local connector or
-  workload compatibility; integration evidence must identify the exercised build
-  combination. Maven SNAPSHOT artifact references remain forbidden. A declaration
-  that mixes Flink lines between setup and restart rejects with
-  `capability.flink-line.unsupported`.
+- **R5.6b** The registered release compatibility line remains Flink `2.2.x`
+  with `org.apache.flink:flink-connector-kafka:5.0.<patch>-2.2`, initially
+  `5.0.0-2.2`. Every canonical Maven primary must match a registered coordinate
+  and version pattern; a similar-looking version suffix alone is insufficient.
+  A local or image-contained connector is an explicit author compatibility
+  assertion, verified by its bytes and runtime origins. Local primaries still
+  need explicit dependency declarations.
+
+  Without `setup.flink.line`, setup and explicit Flink restart images must name
+  one registered line. Experimental tag-selected `2.4`, including
+  `2.4-SNAPSHOT`, requires `image_id`, `runtime_jar` and a local or image-contained
+  connector. Missing pins reject with `capability.flink-experimental.pin-required`;
+  Maven primaries reject with `capability.connector-local.required`. Mixed lines
+  reject with `capability.flink-line.unsupported`.
+
+  With the explicit declaration of R4.13j, arbitrary lines and opaque tags are
+  allowed only with both image/runtime-JAR pins; parseable disagreements still
+  reject. A declared line other than the registered `2.2` requires a local or
+  image-contained connector, not an unregistered Maven primary. Compilation and
+  live evidence must identify the actual exercised build combination; acceptance
+  by this validator is not version support. Maven SNAPSHOT subject references
+  remain forbidden, including for a custom line.
 - **R5.6c** **Any executable workload JAR may participate when its staged bytes
   declare and implement workload protocol v1.** The main JAR manifest contains
   exactly `Flink-Stability-Workload-Protocol: v1` (R4.13d). The harness supplies
@@ -1168,10 +1304,12 @@ Connector pull-request gating is the same mechanism with one axis:
   non-negative base-10 integers. For an exactly-once sink, the effective
   transaction timeout is the declared `transaction_timeout` in milliseconds, or
   `7200000` when omitted, and both transaction-ID fields are present. The runner
-  configures Kafka `transaction.max.timeout.ms` to a fixed two hours; a declared
-  timeout above that maximum is a planning error
+  defaults Kafka `transaction.max.timeout.ms` to two hours; R4.2d may explicitly
+  override broker policy, without changing the sink's two-hour default or its
+  current maximum. A declared sink timeout above that maximum is a planning error
   (`runner.workload.transaction-timeout-unsupported`), not a late producer-init
-  surprise.
+  surprise. An explicit lower broker maximum can still reject the producer at
+  runtime and is retained as a subject configuration failure, not silently raised.
   The v1 built-in source uses `starting-offsets=committed-or-earliest` and
   `isolation-level=read_uncommitted`, matching the non-transactional harness input
   producer.
@@ -1213,18 +1351,23 @@ Connector pull-request gating is the same mechanism with one axis:
   and `org.apache.flink.connector.kafka.sink.KafkaSink`. Before provisioning, the
   first runner requires that the subject connector's primary artifact contains
   every entry class (`runner.subject.entry-class-missing`), and that neither another
-  connector-bundle entry nor the workload JAR contains any of them
-  (`runner.subject.entry-class-conflict`). Flink loads the workload JAR child-first,
+  connector-bundle entry nor the workload JAR contains any class in
+  `org.apache.flink.connector.kafka` or the legacy
+  `org.apache.flink.streaming.connectors.kafka` namespace
+  (`runner.subject.entry-class-conflict`). This includes internal helpers such as
+  `KafkaCommitter`, even when a second JAR omits both entry classes. Flink loads the workload JAR child-first,
   and the bundle order decides which of two `lib` copies loads, so a second copy
   would make the tested code depend on class-loading order. An unrelated local
   primary with the released connector as a runtime dependency therefore rejects
-  instead of silently testing the release. A multi-release JAR with either entry
+  instead of silently testing the release. A multi-release JAR with a connector
   class under `META-INF/versions/` rejects with
   `runner.subject.entry-class-versioned-unsupported`: the runner does not infer
   the container JVM version from the harness JVM. Unrelated versioned classes
   do not trigger this rejection.
 
-  The runner also proves at runtime which code ran. Every Flink JVM logs its class
+  The runner also proves at runtime which code ran. The following quorum applies
+  to staged subjects; image subjects strengthen it to every TaskManager
+  incarnation under R5.6f. Every Flink JVM logs its class
   loads (`-Xlog:class+load`, set through the per-process `env.java.opts.jobmanager`
   or `env.java.opts.taskmanager` key so the image's `env.java.opts.all` flags stay)
   to one file per container incarnation in the attempt directory, which survives
@@ -1233,7 +1376,7 @@ Connector pull-request gating is the same mechanism with one axis:
   rather than disappearing from a directory listing. Failed startup retries use
   distinct incarnation paths. After the process fence, the runner reads which
   source each process loaded each entry class from. The evidence is `confirmed`
-  only if every load came from the subject primary's `lib` path and at least one
+  only if every load came from the subject primary's configured container path and at least one
   TaskManager loaded every entry class. Otherwise a passing oracle becomes
   `inconclusive`: `subject.connector.origin-mismatch` when some process loaded a
   copy from elsewhere, and `subject.connector.origin-unconfirmed` when the logs are
@@ -1256,6 +1399,74 @@ Connector pull-request gating is the same mechanism with one axis:
   assumptions: it does not establish a Git commit, reproducible compilation,
   absence of bytecode transformation, method execution, or coverage of a PR's
   changed behavior. Concurrent JAR mutation after the startup checks is unsupported.
+- **R5.6f** `subject.connectors.<alias>.artifact: image:<absolute-path.jar>`
+  selects a connector already supplied by the Flink image. The path must be
+  normalized, without `.`/`..` segments, and contain only letters, digits, dots,
+  underscores, pluses and hyphens within path segments. Its `sha256` is mandatory.
+  `runtime_dependencies` must be absent or empty; a nonempty list rejects
+  structurally (`schema.max-items`), with
+  `artifact.connector.image-dependencies-unsupported` retained as a defensive
+  preparation diagnostic. Invalid path/hash
+  combinations reject with `artifact.connector.image-invalid` or structural
+  diagnostics. This form performs no Maven resolution or connector installation.
+
+  Before every Flink process starts, hash that container's primary JAR and require
+  both Kafka source/sink entry classes. Reject missing or mismatched bytes and a
+  second copy of any class in the current or legacy Kafka connector namespace
+  in the image's Flink libraries.
+  Library JARs must be regular files; symlink, hardlink and special JAR entries
+  reject rather than leaving an unverified part of the classpath inventory.
+  Before provisioning, reject copies in a staged dependency or workload JAR.
+  Version-dependent copies of connector classes remain unsupported. Every successful
+  TaskManager incarnation must show both entry classes loaded from exactly the
+  declared image path; a replacement cannot cover a predecessor's missing proof.
+  Also verify every observed artifact-defined class in the current and legacy
+  connector namespaces, so matching entry classes cannot hide implementation
+  classes loaded from a second JAR. This inventories the declared primary and
+  `/opt/flink/lib`, checks staged/workload JARs and verifies observed class loads;
+  it is not a filesystem-wide inventory of dormant code or proof against bytecode
+  transformation in an untrusted image.
+  Apply R5.6d's origin-mismatch/unconfirmed outcomes and preserve data failures.
+  `evidence.connectorPrimaries` records `origin: image`, the declared reference
+  and hash; `observedSha256` stays null during Docker-free preparation and becomes
+  a runtime observation only when all relevant provisioning receipts agree.
+  Per-container receipts retain each actual verification. Maven/local artifact
+  resolution and entry-class runtime evidence remain unchanged; the stricter
+  namespace duplicate check in staged/workload JARs applies to every subject form.
+- **R5.6g** The bundled workload's build accepts `-Dflink.version`,
+  `-Dkafka.connector.version` and optional `-Dkafka.connector.groupId` (default
+  `org.apache.flink`). The older `flink.kafka.connector.version` supplies the
+  default when the new connector version property is absent. Runtime dependencies
+  remain `provided` and the manifest protocol marker remains `v1`; a custom JAR
+  must still be retained inside the invocation artifact root.
+
+  `connector-default` performs no naming-setter call. Explicit `INCREMENTING`
+  and `POOLING` resolve the connector's optional `setTransactionNamingStrategy`
+  extension reflectively; no static reference to the connector's naming enum is
+  required. A missing setter/enum choice fails immediately with the requested
+  strategy and an explanation that `connector-default` must be chosen explicitly;
+  never fall back silently. The async checkpoint delay retains direct compile-time
+  references to `StreamMap.snapshotState` and the operator-state future getter/
+  setter in `OperatorSnapshotFutures`. A target without those APIs fails the build
+  rather than receiving a different delay mechanism. The maintained compilation
+  baseline is Flink 2.2.0 / connector 5.0.0-2.2; no wider version range or unrun
+  custom image is certified by the configurable build.
+- **R5.6h** The two-arm catalog tool applies shared runtime image/ID/line/JAR,
+  broker launch/config, Flink config, workload, feature-selection and naming
+  substitutions only to copies. Its strict custom-runtime mode requires an
+  explicit baseline, identical subject source modes (local/local or image/image),
+  and equal explicit dependency byte multisets. Only the connector primary and
+  explicit repeated `--candidate-flink-config` values may differ between arms.
+  A single image path cannot have two hashes in the shared pinned image. The
+  manifest records all inputs and resulting scenario/expected-document hashes;
+  phase/fault timing, expectations and canonical files remain unchanged.
+  `--prepare-only` writes both catalogs and the manifest without execution;
+  `--dry-run` writes nothing. The existing gate without custom inputs retains its
+  optional Maven-auto release baseline, without claiming fixed dependency bytes.
+  The pre-existing `--flink-image docker.io/library/flink:2.2.0` spelling alone
+  remains a legacy option; adding any new runtime input activates strict mode.
+  See [custom runtime subjects](../CUSTOM-RUNTIME-SUBJECTS.md) for flags and the
+  explicit `validate --offline --show-plan` inspection command.
 - **R5.7** Each workload job has optional `start: auto | manual`, defaulting to
   `auto`. Auto-start jobs are submitted after infrastructure is ready and any
   preload input source has completed per R4.5a, before the first phase begins.
@@ -2020,12 +2231,18 @@ Connector pull-request gating is the same mechanism with one axis:
   write/process-fence completion evidence, terminal-validation status/counts/
   completeness, Flink provisioning count, and diagnostics. The Kafka feature
   selection of R4.2c appears as `evidence.kafkaTransactionVersion`: `status` is
-  `not-requested`, `confirmed`, or `unconfirmed`; `requested` is present when
+  `not-requested`, `confirmed`, or `unconfirmed` for omission/explicit integers,
+  and `observed` or `unavailable` for `broker-default`; `requested` is present when
   declared; and `observations` retain each available `metadataEpoch`,
   `finalized: {min, max}`, and `supported: {min, max}`. An unconfirmed selection
   retains the original `error`, stops before proxy/input/Flink startup, and uses
   `infrastructure.kafka-transaction-version-unconfirmed`; it cannot match an
-  expected failure. Omission performs no feature Admin calls. Runtime-image evidence
+  expected failure. An unavailable `broker-default` observation instead uses
+  `kafka.feature.observation-unavailable`; it records no feature-update action.
+  Broker-default observations also retain `observedLevel` and `levelSource`
+  (`finalized-feature` or `implicit-zero`) when the metadata establishes a level;
+  the raw finalized map remains absent for an implicitly observed zero.
+  Omission performs no feature Admin calls. Runtime-image evidence
   includes the expected image ID when declared, identity-check outcome and detail,
   and every provisioned incarnation's logical component, role, container ID,
   declared image reference, observed Docker image ID, and connector bundle hashes
@@ -2037,7 +2254,21 @@ Connector pull-request gating is the same mechanism with one axis:
   runtime JAR check's status, expected path/hash, detail, and observed class sources
   by process key. Each component's `runtimeJar` records its observed path/hash and
   the `classLoadProcess` key joining those sources to its physical container ID
-  (R4.13f, R5.6e). It also includes the
+  (R4.13f, R5.6e). Explicit custom runtime inputs additionally retain declared
+  Flink line/tag/image/JAR identity, resolved and per-incarnation Flink config,
+  Kafka launch/config/image evidence and image-subject provenance under R4.2d,
+  R4.13j, R5.2b and R5.6f. These opt-in fields are absent/null when unused;
+  canonical catalog resolution and existing result fields remain unchanged.
+  `evidence.customRuntimeSubject` records `workload: {artifact, sha256}`,
+  `transactionIdNamingStrategy` and compiled typed/pass-through
+  `jobFlinkConfiguration` before attempt-specific protocol, endpoint and storage
+  materialization. Explicit Flink lines and pinned Kafka images carry
+  `compatibilityBasis: author-assertion` in their runtime evidence and corresponding
+  `compatibilityAssertions` entries in custom-subject plan/result metadata. These
+  labels distinguish declared compatibility from observed byte identity; they do
+  not certify unrun distributions. Custom-subject metadata is absent for unchanged
+  canonical runs. An offline declared
+  image hash is never labeled observed. The JSON result also includes the
   last job observation of R6.12a as `evidence.flinkJob` (`observed`,
   `unavailable` with its failure, or `not-run`) and one `evidence.taskManagerKills`
   entry per confirmed kill: step path and loop iterations, target, effect outcome,
@@ -2252,8 +2483,8 @@ Connector pull-request gating is the same mechanism with one axis:
   `EXACTLY_ONCE` or `AT_LEAST_ONCE`; one JobManager (two with R4.13g HA) and 1–16 TaskManagers
   (`runner.flink.taskmanager-count-unsupported` above that local resource bound);
   exactly two task slots per TaskManager, with parallelism no greater than their
-  total capacity (`runner.workload.insufficient-task-slots` otherwise); no free-form
-  `setup.flink.config`; the bounded input, phase, and validator subset registered
+  total capacity (`runner.workload.insufficient-task-slots` otherwise);
+  `setup.flink.config` subject to R5.2b's reserved-key checks; the bounded input, phase, and validator subset registered
   in R4.5, R6, and R7.3c; and a selected expected outcome of `pass`, or `fail`
   pinned to the `kafka.id-set` oracle and one of its registered reasons (a
   negative control, R8.7a). `AT_LEAST_ONCE` exists for negative controls: a
@@ -2870,9 +3101,9 @@ inside the disposable extension container required by R7.5.5.
 | Decision | Adopted v1 contract | Consequence |
 | --- | --- | --- |
 | Connector dependency handling | **Dependency-aware closure resolution (option 1A).** A Maven primary with no `runtime_dependencies` uses its effective-POM runtime closure. A present list is the complete explicit root set for either a Maven or local primary; `[]` asserts that the primary is self-contained. | The runner never guesses from filenames or silently combines explicit dependencies with the primary POM. A local primary must declare the field. See R4.13a–R4.13b. |
-| First executable compatibility line | **Flink `2.2.x` with the registered Kafka connector coordinate `org.apache.flink:flink-connector-kafka:5.0.<patch>-2.2`**, initially exemplified by `5.0.0-2.2`. | Canonical Maven primaries fail closed unless the coordinate/version pattern is registered. Local connector JARs remain an explicit author compatibility assertion. See R5.6b. |
+| Registered release compatibility line | **Flink `2.2.x` with the registered Kafka connector coordinate `org.apache.flink:flink-connector-kafka:5.0.<patch>-2.2`**, initially exemplified by `5.0.0-2.2`. | Canonical Maven primaries fail closed unless the coordinate/version pattern is registered. Local/image connector JARs and pinned explicit Flink lines remain author compatibility assertions, not claims of live support. See R4.13j and R5.6b. |
 | Connector/runtime identity during upgrades | **Target-specific locks (option A).** The exact post-interpolation Flink image reference participates in `closure_sha256`; a distinct upgrade target creates another lock even when connector bytes are unchanged. | `flink:2.2.0` and `flink:2.2.1` produce distinct connector/image evidence. A tag's independently resolved OCI digest remains runtime evidence outside the Docker-free lock hash. See R4.13c. |
-| Connector deployment | **One deterministic byte-only classpath manifest per effective side, plus a target-specific binding for each distinct Flink image.** The canonical manifest and its JARs are injected under `/opt/flink/lib` before Flink starts; the workload JAR stays separate and must not shade the subject connector. | Every process receives identical verified dependency bytes in stable order even when component image targets differ. `classpath_manifest_sha256` identifies those bytes; `target_binding_sha256` identifies the image/lock pairing. Cross-connector conflicts reject before provisioning. See R5.6a. |
+| Connector deployment | **One deterministic byte-only classpath manifest per effective side, plus a target-specific binding for each distinct Flink image.** For Maven/local subjects, the canonical manifest and its JARs are injected under `/opt/flink/lib` before Flink starts; image subjects use R5.6f and install nothing. The workload JAR stays separate and must not shade the subject connector. | Every process receives identical verified dependency bytes in stable order even when component image targets differ. `classpath_manifest_sha256` identifies those bytes; `target_binding_sha256` identifies the image/lock pairing. Cross-connector conflicts reject before provisioning. See R5.6a. |
 | Flink restart image inheritance | **Track desired image references per logical component and reject ambiguous shorthand.** An image-bearing TaskManager restart requires exactly one TaskManager; a full Flink restart without an image requires one uniform desired target. | v1 never guesses which TaskManager to upgrade or which divergent image a full restart should inherit. After the old process stops, a failed explicit retarget remains desired and is retried without automatic rollback; last-successful provisioning evidence remains separate. See R6.11a. |
 
 ### First execution-vertical decisions settled 2026-08-26
@@ -2882,7 +3113,7 @@ inside the disposable extension container required by R7.5.5.
 | Workload JAR compatibility (1A) | **Any workload JAR declaring `Flink-Stability-Workload-Protocol: v1` and implementing the typed configuration contract.** | Artifact validation is byte-bound and not restricted to the bundled generator. The runtime protocol key cross-checks the declaration; legacy opaque arguments are not a fallback. See R4.13d and R5.6c. |
 | Omitted workload settings (2A) | **Materialize HashMap state, TTL disabled, no watermarks, JobManager checkpoint storage, and `{ type: flink-default }` restart behavior.** | Raw YAML stays compact while the resolved scenario and report remain explicit. The selected Flink runtime owns its default restart behavior; runtime-effective values are reported. See R5.1a. |
 | Filesystem checkpoint storage (3A) | **Harness-managed local `file:/flink/checkpoints/attempt-<ordinal>-<nonce>/<job-alias>` namespaces only.** | Authors select `{ type: filesystem }` but cannot supply a path or arbitrary URI. Attempt/job isolation and the effective generated URI are recorded. See R5.4a. |
-| Kafka broker compatibility (4A) | **Apache Kafka `4.0.x` only.** | Setup and Kafka restart images outside or not demonstrably on that line reject before provisioning. See R4.2a. |
+| Kafka broker compatibility (4A, extended by R4.2d) | **Apache Kafka `4.0.x` by default; explicit image-ID pins allow custom subjects.** | Without the pin, unsupported setup/restart images reject. Pinned custom images must satisfy the declared launch contract and still need build-specific live evidence. See R4.2a–R4.2d. |
 | Terminal validation boundary (5A) | **Bounded job completion followed by an irreversible physical Flink write fence.** | v1 preload input yields exclusive stopping offsets and natural `FINISHED`; then one fixed internal `2m` fence budget SIGKILLs TaskManagers before JobManagers and retains per-component/runtime/timestamp evidence before terminal checks. Future controlled-unbounded support requires a finite cutoff plus stop-with-savepoint/drain and is roadmap-only. See R4.7, R5.6c, and R7.1c–R7.1d. |
 | Validator deadlines (6A) | **Optional raw `timeout`, default `2m`, mandatory after resolution; fail closed when built-in Kafka verification cannot complete.** | The clock starts immediately after the fence and before Kafka discovery. Discovery, one fixed `read_uncommitted` high-watermark boundary, beginning offsets, `read_committed` traversal, decoding, and comparison share it. Kafka unreachability, unresolved transactions/incomplete traversal, over-limit observation, and bounded-job completion timeout fail with stable `verification.*` reasons that cannot satisfy expected data-integrity failures. See R7.1c, R7.3b, R7.3d, and R8.4. |
 | Input-manifest evidence | **Record only observable harness sends and reconciliation facts, with explicit `complete` or `partial` status.** | Kafka-client-internal retries remain opaque rather than being guessed. Failures after acknowledgements and closed bounds preserve partial evidence; earlier failures fabricate none. See R4.8 and R4.14–R4.18. |

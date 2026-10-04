@@ -4,7 +4,6 @@ import org.apache.flink.api.common.eventtime.WatermarkStrategy;
 import org.apache.flink.api.common.state.StateTtlConfig;
 import org.apache.flink.configuration.ReadableConfig;
 import org.apache.flink.connector.base.DeliveryGuarantee;
-import org.apache.flink.connector.kafka.sink.TransactionNamingStrategy;
 import org.apache.kafka.common.TopicPartition;
 
 import java.io.Serializable;
@@ -92,7 +91,7 @@ final class WorkloadProtocolV1Configuration {
     private final String sinkTopic;
     private final DeliveryGuarantee deliveryGuarantee;
     private final String transactionalIdPrefix;
-    private final TransactionNamingStrategy transactionNamingStrategy;
+    private final TransactionIdNamingStrategy transactionNamingStrategy;
     private final Integer transactionTimeoutMs;
     private final StateTtlSettings stateTtl;
     private final WatermarkSettings watermarks;
@@ -107,7 +106,7 @@ final class WorkloadProtocolV1Configuration {
             String sinkTopic,
             DeliveryGuarantee deliveryGuarantee,
             String transactionalIdPrefix,
-            TransactionNamingStrategy transactionNamingStrategy,
+            TransactionIdNamingStrategy transactionNamingStrategy,
             Integer transactionTimeoutMs,
             StateTtlSettings stateTtl,
             WatermarkSettings watermarks) {
@@ -150,7 +149,7 @@ final class WorkloadProtocolV1Configuration {
         DeliveryGuarantee deliveryGuarantee = parseDeliveryGuarantee(values);
 
         String transactionalIdPrefix = optional(values, SINK_TRANSACTIONAL_ID_PREFIX);
-        TransactionNamingStrategy namingStrategy = parseTransactionNamingStrategy(values);
+        TransactionIdNamingStrategy namingStrategy = parseTransactionIdNamingStrategy(values);
         Integer transactionTimeoutMs = optionalPositiveInt(values, SINK_TRANSACTION_TIMEOUT_MS);
         validateTransactionOptions(
                 deliveryGuarantee,
@@ -191,7 +190,7 @@ final class WorkloadProtocolV1Configuration {
     private static void validateTransactionOptions(
             DeliveryGuarantee deliveryGuarantee,
             String transactionalIdPrefix,
-            TransactionNamingStrategy namingStrategy,
+            TransactionIdNamingStrategy namingStrategy,
             Integer transactionTimeoutMs) {
         if (deliveryGuarantee == DeliveryGuarantee.EXACTLY_ONCE) {
             if (transactionalIdPrefix == null) {
@@ -314,7 +313,7 @@ final class WorkloadProtocolV1Configuration {
         }
     }
 
-    private static TransactionNamingStrategy parseTransactionNamingStrategy(
+    private static TransactionIdNamingStrategy parseTransactionIdNamingStrategy(
             Map<String, String> values) {
         String value = optional(values, SINK_TRANSACTION_ID_NAMING_STRATEGY);
         if (value == null) {
@@ -322,13 +321,15 @@ final class WorkloadProtocolV1Configuration {
         }
         switch (value) {
             case "INCREMENTING":
-                return TransactionNamingStrategy.INCREMENTING;
+                return TransactionIdNamingStrategy.INCREMENTING;
             case "POOLING":
-                return TransactionNamingStrategy.POOLING;
+                return TransactionIdNamingStrategy.POOLING;
+            case "connector-default":
+                return TransactionIdNamingStrategy.CONNECTOR_DEFAULT;
             default:
                 throw invalid(
                         SINK_TRANSACTION_ID_NAMING_STRATEGY,
-                        "must be INCREMENTING or POOLING");
+                        "must be INCREMENTING, POOLING, or connector-default");
         }
     }
 
@@ -491,7 +492,7 @@ final class WorkloadProtocolV1Configuration {
         return transactionalIdPrefix;
     }
 
-    TransactionNamingStrategy transactionNamingStrategy() {
+    TransactionIdNamingStrategy transactionNamingStrategy() {
         return transactionNamingStrategy;
     }
 
@@ -505,6 +506,11 @@ final class WorkloadProtocolV1Configuration {
 
     WatermarkSettings watermarks() {
         return watermarks;
+    }
+
+    /** Wire choices owned by the protocol, independent of the connector builder API. */
+    enum TransactionIdNamingStrategy {
+        INCREMENTING, POOLING, CONNECTOR_DEFAULT
     }
 
     static final class StateTtlSettings implements Serializable {

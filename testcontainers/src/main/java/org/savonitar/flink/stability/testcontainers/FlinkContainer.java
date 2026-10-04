@@ -82,6 +82,7 @@ final class FlinkContainer implements FlinkComponentFactory {
         container.observeHaSessions(logicalName, FlinkComponentRole.JOB_MANAGER);
         containers.add(container);
         configurePlugin(container);
+        container.useLiteralConfigurationLauncher("jobmanager");
         return container
                 .withNetwork(network)
                 .withNetworkAliases(highAvailability == null
@@ -110,6 +111,7 @@ final class FlinkContainer implements FlinkComponentFactory {
         container.observeHaSessions(logicalName, FlinkComponentRole.TASK_MANAGER);
         containers.add(container);
         configurePlugin(container);
+        container.useLiteralConfigurationLauncher("taskmanager");
         container
                 .withNetwork(network)
                 .withNetworkAliases(logicalName)
@@ -122,7 +124,9 @@ final class FlinkContainer implements FlinkComponentFactory {
                         + "\ntaskmanager.resource-id: " + container.resourceId())
                 .withCommand("taskmanager")
                 .withLogConsumer(createLogConsumer("TASK_MANAGER_LOGS." + logicalName));
-        if (runtimeTarget.expectedRuntimeJar().isPresent() || runtimeTarget.tokenProvider().isPresent()) {
+        if (runtimeTarget.expectedRuntimeJar().isPresent() || runtimeTarget.tokenProvider().isPresent()
+                || !runtimeTarget.config().isEmpty()
+                || !runtimeTarget.connectorBundle().imageConnectors().isEmpty()) {
             // Docker running alone can precede an entrypoint's JAR replacement. This message
             // comes from TaskManagerRunner, before accepting the second runtime-byte read.
             container.waitingFor(Wait.forLogMessage(".*Starting TaskManager with ResourceID:.*", 1)
@@ -175,7 +179,7 @@ final class FlinkContainer implements FlinkComponentFactory {
                             runtimeTarget.tokenProvider().orElseThrow().retryBackoff())
                     + "\nsecurity.delegation.tokens.renewal.time-ratio: 0.5";
         }
-        return result;
+        return result + org.savonitar.flink.stability.runtime.api.FlinkConfiguration.properties(runtimeTarget.config());
     }
 
     @Override

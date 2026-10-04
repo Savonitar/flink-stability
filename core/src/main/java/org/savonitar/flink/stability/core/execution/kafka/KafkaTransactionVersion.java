@@ -15,6 +15,7 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.OptionalLong;
+import java.util.OptionalInt;
 import java.util.Properties;
 import java.util.concurrent.TimeUnit;
 import java.util.function.LongSupplier;
@@ -23,6 +24,7 @@ import java.util.function.LongSupplier;
 public final class KafkaTransactionVersion {
     public static final String FEATURE = "transaction.version";
     public static final String UNCONFIRMED = "infrastructure.kafka-transaction-version-unconfirmed";
+    public static final String OBSERVATION_UNAVAILABLE = "kafka.feature.observation-unavailable";
     private static final Duration TIMEOUT = Duration.ofSeconds(30);
     private static final Duration POLL_INTERVAL = Duration.ofMillis(100);
 
@@ -41,12 +43,16 @@ public final class KafkaTransactionVersion {
     }
 
     public Selection select(String bootstrapServers, Optional<Integer> requested) {
+        return select(bootstrapServers, requested, false);
+    }
+
+    public Selection select(String bootstrapServers, Optional<Integer> requested, boolean brokerDefault) {
         // Absence preserves the existing startup path without a new Admin dependency.
-        Selection pending = new Selection(requested, List.of(), Optional.empty());
-        if (requested.isEmpty()) {
+        Selection pending = new Selection(requested, List.of(), Optional.empty(), brokerDefault);
+        if (requested.isEmpty() && !brokerDefault) {
             return pending;
         }
-        short target = requested.orElseThrow().shortValue();
+        short target = requested.orElse(0).shortValue();
         MonotonicDeadline deadline = MonotonicDeadline.start(TIMEOUT, nanoTime);
         List<Observation> observations = new ArrayList<>();
         Operations operations = null;
@@ -55,8 +61,12 @@ public final class KafkaTransactionVersion {
             operations = factory.open(bootstrapServers, remaining(deadline));
             Observation initial = operations.observe(remaining(deadline));
             observations.add(initial);
-            requireUsable(initial, target);
-            if (!initial.matches(target)) {
+            if (brokerDefault) {
+                requireFinalizedObservation(initial);
+            } else {
+                requireUsable(initial, target);
+            }
+            if (!brokerDefault && !initial.matches(target)) {
                 FeatureUpdate.UpgradeType type = initial.finalized().orElseThrow().maximum() > target
                         ? FeatureUpdate.UpgradeType.SAFE_DOWNGRADE : FeatureUpdate.UpgradeType.UPGRADE;
                 operations.update(target, type, true, remaining(deadline));
@@ -100,11 +110,16 @@ public final class KafkaTransactionVersion {
                 }
             }
         }
-        return new Selection(requested, observations, Optional.ofNullable(error));
+        return new Selection(requested, observations, Optional.ofNullable(error), brokerDefault);
     }
 
     private static Duration remaining(MonotonicDeadline deadline) throws IOException {
         return deadline.remainingOrThrow(() -> new IOException("Kafka transaction.version selection timed out"));
+    }
+
+    private static void requireFinalizedObservation(Observation observed) throws IOException {
+        if (observed.brokerDefaultLevel().isEmpty())
+            throw new IOException("Kafka did not report a usable finalized transaction.version observation");
     }
 
     private static void requireUsable(Observation observed, short target) throws IOException {
@@ -141,6 +156,25 @@ public final class KafkaTransactionVersion {
             }
         }
 
+        /**
+         * Kafka removes level-zero features from the finalized map. Infer disabled level zero only
+         * from a successful metadata snapshot that explicitly reports support for zero; never add
+         * a synthetic entry to the raw finalized evidence. Explicit requested levels do not use this.
+         */
+        public OptionalInt brokerDefaultLevel() {
+            if (finalized.isPresent()) {
+                Range range = finalized.orElseThrow();
+                return range.minimum() == range.maximum() ? OptionalInt.of(range.minimum()) : OptionalInt.empty();
+            }
+            return metadataEpoch.isPresent() && supported.filter(range -> range.minimum() == 0).isPresent()
+                    ? OptionalInt.of(0) : OptionalInt.empty();
+        }
+
+        public Optional<String> brokerDefaultLevelSource() {
+            if (brokerDefaultLevel().isEmpty()) return Optional.empty();
+            return Optional.of(finalized.isPresent() ? "finalized-feature" : "implicit-zero");
+        }
+
         boolean matches(int requested) {
             return metadataEpoch.isPresent() && finalized.filter(range ->
                     range.minimum() == requested && range.maximum() == requested).isPresent()
@@ -150,7 +184,11 @@ public final class KafkaTransactionVersion {
     }
 
     public record Selection(Optional<Integer> requested, List<Observation> observations,
-                            Optional<String> error) {
+                            Optional<String> error, boolean brokerDefault) {
+        public Selection(Optional<Integer> requested, List<Observation> observations, Optional<String> error) {
+            this(requested, observations, error, false);
+        }
+
         public Selection {
             Objects.requireNonNull(requested, "requested");
             observations = List.copyOf(observations);
@@ -158,7 +196,10 @@ public final class KafkaTransactionVersion {
             if (requested.isPresent() && requested.orElseThrow() != 1 && requested.orElseThrow() != 2) {
                 throw new IllegalArgumentException("transaction_version must be 1 or 2");
             }
-            if (requested.isEmpty() && (!observations.isEmpty() || error.isPresent())) {
+            if (brokerDefault && requested.isPresent()) {
+                throw new IllegalArgumentException("broker-default cannot select an explicit transaction_version");
+            }
+            if (!brokerDefault && requested.isEmpty() && (!observations.isEmpty() || error.isPresent())) {
                 throw new IllegalArgumentException("Unrequested feature selection has no observations");
             }
         }
@@ -168,12 +209,17 @@ public final class KafkaTransactionVersion {
         }
 
         public boolean confirmed() {
-            return requested.isPresent() && error.isEmpty() && !observations.isEmpty()
-                    && observations.getLast().matches(requested.orElseThrow());
+            return error.isEmpty() && !observations.isEmpty()
+                    && (brokerDefault ? observations.getLast().brokerDefaultLevel().isPresent()
+                        : requested.isPresent() && observations.getLast().matches(requested.orElseThrow()));
         }
 
         public boolean permitsPass() {
-            return requested.isEmpty() || confirmed();
+            return (!brokerDefault && requested.isEmpty()) || confirmed();
+        }
+
+        public String failureReason() {
+            return brokerDefault ? OBSERVATION_UNAVAILABLE : UNCONFIRMED;
         }
     }
 

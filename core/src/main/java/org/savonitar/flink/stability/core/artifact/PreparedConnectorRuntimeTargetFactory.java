@@ -43,7 +43,7 @@ public final class PreparedConnectorRuntimeTargetFactory {
         String targetBindingJson = ConnectorClusterBundleBuilder.canonicalTargetBinding(
                 bundle.targetFlinkImageReference(),
                 bundle.closureLocks(),
-                manifestSha256);
+                manifestSha256, bundle.imageConnectors());
         String targetBindingSha256 = Digests.sha256(targetBindingJson);
         if (!targetBindingJson.equals(bundle.canonicalTargetBindingJson())
                 || !targetBindingSha256.equals(bundle.targetBindingSha256())) {
@@ -91,7 +91,7 @@ public final class PreparedConnectorRuntimeTargetFactory {
                 new FlinkConnectorBundleInstallation(
                         bundle.targetFlinkImageReference(),
                         runtimeClosureLocks,
-                        runtimeManifest);
+                        runtimeManifest, bundle.imageConnectors());
         if (!Arrays.equals(
                         installation.canonicalTargetBindingBytes(),
                         bundle.canonicalTargetBindingBytes())

@@ -67,6 +67,7 @@ public final class ClusterManager implements AutoCloseable {
     private final List<FlinkComponentFactory> flinkFactories = new ArrayList<>();
 
     private KafkaRuntimeCluster kafkaRuntime;
+    private java.util.Optional<org.savonitar.flink.stability.runtime.api.KafkaRuntimeEvidence> retainedKafkaRuntimeEvidence = java.util.Optional.empty();
     private KroxyliciousProxy kafkaProxy;
     private FlinkHaRuntime highAvailability;
     private SyntheticTokenService tokenService;
@@ -92,7 +93,9 @@ public final class ClusterManager implements AutoCloseable {
                 Network.newNetwork(),
                 true,
                 createFlinkFactoryProvider(classLoadLogs),
-                (ownedNetwork, target) -> target.brokers() == 3 ? new ThreeBrokerKafkaRuntime(ownedNetwork, target) : new ApacheKafkaRuntime(ownedNetwork, target),
+                (ownedNetwork, target) -> KafkaRuntimeTarget.GENERIC_KRAFT.equals(target.launchType())
+                        ? new GenericKraftKafkaRuntime(ownedNetwork, target)
+                        : target.brokers() == 3 ? new ThreeBrokerKafkaRuntime(ownedNetwork, target) : new ApacheKafkaRuntime(ownedNetwork, target),
                 checkpointStorageRoot);
     }
 
@@ -181,7 +184,13 @@ public final class ClusterManager implements AutoCloseable {
                 kafkaRuntime = candidate;
             }
             throw failure;
+        } finally {
+            retainedKafkaRuntimeEvidence = candidate.runtimeEvidence();
         }
+    }
+
+    public synchronized java.util.Optional<org.savonitar.flink.stability.runtime.api.KafkaRuntimeEvidence> kafkaRuntimeEvidence() {
+        return retainedKafkaRuntimeEvidence;
     }
 
     /** Starts the declared JobManagers and TaskManagers with one shared attempt namespace. */
@@ -903,7 +912,9 @@ public final class ClusterManager implements AutoCloseable {
                     throw new IllegalStateException("Component did not remain running: " + name);
                 }
                 FlinkComponentProvisioningEvidence evidence = runtimeTarget.expectedRuntimeJar().isPresent()
+                        || !runtimeTarget.config().isEmpty()
                         || runtimeTarget.tokenProvider().isPresent()
+                        || !runtimeTarget.connectorBundle().imageConnectors().isEmpty()
                         ? ContainerDriverCallBoundary.call(deadline, "verifying provisioning for " + name,
                                 candidate::provisioningEvidence)
                         : candidate.provisioningEvidence();
@@ -1058,9 +1069,16 @@ public final class ClusterManager implements AutoCloseable {
             if (!evidence.targetBindingSha256().equals(installation.targetBindingSha256())
                     || !evidence.classpathManifestSha256().equals(
                             installation.classpathManifest().manifestSha256())
-                    || !evidence.connectorArtifacts().equals(expectedArtifacts)) {
+                    || !evidence.connectorArtifacts().equals(expectedArtifacts)
+                    || !evidence.imageConnectorArtifacts().equals(installation.imageConnectors())) {
                 throw new ConnectorBundleProvisioningException(
                         "Connector bundle provisioning evidence does not match target for " + name);
+            }
+            if (!evidence.flinkConfig().equals(runtimeTarget.config())
+                    || (!runtimeTarget.config().isEmpty() && evidence.effectiveConfiguration().filter(receipt ->
+                            receipt.observedValues().equals(runtimeTarget.config())
+                                    && receipt.sourceSha256().equals(receipt.observedSha256())).isEmpty())) {
+                throw new IllegalStateException("Flink effective configuration evidence does not match target for " + name);
             }
             runtimeTarget.expectedImageId().ifPresent(expected -> {
                 if (!expected.equals(evidence.imageId())) {

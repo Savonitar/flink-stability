@@ -105,7 +105,7 @@ public record ScenarioVerdict(Status status, String reason, String message, bool
                             + attempt.processHealth().detail());
         }
         if (!attempt.kafkaTransactionVersion().permitsPass()) {
-            return unconfirmed(org.savonitar.flink.stability.core.execution.kafka.KafkaTransactionVersion.UNCONFIRMED,
+            return unconfirmed(attempt.kafkaTransactionVersion().failureReason(),
                     "The expected failure lacks confirmed Kafka transaction.version selection");
         }
         if (attempt.haEvidence().outcome() != FlinkHaEvidence.Outcome.CONFIRMED) {

@@ -1,0 +1,7 @@
+format: v1
+kind: expected-result
+meta:
+  name: custom-runtime.expected
+  scenario: custom-runtime
+default:
+  outcome: pass
