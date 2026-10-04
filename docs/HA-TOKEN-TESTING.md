@@ -144,8 +144,8 @@ oracle does not dismiss those observations.
 All 81 recorded owned container IDs were confirmed absent. Separate cleanup
 follow-ups preserved the original results; no completed catalog was replayed.
 The explicit ZooKeeper SASL setting documented above was added after this matrix
-to address authentication errors against the anonymous fixture. A separately
-authorized control on corrected engine `97c671e` used the same Flink image and
+to address authentication errors against the anonymous fixture. A subsequent
+control on corrected engine `97c671e` used the same Flink image and
 unchanged `ha-eos-control` catalog: exact 3,000 IDs, FINISHED, no restores, and
 complete runtime, class-origin and process-fence evidence. Both JMs and both TMs
 loaded the explicit setting and established ZooKeeper sessions; the full log

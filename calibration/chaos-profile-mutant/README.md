@@ -1,6 +1,6 @@
 # Chaos profile calibration: discard an uncertain retriable commit
 
-Status: build and decision checks only; live calibration is pending authorization.
+Status: build and decision checks only; live calibration has not been run.
 This recipe never starts containers. Do not interpret offline checks as observed
 missing IDs or a passing released connector.
 
@@ -35,13 +35,13 @@ Pinned inputs and output:
 - Mutant: `e17005ab7dd685446de90634662c842599f3a99119d65f9bab696acc63641397`.
 - All runtime and compile/test dependencies: `dependency-pins.json`, verified before
   compilation. Recipe inputs and archive entry comparison are retained in build evidence.
-- Compile using approved JDK 21.0.7-amzn, `javac --release 11`; release classes and ZIP
+- Compile using JDK 21.0.7-amzn, `javac --release 11`; release classes and ZIP
   entry metadata are preserved, and only the patched class is replaced.
 
 ## Prepare without Docker
 
 From the harness root after its complete isolated build, set `JAVA_HOME` and `PATH`
-to the approved JDK. Supply the build's repository, Central-only settings and Maven
+to JDK 21.0.7-amzn. Supply the build's repository, Central-only settings and Maven
 executable. Reuse `connector-mutants/pom.xml` and its digest helpers. The cache must
 already contain the released source JAR and dependency plugin 3.8.1. The recipe is
 offline and refuses to overwrite an existing `target`:

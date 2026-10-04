@@ -378,6 +378,7 @@ class SyntheticTokenServiceTest {
     private static void await(BooleanSupplier ready) throws InterruptedException {
         long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(2);
         while (!ready.getAsBoolean() && System.nanoTime() < deadline) {
+            // Poll asynchronous fixture events without busy-waiting, bounded by the deadline above.
             Thread.sleep(5);
         }
         assertTrue(ready.getAsBoolean(), "Expected fixture event before deadline");

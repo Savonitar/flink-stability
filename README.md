@@ -133,9 +133,11 @@ mvn clean install
 See [validation and evidence](docs/VALIDATION.md) for regression coverage,
 optional container runs, and the no-match control. Unit tests alone do not show that
 the scenarios catch real connector defects. The
-[connector-mutant calibration](calibration/connector-mutants/README.md) checks this in
-real containers: two deliberately wrong commit decisions must fail the EndTxn scenarios,
-and a healthy control must pass them. The separate
+[connector-mutant calibration](calibration/connector-mutants/README.md) demonstrated
+this on its recorded 2026-09-26 engine: two deliberately wrong commit decisions
+failed the sensitive EndTxn scenarios, while the controls passed. The current
+common filter still requires the recipe's complete six-cell requalification.
+The separate
 [recovery-mutant calibration](calibration/recovery-mutant/README.md) checks that
 `bounded-eos` detects a source checkpoint-offset error after recovery while the
 uninterrupted control remains exact. These calibrations do not establish sensitivity
@@ -244,20 +246,33 @@ The runner supports:
 - Flink 2.2, explicitly pinned experimental 2.4, or a declared and pinned custom
   runtime subject, with one JobManager or a
   ZooKeeper-backed HA pair, and 1–16 TaskManagers;
-- one auto-started protocol-v1 job with positive parallelism up to the provisioned
+- one protocol-v1 job definition, started automatically, with positive parallelism up to the provisioned
   capacity (two slots per TaskManager), and an `EXACTLY_ONCE` or `AT_LEAST_ONCE` Kafka sink;
 - one verified connector closure;
 - bounded generated integer input, capped at 1,000,000 records for the in-memory runner;
 - the currently registered wait/await, loop, and named TaskManager kill/restart phase operations;
+- named broker kill/restart and bounded broker faults selected by broker name,
+  partition leader or sink transaction coordinator, including rolling restarts;
 - HA current-leader kill, pause and ZooKeeper isolation, with per-fault leadership
   and same-job recovery evidence;
 - a synthetic token plugin with delayed, HTTP-failing or LinkageError acquisition,
   optional explicit bootstrap/submitted-job proof, and token/checkpoint recovery barriers;
-- an optional Kroxylicious proxy in front of the job sink, with counted `drop-request` and
-  `drop-response` faults on transaction commits and aborts (`end-txn`)
-  ([SPEC-004 §11](docs/specs/SPEC-004-kroxylicious-fault-model.md));
+- an optional Kroxylicious proxy in front of the job sink, with counted request/response
+  loss, delay and protocol errors for the supported Kafka APIs
+  ([SPEC-004](docs/specs/SPEC-004-kroxylicious-fault-model.md));
+- experimental [packet loss, delay/jitter and blackhole faults](docs/PACKET-FAULTS.md)
+  between a selected TaskManager and Kafka, with identity, traffic and healing evidence;
+- one final [savepoint/restore transition](docs/SAVEPOINT-LIFECYCLE.md), using the
+  same workload and connector JARs, optionally rescaling or switching
+  INCREMENTING to POOLING; this slice excludes HA, tokens and other faults;
 - one terminal `kafka.id-set` validator, with an expected outcome of `pass` or an
   expected `kafka.id-set` failure.
+
+Implementation does not establish live qualification. The broker/protocol
+profiles and common filter retain the [calibration gaps](docs/PR-TESTING.md#live-qualification-is-still-pending)
+described in the PR guide. Packet faults require their isolated NET_ADMIN probe
+and live qualification; savepoint/restore has offline validation but no qualified
+live matrix reported in its guide.
 
 A TaskManager kill counts only if Flink shows that it affected the job: a failure on
 the targeted TaskManager ResourceID that hosted a RUNNING subtask, followed by a checkpoint restore, or by a
@@ -340,10 +355,11 @@ validation as the package boundary.
 - controlled-unbounded cutoff plus drain/stop;
 - native execution of schema-defined suites and baseline/candidate experiments
   (`tools/pr_gate.py` separately repeats selected scenarios with two connector artifacts);
-- multi-job execution;
-- packet-level network faults and proxies for clients beyond the routed Kafka sink;
-  counted Kafka protocol faults and HA ZooKeeper isolation are available;
-- savepoint/restore and upgrade execution;
+- concurrent or independently defined multiple jobs;
+- packet faults outside the implemented TaskManager-to-Kafka slice and proxies
+  for clients beyond the routed Kafka sink;
+- connector or Flink upgrades across a savepoint; the implemented lifecycle
+  transition keeps both workload and connector artifacts unchanged;
 - broader state-backend and topology support;
 - health retries, OCI digest capture, and the complete replay-grade report;
 - automatic real-Docker regression coverage on pull requests and pushes, including

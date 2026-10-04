@@ -19,11 +19,13 @@ the Maven cache.
 
 The results below describe the 2026-09-26 engine only. The common transactional
 filter now serves the same canonical EndTxn scenarios. Those historical results
-do **not** qualify the replacement. Before merging, rerun all six cells on the
-current harness: both controls and both harmless mutant cells must PASS;
+do **not** qualify the current filter. Its qualification gate remains open until
+all six cells on the current harness have the required outcomes and complete
+interpretation evidence: both controls and both harmless mutant cells must PASS;
 assume/request must FAIL with missing IDs and rewrite/response must FAIL with
 duplicates, with all interpretation evidence below. Do not change the canonical
-faults, expectations, checkpointing or load to make that matrix green.
+faults, expectations, checkpointing or load to make that matrix green. The
+historical results below do not close this gate.
 
 For Docker installations requiring the fully qualified Flink reference, append
 `--flink-image docker.io/library/flink:2.2.0` to `catalogs.py`. It changes only

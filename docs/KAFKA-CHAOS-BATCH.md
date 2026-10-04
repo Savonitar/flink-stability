@@ -1,8 +1,8 @@
 # Serial Kafka regression batch
 
-`tools/kafka_chaos_batch.py` prepares and resumes the pending live regression.
-Preparation and `plan` are local only. `run --execute` starts Docker and must be
-separately authorized. New packet, parallel, at-least-once and savepoint stages follow the original
+`tools/kafka_chaos_batch.py` prepares and resumes a serial live regression batch.
+Preparation and `plan` do not start containers. `run --execute` starts Docker.
+Packet, parallel, at-least-once and savepoint stages follow the original
 99 cells. The packet stage first requires a successful isolated NET_ADMIN probe.
 
 | Stage | Attempts | Warm-image estimate |
@@ -43,7 +43,7 @@ python3 tools/kafka_chaos_batch.py prepare --output jobs/live/kafka-chaos-batch 
 python3 tools/kafka_chaos_batch.py status --output jobs/live/kafka-chaos-batch
 ```
 
-After specific live-run approval, use the same command to start or resume:
+After reviewing the frozen manifest, use this command to start or resume:
 
 ```sh
 python3 tools/kafka_chaos_batch.py run --execute \
@@ -95,7 +95,7 @@ index digest before launching any packet scenario. Its start/completion records,
 stdout/stderr and inspection output are retained and hashed. Failure, timeout,
 changed evidence or interruption blocks the packet stage; the probe is never
 retried automatically. A timeout may leave an ambiguous container named in the
-start record and requires inspection before any separately approved retry.
+start record and requires inspection before preparing another attempt.
 The image tool check alone does not prove NET_ADMIN support.
 
 At-least-once cells require the matching explicit oracle mode. They permit counted

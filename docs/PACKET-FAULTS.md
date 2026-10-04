@@ -6,11 +6,12 @@ A short-lived sidecar joins `container:<exact TaskManager ID>` with only
 network, Docker socket or host-directory mounts. It requires an explicitly
 supplied immutable `docker.io/nicolaka/netshoot@sha256:<digest>` image with `sh`,
 `ip`, `tc` and `iptables`. The canonical index digest and linux/arm64 config identity are recorded in
-`packet-image-pin.json`. One network-none container verified all four tools with
-all capabilities dropped. This Docker image store does not expose the child
-platform manifest digest, even with platform-specific inspect; that field is
-explicitly unavailable, not confused with the config ID. A real NET_ADMIN probe
-is still required before live packet stages.
+[`packet-image-pin.json`](packet-image-pin.json). One network-none container verified
+all four tools with all capabilities dropped. Docker inspect did not expose the
+child platform manifest digest when the pin was recorded, including with
+platform-specific inspect. Its value is `null` with status `unavailable`; the
+config image ID is recorded separately. The NET_ADMIN probe has status `not-run`
+and remains required before live packet stages.
 
 The owner resolves a named broker, current partition leader or open sink
 transaction coordinator using the existing Kafka Admin selector. It freezes that

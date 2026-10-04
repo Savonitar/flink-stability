@@ -136,8 +136,8 @@ class AnalyzeAttemptTest(unittest.TestCase):
 
     def test_untrusted_external_paths_and_symlinks_are_not_read(self):
         data = json.loads(self.result.read_text())
-        data['evidence']['kafkaLogs']['decoded'][0]['evidence'] = '/outside-authorized-roots/decoded-0.json'
-        data['attempt']['checkpointRoot'] = '/outside-authorized-roots/logs'
+        data['evidence']['kafkaLogs']['decoded'][0]['evidence'] = '/outside-evidence-roots/decoded-0.json'
+        data['attempt']['checkpointRoot'] = '/outside-evidence-roots/logs'
         self.result.write_text(json.dumps(data))
         report = self.analyze()
         self.assertTrue(any('outside the explicit evidence roots' in item['message'] for item in report['diagnostics']))
@@ -156,14 +156,14 @@ class AnalyzeAttemptTest(unittest.TestCase):
         copied = self.root / 'retained/checkpoints'
         shutil.copytree(self.root / 'flink-logs', copied)
         data = json.loads(self.result.read_text())
-        data['attempt']['checkpointRoot'] = '/outside-authorized-roots/original-checkpoints'
+        data['attempt']['checkpointRoot'] = '/outside-evidence-roots/original-checkpoints'
         data['evidence']['checkpointRetention'] = {'status': 'complete', 'checkpointRoot': 'retained/checkpoints'}
         self.result.write_text(json.dumps(data))
         report = self.analyze()
         self.assertEqual(1, len(report['taskManagerMarkers'][0]['matches']))
         self.assertTrue(Path(report['taskManagerMarkers'][0]['file']).is_relative_to(copied))
         self.assertEqual([], report['diagnostics'])
-        data['evidence']['checkpointRetention']['checkpointRoot'] = '/outside-authorized-roots/retained'
+        data['evidence']['checkpointRetention']['checkpointRoot'] = '/outside-evidence-roots/retained'
         self.result.write_text(json.dumps(data))
         report = self.analyze()
         self.assertEqual([], report['taskManagerMarkers'])
@@ -201,7 +201,7 @@ class AnalyzeAttemptTest(unittest.TestCase):
         self.assertIn('kill.window-fields-malformed', codes)
         self.assertIn('kill.transaction-fields-malformed', codes)
 
-    def test_receipts_cannot_read_arbitrary_json_under_an_authorized_root(self):
+    def test_receipts_cannot_read_arbitrary_json_under_an_evidence_root(self):
         data = json.loads(self.result.read_text())
         data['evidence']['kafkaLogs']['decoded'][0]['evidence'] = 'unrelated.json'
         self.result.write_text(json.dumps(data))

@@ -9,8 +9,8 @@ failure handling retain the release behavior.
 Run `build.py` with `--java-home`, `--maven`, `--maven-repo` and `--maven-settings`.
 JDK 21 and an explicitly selected existing Maven cache/settings are required. The
 build is offline, rejects symlink cache/settings paths, isolates Java home/temp,
-and refuses to overwrite `target`. Cache and settings may be inside or outside
-the checkout; local access permissions remain the caller's responsibility.
+and refuses to overwrite `target`. Cache and settings paths may be explicitly
+supplied from inside or outside the checkout.
 Default user settings are never read implicitly. It verifies the release source SHA-256
 `c05dcdc7d7256575f10f784c728f983b517058daee517ae258021edd1e87ecfe`
 and binary SHA-256
@@ -39,7 +39,7 @@ verdict. No expected outcome is changed to make this negative calibration pass.
 The checker applies the following recipe-specific qualification rules.
 `qualified: true` and a zero exit code mean that the supplied evidence satisfies
 these rules. They do not establish acceptance against an external specification
-or independent approval of the contract. The 3,000 ms margin and 200–900-record
+or independent validation of the contract. The 3,000 ms margin and 200–900-record
 range are calibration parameters chosen for this workload, not general Flink or
 Kafka correctness limits. The retained batch does not independently validate
 those threshold choices.

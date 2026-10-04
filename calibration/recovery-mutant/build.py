@@ -48,7 +48,7 @@ def local_path(path, directory):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--java-home", type=Path, required=True, help="Approved JDK 21 directory")
+    parser.add_argument("--java-home", type=Path, required=True, help="JDK 21 directory")
     parser.add_argument("--maven-repo", type=Path, required=True, help="Existing repository-local Maven cache")
     parser.add_argument("--maven-settings", type=Path, required=True, help="Repository-local Maven settings XML")
     args = parser.parse_args()
@@ -62,7 +62,7 @@ def main():
         "PATH": str(java_home / "bin") + os.pathsep + os.environ.get("PATH", "/usr/bin:/bin"),
         "MAVEN_SKIP_RC": "1",
     }
-    # The caller may supply approved JVM sandbox options, without inheriting other environment data.
+    # Carry explicitly supplied JVM options without inheriting other environment data.
     if "JDK_JAVA_OPTIONS" in os.environ:
         environment["JDK_JAVA_OPTIONS"] = os.environ["JDK_JAVA_OPTIONS"]
     # Preserve previous artifacts and partial failures; the caller must archive them first.

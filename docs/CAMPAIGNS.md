@@ -90,4 +90,4 @@ Timeouts, trigger deadlines and the oracle remain unchanged. EndTxn occurrence l
 no hold to shorten, so it only produces a removal candidate. Removing the final unit
 removes the chosen phase. Invalid reductions are omitted with reasons in `reductions.json`.
 Each candidate has its own replayable manifest. Iterate by selecting a candidate based
-on separately authorized runs, then shrinking its manifest again.
+on a separate recorded run, then shrinking its manifest again.

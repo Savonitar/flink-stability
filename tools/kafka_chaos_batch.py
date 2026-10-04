@@ -367,7 +367,7 @@ def main():
     parser.add_argument("--launcher", type=Path, help="JSON with direct Java CLI argv and an explicit non-secret environment")
     parser.add_argument("--legacy-build", type=Path)
     parser.add_argument("--quick-build", type=Path)
-    parser.add_argument("--execute", action="store_true", help="Explicit live launch; obtain permission before using")
+    parser.add_argument("--execute", action="store_true", help="Launch the prepared batch")
     parser.add_argument("--stage", choices=NEW_STAGES, action="append", help="Select a new stage independently; repeatable. Omission includes the original batch first.")
     parser.add_argument("--max-new-cells", type=int, default=157, help="Bound this invocation; completed cells are skipped")
     args = parser.parse_args()
