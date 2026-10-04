@@ -1707,6 +1707,14 @@ Connector pull-request gating is the same mechanism with one axis:
   expanded atomic broker faults. No overlap with an unhealed process kill. Docker
   pause must show the same container running and paused, a changed affected leader
   and ISR excluding that node; resume shows running/unpaused and ISR recovery.
+  Verify the live host-port mapping before pause and again after resume. Docker
+  may omit its runtime port mapping while paused: accept that omission only when
+  the same fault driver already verified the live mapping and the inspected
+  configured fixed binding remains unchanged. A present but conflicting runtime
+  mapping, a missing/changed configured binding during that omission, or a missing
+  live mapping while unpaused leaves the effect unconfirmed. Preserve container,
+  image and network checks in
+  every state; distinguish an unavailable mapping from a changed one in diagnostics.
   Metadata selection, mutation, effect and ordinary healing share one deadline.
   The active observation budget cannot exceed the requested hold; missing effect
   does not extend a pause. Healing always targets the selected physical container,
