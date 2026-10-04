@@ -878,6 +878,17 @@ Connector pull-request gating is the same mechanism with one axis:
   evidence. Because this occurs before Flink starts and before any write fence,
   it is distinct from the post-fence, fail-closed `verification.*` outcomes in
   R7.1c and R7.3b.
+- **R4.18b** Topic creation is issued once. Before generating input, every
+  explicit broker endpoint must observe each declared topic with the declared
+  partitions and replication factor and an available leader for every partition.
+  A successful create acknowledgement alone does not establish this metadata
+  propagation barrier. Retry only transient propagation/unavailability responses;
+  metadata requests, pauses, configuration verification and client close consume
+  the existing R4.18a deadline without resetting it. Permanent errors and observed
+  topic/configuration mismatches fail immediately. Failure remains
+  `infrastructure.kafka-input-setup-failed`, retains the failed operation and
+  original exception, and includes the broker/topic context for the propagation
+  check. Never start the input producer or Flink after an unconfirmed barrier.
 
 ---
 

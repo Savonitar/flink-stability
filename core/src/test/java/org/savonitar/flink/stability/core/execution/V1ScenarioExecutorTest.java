@@ -1845,6 +1845,50 @@ class V1ScenarioExecutorTest {
     }
 
     @Test
+    void inputMetadataFailureRetainsOperationAndCauseWithoutStartingFlinkOrValidation()
+            throws Exception {
+        List<String> events = new ArrayList<>();
+        String operation = "describing created Kafka topics [input, output]";
+        var originalFailure = new org.apache.kafka.common.errors.UnknownTopicOrPartitionException(
+                "This server does not host this topic-partition");
+        try (Fixture fixture = fixture()) {
+            FakeRuntime runtime = new FakeRuntime(events);
+            V1ScenarioExecutor executor = new V1ScenarioExecutor(
+                    checkpointRoot -> {
+                        events.add("runtime-create");
+                        return runtime;
+                    },
+                    (plan, endpoints) -> {
+                        events.add("input-prepare");
+                        throw new KafkaInputPreparationException(
+                                KafkaInputPreparationException.INFRASTRUCTURE_SETUP_FAILED,
+                                "Kafka input preparation failed",
+                                new IllegalStateException(
+                                        "Kafka input operation failed: " + operation, originalFailure));
+                    },
+                    url -> { throw new AssertionError("Flink must not start after input setup fails"); },
+                    (bootstrap, topic, count, timeout) -> {
+                        throw new AssertionError("Terminal validation must not run after input setup fails");
+                    });
+
+            V1ScenarioExecutionResult result = executor.execute(
+                    fixture.bound(), attemptContext());
+
+            assertEquals(V1ScenarioExecutionResult.Status.INCONCLUSIVE, result.status());
+            assertEquals(KafkaInputPreparationException.INFRASTRUCTURE_SETUP_FAILED, result.reason());
+            assertTrue(result.diagnostics().stream().anyMatch(diagnostic -> diagnostic.contains(operation)));
+            assertTrue(result.diagnostics().contains("UnknownTopicOrPartitionException: "
+                    + originalFailure.getMessage()));
+            assertTrue(result.inputManifest().isEmpty());
+            assertTrue(result.phaseEvidence().isEmpty());
+            assertTrue(result.writeFenceEvidence().isEmpty());
+            assertTrue(result.terminalValidation().isEmpty());
+            assertEquals(List.of(
+                    "runtime-create", "kafka-start", "input-prepare", "runtime-close"), events);
+        }
+    }
+
+    @Test
     void completeInputEvidenceSurvivesInfrastructureCloseFailure() throws Exception {
         List<String> events = new ArrayList<>();
         KafkaInputManifest completeEvidence = inputManifest(
