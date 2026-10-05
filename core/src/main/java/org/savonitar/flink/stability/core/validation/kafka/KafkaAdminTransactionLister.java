@@ -53,20 +53,9 @@ public final class KafkaAdminTransactionLister {
     /** Read the actual coordinator topic layout under the caller's collection-wide deadline. */
     public int transactionStatePartitions(String bootstrapServers,
             org.savonitar.flink.stability.runtime.api.MonotonicDeadline deadline) throws Exception {
-        Properties properties = new Properties();
-        properties.put(AdminClientConfig.BOOTSTRAP_SERVERS_CONFIG, bootstrapServers);
-        int timeout = Math.toIntExact(Math.max(1, deadline.remaining().toMillis()));
-        properties.put(AdminClientConfig.DEFAULT_API_TIMEOUT_MS_CONFIG, timeout);
-        properties.put(AdminClientConfig.REQUEST_TIMEOUT_MS_CONFIG, timeout);
-        Admin admin = Admin.create(properties);
-        try {
-            var topic = admin.describeTopics(List.of(KafkaTransactionLogEvidence.TOPIC))
-                    .allTopicNames().get(deadline.remaining().toNanos(), java.util.concurrent.TimeUnit.NANOSECONDS)
-                    .get(KafkaTransactionLogEvidence.TOPIC);
-            return partitionCount(topic.partitions());
-        } finally {
-            admin.close(deadline.remaining());
-        }
+        var topic = org.savonitar.flink.stability.core.execution.kafka.KafkaBrokerTopicReadiness.describeTopics(
+                bootstrapServers, List.of(KafkaTransactionLogEvidence.TOPIC), deadline).get(KafkaTransactionLogEvidence.TOPIC);
+        return partitionCount(topic.partitions());
     }
 
     static int partitionCount(List<org.apache.kafka.common.TopicPartitionInfo> partitions) {
