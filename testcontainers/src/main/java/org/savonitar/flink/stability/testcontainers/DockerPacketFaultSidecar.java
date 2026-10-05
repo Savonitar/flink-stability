@@ -61,7 +61,7 @@ final class DockerPacketFaultSidecar implements PacketFaultBackend.Driver {
         return new GenericContainer<>(DockerImageName.parse(request.image()))
                 .withNetworkMode("container:" + binding.taskManagerId())
                 .withCreateContainerCmdModifier(DockerPacketFaultSidecar::configure)
-                .withCommand(watchdog(request, binding, chain))
+                .withCommand(new String[]{watchdog(request, binding, chain)})
                 .waitingFor(Wait.forLogMessage(".*packet-watchdog-ready.*\\n", 1));
     }
     static void configure(com.github.dockerjava.api.command.CreateContainerCmd command) {

@@ -781,3 +781,9 @@ run whose original JSON/log evidence must be retained.
 | SV-343 | All endpoints unavailable, expired/interrupted observation, permanent authorization error, or transient topic visibility. | Fail closed for expiry/interruption/permanent errors; transient errors may try another endpoint. Retain target, timing and full exception evidence. No guard, hold or expected outcome is relaxed. |
 | SV-344 | Coordinator description stalls during the commit window. | Bound API/future waits below the remaining hold so the existing observer can retry; keep the original operation API budget for pre-fault selection and cap fault-client network requests at one second. |
 | SV-345 | Transaction-state inventory is requested after a broker fault. | Use the same endpoint metadata helper, support internal-topic metadata, and retain the existing partition-count and archive-completeness checks. Never substitute a partial transaction listing. |
+
+### Packet watchdog command
+
+| Case | Input | Required result |
+| --- | --- | --- |
+| SV-346 | Loss, delay or blackhole sidecar launched with `/bin/sh -c` and a watchdog script containing spaces. | Pass exactly one command argument equal to the entire watchdog script, without container-API word splitting. Preserve the script, activation guard, bounded timing and existing live effect/healing checks; command construction alone cannot confirm a fault. |

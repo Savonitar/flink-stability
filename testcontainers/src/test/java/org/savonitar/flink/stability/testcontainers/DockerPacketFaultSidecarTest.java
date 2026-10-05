@@ -9,6 +9,16 @@ import java.util.*;
 import static org.junit.jupiter.api.Assertions.*;
 
 class DockerPacketFaultSidecarTest {
+    @Test void watchdogIsOneCompleteShellCommandArgument() {
+        for (var action : PacketFaultControl.Action.values()) {
+            var request = PacketFaultBackendTest.request(action);
+            var binding = new PacketFaultBackendTest.Fake().binding;
+            var chain = "FSCHAOS_123456abcdef";
+            var script = DockerPacketFaultSidecar.watchdog(request, binding, chain);
+            var container = DockerPacketFaultSidecar.container(request, binding, chain);
+            assertArrayEquals(new String[]{script}, container.getCommandParts(), action.name());
+        }
+    }
     @Test void sidecarUsesOnlyTargetNamespaceAndNetAdminWithoutHostMounts() {
         var request=PacketFaultBackendTest.request(PacketFaultControl.Action.DELAY);
         var binding=new PacketFaultBackendTest.Fake().binding;
