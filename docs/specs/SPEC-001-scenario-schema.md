@@ -3659,6 +3659,33 @@ missing/mixed/duplicate/foreign partition replies pass unchanged and release the
 reservation. Late/missing proof cannot make the scenario PASS. See SPEC-004 K12.7.
 
 
+### Kafka observations during broker faults
+
+Broker leadership and transaction-state inventory observations reuse the direct
+per-endpoint Metadata request used for input-topic readiness, with automatic topic
+creation disabled. A paused, killed or unreachable endpoint cannot monopolize the
+observation budget: each endpoint request has a total deadline of at most one
+second and half the remaining caller budget. Failed endpoints and transient
+metadata visibility errors allow observations through another owned endpoint;
+permanent errors still fail. Entirely unavailable metadata, expired deadlines and
+interruption remain unconfirmed. Responses received after the deadline cannot
+confirm a fault. The original hold, physical identity checks, partition/ISR
+requirements and safety healing are unchanged.
+
+Fault-observer Admin clients cap network requests at one second (or the shorter
+operation timeout), allowing stale coordinator/leader routing to retry. During a
+commit window, each transaction-description call also caps its API and future
+wait at one second and half the remaining hold, leaving the existing commit
+observer time to resample. Pre-fault selection retains its operation-wide API
+budget. Complete transaction listings still require every broker; a partial
+inventory is never substituted when a required broker is down.
+
+Each broker-fault observation retains its operation, available target (exact
+endpoint for direct metadata, explicit broker/coordinator selector where exposed
+by Admin), wall-clock start/end, monotonic elapsed time and full exception stack
+in the run logs. Admin-selected request nodes are not exposed by its public API;
+Kafka client DEBUG routing logs can provide destination and correlation evidence.
+
 ### Coordinator failure with a confirmed commit window
 
 `broker_fault.require_commit: true` is an optional strengthening of the existing

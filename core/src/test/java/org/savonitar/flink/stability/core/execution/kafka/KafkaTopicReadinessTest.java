@@ -291,6 +291,110 @@ class KafkaTopicReadinessTest {
         }
     }
 
+    @Test
+    void stalledEndpointCannotHideTheNewLeaderOnALiveEndpoint() throws Exception {
+        try (var paused = new ServerSocket(0, 1, InetAddress.getLoopbackAddress());
+             var live = new ServerSocket(0, 1, InetAddress.getLoopbackAddress());
+             var workers = Executors.newFixedThreadPool(2)) {
+            paused.setSoTimeout(2_000);
+            var release = new CountDownLatch(1);
+            var stuck = workers.submit(() -> {
+                try (var socket = paused.accept()) {
+                    // The broker accepts TCP and the Metadata request, but never answers.
+                    var input = new DataInputStream(socket.getInputStream());
+                    input.readNBytes(input.readInt());
+                    release.await(5, TimeUnit.SECONDS);
+                }
+                return null;
+            });
+            var healthy = workers.submit(() -> {
+                var response = metadata(Errors.NONE, 3, 1);
+                response.data().topics().iterator().next().partitions().getFirst()
+                        .setReplicaNodes(List.of(1, 2, 3)).setIsrNodes(List.of(2, 3));
+                serve(live, response); return null;
+            });
+            try {
+                var deadline = org.savonitar.flink.stability.runtime.api.MonotonicDeadline.start(Duration.ofSeconds(4), System::nanoTime);
+                var result = KafkaBrokerTopicReadiness.describeTopics(endpoint(paused) + "," + endpoint(live), List.of("input"), deadline);
+                assertEquals(3, result.get("input").partitions().getFirst().leader().id());
+                assertEquals(List.of(1, 2, 3), result.get("input").partitions().getFirst().replicas().stream().map(Node::id).toList());
+                assertEquals(List.of(2, 3), result.get("input").partitions().getFirst().isr().stream().map(Node::id).toList());
+                assertFalse(deadline.remaining().isZero());
+                assertFalse(stuck.isDone(), "Live evidence arrives while the paused request remains unanswered");
+                healthy.get(1, TimeUnit.SECONDS);
+            } finally { release.countDown(); }
+        }
+    }
+
+    @Test
+    void unavailableEndpointsExpireAndPermanentErrorsAreNotHidden() throws Exception {
+        try (var missing = new ServerSocket(0, 1, InetAddress.getLoopbackAddress())) {
+            String endpoint = endpoint(missing); missing.close();
+            var deadline = org.savonitar.flink.stability.runtime.api.MonotonicDeadline.start(Duration.ofMillis(100), System::nanoTime);
+            assertThrows(java.util.concurrent.TimeoutException.class,
+                    () -> KafkaBrokerTopicReadiness.describeTopics(endpoint, List.of("input"), deadline));
+        }
+        try (var denied = new ServerSocket(0, 1, InetAddress.getLoopbackAddress());
+             var worker = Executors.newSingleThreadExecutor()) {
+            var served = worker.submit(() -> { serve(denied, metadata(Errors.TOPIC_AUTHORIZATION_FAILED, 3, 1)); return null; });
+            assertThrows(TopicAuthorizationException.class, () -> KafkaBrokerTopicReadiness.describeTopics(
+                    endpoint(denied), List.of("input"), org.savonitar.flink.stability.runtime.api.MonotonicDeadline.start(Duration.ofSeconds(2), System::nanoTime)));
+            served.get(1, TimeUnit.SECONDS);
+        }
+    }
+
+    @Test
+    void transientTopicVisibilityFallsBackAndInternalMetadataRemainsUsable() throws Exception {
+        try (var lagging = new ServerSocket(0, 1, InetAddress.getLoopbackAddress());
+             var live = new ServerSocket(0, 1, InetAddress.getLoopbackAddress());
+             var workers = Executors.newFixedThreadPool(2)) {
+            var first = workers.submit(() -> { serve(lagging, metadata(Errors.UNKNOWN_TOPIC_OR_PARTITION, 1, 1)); return null; });
+            var second = workers.submit(() -> {
+                var response = metadata(Errors.NONE, 3, 1);
+                response.data().topics().iterator().next().setName("__transaction_state").setIsInternal(true);
+                serve(live, response); return null;
+            });
+            var result = KafkaBrokerTopicReadiness.describeTopics(endpoint(lagging) + "," + endpoint(live),
+                    List.of("__transaction_state"), org.savonitar.flink.stability.runtime.api.MonotonicDeadline.start(Duration.ofSeconds(2), System::nanoTime));
+            assertTrue(result.get("__transaction_state").isInternal());
+            assertEquals(3, result.get("__transaction_state").partitions().getFirst().leader().id());
+            first.get(1, TimeUnit.SECONDS); second.get(1, TimeUnit.SECONDS);
+        }
+    }
+
+    @Test
+    void expiredOrInterruptedObservationDoesNotSendAnotherRequest() {
+        var now = new AtomicLong();
+        var expired = org.savonitar.flink.stability.runtime.api.MonotonicDeadline.start(Duration.ofSeconds(1), now::get);
+        now.set(TimeUnit.SECONDS.toNanos(1));
+        assertThrows(java.util.concurrent.TimeoutException.class,
+                () -> KafkaBrokerTopicReadiness.describeTopics("127.0.0.1:1", List.of("input"), expired));
+        Thread.currentThread().interrupt();
+        try { assertThrows(InterruptedException.class,
+                () -> KafkaBrokerTopicReadiness.describeTopics("127.0.0.1:1", List.of("input"), expired)); }
+        finally { Thread.interrupted(); }
+    }
+
+    private static String endpoint(ServerSocket socket) {
+        return Utils.formatAddress(socket.getInetAddress().getHostAddress(), socket.getLocalPort());
+    }
+
+    private static void serve(ServerSocket server, MetadataResponse metadata) throws Exception {
+        server.setSoTimeout(3_000);
+        try (var socket = server.accept()) {
+            socket.setSoTimeout(2_000);
+            var input = new DataInputStream(socket.getInputStream());
+            var bytes = ByteBuffer.wrap(input.readNBytes(input.readInt()));
+            var header = RequestHeader.parse(bytes);
+            var request = MetadataRequest.parse(bytes, header.apiVersion());
+            assertFalse(request.allowAutoTopicCreation());
+            var response = MessageUtil.toByteBuffer(metadata.data(), header.apiVersion());
+            var output = new DataOutputStream(socket.getOutputStream());
+            output.writeInt(4 + response.remaining()); output.writeInt(header.correlationId());
+            output.write(Utils.toArray(response)); output.flush();
+        }
+    }
+
     private static MetadataResponse metadata(Errors error, int leader, int partitions) {
         var topic = new MetadataResponseData.MetadataResponseTopic().setName("input")
                 .setErrorCode(error.code()).setPartitions(java.util.stream.IntStream.range(0, partitions)

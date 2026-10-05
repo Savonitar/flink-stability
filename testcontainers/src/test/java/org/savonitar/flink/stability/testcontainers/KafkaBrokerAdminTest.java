@@ -12,9 +12,29 @@ import java.util.*;
 import static org.junit.jupiter.api.Assertions.*;
 
 class KafkaBrokerAdminTest {
+    @Test void pausedAdminRequestConsumesHoldEvenWhenAnotherBrokerAlreadyReportsNewLeader() throws Exception {
+        var live = new Fake(); live.leader = 3;
+        var pausedRequest = new KafkaFutureImpl<TopicDescription>();
+        Admin routedToPaused = (Admin) Proxy.newProxyInstance(Admin.class.getClassLoader(), new Class<?>[]{Admin.class},
+                (proxy, method, args) -> switch (method.getName()) {
+                    case "describeTopics" -> result(DescribeTopicsResult.class, null, Map.of("output", pausedRequest));
+                    case "close" -> null;
+                    default -> throw new AssertionError(method.getName());
+                });
+        var partitions = List.of(new KafkaLogCapture.Partition("output", 2));
+        try (var healthy = new KafkaBrokerAdmin(live.admin(), live::topics); var old = new KafkaBrokerAdmin(routedToPaused, (names, deadline) -> routedToPaused.describeTopics(names)
+                .allTopicNames().get(deadline.remaining().toNanos(), java.util.concurrent.TimeUnit.NANOSECONDS))) {
+            assertEquals(3, healthy.leaders(partitions, deadline()).getFirst().leader());
+            var hold = MonotonicDeadline.start(Duration.ofMillis(100), System::nanoTime);
+            assertThrows(java.util.concurrent.TimeoutException.class, () -> old.leaders(partitions, hold));
+            assertTrue(hold.remaining().isZero());
+            assertFalse(pausedRequest.isDone(), "Caller timeout neither completes nor cancels the stuck RPC");
+        }
+    }
+
     @Test void coordinatorUsesObservedNondefaultPartitionCountAndLatestLeaderRatherThanDescriptionCoordinator() throws Exception {
         var fake = new Fake();
-        try (var admin = new KafkaBrokerAdmin(fake.admin())) {
+        try (var admin = new KafkaBrokerAdmin(fake.admin(), fake::topics)) {
             var target = new KafkaBrokerControl.Target(KafkaBrokerControl.TargetKind.TRANSACTION_COORDINATOR, null, null, -1, "sink-");
             var first = admin.select(target, deadline());
             assertEquals("sink-a", first.transactionalId()); assertEquals(7, first.partitionCount());
@@ -27,7 +47,7 @@ class KafkaBrokerAdminTest {
     @Test void noOpenTransactionClosedTransactionOrUnownedLeaderNeverGuesses() throws Exception {
         for (int failure = 0; failure < 3; failure++) {
             var fake = new Fake(); if (failure==0) fake.empty=true; if (failure==1) fake.state=TransactionState.COMPLETE_COMMIT; if(failure==2)fake.leader=9;
-            try (var admin = new KafkaBrokerAdmin(fake.admin())) {
+            try (var admin = new KafkaBrokerAdmin(fake.admin(), fake::topics)) {
                 assertThrows(IllegalStateException.class, () -> admin.select(new KafkaBrokerControl.Target(
                         KafkaBrokerControl.TargetKind.TRANSACTION_COORDINATOR,null,null,-1,"sink-"),deadline()));
             }
@@ -35,7 +55,7 @@ class KafkaBrokerAdminTest {
     }
     @Test void partitionTargetReadsMetadataAtEachSelection() throws Exception {
         var fake = new Fake();
-        try(var admin = new KafkaBrokerAdmin(fake.admin())) {
+        try(var admin = new KafkaBrokerAdmin(fake.admin(), fake::topics)) {
             var target = new KafkaBrokerControl.Target(KafkaBrokerControl.TargetKind.PARTITION_LEADER,null,"output",2,null);
             assertEquals(2,admin.select(target,deadline()).leader());fake.leader=1;
             assertEquals(1,admin.select(target,deadline()).leader());
@@ -43,10 +63,36 @@ class KafkaBrokerAdminTest {
     }
     @Test void readsSessionTimeoutFromBrokerMetadataAndExactTransaction() throws Exception {
         var fake = new Fake();
-        try (var admin = new KafkaBrokerAdmin(fake.admin())) {
+        try (var admin = new KafkaBrokerAdmin(fake.admin(), fake::topics)) {
             assertEquals(17000, admin.sessionTimeoutMillis(2, deadline()));
             var state = admin.transaction("sink-a", deadline());
             assertEquals("ONGOING", state.state()); assertEquals(77, state.producerId()); assertEquals(4, state.producerEpoch());
+        }
+    }
+    @Test void faultClientsBoundNetworkRequestsWithoutShorteningTheOperationTimeout() {
+        var config = KafkaBrokerAdmin.properties("localhost:9092", Duration.ofSeconds(120));
+        assertEquals(120_000, config.get("default.api.timeout.ms"));
+        assertEquals(1_000, config.get("request.timeout.ms"));
+        assertEquals(50, KafkaBrokerAdmin.properties("localhost:9092", Duration.ofMillis(50)).get("request.timeout.ms"));
+    }
+    @Test void stalledCoordinatorObservationLeavesBudgetForTheCommitObserverToRetry() throws Exception {
+        var pending = new KafkaFutureImpl<TransactionDescription>();
+        Admin fake = (Admin) Proxy.newProxyInstance(Admin.class.getClassLoader(), new Class<?>[]{Admin.class},
+                (proxy, method, args) -> switch (method.getName()) {
+                    case "describeTransactions" -> {
+                        assertTrue(((DescribeTransactionsOptions) args[1]).timeoutMs() <= 100);
+                        yield result(DescribeTransactionsResult.class, Map.of(CoordinatorKey.byTransactionalId("sink-a"), pending));
+                    }
+                    case "close" -> null;
+                    default -> throw new AssertionError(method.getName());
+                });
+        try (var admin = new KafkaBrokerAdmin(fake, (names, deadline) -> { throw new AssertionError(); })) {
+            var hold = MonotonicDeadline.start(Duration.ofMillis(200), System::nanoTime);
+            assertThrows(java.util.concurrent.TimeoutException.class, () -> admin.transaction("sink-a", hold));
+            assertFalse(hold.remaining().isZero());
+            pending.complete(new TransactionDescription(3, TransactionState.ONGOING, 77, 4, 7200000,
+                    OptionalLong.of(1), Set.of(new TopicPartition("output",0))));
+            assertEquals(3, admin.transaction("sink-a", hold).coordinatorId());
         }
     }
     static MonotonicDeadline deadline(){return MonotonicDeadline.start(Duration.ofSeconds(1),System::nanoTime);}
@@ -55,6 +101,9 @@ class KafkaBrokerAdminTest {
     }
     static class Fake {
         int leader=2; boolean empty, filteredOngoing; TransactionState state=TransactionState.ONGOING;
+        Map<String, TopicDescription> topics(List<String> names, MonotonicDeadline deadline) throws Exception {
+            return admin().describeTopics(names).allTopicNames().get(deadline.remaining().toNanos(), java.util.concurrent.TimeUnit.NANOSECONDS);
+        }
         Admin admin() {
             return (Admin)Proxy.newProxyInstance(Admin.class.getClassLoader(),new Class<?>[]{Admin.class},(proxy,method,args)->{
                 return switch(method.getName()) {

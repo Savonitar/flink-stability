@@ -31,6 +31,11 @@
 
     <dependencies>
         <dependency>
+            <groupId>org.savonitar.flink.stability</groupId>
+            <artifactId>core</artifactId>
+            <version>${project.version}</version>
+        </dependency>
+        <dependency>
             <groupId>org.snakeyaml</groupId>
             <artifactId>snakeyaml-engine</artifactId>
             <version>2.6</version>

@@ -770,3 +770,14 @@ run whose original JSON/log evidence must be retained.
 | SV-338 | Required marker occurs in every initial/replacement process log, or is missing from one incarnation, borrowed from another, unreadable, truncated without a complete match, or inspected without a full physical fence. | Retain the first full matching line and substring per physical incarnation, or explicit absence. Missing required proof gives `subject.flink.log-marker-missing` / inconclusive only for an otherwise passing attempt. Every data FAIL/reason remains unchanged; the missing proof prevents matching a negative expectation. Optional absence is diagnostic only. |
 | SV-339 | `run --retain-checkpoints DIR` follows a confirmed physical process fence. | Copy checkpoint state and nested HA state to a fresh destination, preserve originals, and record paths, per-file sizes/SHA-256 and verified total bytes. Retention and marker fields are absent when unused. |
 | SV-340 | Checkpoint copy encounters an existing/overlapping destination, symbolic/special entry, missing source, interruption, changed source or failed copy/hash check; or the process fence is partial/unconfirmed. | Never overwrite or follow unsafe entries. Record incomplete/not-copied status and `checkpoint.retention-incomplete` diagnostics; preserve partial verified receipts and the original attempt status/reason, including FAIL. |
+
+
+### Bounded Kafka fault observations
+
+| # | Case | Required result |
+| --- | --- | --- |
+| SV-341 | Legacy Admin metadata future never completes while a healthy broker reports the new leader. | Reproduce exhaustion of the caller's hold budget; a local future timeout does not cancel the request or establish fault confirmation. |
+| SV-342 | First owned endpoint accepts a Metadata request but never answers; another endpoint reports the new leader/ISR. | Reuse the readiness wire request, disable auto-creation, cap the complete endpoint request at one second and half the remaining budget, and return live metadata within the original hold. Preserve leader, replica and ISR IDs. |
+| SV-343 | All endpoints unavailable, expired/interrupted observation, permanent authorization error, or transient topic visibility. | Fail closed for expiry/interruption/permanent errors; transient errors may try another endpoint. Retain target, timing and full exception evidence. No guard, hold or expected outcome is relaxed. |
+| SV-344 | Coordinator description stalls during the commit window. | Bound API/future waits below the remaining hold so the existing observer can retry; keep the original operation API budget for pre-fault selection and cap fault-client network requests at one second. |
+| SV-345 | Transaction-state inventory is requested after a broker fault. | Use the same endpoint metadata helper, support internal-topic metadata, and retain the existing partition-count and archive-completeness checks. Never substitute a partial transaction listing. |
