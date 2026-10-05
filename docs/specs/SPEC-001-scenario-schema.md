@@ -3815,6 +3815,10 @@ requirements, bounded holds, counter deltas and scoped healing. Confirmation
 requires positive counter growth during the hold, stable endpoint identities,
 verified absence of owned rules and removal of the helper. Cleanup uncertainty
 retains the watchdog and namespace ownership lock; it cannot become a PASS.
+The helper entrypoint is `/bin/sh -c`; its command must be exactly one argument
+containing the complete watchdog script. Do not split the script into words when
+passing it through the container API. The script, activation guard and timing
+remain unchanged.
 
 The initial runtime slice has now been connected to the canonical packet schema
 below. Tool availability and an immutable index/config pin have been recorded;
