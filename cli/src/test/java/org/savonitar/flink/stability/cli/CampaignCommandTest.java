@@ -89,8 +89,6 @@ class CampaignCommandTest {
         ValidateSpecificationsCommandTest.createJar(root.resolve("connector.jar"), false);
         ValidateSpecificationsCommandTest.createJar(root.resolve("job.jar"), true);
         ValidateSpecificationsCommandTest.writePair(catalog, "base", "connector.jar", "job.jar", "");
-        Path source = catalog.resolve("base.yaml");
-        Files.writeString(source, Files.readString(source) + "\nhealth_retry_limit: 0\n");
         Files.writeString(root.resolve("constraints.json"), """
                 {"phase":"verify-running","min_faults":2,"max_faults":2,"min_gap_ms":0,"max_gap_ms":10,
                  "faults":[[

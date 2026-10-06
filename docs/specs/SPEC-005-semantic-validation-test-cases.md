@@ -436,8 +436,11 @@ expected validation code.
 
 | ID | Case | Expected result |
 | --- | --- | --- |
-| SV-170 | `validate` selects one existing scenario or suite by `meta.name`. | Load the complete catalog, resolve/preflight the selected target, prepare every artifact without constructing/provisioning Docker, close prepared copies, and exit 0. |
-| SV-171 | Structural, catalog, parameter, expectation, semantic, artifact, or suite-entry validation fails. | Print every stable source/scope/code/pointer diagnostic to stderr, return no partial plan, and exit 1. |
+| SV-170 | `validate` selects one existing scenario or suite by `meta.name`. | Load the complete catalog, resolve/preflight, compile capabilities, prepare artifacts, and bind every selected scenario/entry without constructing or contacting Docker. Close prepared copies and exit 0. |
+| SV-170a | Three-broker proxy topology is schema-valid but unsupported by the runner. | Default scenario validation, with/without `--offline`, and `--show-plan` return the same capability rejection; rendering never changes the verdict. Missing artifacts cannot mask it. |
+| SV-170b | A suite has several unsupported entries, or a supported entry with unavailable artifacts before an unsupported entry. | Compile all resolved entries before preparing any artifacts; retain every compiler diagnostic with its suite identity. Include non-proxy restrictions such as insufficient task slots. |
+| SV-170c | Artifact preparation succeeds but binding finds missing connector entry classes. | Report binding diagnostics for scenario and suite validation, retain suite identity, and remove the entire private prepared workspace including earlier successful entries. |
+| SV-171 | Structural, catalog, parameter, expectation, semantic, runner-capability, artifact, or suite-entry validation fails. | Print every stable source/scope/code/pointer diagnostic to stderr, return no partial plan, and exit 1. |
 | SV-172 | CLI syntax is invalid, both/neither target selectors are supplied, a parameter assignment is malformed/duplicated, or the selected name is absent. | Print a usage-oriented error (including sorted available names for an absent target) and exit 2. |
 | SV-173 | `-p NAME=VALUE` uses `true`/`false`, an integer, unquoted text, or a quoted JSON string. | Preserve boolean/integer/string type; a quoted numeric-looking value remains a string and trailing tokens reject. |
 | SV-174 | `--offline` is used with an ordinary Maven-Central artifact already present in the local Maven cache. | Reuse the conventional `central` repository identity without network access; distinguish a healthy cache miss from an unusable local repository. |

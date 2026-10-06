@@ -3,24 +3,28 @@ package org.savonitar.flink.stability.cli;
 import com.fasterxml.jackson.databind.JsonNode;
 import org.savonitar.flink.stability.core.artifact.ArtifactPlanResolver;
 import org.savonitar.flink.stability.core.artifact.ArtifactResolutionOptions;
-import org.savonitar.flink.stability.core.artifact.PreparedScenarioPlan;
 import org.savonitar.flink.stability.core.artifact.PreparedSuitePlan;
-import org.savonitar.flink.stability.core.spec.resolution.ResolutionRequest;
-import org.savonitar.flink.stability.core.spec.resolution.ResolvedScenarioPlan;
 import org.savonitar.flink.stability.core.spec.resolution.ResolvedSuitePlan;
 import org.savonitar.flink.stability.core.spec.resolution.ScenarioPlanResolver;
 import org.savonitar.flink.stability.core.spec.document.SpecificationCatalog;
 import org.savonitar.flink.stability.core.spec.document.SpecificationCatalogLoader;
 import org.savonitar.flink.stability.core.spec.resolution.SuitePlanResolver;
 
+import org.savonitar.flink.stability.core.execution.plan.ExecutableScenarioPlan;
+import org.savonitar.flink.stability.core.execution.plan.ExecutableScenarioPlanCompiler;
+import org.savonitar.flink.stability.core.spec.document.Diagnostic;
+import org.savonitar.flink.stability.core.spec.document.SpecificationException;
+
 import java.nio.file.Path;
+import java.util.ArrayList;
 import java.util.Map;
 import java.util.Objects;
 
 /** Loads, resolves, and prepares a selected v1 target without provisioning infrastructure. */
 final class SpecificationValidationService {
     private final SpecificationCatalogLoader catalogLoader;
-    private final ScenarioPlanResolver scenarioResolver;
+    private final V1ScenarioPreparationService scenarioPreparation;
+    private final ExecutableScenarioPlanCompiler compiler;
     private final SuitePlanResolver suiteResolver;
     private final ArtifactPlanResolver artifactResolver;
 
@@ -38,7 +42,9 @@ final class SpecificationValidationService {
             SuitePlanResolver suiteResolver,
             ArtifactPlanResolver artifactResolver) {
         this.catalogLoader = Objects.requireNonNull(catalogLoader, "catalogLoader");
-        this.scenarioResolver = Objects.requireNonNull(scenarioResolver, "scenarioResolver");
+        this.compiler = new ExecutableScenarioPlanCompiler();
+        this.scenarioPreparation = new V1ScenarioPreparationService(
+                catalogLoader, scenarioResolver, compiler, artifactResolver);
         this.suiteResolver = Objects.requireNonNull(suiteResolver, "suiteResolver");
         this.artifactResolver = Objects.requireNonNull(artifactResolver, "artifactResolver");
     }
@@ -55,18 +61,14 @@ final class SpecificationValidationService {
             Map<String, ? extends JsonNode> submitOverrides, ArtifactResolutionOptions artifactOptions,
             boolean showPlan) {
         Objects.requireNonNull(scenarioName, "scenarioName");
-        SpecificationCatalog catalog = load(catalogRoot);
-        var bundle = catalog.scenario(scenarioName).orElseThrow(() -> unknown(
-                "scenario", scenarioName, catalog.scenarios().keySet()));
-        ResolvedScenarioPlan resolved = scenarioResolver.resolve(
-                bundle,
-                new ResolutionRequest(Map.of(), submitOverrides));
-        try (PreparedScenarioPlan prepared = artifactResolver.resolve(resolved, artifactOptions)) {
+        try (var target = scenarioPreparation.prepare(
+                catalogRoot, scenarioName, submitOverrides, artifactOptions)) {
+            var prepared = target.owner();
+            var bound = target.executionPlan();
+            var resolved = prepared.scenarioPlan();
+            var executable = bound.executablePlan();
             java.util.Optional<JsonNode> plan = java.util.Optional.empty();
             if (showPlan) {
-                var compiler = new org.savonitar.flink.stability.core.execution.plan.ExecutableScenarioPlanCompiler();
-                var executable = compiler.compile(resolved);
-                var bound = compiler.bind(prepared, executable);
                 var mapper = new com.fasterxml.jackson.databind.ObjectMapper();
                 var rendered = mapper.createObjectNode();
                 rendered.put("scenario", scenarioName);
@@ -101,7 +103,33 @@ final class SpecificationValidationService {
             throw unknown("suite", suiteName, catalog.suites().keySet());
         }
         ResolvedSuitePlan resolved = suiteResolver.resolve(catalog, suiteName, submitOverrides);
+        var executables = new ArrayList<ExecutableScenarioPlan>();
+        var issues = new ArrayList<Diagnostic>();
+        for (var entry : resolved.entries()) {
+            try {
+                executables.add(compiler.compile(entry.scenarioPlan()));
+            } catch (SpecificationException failure) {
+                failure.diagnostics().stream().map(issue -> issue.inSuiteEntry(entry.identity()))
+                        .forEach(issues::add);
+            }
+        }
+        if (!issues.isEmpty()) {
+            throw new SpecificationException(SpecificationException.Stage.RUNNER_CAPABILITY, issues);
+        }
         try (PreparedSuitePlan prepared = artifactResolver.resolve(resolved, artifactOptions)) {
+            for (int index = 0; index < prepared.entries().size(); index++) {
+                var entry = prepared.entries().get(index);
+                try {
+                    compiler.bind(entry.scenario(), executables.get(index));
+                } catch (SpecificationException failure) {
+                    failure.diagnostics().stream()
+                            .map(issue -> issue.inSuiteEntry(entry.suiteEntry().identity()))
+                            .forEach(issues::add);
+                }
+            }
+            if (!issues.isEmpty()) {
+                throw new SpecificationException(SpecificationException.Stage.RUNNER_CAPABILITY, issues);
+            }
             int artifactCount = prepared.entries().stream()
                     .mapToInt(entry -> entry.scenario().artifacts().size())
                     .sum();

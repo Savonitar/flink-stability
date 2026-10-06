@@ -111,6 +111,88 @@ class ValidateSpecificationsCommandTest {
     }
 
     @Test
+    void capabilityVerdictDoesNotDependOnRenderingOfflineOrSuiteSelection() throws IOException {
+        Path catalog = Files.createDirectories(temporaryDirectory.resolve("capabilities"));
+        writePair(catalog, "proxy", "missing-connector.jar", "missing-job.jar", "");
+        writePair(catalog, "slots", "missing-connector.jar", "missing-job.jar", "");
+        updateDocument(catalog.resolve("proxy.yaml"), document -> {
+            ((ObjectNode) document.at("/setup/kafka/clusters/main")).put("brokers", 3);
+            document.at("/setup/kafka/clusters/main/topics").forEach(topic ->
+                    ((ObjectNode) topic).put("replication_factor", 3));
+            ObjectNode proxy = ((ObjectNode) document.at("/setup")).putObject("proxies")
+                    .putObject("kafka-proxy");
+            proxy.put("type", "kroxylicious").put("cluster", "main")
+                    .put("listen", "kafka-proxy:9092");
+            proxy.putObject("bootstrap").put("cluster", "main");
+            ((ObjectNode) document.at("/workload/jobs/0/sink"))
+                    .put("connect_via_proxy", "kafka-proxy");
+        });
+        updateDocument(catalog.resolve("slots.yaml"), document ->
+                ((ObjectNode) document.at("/workload/jobs/0")).put("parallelism", 3));
+        writeSuite(catalog, "unsupported", List.of("proxy", "slots"));
+        for (boolean offline : List.of(false, true)) {
+            for (boolean showPlan : List.of(false, true)) {
+                var args = new java.util.ArrayList<>(List.of("validate", "--catalog-root",
+                        catalog.toString(), "--scenario", "proxy", "--artifact-root",
+                        temporaryDirectory.toString()));
+                if (offline) args.add("--offline");
+                if (showPlan) args.add("--show-plan");
+                Invocation result = execute(args.toArray(String[]::new));
+                assertValidationFailure(result, "runner.kafka.multi-broker-proxy-unsupported");
+                assertFalse(result.stderr().contains("artifact.local.not-found"));
+            }
+        }
+        Invocation suite = execute("validate", "--catalog-root", catalog.toString(),
+                "--suite", "unsupported", "--artifact-root", temporaryDirectory.toString());
+        assertValidationFailure(suite, "proxy.yaml [entry 0 'proxy', single] "
+                + "runner.kafka.multi-broker-proxy-unsupported at $/setup/proxies");
+        assertTrue(suite.stderr().contains("slots.yaml [entry 1 'slots', single] "
+                + "runner.workload.insufficient-task-slots"), suite.stderr());
+        Invocation slots = execute("validate", "--catalog-root", catalog.toString(),
+                "--scenario", "slots", "--artifact-root", temporaryDirectory.toString());
+        assertValidationFailure(slots, "runner.workload.insufficient-task-slots");
+        assertNoPreparedWorkspace(temporaryDirectory);
+    }
+
+    @Test
+    void laterSuiteCapabilityFailurePrecedesEarlierMissingArtifacts() throws IOException {
+        Path catalog = Files.createDirectories(temporaryDirectory.resolve("suite-order"));
+        writePair(catalog, "first", "missing.jar", "missing-job.jar", "");
+        writePair(catalog, "later", "missing.jar", "missing-job.jar", "");
+        updateDocument(catalog.resolve("later.yaml"), document ->
+                ((ObjectNode) document.at("/workload/jobs/0")).put("parallelism", 3));
+        writeSuite(catalog, "ordered", List.of("first", "later"));
+        Invocation result = execute("validate", "--catalog-root", catalog.toString(),
+                "--suite", "ordered", "--artifact-root", temporaryDirectory.toString(), "--offline");
+        assertValidationFailure(result, "later.yaml [entry 1 'later', single] "
+                + "runner.workload.insufficient-task-slots");
+        assertFalse(result.stderr().contains("artifact.local.not-found"));
+        assertNoPreparedWorkspace(temporaryDirectory);
+    }
+
+    @Test
+    void bindingFailureClosesScenarioAndEntireSuiteWorkspace() throws IOException {
+        Path catalog = Files.createDirectories(temporaryDirectory.resolve("binding"));
+        Path artifacts = Files.createDirectories(temporaryDirectory.resolve("binding-artifacts"));
+        writePair(catalog, "good", "connector.jar", "job.jar", "");
+        writePair(catalog, "bad", "unrelated.jar", "job.jar", "");
+        createJar(artifacts.resolve("connector.jar"), false);
+        createJar(artifacts.resolve("job.jar"), true);
+        createRawWorkloadJar(artifacts.resolve("unrelated.jar"), List.of());
+        writeSuite(catalog, "binding-suite", List.of("good", "bad"));
+        for (String selector : List.of("--scenario", "--suite")) {
+            Invocation result = execute("validate", "--catalog-root", catalog.toString(),
+                    selector, selector.equals("--scenario") ? "bad" : "binding-suite",
+                    "--artifact-root", artifacts.toString(), "--offline");
+            assertValidationFailure(result, "runner.subject.entry-class-missing");
+            if (selector.equals("--suite")) {
+                assertTrue(result.stderr().contains("[entry 1 'bad', single]"), result.stderr());
+            }
+            assertNoPreparedWorkspace(artifacts);
+        }
+    }
+
+    @Test
     void noSubcommandPrintsUsageAndReturnsUsageExit() {
         Invocation result = execute();
 
@@ -595,6 +677,7 @@ class ValidateSpecificationsCommandTest {
             String jobReference,
             String parameterBlock) throws IOException {
         ObjectNode scenario = readFixture("scenario-v1.yaml");
+        scenario.put("health_retry_limit", 0);
         ((ObjectNode) scenario.required("meta")).put("name", name);
         ObjectNode connector = (ObjectNode) scenario.requiredAt("/subject/connectors/kafka");
         connector.put("artifact", connectorReference);
@@ -642,6 +725,14 @@ class ValidateSpecificationsCommandTest {
         }
         try (JarOutputStream output = new JarOutputStream(
                 Files.newOutputStream(path), manifest)) {
+            if (!executable) {
+                for (String entryClass : org.savonitar.flink.stability.core.execution.plan
+                        .ExecutableScenarioPlan.PROTOCOL_V1_SUBJECT_ENTRY_CLASSES) {
+                    output.putNextEntry(new JarEntry(entryClass.replace('.', '/') + ".class"));
+                    output.write(new byte[] {0});
+                    output.closeEntry();
+                }
+            }
             output.putNextEntry(new JarEntry("payload.txt"));
             output.write("payload".getBytes(StandardCharsets.UTF_8));
             output.closeEntry();
