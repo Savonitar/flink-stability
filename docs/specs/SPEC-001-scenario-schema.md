@@ -124,6 +124,23 @@ ordering properties are tested.
   legacy JAR are not retained. A future compatibility layer requires an
   explicit new decision and tests rather than dormant adapters in production.
 
+### Docker-free executable validation
+
+Normal `validate` uses the same executable preparation order as `run`:
+resolve → compile runner capabilities → prepare artifacts → bind. Scenario
+validation and every resolved suite entry must pass this sequence before exit 0.
+Compile all suite entries before preparing any suite artifacts; diagnostics retain
+their entry identity. A capability rejection therefore precedes an unavailable
+artifact, including one in an earlier suite entry. Prepared resources are closed
+on success and on preparation or binding failure.
+
+`--offline` controls artifact downloads only. `--show-plan` renders the prepared
+scenario plan and must not change its validation verdict. Neither mode constructs
+or contacts Docker. Broad-schema validity and current runner support are distinct:
+a valid schema feature may receive a `runner.*` capability diagnostic without
+becoming schema-invalid. Successful validation establishes eligibility for an
+execution attempt, not runtime success or qualification.
+
 ### Bug reproductions imply an expectation
 
 - **R1.6** A scenario that intentionally reproduces a known bug declares that
