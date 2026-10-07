@@ -16,6 +16,8 @@ final class VerifiedKafkaContainer extends KafkaContainer {
         super(DockerImageName.parse(target.imageReference()).asCompatibleSubstituteFor("apache/kafka"));
         this.target = target;
         this.node = node;
+        // Preserve the image entrypoint and replace the waiting shell when Kafka is ready to launch.
+        withCommand("sh", "-c", "while [ ! -f /tmp/testcontainers_start.sh ]; do sleep 0.1; done; exec /tmp/testcontainers_start.sh");
     }
 
     @Override protected void containerIsCreated(String containerId) {
@@ -38,9 +40,24 @@ final class VerifiedKafkaContainer extends KafkaContainer {
     }
 
     @Override public void copyFileToContainer(org.testcontainers.images.builder.Transferable transferable, String path) {
-        if (target.customConfiguration() && path.equals("/tmp/testcontainers_start.sh") && receipt != null)
-            receipt = receipt.withStartupScript(new String(transferable.getBytes(), java.nio.charset.StandardCharsets.UTF_8));
-        super.copyFileToContainer(transferable, path);
+        super.copyFileToContainer(prepareTransfer(transferable, path), path);
+    }
+
+    /** Preserve Testcontainers' listener setup and file mode, then replace its final shell boundary. */
+    org.testcontainers.images.builder.Transferable prepareTransfer(
+            org.testcontainers.images.builder.Transferable transferable, String path) {
+        if (!path.equals("/tmp/testcontainers_start.sh")) return transferable;
+        String starter = new String(transferable.getBytes(), java.nio.charset.StandardCharsets.UTF_8);
+        String vendorStart = "\n/etc/kafka/docker/run \n";
+        if (!starter.endsWith(vendorStart) || starter.indexOf(vendorStart) != starter.lastIndexOf(vendorStart))
+            throw new IllegalStateException("Unexpected pinned Testcontainers Kafka starter script");
+        String corrected = starter.substring(0, starter.length() - vendorStart.length())
+                + "\nexec /etc/kafka/docker/run \n";
+        var prepared = org.testcontainers.images.builder.Transferable.of(
+                corrected.getBytes(java.nio.charset.StandardCharsets.UTF_8), transferable.getFileMode());
+        if (target.customConfiguration() && receipt != null)
+            receipt = receipt.withStartupScript(corrected);
+        return prepared;
     }
 
     void markReady() { if (receipt != null) receipt = receipt.started(); }

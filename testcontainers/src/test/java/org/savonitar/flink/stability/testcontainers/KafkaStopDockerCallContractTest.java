@@ -10,7 +10,7 @@ import java.time.Duration;
 import java.util.*;
 import static org.junit.jupiter.api.Assertions.*;
 
-class KafkaGracefulStopTest {
+class KafkaStopDockerCallContractTest {
     @Test void productionDriverSendsTermToExactOwnedContainerAndEnablesControlledShutdown() {
         List<String> calls = new ArrayList<>();
         var command = (KillContainerCmd) Proxy.newProxyInstance(getClass().getClassLoader(), new Class<?>[]{KillContainerCmd.class}, (proxy, method, args) -> {
