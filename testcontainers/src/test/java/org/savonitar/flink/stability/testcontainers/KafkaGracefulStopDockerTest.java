@@ -30,13 +30,6 @@ class KafkaGracefulStopDockerTest {
     private static final ObjectMapper JSON = new ObjectMapper();
     private static final Duration LIMIT = Duration.ofMinutes(2);
     private static final String LABEL = "org.savonitar.kafka-lifecycle";
-    private static final String PID_ONE = """
-            printf 'namespace_pid=1\\n'
-            awk '/^(Name|State|Pid|PPid|NSpid|SigIgn|SigCgt):/' /proc/1/status
-            awk '{print "starttime_ticks=" $22}' /proc/1/stat
-            printf 'pid_namespace='; readlink /proc/1/ns/pid
-            printf 'cmdline='; tr '\\000' ' ' < /proc/1/cmdline; printf '\\n'
-            """;
 
     /** Runs only this already compiled test, without a build or additional test selection. */
     public static void main(String[] args) throws Exception {
@@ -193,13 +186,13 @@ class KafkaGracefulStopDockerTest {
             try {
                 var docker = DockerClientFactory.instance().client();
                 var preflight = MonotonicDeadline.start(Duration.ofSeconds(20), System::nanoTime);
-                var image = bounded(preflight, "inspect pinned image", () -> {
+                var image = KafkaLifecycleInspection.observation(output, "image", () -> bounded(preflight, "inspect pinned image", () -> {
                     try (var command = docker.inspectImageCmd(imageName)) { return command.exec(); }
-                });
+                }), value -> Map.of("reference", imageName, "id", value.getId(), "platform", platform, "digest", digest,
+                        "observedPlatform", value.getOs() + "/" + value.getArch(), "repoDigests", value.getRepoDigests()));
                 assertEquals(expectedImage, image.getId());
                 assertEquals(String.join("/", Arrays.copyOf(platform.split("/"), 2)), image.getOs() + "/" + image.getArch());
                 assertTrue(image.getRepoDigests().contains(digest));
-                record(output, "image", Map.of("reference", imageName, "id", image.getId(), "platform", platform, "digest", digest));
                 runtime.start();
                 logs.assertHealthy();
                 String id = broker.getContainerId();
@@ -222,9 +215,9 @@ class KafkaGracefulStopDockerTest {
                 if (target.launchType().equals(KafkaRuntimeTarget.APACHE_KAFKA)) {
                     assertArrayEquals(new String[]{"/__cacert_entrypoint.sh"}, before.getConfig().getEntrypoint());
                     assertTrue(broker.getCommandParts()[2].endsWith("; exec /tmp/testcontainers_start.sh"));
-                    byte[] starter = bounded(observe, "actual Apache starter", () -> broker.copyFileFromContainer(
-                            "/tmp/testcontainers_start.sh", InputStream::readAllBytes));
-                    Files.write(output.resolve("actual-starter.sh"), starter, StandardOpenOption.CREATE_NEW);
+                    byte[] starter = KafkaLifecycleInspection.transfer(output, "starter", "actual-starter.sh", "/tmp/testcontainers_start.sh",
+                            sink -> bounded(observe, "actual Apache starter", () -> broker.copyFileFromContainer(
+                                    "/tmp/testcontainers_start.sh", input -> { input.transferTo(sink); return null; })));
                     assertTrue(new String(starter, StandardCharsets.UTF_8).endsWith("\nexec /etc/kafka/docker/run \n"));
                     propertyPath = "/opt/kafka/config/server.properties";
                 } else {
@@ -234,11 +227,15 @@ class KafkaGracefulStopDockerTest {
                     assertEquals(launch.environment(), observedEnvironment);
                     propertyPath = KafkaRuntimeLaunch.CONFIG_FILE;
                 }
-                var properties = bounded(observe, "selected broker configuration", () -> broker.execInContainer("/bin/sh", "-ec",
-                        "awk '/^(process.roles|node.id|offsets.topic.replication.factor|transaction.max.timeout.ms|transaction.state.log.replication.factor|transaction.state.log.min.isr|group.initial.rebalance.delay.ms|log.retention.ms)=/' " + propertyPath));
-                assertEquals(0, properties.getExitCode());
-                Files.writeString(output.resolve("selected-broker.properties"), properties.getStdout());
-                var actualProperties = new Properties(); actualProperties.load(new StringReader(properties.getStdout()));
+                byte[] rawProperties = KafkaLifecycleInspection.transfer(output, "broker-config", "broker-config.raw", propertyPath,
+                        sink -> bounded(observe, "actual broker configuration", () -> broker.copyFileFromContainer(
+                                propertyPath, input -> { input.transferTo(sink); return null; })));
+                var actualProperties = KafkaLifecycleInspection.brokerProperties(rawProperties, Set.of("process.roles", "node.id",
+                        "offsets.topic.replication.factor", "transaction.max.timeout.ms", "transaction.state.log.replication.factor",
+                        "transaction.state.log.min.isr", "group.initial.rebalance.delay.ms", "log.retention.ms"));
+                try (var writer = Files.newBufferedWriter(output.resolve("selected-broker.properties"), StandardOpenOption.CREATE_NEW)) {
+                    actualProperties.store(writer, "Selected from the observed broker file");
+                }
                 target.resolvedBrokerConfig().forEach((key, value) -> assertEquals(value, actualProperties.getProperty(key), key));
                 assertEquals("broker,controller", actualProperties.getProperty("process.roles"));
                 assertEquals("1", actualProperties.getProperty("node.id"));
@@ -248,17 +245,16 @@ class KafkaGracefulStopDockerTest {
                     catch (IOException failure) { throw new UncheckedIOException(failure); }
                 });
                 long hostPid = before.getState().getPidLong();
-                var top = bounded(observe, "owned host process topology", () -> {
+                var top = KafkaLifecycleInspection.observation(output, "host-top", () -> bounded(observe, "owned host process topology", () -> {
                     try (var command = docker.topContainerCmd(id).withPsArgs("-eo pid,ppid,lstart,args")) { return command.exec(); }
-                });
-                record(output, "host-top", Map.of("titles", top.getTitles(), "processes", top.getProcesses(), "inspectHostPid", hostPid));
+                }), value -> Map.of("titles", value.getTitles(), "processes", value.getProcesses(), "inspectHostPid", hostPid));
                 assertTrue(hostPid > 0 && Arrays.stream(top.getProcesses()).anyMatch(row -> row[0].trim().equals(Long.toString(hostPid))
                         && String.join(" ", row).contains("kafka.Kafka")), "Container host PID must be Kafka Java");
-                var namespace = bounded(observe, "namespace PID 1 identity", () -> broker.execInContainer("/bin/sh", "-ec", PID_ONE));
-                Files.writeString(output.resolve("namespace-pid-one.txt"), namespace.getStdout() + namespace.getStderr());
-                assertEquals(0, namespace.getExitCode()); assertTrue(namespace.getStdout().contains("kafka.Kafka"));
-                assertTrue(namespace.getStdout().matches("(?s).*Name:\\s+java\\n.*Pid:\\s+1\\n.*"));
-                assertTrue(namespace.getStdout().matches("(?s).*starttime_ticks=[0-9]+\\n.*pid_namespace=pid:\\[[0-9]+].*"));
+                String status = inspectCommand(broker, output, observe, "pid1-status", "/bin/cat", "/proc/1/status");
+                String stat = inspectCommand(broker, output, observe, "pid1-stat", "/bin/cat", "/proc/1/stat");
+                String command = inspectCommand(broker, output, observe, "pid1-cmdline", "/bin/cat", "/proc/1/cmdline");
+                String namespace = inspectCommand(broker, output, observe, "pid1-namespace", "/usr/bin/readlink", "/proc/1/ns/pid");
+                Files.writeString(output.resolve("namespace-pid-one.txt"), KafkaLifecycleInspection.processIdentity(status, stat, command, namespace));
                 var driver = new DockerKafkaBrokerDriver(broker, target, 1, networkId, () -> true, null, new HashMap<>());
                 assertTrue(driver.inspect(observe).running());
                 var stopWindow = MonotonicDeadline.start(LIMIT, System::nanoTime);
@@ -414,7 +410,12 @@ class KafkaGracefulStopDockerTest {
         return Map.of("imageId", evidence.imageId().orElseThrow(), "launchType", evidence.launchType(),
                 "layout", String.valueOf(evidence.layout()), "brokerConfig", evidence.brokerConfig(), "containers", evidence.containers());
     }
-    private static void record(Path output, String name, Map<String,?> values) throws IOException {
+    private static String inspectCommand(GenericContainer<?> broker, Path output, MonotonicDeadline deadline,
+                                         String name, String... command) throws Exception {
+        return KafkaLifecycleInspection.command(output, name, List.of(command),
+                () -> bounded(deadline, name, () -> broker.execInContainer(command)));
+    }
+    static void record(Path output, String name, Map<String,?> values) throws IOException {
         var result = new LinkedHashMap<String,Object>(); result.put("wall", Instant.now().toString());result.put("monotonicNanos", System.nanoTime());result.putAll(values);
         Path partial = output.resolve(name + ".json.partial"); JSON.writerWithDefaultPrettyPrinter().writeValue(partial.toFile(), result);
         Files.move(partial, output.resolve(name + ".json"), StandardCopyOption.ATOMIC_MOVE);
