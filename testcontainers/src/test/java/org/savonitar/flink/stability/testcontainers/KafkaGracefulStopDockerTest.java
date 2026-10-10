@@ -1,6 +1,8 @@
 package org.savonitar.flink.stability.testcontainers;
 
 import com.github.dockerjava.api.command.InspectContainerResponse;
+import com.github.dockerjava.api.DockerClient;
+import com.github.dockerjava.api.command.LogContainerCmd;
 import com.github.dockerjava.api.exception.NotFoundException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.Test;
@@ -15,6 +17,7 @@ import org.testcontainers.containers.output.OutputFrame;
 
 import java.io.*;
 import java.lang.reflect.Field;
+import java.lang.reflect.Proxy;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.*;
 import java.time.*;
@@ -55,9 +58,8 @@ class KafkaGracefulStopDockerTest {
             logs.accept(new OutputFrame(OutputFrame.OutputType.STDERR, new byte[]{13, 42}));
             assertNull(OutputFrame.END.getBytes());
             // The pinned callback sends END once for each registered stream.
-            try (var callback = new FrameConsumerResultCallback()) {
-                callback.addConsumer(OutputFrame.OutputType.STDOUT, logs);
-                callback.addConsumer(OutputFrame.OutputType.STDERR, logs);
+            try (var callback = new EvidenceCallback(logs)) {
+                callback.onComplete();
             }
             logs.awaitCompletion(MonotonicDeadline.start(Duration.ofNanos(1), System::nanoTime));
         }
@@ -106,6 +108,9 @@ class KafkaGracefulStopDockerTest {
             logs.accept(OutputFrame.END);
             assertThrows(IOException.class, () -> logs.awaitCompletion(MonotonicDeadline.start(Duration.ofNanos(1), System::nanoTime)));
             logs.accept(OutputFrame.END);
+            assertThrows(IOException.class, () -> logs.awaitCompletion(MonotonicDeadline.start(Duration.ofNanos(1), System::nanoTime)),
+                    "END frames alone do not prove natural transport completion");
+            logs.completedNaturally();
             logs.awaitCompletion(MonotonicDeadline.start(Duration.ofNanos(1), System::nanoTime));
         }
         var logs = new EvidenceLog(new ByteArrayOutputStream());
@@ -124,6 +129,189 @@ class KafkaGracefulStopDockerTest {
         reference[0] = logs;
         logs.accept(OutputFrame.END); logs.accept(OutputFrame.END);
         assertThrows(IOException.class, logs::close);
+    }
+
+    @Test void actualContinuousRequestRetainsTransportFailureBeforeAndAfterPartialOutput() throws Exception {
+        for (boolean partial : List.of(false, true)) {
+            var bytes = new ByteArrayOutputStream();
+            var logs = new EvidenceLog(bytes);
+            var callback = new EvidenceCallback(logs);
+            var calls = Collections.synchronizedList(new ArrayList<String>());
+            var failure = new IOException("injected transport failure");
+            var docker = logClient(calls, connected -> {
+                if (partial) connected.onNext(new com.github.dockerjava.api.model.Frame(
+                        com.github.dockerjava.api.model.StreamType.STDOUT, new byte[]{42, 10}));
+                connected.onError(failure);
+            });
+            var observed = assertThrows(IOException.class, () -> callback.follow(docker, "owned-broker", logDeadline()));
+            assertSame(failure, observed.getCause().getCause());
+            assertArrayEquals(partial ? new byte[]{42, 10} : new byte[0], bytes.toByteArray());
+            assertEquals(2, logs.endedStreams, "Inherited END delivery must not erase the transport failure");
+            assertThrows(IOException.class, logs::assertHealthy);
+            assertThrows(IOException.class, () -> logs.awaitCompletion(logDeadline()));
+            assertThrows(UncheckedIOException.class, () -> callback.awaitCompletion(1, TimeUnit.SECONDS));
+            assertThrows(IOException.class, callback::close);
+            // The exact live acceptance helper also rejects despite a successful final-log retrieval.
+            String finalLog = "Terminating process due to signal SIGTERM\nTransition from STARTED to SHUTTING_DOWN\n"
+                    + "[BrokerServer id=1] shut down completed\nGraceful shutdown completed\n";
+            assertThrows(IOException.class, () -> confirmShutdownLogs(finalLog, logs, logDeadline()));
+            assertThrows(IOException.class, logs::close);
+            assertTrue(calls.contains("stream.close")); assertEquals(1, Collections.frequency(calls, "request.close"));
+        }
+    }
+
+    @Test void actualContinuousRequestRequiresNaturalCompletionAndOwnsItsResources() throws Exception {
+        var calls = Collections.synchronizedList(new ArrayList<String>());
+        var bytes = new ByteArrayOutputStream();
+        try (var logs = new EvidenceLog(bytes); var callback = new EvidenceCallback(logs)) {
+            callback.follow(logClient(calls, connected -> {}), "owned-broker", logDeadline());
+            assertEquals(List.of("container=owned-broker", "withFollowStream=true", "withSince=0",
+                    "withStdOut=true", "withStdErr=true", "exec"), calls);
+            callback.onNext(new com.github.dockerjava.api.model.Frame(
+                    com.github.dockerjava.api.model.StreamType.STDERR, new byte[]{42, 10}));
+            callback.onComplete();
+            logs.awaitCompletion(logDeadline());
+            assertTrue(callback.awaitCompletion(1, TimeUnit.SECONDS));
+            assertTrue(logs.naturalCompletion); logs.assertHealthy();
+        }
+        assertArrayEquals(new byte[]{42, 10}, bytes.toByteArray());
+        assertEquals(1, Collections.frequency(calls, "stream.close"));
+        assertEquals(1, Collections.frequency(calls, "request.close"));
+    }
+
+    @Test void deliberateContinuousRequestCloseCannotManufactureNaturalCompletion() throws Exception {
+        var logs = new EvidenceLog(new ByteArrayOutputStream());
+        var callback = new EvidenceCallback(logs);
+        var calls = Collections.synchronizedList(new ArrayList<String>());
+        callback.follow(logClient(calls, connected -> {}), "owned-broker", logDeadline());
+        assertThrows(IOException.class, callback::close);
+        assertEquals(2, logs.endedStreams); assertFalse(logs.naturalCompletion);
+        callback.onComplete(); // A late completion notification cannot rescue cancellation.
+        assertFalse(logs.naturalCompletion);
+        assertThrows(IOException.class, logs::assertHealthy);
+        assertThrows(IOException.class, () -> logs.awaitCompletion(logDeadline()));
+        assertThrows(UncheckedIOException.class, () -> callback.awaitCompletion(1, TimeUnit.SECONDS));
+        assertThrows(IOException.class, logs::close);
+        assertTrue(calls.contains("stream.close")); assertTrue(calls.contains("request.close"));
+    }
+
+    @Test void completionWaitsRetainConcurrentStreamCloseFailure() throws Exception {
+        for (boolean timed : List.of(false, true)) {
+            var logs = new EvidenceLog(new ByteArrayOutputStream());
+            var callback = new EvidenceCallback(logs);
+            var closing = new java.util.concurrent.CountDownLatch(1);
+            var release = new java.util.concurrent.CountDownLatch(1);
+            var closeFailure = new IOException("stream close failed");
+            callback.onStart(() -> {
+                closing.countDown();
+                try { if (!release.await(5, TimeUnit.SECONDS)) throw new IOException("Close fixture timed out"); }
+                catch (InterruptedException failure) { Thread.currentThread().interrupt(); throw new IOException(failure); }
+                throw closeFailure;
+            });
+            try (var workers = java.util.concurrent.Executors.newFixedThreadPool(2)) {
+                var completion = workers.submit(callback::onComplete);
+                assertTrue(closing.await(5, TimeUnit.SECONDS));
+                var waiting = workers.submit(() -> assertThrows(UncheckedIOException.class, () -> {
+                    if (timed) callback.awaitCompletion(5, TimeUnit.SECONDS);
+                    else callback.awaitCompletion();
+                }));
+                release.countDown();
+                waiting.get(5, TimeUnit.SECONDS); completion.get(5, TimeUnit.SECONDS);
+            } finally { release.countDown(); }
+            assertSame(closeFailure, logs.failure.getCause());
+            assertFalse(logs.naturalCompletion);
+            assertThrows(IOException.class, () -> logs.awaitCompletion(logDeadline()));
+            assertThrows(IOException.class, callback::close); assertThrows(IOException.class, logs::close);
+        }
+    }
+
+    @Test void transportErrorAfterCompletionRemainsVisibleThroughFinalClose() throws Exception {
+        var logs = new EvidenceLog(new ByteArrayOutputStream());
+        var callback = new EvidenceCallback(logs);
+        callback.onComplete(); logs.awaitCompletion(logDeadline());
+        var failure = new IOException("late transport failure");
+        callback.onError(failure);
+        assertSame(failure, assertThrows(IOException.class, logs::assertHealthy).getCause().getCause());
+        assertThrows(IOException.class, () -> logs.awaitCompletion(logDeadline()));
+        assertThrows(IOException.class, callback::close); assertThrows(IOException.class, logs::close);
+    }
+
+    @Test void aLateStartCannotReopenACancelledContinuousRequest() throws Exception {
+        var logs = new EvidenceLog(new ByteArrayOutputStream());
+        var callback = new EvidenceCallback(logs);
+        assertThrows(IOException.class, callback::close);
+        var closes = new java.util.concurrent.atomic.AtomicInteger();
+        callback.onStart(closes::incrementAndGet);
+        assertEquals(1, closes.get());
+        assertFalse(callback.awaitStarted(1, TimeUnit.NANOSECONDS));
+        assertThrows(IOException.class, callback::close);
+        assertThrows(IOException.class, logs::assertHealthy);
+        assertFalse(logs.naturalCompletion); assertThrows(IOException.class, logs::close);
+    }
+
+    @Test void cleanupKeepsTheOriginalFailureAndAttemptsRemainingResources() throws Exception {
+        var primary = new IOException("transport failed");
+        var cleanup = new IOException("runtime cleanup failed");
+        var close = new IOException("request close failed");
+        var attempted = new ArrayList<String>();
+        cleanupAfter(primary,
+                () -> { attempted.add("runtime"); throw cleanup; },
+                () -> { attempted.add("callback"); throw close; });
+        assertEquals(List.of("runtime", "callback"), attempted);
+        assertArrayEquals(new Throwable[]{cleanup, close}, primary.getSuppressed());
+        assertSame(cleanup, assertThrows(IOException.class, () -> cleanupAfter(null, () -> { throw cleanup; })));
+    }
+
+    @Test void cleanupPreservesInterruptionAfterAttemptingOwnedResources() throws Exception {
+        try {
+            Thread.currentThread().interrupt();
+            cleanupAfter(new InterruptedException("observation interrupted"),
+                    () -> { assertFalse(Thread.currentThread().isInterrupted()); return null; });
+            assertTrue(Thread.currentThread().isInterrupted());
+        } finally { Thread.interrupted(); }
+    }
+
+    @Test void interruptionDuringOneCleanupDoesNotSkipTheNextResource() throws Exception {
+        var primary = new IOException("observation failed");
+        var attempted = new ArrayList<String>();
+        try {
+            cleanupAfter(primary,
+                    () -> {
+                        Thread.currentThread().interrupt();
+                        throw new IllegalStateException("bounded cleanup interrupted", new InterruptedException());
+                    },
+                    () -> { assertFalse(Thread.currentThread().isInterrupted()); attempted.add("callback"); return null; });
+            assertEquals(List.of("callback"), attempted);
+            assertEquals(1, primary.getSuppressed().length);
+            assertTrue(Thread.currentThread().isInterrupted());
+        } finally { Thread.interrupted(); }
+    }
+
+    private static MonotonicDeadline logDeadline() { return MonotonicDeadline.start(LIMIT, System::nanoTime); }
+
+    /** Drives the same request method as the live fixture, with no Docker daemon or client factory. */
+    private static DockerClient logClient(List<String> calls, Consumer<EvidenceCallback> connected) {
+        var request = (LogContainerCmd) Proxy.newProxyInstance(LogContainerCmd.class.getClassLoader(),
+                new Class<?>[]{LogContainerCmd.class}, (proxy, method, args) -> {
+                    switch (method.getName()) {
+                        case "withFollowStream", "withSince", "withStdOut", "withStdErr" -> {
+                            calls.add(method.getName() + "=" + args[0]); return proxy;
+                        }
+                        case "exec" -> {
+                            calls.add("exec");
+                            var callback = assertInstanceOf(EvidenceCallback.class, args[0]);
+                            callback.onStart(() -> calls.add("stream.close"));
+                            connected.accept(callback); return callback;
+                        }
+                        case "close" -> { calls.add("request.close"); return null; }
+                        default -> throw new AssertionError("Unexpected log request method " + method.getName());
+                    }
+                });
+        return (DockerClient) Proxy.newProxyInstance(DockerClient.class.getClassLoader(), new Class<?>[]{DockerClient.class},
+                (proxy, method, args) -> {
+                    if (!method.getName().equals("logContainerCmd")) throw new AssertionError(method.getName());
+                    calls.add("container=" + args[0]); return request;
+                });
     }
 
     private static void verifyEvidenceSerialization(Path output) throws IOException {
@@ -181,8 +369,9 @@ class KafkaGracefulStopDockerTest {
                 .withLabel(LABEL + ".case", selected)
                 .withCreateContainerCmdModifier(command -> command.withPlatform(platform));
         try (var logs = new EvidenceLog(Files.newOutputStream(output.resolve("kafka-continuous.log"), StandardOpenOption.CREATE_NEW))) {
-            broker.withLogConsumer(logs);
+            var callback = new EvidenceCallback(logs);
             boolean accepted = false;
+            Throwable primaryFailure = null;
             try {
                 var docker = DockerClientFactory.instance().client();
                 var preflight = MonotonicDeadline.start(Duration.ofSeconds(20), System::nanoTime);
@@ -198,6 +387,7 @@ class KafkaGracefulStopDockerTest {
                 String id = broker.getContainerId();
                 var observe = MonotonicDeadline.start(LIMIT, System::nanoTime);
                 var before = inspectOwned(broker, target, session, selected, networkId, observe);
+                callback.follow(docker, id, observe);
                 record(output, "ready", selectedState(before));
                 assertEquals(expectedImage, before.getImageId());
                 assertArrayEquals(broker.getCommandParts(), before.getConfig().getCmd());
@@ -258,7 +448,7 @@ class KafkaGracefulStopDockerTest {
                 var driver = new DockerKafkaBrokerDriver(broker, target, 1, networkId, () -> true, null, new HashMap<>());
                 assertTrue(driver.inspect(observe).running());
                 var stopWindow = MonotonicDeadline.start(LIMIT, System::nanoTime);
-                logs.assertHealthy();
+                logs.assertCapturing();
                 record(output, "term-submitted", Map.of("containerId", id));
                 driver.mutate(KafkaBrokerControl.Action.STOP, stopWindow);
                 record(output, "term-returned", Map.of("containerId", id));
@@ -276,37 +466,130 @@ class KafkaGracefulStopDockerTest {
                 assertFalse(Boolean.TRUE.equals(after.getState().getOOMKilled())); assertNotNull(after.getState().getExitCodeLong());
                 String finalLog = bounded(stopWindow, "Kafka shutdown log", broker::getLogs);
                 Files.writeString(output.resolve("kafka-final.log"), finalLog);
-                assertTrue(finalLog.contains("Terminating process due to signal SIGTERM"), "Kafka must report TERM receipt");
-                assertTrue(finalLog.contains("Transition from STARTED to SHUTTING_DOWN"), "Kafka shutdown must start");
-                assertTrue(finalLog.contains("[BrokerServer id=1] shut down completed"), "Broker shutdown must complete");
-                assertTrue(finalLog.contains("Graceful shutdown completed"), "Raft shutdown must complete");
                 assertFalse(driver.inspect(stopWindow).running());
-                logs.awaitCompletion(stopWindow);
+                confirmShutdownLogs(finalLog, logs, stopWindow);
                 record(output, "result", Map.of("accepted", true, "containerId", id, "exitCode", after.getState().getExitCodeLong(),
                         "finishedAt", after.getState().getFinishedAt(), "shutdownConfirmedBeforeCleanup", true));
                 accepted = true;
+            } catch (Exception | Error failure) {
+                primaryFailure = failure;
+                throw failure;
             } finally {
-                record(output, "observation-ended", Map.of("accepted", accepted, "containerId", String.valueOf(broker.getContainerId())));
                 // Supervisor records this boundary before granting cleanup; no cleanup death can pass STOP.
                 var cleanup = MonotonicDeadline.start(Duration.ofMinutes(1), System::nanoTime);
-                while (!Files.exists(output.resolve("cleanup-authorized"))) {
-                    assertFalse(cleanup.remaining().isZero(), "Supervisor did not authorize owned cleanup");
-                    Thread.sleep(50);
-                }
-                String cleanupId = broker.getContainerId();
-                if (cleanupId != null) {
-                    try { inspectOwned(broker, target, session, selected, networkId, cleanup); }
-                    catch (NotFoundException alreadyRemovedByFailedStartup) { /* Startup owns its failed container cleanup. */ }
-                }
-                bounded(cleanup, "owned runtime cleanup", () -> { runtime.stop(); return null; });
-                if (cleanupId != null) assertThrows(NotFoundException.class, () -> bounded(cleanup, "owned removal confirmation", () -> {
-                    // GenericContainer.stop clears its current ID; retain the positively checked identity.
-                    try (var command = broker.getDockerClient().inspectContainerCmd(cleanupId)) { return command.exec(); }
-                }));
-                record(output, "cleanup", Map.of("ownedContainerRemoved", true, "containerId", String.valueOf(cleanupId)));
+                boolean observationAccepted = accepted;
+                cleanupAfter(primaryFailure,
+                        () -> { record(output, "observation-ended", Map.of("accepted", observationAccepted,
+                                "containerId", String.valueOf(broker.getContainerId()))); return null; },
+                        () -> {
+                            while (!Files.exists(output.resolve("cleanup-authorized"))) {
+                                assertFalse(cleanup.remaining().isZero(), "Supervisor did not authorize owned cleanup");
+                                Thread.sleep(50);
+                            }
+                            String cleanupId = broker.getContainerId();
+                            if (cleanupId != null) {
+                                try { inspectOwned(broker, target, session, selected, networkId, cleanup); }
+                                catch (NotFoundException alreadyRemovedByFailedStartup) { /* Startup owns its failed container cleanup. */ }
+                            }
+                            bounded(cleanup, "owned runtime cleanup", () -> { runtime.stop(); return null; });
+                            if (cleanupId != null) assertThrows(NotFoundException.class, () -> bounded(cleanup, "owned removal confirmation", () -> {
+                                // GenericContainer.stop clears its current ID; retain the positively checked identity.
+                                try (var command = broker.getDockerClient().inspectContainerCmd(cleanupId)) { return command.exec(); }
+                            }));
+                            record(output, "cleanup", Map.of("ownedContainerRemoved", true, "containerId", String.valueOf(cleanupId)));
+                            return null;
+                        },
+                        () -> bounded(cleanup, "continuous log request cleanup", () -> { callback.close(); return null; }));
             }
         }
-        record(output, "log-evidence", Map.of("complete", true, "healthyAfterCleanupAndClose", true));
+        record(output, "log-evidence", Map.of("complete", true, "healthyAfterCleanupAndClose", true,
+                "naturalCompletion", true, "transportFailed", false, "cancelled", false));
+    }
+
+    private static void confirmShutdownLogs(String finalLog, EvidenceLog logs, MonotonicDeadline deadline) throws Exception {
+        assertTrue(finalLog.contains("Terminating process due to signal SIGTERM"), "Kafka must report TERM receipt");
+        assertTrue(finalLog.contains("Transition from STARTED to SHUTTING_DOWN"), "Kafka shutdown must start");
+        assertTrue(finalLog.contains("[BrokerServer id=1] shut down completed"), "Broker shutdown must complete");
+        assertTrue(finalLog.contains("Graceful shutdown completed"), "Raft shutdown must complete");
+        logs.awaitCompletion(deadline);
+    }
+
+    /** Attempt every cleanup action without replacing the original observation failure. */
+    private static void cleanupAfter(Throwable primary, Callable<?>... actions) throws Exception {
+        Throwable failure = primary;
+        boolean interrupted = Thread.interrupted();
+        try {
+            for (var action : actions) {
+                try { action.call(); }
+                catch (Exception | Error secondary) {
+                    interrupted |= secondary instanceof InterruptedException;
+                    if (failure == null) failure = secondary;
+                    else if (failure != secondary) failure.addSuppressed(secondary);
+                } finally { interrupted |= Thread.interrupted(); }
+            }
+        } finally { if (interrupted) Thread.currentThread().interrupt(); }
+        if (primary == null && failure instanceof Exception exception) throw exception;
+        if (primary == null && failure instanceof Error error) throw error;
+    }
+
+    /** Owns the actual follow request; Testcontainers' stock onError discards transport failures. */
+    private static final class EvidenceCallback extends FrameConsumerResultCallback {
+        private final EvidenceLog logs;
+        private LogContainerCmd request;
+        private boolean completingNaturally;
+        private boolean requestClosed;
+        private boolean closeStarted;
+
+        private EvidenceCallback(EvidenceLog logs) {
+            this.logs = logs;
+            addConsumer(OutputFrame.OutputType.STDOUT, logs);
+            addConsumer(OutputFrame.OutputType.STDERR, logs);
+        }
+
+        private void follow(DockerClient docker, String id, MonotonicDeadline deadline) throws Exception {
+            request = docker.logContainerCmd(id).withFollowStream(true).withSince(0).withStdOut(true).withStdErr(true);
+            bounded(deadline, "start continuous Kafka log request", () -> request.exec(this));
+            logs.assertHealthy();
+            boolean started = awaitStarted(deadline.remaining().toNanos(), TimeUnit.NANOSECONDS);
+            logs.assertHealthy();
+            assertTrue(started, "Kafka log request did not start");
+            logs.assertCapturing();
+        }
+
+        @Override public synchronized void onStart(Closeable stream) {
+            if (!closeStarted) { super.onStart(stream); return; }
+            logs.failedIfHealthy(new IOException("Kafka log stream started after capture was closed"));
+            try { stream.close(); }
+            catch (IOException | RuntimeException failure) { logs.failed(new IOException("Late Kafka log stream close failed", failure)); }
+        }
+
+        @Override public synchronized void onError(Throwable failure) {
+            logs.failed(new IOException("Continuous Kafka log transport failed", failure));
+            try { close(); }
+            catch (IOException retainedFailure) { /* The test thread observes the already retained failure. */ }
+        }
+
+        @Override public synchronized void onComplete() {
+            completingNaturally = true;
+            try { super.onComplete(); logs.completedNaturally(); }
+            catch (IOException | RuntimeException failure) { logs.failedIfHealthy(new IOException("Kafka log completion failed", failure)); }
+        }
+
+        @Override protected synchronized void throwFirstError() {
+            super.throwFirstError();
+            try { logs.assertHealthy(); }
+            catch (IOException failure) { throw new UncheckedIOException(failure); }
+        }
+
+        @Override public synchronized void close() throws IOException {
+            closeStarted = true;
+            if (!completingNaturally) logs.failed(new IOException("Continuous Kafka log capture cancelled before natural completion"));
+            try { super.close(); }
+            catch (IOException | RuntimeException failure) { logs.failed(new IOException("Kafka log stream close failed", failure)); }
+            try { if (request != null && !requestClosed) { requestClosed = true; request.close(); } }
+            catch (RuntimeException failure) { logs.failed(new IOException("Kafka log request close failed", failure)); }
+            logs.assertHealthy();
+        }
     }
 
     /** Retains callback failures for the test thread, including failures delivered during cleanup. */
@@ -314,6 +597,7 @@ class KafkaGracefulStopDockerTest {
         private final OutputStream sink;
         private IOException failure;
         private int endedStreams;
+        private boolean naturalCompletion;
         private boolean closed;
 
         private EvidenceLog(OutputStream sink) { this.sink = Objects.requireNonNull(sink); }
@@ -336,15 +620,34 @@ class KafkaGracefulStopDockerTest {
             finally { notifyAll(); }
         }
 
-        private void retain(IOException error) { if (failure == null) failure = error; }
+        private void retain(IOException error) {
+            if (failure == null) failure = error;
+            else if (failure != error) failure.addSuppressed(error);
+        }
+
+        private synchronized void failed(IOException error) { retain(error); notifyAll(); }
+
+        private synchronized void failedIfHealthy(IOException error) { if (failure == null) retain(error); notifyAll(); }
+
+        private synchronized void completedNaturally() throws IOException {
+            assertHealthy();
+            if (endedStreams != 2) throw new IOException("Natural Kafka log completion did not end both streams");
+            naturalCompletion = true;
+            notifyAll();
+        }
 
         private synchronized void assertHealthy() throws IOException {
             if (failure != null) throw new IOException("Continuous Kafka log evidence failed", failure);
         }
 
+        private synchronized void assertCapturing() throws IOException {
+            assertHealthy();
+            if (naturalCompletion) throw new IOException("Continuous Kafka log capture ended before TERM");
+        }
+
         private synchronized void awaitCompletion(MonotonicDeadline deadline) throws IOException, InterruptedException {
             assertHealthy();
-            while (endedStreams != 2) {
+            while (endedStreams != 2 || !naturalCompletion) {
                 long remaining = deadline.remaining().toNanos();
                 if (remaining == 0) throw new IOException("Kafka log streams did not complete within the shutdown deadline");
                 TimeUnit.NANOSECONDS.timedWait(this, remaining);
