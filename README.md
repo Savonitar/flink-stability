@@ -69,7 +69,9 @@ Important properties of this boundary:
   retains its error;
 - terminal Kafka validation never runs unless the Flink process fence succeeds;
 - timeouts, partial evidence, cleanup failures, and validation failures have stable reason codes;
-- operational logs use stderr and the command result is emitted as one JSON document on stdout.
+- operational logs and Log4j internal status diagnostics use stderr, including during JVM
+  shutdown; the command result remains exactly one JSON document on stdout through process
+  exit. Diagnostic warnings do not change the command's exit status or relax result parsing.
 
 The [distributed recovery guide](docs/DISTRIBUTED-RECOVERY.md) and
 [HA and token fault guide](docs/HA-TOKEN-TESTING.md) describe their separate catalogs,
