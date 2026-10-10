@@ -6,6 +6,11 @@ import org.testcontainers.utility.DockerImageName;
 
 /** Keeps the Apache entrypoint contract and verifies opt-in image pins before process start. */
 final class VerifiedKafkaContainer extends KafkaContainer {
+    // KafkaLaunchContractTest checks this starter contract against Testcontainers 1.21.4.
+    private static final String STARTER_PATH = "/tmp/testcontainers_start.sh";
+    private static final String VENDOR_EXECUTABLE = "/etc/kafka/docker/run";
+    private static final String VENDOR_START_SUFFIX = "\n" + VENDOR_EXECUTABLE + " \n";
+
     private final KafkaRuntimeTarget target;
     private final int node;
     private volatile org.savonitar.flink.stability.runtime.api.KafkaRuntimeEvidence.Container receipt;
@@ -17,7 +22,7 @@ final class VerifiedKafkaContainer extends KafkaContainer {
         this.target = target;
         this.node = node;
         // Preserve the image entrypoint and replace the waiting shell when Kafka is ready to launch.
-        withCommand("sh", "-c", "while [ ! -f /tmp/testcontainers_start.sh ]; do sleep 0.1; done; exec /tmp/testcontainers_start.sh");
+        withCommand("sh", "-c", "while [ ! -f " + STARTER_PATH + " ]; do sleep 0.1; done; exec " + STARTER_PATH);
     }
 
     @Override protected void containerIsCreated(String containerId) {
@@ -46,13 +51,18 @@ final class VerifiedKafkaContainer extends KafkaContainer {
     /** Preserve Testcontainers' listener setup and file mode, then replace its final shell boundary. */
     org.testcontainers.images.builder.Transferable prepareTransfer(
             org.testcontainers.images.builder.Transferable transferable, String path) {
-        if (!path.equals("/tmp/testcontainers_start.sh")) return transferable;
-        String starter = new String(transferable.getBytes(), java.nio.charset.StandardCharsets.UTF_8);
-        String vendorStart = "\n/etc/kafka/docker/run \n";
-        if (!starter.endsWith(vendorStart) || starter.indexOf(vendorStart) != starter.lastIndexOf(vendorStart))
-            throw new IllegalStateException("Unexpected pinned Testcontainers Kafka starter script");
-        String corrected = starter.substring(0, starter.length() - vendorStart.length())
-                + "\nexec /etc/kafka/docker/run \n";
+        if (!path.equals(STARTER_PATH)) return transferable;
+        byte[] originalBytes = transferable.getBytes();
+        String starter = new String(originalBytes, java.nio.charset.StandardCharsets.UTF_8);
+        boolean expectedSuffix = starter.endsWith(VENDOR_START_SUFFIX);
+        int occurrences = 0;
+        for (int match = starter.indexOf(VENDOR_START_SUFFIX); match >= 0;
+                match = starter.indexOf(VENDOR_START_SUFFIX, match + 1)) occurrences++;
+        if (!expectedSuffix || occurrences != 1)
+            throw new IllegalStateException("Unexpected pinned Testcontainers Kafka starter script: byteLength="
+                    + originalBytes.length + ", expectedSuffix=" + expectedSuffix + ", vendorStartOccurrences=" + occurrences);
+        String corrected = starter.substring(0, starter.length() - VENDOR_START_SUFFIX.length())
+                + "\nexec " + VENDOR_EXECUTABLE + " \n";
         var prepared = org.testcontainers.images.builder.Transferable.of(
                 corrected.getBytes(java.nio.charset.StandardCharsets.UTF_8), transferable.getFileMode());
         if (target.customConfiguration() && receipt != null)

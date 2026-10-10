@@ -12,6 +12,7 @@
     <artifactId>testcontainers</artifactId>
 
     <properties>
+        <!-- On upgrades, run KafkaLaunchContractTest and the documented Kafka lifecycle probe. -->
         <testcontainers.version>1.21.4</testcontainers.version>
         <!-- Aligned with Testcontainers 1.21.4's published dependency graph. -->
         <docker-java.version>3.4.2</docker-java.version>

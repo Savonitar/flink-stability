@@ -11,6 +11,8 @@ import org.junit.jupiter.api.io.TempDir;
 import java.net.URI;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.concurrent.TimeUnit;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -58,24 +60,53 @@ class CliShutdownLoggingTest {
         assertEquals(1, occurrences(result.stderr(), ORDINARY_LOG), result.stderr());
     }
 
+    @Test
+    void actualMainRendersOneResolvedPlanFromFullyLocalArtifacts() throws Exception {
+        Path catalog = Files.createDirectory(temporaryDirectory.resolve("catalog"));
+        Path artifacts = Files.createDirectory(temporaryDirectory.resolve("artifacts"));
+        ValidateSpecificationsCommandTest.createJar(artifacts.resolve("connector.jar"), false);
+        ValidateSpecificationsCommandTest.createJar(artifacts.resolve("job.jar"), true);
+        ValidateSpecificationsCommandTest.writePair(
+                catalog, "subprocess-plan", "connector.jar", "job.jar", "");
+
+        Invocation result = invoke("-cp", classpath(), Main.class.getName(),
+                "validate", "--catalog-root", catalog.toString(), "--scenario", "subprocess-plan",
+                "--artifact-root", artifacts.toString(), "--offline", "--show-plan");
+
+        assertEquals(0, result.exitCode(), result.stderr());
+        var plan = JSON.readTree(result.stdout());
+        assertEquals("subprocess-plan", plan.path("scenario").asText());
+        assertEquals("EXACTLY_ONCE",
+                plan.at("/resolved/workload/jobs/0/sink/delivery_guarantee").asText());
+        assertEquals(10, plan.at("/resolved/setup/kafka/clusters/main/topics/0/input_source/total").asInt());
+    }
+
     private Invocation shutdown(Path configuration, int exitCode) throws Exception {
+        return invoke("-Dlog4j.configurationFile=" + configuration.toUri(), "-cp", classpath(),
+                ShutdownProcess.class.getName(), configuration.toUri().toString(), Integer.toString(exitCode));
+    }
+
+    private static String classpath() {
+        return System.getProperty("surefire.test.class.path", System.getProperty("java.class.path"));
+    }
+
+    private Invocation invoke(String... arguments) throws Exception {
         Path directory = Files.createTempDirectory(temporaryDirectory, "process-");
         Path stdout = directory.resolve("stdout.txt");
         Path stderr = directory.resolve("stderr.txt");
-        Process process = new ProcessBuilder(
-                Path.of(System.getProperty("java.home"), "bin", "java").toString(),
-                "-Dlog4j.configurationFile=" + configuration.toUri(),
-                "-cp", System.getProperty("surefire.test.class.path", System.getProperty("java.class.path")),
-                ShutdownProcess.class.getName(), configuration.toUri().toString(), Integer.toString(exitCode))
+        var command = new ArrayList<String>();
+        command.add(Path.of(System.getProperty("java.home"), "bin", "java").toString());
+        command.addAll(List.of(arguments));
+        Process process = new ProcessBuilder(command)
                 .directory(directory.toFile())
                 .redirectOutput(stdout.toFile()).redirectError(stderr.toFile()).start();
         try {
-            assertTrue(process.waitFor(20, TimeUnit.SECONDS), "Shutdown subprocess exceeded its bound");
+            assertTrue(process.waitFor(20, TimeUnit.SECONDS), "CLI subprocess exceeded its bound");
             return new Invocation(process.exitValue(), Files.readString(stdout), Files.readString(stderr));
         } finally {
             if (process.isAlive()) {
                 process.destroyForcibly();
-                assertTrue(process.waitFor(5, TimeUnit.SECONDS), "Shutdown subprocess was not reaped");
+                assertTrue(process.waitFor(5, TimeUnit.SECONDS), "CLI subprocess was not reaped");
             }
         }
     }

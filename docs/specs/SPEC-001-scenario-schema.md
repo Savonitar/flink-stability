@@ -450,6 +450,11 @@ Connector pull-request gating is the same mechanism with one axis:
   execs across both Testcontainers starter shell boundaries so TERM reaches the
   foreground Kafka process. Custom Apache images retain their supported launch
   contract; compatibility with their downstream scripts requires separate evidence.
+  Detailed runtime receipts are emitted for `customConfiguration()` targets.
+  Default Apache launch behavior is covered separately by launcher and lifecycle
+  tests. A custom receipt confirms its documented identity/readiness contract;
+  it does not independently prove signal delivery through arbitrary downstream
+  image scripts. See the [lifecycle probe](../KAFKA-LIFECYCLE-PROBE.md).
   Unknown types reject with
   `runner.kafka.launch-unsupported`. `generic-kraft` starts the one- or three-node
   combined broker/controller topology of R4.2b using explicit properties,

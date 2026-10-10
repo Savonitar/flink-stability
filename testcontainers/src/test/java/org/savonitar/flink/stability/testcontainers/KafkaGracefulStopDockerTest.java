@@ -27,6 +27,7 @@ import java.util.concurrent.TimeUnit;
 import java.util.function.Consumer;
 
 import static org.junit.jupiter.api.Assertions.*;
+import static org.savonitar.flink.stability.testcontainers.KafkaLifecycleInspection.record;
 
 /** Opt-in production launch/STOP regression; the external supervisor owns hard limits and cleanup. */
 class KafkaGracefulStopDockerTest {
@@ -51,7 +52,7 @@ class KafkaGracefulStopDockerTest {
         verifyEvidenceSerialization(output);
     }
 
-    @Test void evidenceLogPreservesBytesAndHandlesActualEndFrames() throws Exception {
+    @Test void evidenceLogPreservesBytesDeliveredDirectlyToTheSinkAndHandlesEndFrames() throws Exception {
         var bytes = new ByteArrayOutputStream();
         try (var logs = new EvidenceLog(bytes)) {
             logs.accept(new OutputFrame(OutputFrame.OutputType.STDOUT, new byte[]{0, -1, 10}));
@@ -64,6 +65,24 @@ class KafkaGracefulStopDockerTest {
             logs.awaitCompletion(MonotonicDeadline.start(Duration.ofNanos(1), System::nanoTime));
         }
         assertArrayEquals(new byte[]{0, -1, 10, 13, 42}, bytes.toByteArray());
+    }
+
+    @Test void pinnedCallbackNormalizesUtf8AndAnsiBeforeDeliveringTextToTheSink() throws Exception {
+        var bytes = new ByteArrayOutputStream();
+        try (var logs = new EvidenceLog(bytes); var callback = new EvidenceCallback(logs)) {
+            byte[] prefix = "\u001b[31mcaf".getBytes(StandardCharsets.UTF_8);
+            callback.onNext(new com.github.dockerjava.api.model.Frame(com.github.dockerjava.api.model.StreamType.STDOUT, prefix));
+            callback.onNext(new com.github.dockerjava.api.model.Frame(com.github.dockerjava.api.model.StreamType.STDOUT,
+                    new byte[]{(byte) 0xc3}));
+            callback.onNext(new com.github.dockerjava.api.model.Frame(com.github.dockerjava.api.model.StreamType.STDOUT,
+                    new byte[]{(byte) 0xa9, 27, '[', '0', 'm', '\n'}));
+            callback.onNext(new com.github.dockerjava.api.model.Frame(com.github.dockerjava.api.model.StreamType.STDERR,
+                    new byte[]{(byte) 0xff, '\n'}));
+            callback.onComplete();
+            logs.awaitCompletion(logDeadline()); logs.assertHealthy();
+        }
+        assertArrayEquals("caf\u00e9\n\ufffd\n".getBytes(StandardCharsets.UTF_8), bytes.toByteArray(),
+                "The pinned line adapter strips ANSI color and decodes/re-encodes UTF-8; this is not raw transport capture");
     }
 
     @Test void evidenceLogRejectsMalformedOrdinaryFrames() {
@@ -332,6 +351,7 @@ class KafkaGracefulStopDockerTest {
                 target.launchType(), target.brokerConfig(), List.of(container));
         assertTrue(evidence.confirms(target));
         record(output, "runtime-evidence", selectedRuntimeEvidence(evidence));
+        KafkaLifecycleInspection.launch(output, null, null, new String[]{"sh", "-c", "exec starter"}, Map.of());
         var startup = JSON.readTree(output.resolve("startup-submitted.json").toFile());
         assertEquals("default-apache", startup.path("case").asText());
         assertDoesNotThrow(() -> Instant.parse(startup.path("wall").asText()));
@@ -347,6 +367,9 @@ class KafkaGracefulStopDockerTest {
         assertEquals("3600000", receipt.path("brokerConfig").path("log.retention.ms").asText());
         assertEquals(id, receipt.path("containers").get(0).path("containerId").asText());
         assertEquals(container.startupScript(), receipt.path("containers").get(0).path("startupScript").asText());
+        var launch = JSON.readTree(output.resolve("created-launch.json").toFile());
+        assertTrue(launch.has("expectedEntrypoint") && launch.path("expectedEntrypoint").isNull());
+        assertTrue(launch.has("entrypoint") && launch.path("entrypoint").isNull());
         try (var files = Files.list(output)) {
             assertFalse(files.anyMatch(path -> path.getFileName().toString().endsWith(".partial")));
         }
@@ -399,11 +422,15 @@ class KafkaGracefulStopDockerTest {
                         assertNull(observedEnvironment.put(entry.substring(0, split), entry.substring(split + 1)), "Duplicate owned environment key");
                 }
                 assertEquals(expectedEnvironment, observedEnvironment);
-                record(output, "created-launch", Map.of("entrypoint", before.getConfig().getEntrypoint(),
-                        "command", before.getConfig().getCmd(), "ownedEnvironment", observedEnvironment));
+                var genericLaunch = target.launchType().equals(KafkaRuntimeTarget.GENERIC_KRAFT)
+                        ? KafkaRuntimeLaunch.genericKraft(target, 1, broker.getHost(), broker.getMappedPort(9092).toString()) : null;
+                String[] expectedEntrypoint = genericLaunch == null
+                        ? Objects.requireNonNull(image.getConfig(), "Selected image configuration").getEntrypoint()
+                        : genericLaunch.command().subList(0, 2).toArray(String[]::new);
+                KafkaLifecycleInspection.launch(output, expectedEntrypoint, before.getConfig().getEntrypoint(),
+                        before.getConfig().getCmd(), observedEnvironment);
                 String propertyPath;
                 if (target.launchType().equals(KafkaRuntimeTarget.APACHE_KAFKA)) {
-                    assertArrayEquals(new String[]{"/__cacert_entrypoint.sh"}, before.getConfig().getEntrypoint());
                     assertTrue(broker.getCommandParts()[2].endsWith("; exec /tmp/testcontainers_start.sh"));
                     byte[] starter = KafkaLifecycleInspection.transfer(output, "starter", "actual-starter.sh", "/tmp/testcontainers_start.sh",
                             sink -> bounded(observe, "actual Apache starter", () -> broker.copyFileFromContainer(
@@ -411,10 +438,8 @@ class KafkaGracefulStopDockerTest {
                     assertTrue(new String(starter, StandardCharsets.UTF_8).endsWith("\nexec /etc/kafka/docker/run \n"));
                     propertyPath = "/opt/kafka/config/server.properties";
                 } else {
-                    var launch = KafkaRuntimeLaunch.genericKraft(target, 1, broker.getHost(), broker.getMappedPort(9092).toString());
-                    assertArrayEquals(launch.command().subList(0, 2).toArray(String[]::new), before.getConfig().getEntrypoint());
-                    assertArrayEquals(launch.command().subList(2, 3).toArray(String[]::new), before.getConfig().getCmd());
-                    assertEquals(launch.environment(), observedEnvironment);
+                    assertArrayEquals(genericLaunch.command().subList(2, 3).toArray(String[]::new), before.getConfig().getCmd());
+                    assertEquals(genericLaunch.environment(), observedEnvironment);
                     propertyPath = KafkaRuntimeLaunch.CONFIG_FILE;
                 }
                 byte[] rawProperties = KafkaLifecycleInspection.transfer(output, "broker-config", "broker-config.raw", propertyPath,
@@ -502,6 +527,8 @@ class KafkaGracefulStopDockerTest {
                         () -> bounded(cleanup, "continuous log request cleanup", () -> { callback.close(); return null; }));
             }
         }
+        // These are success postconditions after natural completion, owned cleanup and all closes.
+        // result.json is earlier shutdown evidence; reaching it alone does not establish these postconditions.
         record(output, "log-evidence", Map.of("complete", true, "healthyAfterCleanupAndClose", true,
                 "naturalCompletion", true, "transportFailed", false, "cancelled", false));
     }
@@ -532,13 +559,13 @@ class KafkaGracefulStopDockerTest {
         if (primary == null && failure instanceof Error error) throw error;
     }
 
-    /** Owns the actual follow request; Testcontainers' stock onError discards transport failures. */
+    /** Owns the follow request and its normalized textual output, not byte-for-byte Docker transport. */
     private static final class EvidenceCallback extends FrameConsumerResultCallback {
         private final EvidenceLog logs;
         private LogContainerCmd request;
-        private boolean completingNaturally;
+        private boolean completingNaturally; // onComplete was entered; this does not prove successful cleanup.
         private boolean requestClosed;
-        private boolean closeStarted;
+        private boolean closeStarted; // Prevents reopening; close may still fail.
 
         private EvidenceCallback(EvidenceLog logs) {
             this.logs = logs;
@@ -575,6 +602,8 @@ class KafkaGracefulStopDockerTest {
             catch (IOException | RuntimeException failure) { logs.failedIfHealthy(new IOException("Kafka log completion failed", failure)); }
         }
 
+        // Inherited timed waits can exceed their timeout while acquiring this close monitor.
+        // The live fixture uses EvidenceLog's deadline and the external supervisor for execution bounds.
         @Override protected synchronized void throwFirstError() {
             super.throwFirstError();
             try { logs.assertHealthy(); }
@@ -717,11 +746,6 @@ class KafkaGracefulStopDockerTest {
                                          String name, String... command) throws Exception {
         return KafkaLifecycleInspection.command(output, name, List.of(command),
                 () -> bounded(deadline, name, () -> broker.execInContainer(command)));
-    }
-    static void record(Path output, String name, Map<String,?> values) throws IOException {
-        var result = new LinkedHashMap<String,Object>(); result.put("wall", Instant.now().toString());result.put("monotonicNanos", System.nanoTime());result.putAll(values);
-        Path partial = output.resolve(name + ".json.partial"); JSON.writerWithDefaultPrettyPrinter().writeValue(partial.toFile(), result);
-        Files.move(partial, output.resolve(name + ".json"), StandardCopyOption.ATOMIC_MOVE);
     }
     private static <T> T bounded(MonotonicDeadline deadline, String name, Callable<T> call) {
         return ContainerDriverCallBoundary.call(ContainerOperationDeadline.shared("Kafka lifecycle regression", deadline), name, call);

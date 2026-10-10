@@ -61,6 +61,28 @@ class KafkaLaunchContractTest {
             for (var broker : ThreeBrokerKafkaRuntime.containers(Network.SHARED, target(custom, 3))) assertCorrected(broker);
         }
     }
+
+    @Test void unexpectedStarterReportsOnlyBoundedStructuralDiagnostics() {
+        String setup = "#!/bin/bash\nexport KAFKA_ADVERTISED_LISTENERS=private-listener-π\n"
+                + "# private setup\n".repeat(1024);
+        assertUnexpectedStarter(setup + "different-command\n", false, 0);
+        assertUnexpectedStarter(setup + "\n/etc/kafka/docker/run \ntrailing\n", false, 1);
+        // Adjacent matches share a newline; both must still be counted and rejected.
+        assertUnexpectedStarter(setup + "\n/etc/kafka/docker/run \n/etc/kafka/docker/run \n", true, 2);
+    }
+
+    private static void assertUnexpectedStarter(String script, boolean expectedSuffix, int occurrences) {
+        var container = new VerifiedKafkaContainer(target(false, 1));
+        var failure = assertThrows(IllegalStateException.class, () ->
+                container.prepareTransfer(Transferable.of(script, 0755), STARTER));
+        assertEquals("Unexpected pinned Testcontainers Kafka starter script: byteLength="
+                + script.getBytes(StandardCharsets.UTF_8).length + ", expectedSuffix=" + expectedSuffix
+                + ", vendorStartOccurrences=" + occurrences, failure.getMessage());
+        assertTrue(failure.getMessage().length() < 180);
+        assertFalse(failure.getMessage().contains("private-listener"));
+        assertFalse(failure.getMessage().contains("private setup"));
+    }
+
     private static void assertCorrected(KafkaContainer broker) {
         assertInstanceOf(VerifiedKafkaContainer.class, broker);
         assertTrue(broker.getCommandParts()[2].endsWith("; exec " + STARTER));

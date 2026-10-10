@@ -1,18 +1,41 @@
 package org.savonitar.flink.stability.testcontainers;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
 import org.testcontainers.containers.Container;
 
 import java.io.*;
 import java.nio.file.*;
+import java.time.Instant;
 import java.util.*;
 import java.util.concurrent.Callable;
 import java.util.function.Function;
 
 /** Test-only evidence collection: persist observations before validating their contents. */
 final class KafkaLifecycleInspection {
+    private static final ObjectMapper JSON = new ObjectMapper();
     private KafkaLifecycleInspection() {}
 
     @FunctionalInterface interface Transfer { void copy(OutputStream output) throws Exception; }
+
+    static void record(Path output, String name, Map<String, ?> values) throws IOException {
+        var result = new LinkedHashMap<String, Object>();
+        result.put("wall", Instant.now().toString()); result.put("monotonicNanos", System.nanoTime()); result.putAll(values);
+        Path partial = output.resolve(name + ".json.partial");
+        JSON.writerWithDefaultPrettyPrinter().writeValue(partial.toFile(), result);
+        Files.move(partial, output.resolve(name + ".json"), StandardCopyOption.ATOMIC_MOVE);
+    }
+
+    /** Preserve exact entrypoint representation: null and an empty array are distinct observations. */
+    static void launch(Path output, String[] expectedEntrypoint, String[] observedEntrypoint,
+                       String[] command, Map<String, String> ownedEnvironment) throws IOException {
+        var receipt = new LinkedHashMap<String, Object>();
+        receipt.put("expectedEntrypoint", expectedEntrypoint); receipt.put("entrypoint", observedEntrypoint);
+        receipt.put("entrypointPolicy", "exact-null-and-empty-distinct");
+        receipt.put("command", command); receipt.put("ownedEnvironment", ownedEnvironment);
+        record(output, "created-launch", receipt);
+        if (!Arrays.equals(expectedEntrypoint, observedEntrypoint))
+            throw new IOException("Created container entrypoint differs from the selected launch configuration");
+    }
 
     static byte[] transfer(Path output, String name, String artifact, String source, Transfer transfer) throws Exception {
         Path raw = output.resolve(artifact);
@@ -22,10 +45,10 @@ final class KafkaLifecycleInspection {
             var receipt = failure(failure);
             receipt.put("source", source);
             receipt.put("bytesCaptured", Files.exists(raw) ? Files.size(raw) : 0);
-            KafkaGracefulStopDockerTest.record(output, name + ".transfer", receipt);
+            record(output, name + ".transfer", receipt);
             throw failure;
         }
-        KafkaGracefulStopDockerTest.record(output, name + ".transfer", Map.of(
+        record(output, name + ".transfer", Map.of(
                 "status", "completed", "source", source, "bytesCaptured", Files.size(raw)));
         return Files.readAllBytes(raw);
     }
@@ -35,12 +58,12 @@ final class KafkaLifecycleInspection {
         T value;
         try { value = call.call(); }
         catch (Exception | AssertionError failure) {
-            KafkaGracefulStopDockerTest.record(output, name, failure(failure));
+            record(output, name, failure(failure));
             throw failure;
         }
         var receipt = new LinkedHashMap<String, Object>();
         receipt.put("status", "completed"); receipt.putAll(details.apply(value));
-        KafkaGracefulStopDockerTest.record(output, name, receipt);
+        record(output, name, receipt);
         return value;
     }
 
@@ -49,10 +72,10 @@ final class KafkaLifecycleInspection {
         try { result = call.call(); }
         catch (Exception | AssertionError failure) {
             var receipt = failure(failure); receipt.put("command", command);
-            KafkaGracefulStopDockerTest.record(output, name + ".command", receipt);
+            record(output, name + ".command", receipt);
             throw failure;
         }
-        KafkaGracefulStopDockerTest.record(output, name + ".command", Map.of(
+        record(output, name + ".command", Map.of(
                 "status", "completed", "command", command, "exitCode", result.getExitCode()));
         Files.writeString(output.resolve(name + ".stdout"), result.getStdout(), StandardOpenOption.CREATE_NEW);
         Files.writeString(output.resolve(name + ".stderr"), result.getStderr(), StandardOpenOption.CREATE_NEW);

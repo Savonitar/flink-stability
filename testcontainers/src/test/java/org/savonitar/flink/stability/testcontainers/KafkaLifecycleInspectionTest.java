@@ -8,6 +8,7 @@ import org.testcontainers.containers.Container;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.*;
+import java.time.Instant;
 import java.util.*;
 
 import static org.junit.jupiter.api.Assertions.*;
@@ -17,6 +18,57 @@ class KafkaLifecycleInspectionTest {
     private static final String STATUS = "Name:\tjava\nState:\tS (sleeping)\nPid:\t1\nPPid:\t0\nNSpid:\t1\n";
     private static final String STAT = "1 (java (process)) S " + "0 ".repeat(18) + "12345 0\n";
     private static final String CMDLINE = "/opt/java/bin/java\0-Xmx1g\0kafka.Kafka\0/config/server.properties\0";
+
+    @Test void sharedWriterPublishesTimestampedJsonWithoutLeavingPartialFiles(@TempDir Path output) throws Exception {
+        long before = System.nanoTime();
+        KafkaLifecycleInspection.record(output, "observation", Map.of("status", "completed"));
+        long after = System.nanoTime();
+        var receipt = JSON.readTree(output.resolve("observation.json").toFile());
+        assertDoesNotThrow(() -> Instant.parse(receipt.path("wall").asText()));
+        assertTrue(receipt.path("monotonicNanos").isIntegralNumber());
+        assertTrue(receipt.path("monotonicNanos").asLong() >= before && receipt.path("monotonicNanos").asLong() <= after);
+        assertEquals("completed", receipt.path("status").asText());
+        assertFalse(Files.exists(output.resolve("observation.json.partial")));
+    }
+
+    @Test void retainsMatchingStockAndCustomImageEntrypoints(@TempDir Path output) throws Exception {
+        String[][] entrypoints = {{"/__cacert_entrypoint.sh"}, {"/custom/bootstrap.sh", "--initialize"}};
+        for (int index = 0; index < entrypoints.length; index++) {
+            Path selected = Files.createDirectory(output.resolve(Integer.toString(index)));
+            String[] expected = entrypoints[index];
+            KafkaLifecycleInspection.launch(selected, expected, expected.clone(), new String[]{"sh", "-c", "exec starter"}, Map.of());
+            var receipt = JSON.readTree(selected.resolve("created-launch.json").toFile());
+            assertEquals(JSON.valueToTree(expected), receipt.path("expectedEntrypoint"));
+            assertEquals(receipt.path("expectedEntrypoint"), receipt.path("entrypoint"));
+            assertEquals("exact-null-and-empty-distinct", receipt.path("entrypointPolicy").asText());
+        }
+    }
+
+    @Test void retainsExpectedAndObservedEntrypointsBeforeRejectingMismatch(@TempDir Path output) throws Exception {
+        assertThrows(IOException.class, () -> KafkaLifecycleInspection.launch(output,
+                new String[]{"/custom/bootstrap.sh"}, new String[]{"/__cacert_entrypoint.sh"}, new String[]{"sh"}, Map.of()));
+        var receipt = JSON.readTree(output.resolve("created-launch.json").toFile());
+        assertEquals("/custom/bootstrap.sh", receipt.at("/expectedEntrypoint/0").asText());
+        assertEquals("/__cacert_entrypoint.sh", receipt.at("/entrypoint/0").asText());
+    }
+
+    @Test void entrypointAbsenceKeepsNullAndEmptyDistinctAndNeverInventsStockValues(@TempDir Path output) throws Exception {
+        String[][] absent = {null, new String[0]};
+        for (int expected = 0; expected < absent.length; expected++) {
+            for (int observed = 0; observed < absent.length; observed++) {
+                Path selected = Files.createDirectory(output.resolve(expected + "-" + observed));
+                String[] wanted = absent[expected], actual = absent[observed];
+                if (expected == observed) KafkaLifecycleInspection.launch(selected, wanted, actual, new String[]{"sh"}, Map.of());
+                else assertThrows(IOException.class, () -> KafkaLifecycleInspection.launch(selected, wanted, actual, new String[]{"sh"}, Map.of()));
+                var receipt = JSON.readTree(selected.resolve("created-launch.json").toFile());
+                assertTrue(receipt.has("expectedEntrypoint")); assertTrue(receipt.has("entrypoint"));
+                assertEquals(expected == 0, receipt.path("expectedEntrypoint").isNull());
+                assertEquals(observed == 0, receipt.path("entrypoint").isNull());
+                if (expected == 1) assertEquals(JSON.createArrayNode(), receipt.path("expectedEntrypoint"));
+                if (observed == 1) assertEquals(JSON.createArrayNode(), receipt.path("entrypoint"));
+            }
+        }
+    }
 
     @Test void parsesObservedPropertiesAndKeepsJavaDuplicateSemantics() throws Exception {
         byte[] raw = ("# observed file\nnode.id=7\nnode.id=1\nprocess.roles=broker,controller\n"
