@@ -93,8 +93,10 @@ For listed checkpoints, `--failAsyncSnapshotDelayMs 500` replaces the ordinary
 future and throws `POOL_REUSE_SNAPSHOT_ASYNC_FAIL checkpoint=<id> timeMs=<now>`.
 This declines a checkpoint without failing the task. Both controls also declare
 the 500 ms failure delay explicitly. The generator defaults it to 500 ms and
-requires it to be strictly smaller than the planned-failure delay whenever both
-faults are configured, so checkpoint 3 can decline before the task is cancelled.
+requires it to be strictly smaller than the planned-failure delay when the
+planned-failure checkpoint is also selected for asynchronous failure. In these
+catalogs, this lets checkpoint 3 decline before the task is cancelled. Delays
+anchored to different checkpoints are independent and are not compared.
 Each failure-delay option requires its corresponding checkpoint selector;
 specifying a delay alone is rejected instead of enabling an unused operator hook.
 

@@ -60,7 +60,7 @@ class FlinkKafkaEosJobArgumentsTest {
     }
 
     @Test
-    void asyncFailureMustPrecedePlannedFailureWhenBothAreConfigured() {
+    void asyncFailureMustPrecedePlannedFailureForSameCheckpoint() {
         for (String[] delays : new String[][]{{"0", "0"}, {"500", "500"}, {"501", "500"}, {"2000", "2000"}}) {
             IllegalArgumentException failure = assertThrows(IllegalArgumentException.class,
                     () -> FlinkKafkaEosJobArguments.from(new String[]{
@@ -70,15 +70,36 @@ class FlinkKafkaEosJobArgumentsTest {
             assertTrue(failure.getMessage().contains("checkpoint 3 must decline before the planned failure cancels the task"));
             assertTrue(failure.getMessage().contains("POOL_REUSE_SNAPSHOT_ASYNC_FAIL marker cannot match"));
         }
-        // The default failure delay also participates, even if the target is not listed.
+        // The default failure delay also participates when the target is listed.
         assertThrows(IllegalArgumentException.class, () -> FlinkKafkaEosJobArguments.from(new String[]{
-                "--failAsyncSnapshotForCheckpoints", "2", "--failAfterSnapshotOfCheckpoint", "3",
+                "--failAsyncSnapshotForCheckpoints", "2,3", "--failAfterSnapshotOfCheckpoint", "3",
                 "--failAfterSnapshotDelayMs", "500"}));
         FlinkKafkaEosJobArguments arguments = FlinkKafkaEosJobArguments.from(new String[]{
                 "--failAsyncSnapshotForCheckpoints", "2,3", "--failAsyncSnapshotDelayMs", "0",
                 "--failAfterSnapshotOfCheckpoint", "3", "--failAfterSnapshotDelayMs", "1"});
         assertEquals(0, arguments.failAsyncSnapshotDelayMs());
         assertEquals(1, arguments.failAfterSnapshotDelayMs());
+    }
+
+    @Test
+    void differentCheckpointsAllowIndependentFailureDelays() {
+        FlinkKafkaEosJobArguments defaults = FlinkKafkaEosJobArguments.from(new String[]{
+                "--failAsyncSnapshotForCheckpoints", "2", "--failAfterSnapshotOfCheckpoint", "3",
+                "--failAfterSnapshotDelayMs", "500"});
+        assertEquals(Set.of(2L), defaults.failAsyncSnapshotForCheckpoints());
+        assertEquals(3L, defaults.failAfterSnapshotOfCheckpoint());
+        assertEquals(500, defaults.failAsyncSnapshotDelayMs());
+        assertEquals(500, defaults.failAfterSnapshotDelayMs());
+
+        for (String[] delays : new String[][]{{"0", "0"}, {"500", "500"}, {"501", "500"}, {"2000", "0"}}) {
+            FlinkKafkaEosJobArguments arguments = FlinkKafkaEosJobArguments.from(new String[]{
+                    "--failAsyncSnapshotForCheckpoints", "2,4", "--failAsyncSnapshotDelayMs", delays[0],
+                    "--failAfterSnapshotOfCheckpoint", "3", "--failAfterSnapshotDelayMs", delays[1]});
+            assertEquals(Set.of(2L, 4L), arguments.failAsyncSnapshotForCheckpoints());
+            assertEquals(3L, arguments.failAfterSnapshotOfCheckpoint());
+            assertEquals(Integer.parseInt(delays[0]), arguments.failAsyncSnapshotDelayMs());
+            assertEquals(Integer.parseInt(delays[1]), arguments.failAfterSnapshotDelayMs());
+        }
     }
 
     @Test
