@@ -445,7 +445,17 @@ Connector pull-request gating is the same mechanism with one axis:
   claim for an image that has not been exercised.
 
   Optional `launch: {type: apache-kafka | generic-kraft}` chooses a launcher;
-  omission retains `apache-kafka`. Unknown types reject with
+  omission retains `apache-kafka`. The Apache launcher preserves the image's
+  original entrypoint and `/etc/kafka/docker/run` initialization, and explicitly
+  execs across both Testcontainers starter shell boundaries so TERM reaches the
+  foreground Kafka process. Custom Apache images retain their supported launch
+  contract; compatibility with their downstream scripts requires separate evidence.
+  Detailed runtime receipts are emitted for `customConfiguration()` targets.
+  Default Apache launch behavior is covered separately by launcher and lifecycle
+  tests. A custom receipt confirms its documented identity/readiness contract;
+  it does not independently prove signal delivery through arbitrary downstream
+  image scripts. See the [lifecycle probe](../KAFKA-LIFECYCLE-PROBE.md).
+  Unknown types reject with
   `runner.kafka.launch-unsupported`. `generic-kraft` starts the one- or three-node
   combined broker/controller topology of R4.2b using explicit properties,
   environment and command. Its optional `launch.layout` is `apache` (default)
@@ -3802,7 +3812,8 @@ The remaining brokers keep numeric order. This is relative to the observed
 transaction at the start, not a claim that the same transaction remains open.
 
 Kafka controlled shutdown is explicitly enabled. Each stop sends SIGTERM to the
-exact owned container; it never escalates to SIGKILL. The bounded observer must
+exact owned container; it never escalates to SIGKILL. Docker's acceptance of TERM
+alone does not establish process shutdown. The bounded observer must
 see the process stop and partition leadership/ISR exclude that broker, then the
 fixed-port restart must preserve container, image, network and advertised endpoint.
 Before the first stop and before advancing, all declared topic partitions and

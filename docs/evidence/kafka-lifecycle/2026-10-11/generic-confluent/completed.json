@@ -1,0 +1,82 @@
+{
+  "accepted": true,
+  "case": "generic-confluent",
+  "session": "kafka-lifecycle-e8d3b8123c8e48a2aabc7cbbab57037e",
+  "firstFailure": null,
+  "cleanup": {
+    "passed": true,
+    "errors": [],
+    "forcedContainerRemovals": [],
+    "childReaped": true
+  },
+  "shutdownObservationAccepted": true,
+  "preflightExitCode": 0,
+  "lifecycleExitCode": 0,
+  "launchStates": {
+    "preflight": "fixture-confirmed",
+    "java": "fixture-confirmed"
+  },
+  "wrapperExitCodes": {
+    "preflight": 0,
+    "java": 0
+  },
+  "elapsedSeconds": 5.873347875196487,
+  "phases": [
+    {
+      "phase": "preflight",
+      "elapsedSeconds": 0
+    },
+    {
+      "phase": "startup",
+      "elapsedSeconds": 0.9291516672819853
+    },
+    {
+      "phase": "observation",
+      "elapsedSeconds": 4.385557875037193
+    },
+    {
+      "phase": "cleanup",
+      "elapsedSeconds": 5.077462833374739
+    }
+  ],
+  "evidenceHashes": {
+    "startup-submitted.json": "e5b55b26a4e3e72c8204d85d73e853580ae09fe71c740b6d0f83b50d466450d9",
+    "image.json": "d0f7cc8f46e55a525675f437ab3456fe20614e880a28bab22894b8596f6290dd",
+    "ready.json": "d8804a6a7023d6a47b765063c03f21d8cf5f6608b96b5e8331f6483d3713ec91",
+    "created-launch.json": "63fedc94c353b40610b50e149566c63795e0d377b5d0be437c2131bcdb2b7bb9",
+    "host-top.json": "6fb2115edc163b79e4c2a2089e4aebdaec8bdea514c77e3f25ccd2459d2f3a4b",
+    "namespace-pid-one.txt": "06c68666f3e949cea4a3338a07d0ecaafe9e9620f0dcd4c7f2adff077220405e",
+    "selected-broker.properties": "25166b4d0875074673bf9020471fda31c4df249d8b209379a2d75acbf1339126",
+    "term-submitted.json": "101036b7b139a11a3aa8397c140460839d1e886a86a0c82dbee1e947c63eaf4b",
+    "term-returned.json": "1e26cd750696647af506d8898d7f7c8313275ceb9d1206ed622b3218676f766d",
+    "states.jsonl": "0c4e41667b0ff6633c632ee512ade56d02a134055c043828361f95dec2985393",
+    "kafka-final.log": "da2c07891b71cbdce0b93d4299c9013f665877bb6c2641db30327cbb7451f09b",
+    "kafka-continuous.log": "da2c07891b71cbdce0b93d4299c9013f665877bb6c2641db30327cbb7451f09b",
+    "result.json": "afa691976db1e7e572e213dcc3bc6a0f759e656b5dee034046f118cab1829853",
+    "observation-ended.json": "24d144096545b9b9f2855c364c08d1f881078f7f3c9e7f89f371995e58e9e8c5",
+    "cleanup.json": "fea875927f297b41426e47b779664bfce46341652d849d5481bc77d5803f79ba",
+    "safety-cleanup.json": "12fa48685a97c55f49606c4603115bad4e79515b159edd0f8765c19c82febccb",
+    "log-evidence.json": "547d95c5e7eefc3a38bfdf6566226102766d2b37a6b2e21051985ab60c039c1e",
+    "broker-config.raw": "57f41ec4610f33cbcb50c020947c0c554219ecb0460efc51f64f8c8f8dbe47d7",
+    "broker-config.transfer.json": "8835ec28006c1be7dd143785e91b6c44776c7ec747c30d084da5cd34d16160a0",
+    "pid1-status.stdout": "633bb14301af8e29c140d9d0a42d2dabbdd727ab2c5f6ddca889190bd1f74842",
+    "pid1-status.stderr": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "pid1-status.command.json": "c6f7628c9e63886b7b80280d70d71ce62137be2d6329c0ead54d397470098296",
+    "pid1-stat.stdout": "c339f4aaeedf0a43f3cfb4f18e66c4d6db7fe4ab9788af5b9b38dfa11311acbe",
+    "pid1-stat.stderr": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "pid1-stat.command.json": "c33d657d30781d1dee5afdf1d406cb7c718236e8740b787b58238e10548cf118",
+    "pid1-cmdline.stdout": "00f718e1df8f207c78ec3e207bfc91d5fbf7d1297e0170267db773ee11fbb254",
+    "pid1-cmdline.stderr": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "pid1-cmdline.command.json": "708be83a3e7e368338cc2f82ff91d1fa65f9704b22b8bd9612dbf327481de88d",
+    "pid1-namespace.stdout": "c2f14eae4678e8c35a8c2aa01452f61f1868ab8008865cee2f52551ddd1c409d",
+    "pid1-namespace.stderr": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "pid1-namespace.command.json": "5f3c2688c0a4db57b96ddc0bc6ea01bae179393ca3fe75606d636f1a23ec88fc",
+    "runtime-evidence.json": "9e188a614b8496e6cbb6d9b9e35f84c483aaed51d7023d28e34e6bfdd9118709"
+  },
+  "ownedContainerIds": [
+    "f2ea14c86638f78d32602a0ae4c646b6db3da229104a2c251fad31ef93c11052"
+  ],
+  "ownedNetworkIds": [
+    "6e77b4f4c90f1be277e911dc1ec158ca331b1993b24b7c2e50a5edb3b5f67d99"
+  ]
+}

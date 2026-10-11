@@ -1,0 +1,79 @@
+{
+  "sourceHead": "51637486f056e042b02338816eb70ee7ccd264f5",
+  "sourceCleanDuringExecution": true,
+  "toolSha256": {
+    "tools/kafka_lifecycle_probe.py": "a7cb8b168b156a1cd74f276a33a1f4c37364354f79a62273ff868fe223139f26",
+    "tools/kafka_lifecycle_inputs.py": "90f4be275c1d86117321c4ff25d32e75bd20a9d647e78df43d329c0a073fd228"
+  },
+  "runtime": "JDK21 / Docker Desktop29.1.3 / local Linux containers",
+  "limitsSeconds": {
+    "preflight": 60,
+    "startup": 120,
+    "observation": 120,
+    "cleanup": 60,
+    "overall": 360
+  },
+  "supervisorInvocations": 3,
+  "lifecycleLaunches": 3,
+  "retries": 0,
+  "cases": {
+    "default-apache": {
+      "accepted": true,
+      "elapsedSeconds": 7.035719707608223,
+      "completedSha256": "66e8de75bfb25189f03e52751215c165356d3ea18e4136592b44e7062419d725",
+      "launchStates": {
+        "preflight": "fixture-confirmed",
+        "java": "fixture-confirmed"
+      },
+      "image": {
+        "reference": "apache/kafka:4.0.0",
+        "id": "sha256:2cecec9e3ea2d63fd5d1da1ab95e6bb7c33a7ff81053c4eb46f4176cd0bad8c9",
+        "digest": "apache/kafka@sha256:3f7b939115cd4872e9cee9369d80bd69712fde55f9902f46d793f64848dedc75",
+        "platform": "linux/arm64"
+      }
+    },
+    "custom-apache": {
+      "accepted": true,
+      "elapsedSeconds": 6.153251165989786,
+      "completedSha256": "9a1399c13431c63ca1b16aa5ca2bc175c3e7238ec261d233cfcc9dd6c741b4ea",
+      "launchStates": {
+        "preflight": "fixture-confirmed",
+        "java": "fixture-confirmed"
+      },
+      "image": {
+        "reference": "apache/kafka:4.0.0",
+        "id": "sha256:2cecec9e3ea2d63fd5d1da1ab95e6bb7c33a7ff81053c4eb46f4176cd0bad8c9",
+        "digest": "apache/kafka@sha256:3f7b939115cd4872e9cee9369d80bd69712fde55f9902f46d793f64848dedc75",
+        "platform": "linux/arm64"
+      }
+    },
+    "generic-confluent": {
+      "accepted": true,
+      "elapsedSeconds": 5.873347875196487,
+      "completedSha256": "50873c654ab2d77eb1f7d3ba18f33a010efec59397e616b7151d9b5758dde5f1",
+      "launchStates": {
+        "preflight": "fixture-confirmed",
+        "java": "fixture-confirmed"
+      },
+      "image": {
+        "reference": "confluentinc/cp-kafka:8.3.2",
+        "id": "sha256:7eac158a17f82faac013c6cd101e8f98906eb2e6f6462f25abf77c08193281d0",
+        "digest": "confluentinc/cp-kafka@sha256:5e8f3ab5b4977c9a8fd6137d26af2caad878aca316f24c55f08206217e3cec48",
+        "platform": "linux/arm64/v8"
+      }
+    }
+  },
+  "ci": {
+    "runUrl": "https://github.com/Savonitar/flink-stability/actions/runs/38133829723",
+    "prHead": "51637486f056e042b02338816eb70ee7ccd264f5",
+    "testedMergeCommit": "f0ae69678ff09673d1e4b884ec1b54e7a3366df4",
+    "javaSelected": 1386,
+    "javaPassed": 1385,
+    "javaSkipped": 1,
+    "pythonPassed": 222,
+    "failures": 0,
+    "errors": 0,
+    "rawLogSha256": "cadc57e5e80c80120333b6fac67c430bb3778e3163d48737d232872923904c13"
+  },
+  "scope": "Exact unmodified completed.json receipts; full local evidence retained. No connector or arbitrary-image qualification."
+}

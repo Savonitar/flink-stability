@@ -2,6 +2,8 @@
 
 `tools/kafka_chaos_batch.py` prepares and resumes a serial live regression batch.
 Preparation and `plan` do not start containers. `run --execute` starts Docker.
+For a single Kafka PID1/TERM/shutdown check, use the separate
+[Kafka lifecycle probe](KAFKA-LIFECYCLE-PROBE.md); it does not launch this batch.
 Packet, parallel, at-least-once and savepoint stages follow the original
 99 cells. The packet stage first requires a successful isolated NET_ADMIN probe.
 
