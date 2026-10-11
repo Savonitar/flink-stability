@@ -83,7 +83,8 @@ final class FlinkKafkaEosJobArguments {
         Long failAfterCheckpoint = values.containsKey(FAIL_AFTER_SNAPSHOT_OPTION)
                 ? checkpointId(FAIL_AFTER_SNAPSHOT_OPTION, values.get(FAIL_AFTER_SNAPSHOT_OPTION)) : null;
         int failAfterDelay = integer(FAIL_AFTER_SNAPSHOT_DELAY_OPTION, values.getOrDefault(FAIL_AFTER_SNAPSHOT_DELAY_OPTION, "2000"), false);
-        if (!failedSnapshots.isEmpty() && failAfterCheckpoint != null && failureDelay >= failAfterDelay) {
+        if (failAfterCheckpoint != null && failedSnapshots.contains(failAfterCheckpoint)
+                && failureDelay >= failAfterDelay) {
             throw new IllegalArgumentException(FAIL_ASYNC_SNAPSHOT_DELAY_OPTION + " must be strictly smaller than "
                     + FAIL_AFTER_SNAPSHOT_DELAY_OPTION + ": checkpoint " + failAfterCheckpoint
                     + " must decline before the planned failure cancels the task; otherwise its "
