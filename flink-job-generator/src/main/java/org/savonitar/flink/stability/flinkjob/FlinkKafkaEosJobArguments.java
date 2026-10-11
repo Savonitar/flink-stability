@@ -27,12 +27,11 @@ final class FlinkKafkaEosJobArguments {
     private final int failAsyncSnapshotDelayMs;
     private final Long failAfterSnapshotOfCheckpoint;
     private final int failAfterSnapshotDelayMs;
-    private final boolean snapshotHooksEnabled;
 
     private FlinkKafkaEosJobArguments(int processingDelayMs, Integer producerMaxBlockMs,
             Integer producerRequestTimeoutMs, int snapshotAsyncDelayMs,
             Set<Long> failAsyncSnapshotForCheckpoints, int failAsyncSnapshotDelayMs, Long failAfterSnapshotOfCheckpoint,
-            int failAfterSnapshotDelayMs, boolean snapshotHooksEnabled) {
+            int failAfterSnapshotDelayMs) {
         this.processingDelayMs = processingDelayMs;
         this.producerMaxBlockMs = producerMaxBlockMs;
         this.producerRequestTimeoutMs = producerRequestTimeoutMs;
@@ -41,7 +40,6 @@ final class FlinkKafkaEosJobArguments {
         this.failAsyncSnapshotDelayMs = failAsyncSnapshotDelayMs;
         this.failAfterSnapshotOfCheckpoint = failAfterSnapshotOfCheckpoint;
         this.failAfterSnapshotDelayMs = failAfterSnapshotDelayMs;
-        this.snapshotHooksEnabled = snapshotHooksEnabled;
     }
 
     static FlinkKafkaEosJobArguments from(String[] args) {
@@ -64,6 +62,12 @@ final class FlinkKafkaEosJobArguments {
             }
             String raw = Objects.requireNonNull(args[index], "Program argument values must not be null");
             values.put(option, raw);
+        }
+        if (values.containsKey(FAIL_AFTER_SNAPSHOT_DELAY_OPTION) && !values.containsKey(FAIL_AFTER_SNAPSHOT_OPTION)) {
+            throw new IllegalArgumentException(FAIL_AFTER_SNAPSHOT_DELAY_OPTION + " requires " + FAIL_AFTER_SNAPSHOT_OPTION);
+        }
+        if (values.containsKey(FAIL_ASYNC_SNAPSHOT_DELAY_OPTION) && !values.containsKey(FAIL_ASYNC_SNAPSHOTS_OPTION)) {
+            throw new IllegalArgumentException(FAIL_ASYNC_SNAPSHOT_DELAY_OPTION + " requires " + FAIL_ASYNC_SNAPSHOTS_OPTION);
         }
         Set<Long> failedSnapshots = new HashSet<>();
         if (values.containsKey(FAIL_ASYNC_SNAPSHOTS_OPTION)) {
@@ -89,10 +93,7 @@ final class FlinkKafkaEosJobArguments {
                 integer(PROCESSING_DELAY_OPTION, values.getOrDefault(PROCESSING_DELAY_OPTION, "0"), false),
                 integer(PRODUCER_MAX_BLOCK_OPTION, values.get(PRODUCER_MAX_BLOCK_OPTION), true),
                 integer(PRODUCER_REQUEST_TIMEOUT_OPTION, values.get(PRODUCER_REQUEST_TIMEOUT_OPTION), true),
-                asyncDelay, failedSnapshots, failureDelay, failAfterCheckpoint, failAfterDelay,
-                asyncDelay > 0 || values.containsKey(FAIL_ASYNC_SNAPSHOTS_OPTION)
-                        || values.containsKey(FAIL_ASYNC_SNAPSHOT_DELAY_OPTION) || values.containsKey(FAIL_AFTER_SNAPSHOT_OPTION)
-                        || values.containsKey(FAIL_AFTER_SNAPSHOT_DELAY_OPTION));
+                asyncDelay, failedSnapshots, failureDelay, failAfterCheckpoint, failAfterDelay);
     }
 
     private static Integer integer(String option, String raw, boolean positive) {
@@ -134,7 +135,9 @@ final class FlinkKafkaEosJobArguments {
 
     int failAfterSnapshotDelayMs() { return failAfterSnapshotDelayMs; }
 
-    boolean snapshotHooksEnabled() { return snapshotHooksEnabled; }
+    boolean snapshotHooksEnabled() {
+        return snapshotAsyncDelayMs > 0 || !failAsyncSnapshotForCheckpoints.isEmpty() || failAfterSnapshotOfCheckpoint != null;
+    }
 
     Integer producerRequestTimeoutMs() { return producerRequestTimeoutMs; }
 

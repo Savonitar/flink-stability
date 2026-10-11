@@ -141,12 +141,15 @@ class WorkloadProtocolV1ConfigurationTest {
 
     @Test
     void checkpointFailureOptionsUseSnapshotOperatorEvenWithZeroAsyncDelay() {
-        for (String option : new String[]{"--failAsyncSnapshotForCheckpoints",
-                "--failAfterSnapshotOfCheckpoint", "--failAfterSnapshotDelayMs"}) {
+        for (String[] args : new String[][]{
+                {"--failAsyncSnapshotForCheckpoints", "3"},
+                {"--failAfterSnapshotOfCheckpoint", "3"},
+                {"--failAsyncSnapshotForCheckpoints", "3", "--failAsyncSnapshotDelayMs", "0"},
+                {"--failAfterSnapshotOfCheckpoint", "3", "--failAfterSnapshotDelayMs", "0"}}) {
             StreamExecutionEnvironment env = StreamExecutionEnvironment.getExecutionEnvironment(
                     Configuration.fromMap(baseExactlyOnceValues()));
             FlinkKafkaEosJob.buildPipeline(env, WorkloadProtocolV1Configuration.from(env.getConfiguration()),
-                    FlinkKafkaEosJobArguments.from(new String[]{option, "3"}));
+                    FlinkKafkaEosJobArguments.from(args));
             StreamGraph graph = env.getStreamGraph();
             StreamNode node = graph.getStreamNodes().stream()
                     .filter(value -> FlinkKafkaEosJob.THROTTLE_UID.equals(value.getTransformationUID())).findFirst().orElseThrow();

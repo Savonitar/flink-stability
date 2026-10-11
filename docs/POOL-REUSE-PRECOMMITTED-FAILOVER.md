@@ -95,6 +95,8 @@ This declines a checkpoint without failing the task. Both controls also declare
 the 500 ms failure delay explicitly. The generator defaults it to 500 ms and
 requires it to be strictly smaller than the planned-failure delay whenever both
 faults are configured, so checkpoint 3 can decline before the task is cancelled.
+Each failure-delay option requires its corresponding checkpoint selector;
+specifying a delay alone is rejected instead of enabling an unused operator hook.
 
 Flink's `SubtaskCheckpointCoordinatorImpl.checkpointState` broadcasts the barrier
 before taking the operator's synchronous snapshot. The subsequent failure delay
@@ -407,6 +409,11 @@ same workload, Flink image and 11 dependency hashes in the same order; the
 connector mutation remained limited to `ProducerPoolImpl.class`.
 Full timing confirmation requires the retained logs and transaction
 history, not only the terminal result or required-marker matches.
+The live batch used the rebuilt timing-change artifact before the subsequent
+parser-only rejection of orphan delay flags. That validation change has separate
+unit coverage; the valid, paired arguments in these catalogs and their injected
+timing behavior are unchanged. No additional live batch was run for that parser
+validation change.
 
 ## Follow-ups
 
