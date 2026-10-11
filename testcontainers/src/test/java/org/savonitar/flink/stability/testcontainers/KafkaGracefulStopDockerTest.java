@@ -25,6 +25,7 @@ import java.util.*;
 import java.util.concurrent.Callable;
 import java.util.concurrent.TimeUnit;
 import java.util.function.Consumer;
+import java.util.function.LongSupplier;
 
 import static org.junit.jupiter.api.Assertions.*;
 import static org.savonitar.flink.stability.testcontainers.KafkaLifecycleInspection.record;
@@ -33,6 +34,9 @@ import static org.savonitar.flink.stability.testcontainers.KafkaLifecycleInspect
 class KafkaGracefulStopDockerTest {
     private static final ObjectMapper JSON = new ObjectMapper();
     private static final Duration LIMIT = Duration.ofMinutes(2);
+    // The external 60-second cleanup phase also reserves time to reap this JVM and remove its network.
+    private static final Duration CLEANUP_LIMIT = Duration.ofSeconds(45);
+    private static final Duration CLEANUP_RESERVE = Duration.ofSeconds(10);
     private static final String LABEL = "org.savonitar.kafka-lifecycle";
 
     /** Runs only this already compiled test, without a build or additional test selection. */
@@ -306,6 +310,130 @@ class KafkaGracefulStopDockerTest {
         } finally { Thread.interrupted(); }
     }
 
+    @Test void missingAuthorizationReservesSafetyCleanupAndCannotProduceNormalSuccess(@TempDir Path output) throws Exception {
+        var clock = new java.util.concurrent.atomic.AtomicLong();
+        var missing = new IOException("Supervisor did not authorize owned cleanup");
+        var attempted = new ArrayList<String>();
+        record(output, "result", Map.of("accepted", true, "shutdownConfirmedBeforeCleanup", true));
+        String observation = Files.readString(output.resolve("result.json"));
+        assertSame(missing, assertThrows(IOException.class, () -> safetyCleanup(output, null, true, "owned-broker", clock::get,
+                deadline -> {
+                    assertEquals(Duration.ofSeconds(10), deadline.remaining());
+                    clock.addAndGet(Duration.ofSeconds(10).toNanos()); throw missing;
+                },
+                deadline -> {
+                    attempted.add("runtime"); assertEquals(Duration.ofSeconds(25), deadline.remaining());
+                    clock.addAndGet(Duration.ofSeconds(24).toNanos());
+                },
+                deadline -> {
+                    attempted.add("callback"); assertEquals(Duration.ofSeconds(11), deadline.remaining());
+                    clock.addAndGet(Duration.ofSeconds(10).toNanos());
+                })));
+        assertEquals(List.of("runtime", "callback"), attempted);
+        assertEquals(Duration.ofSeconds(44).toNanos(), clock.get(), "No cleanup phase resets the fixed deadline");
+        var receipt = JSON.readTree(output.resolve("safety-cleanup.json").toFile());
+        assertFalse(receipt.path("authorizationReceived").asBoolean()); assertTrue(receipt.path("safetyFallback").asBoolean());
+        assertTrue(receipt.path("runtimeCleanupCompleted").asBoolean()); assertTrue(receipt.path("callbackCleanupCompleted").asBoolean());
+        assertEquals(observation, Files.readString(output.resolve("result.json")), "Pre-cleanup observations are never rewritten");
+        assertFalse(Files.exists(output.resolve("cleanup.json"))); assertFalse(Files.exists(output.resolve("log-evidence.json")));
+    }
+
+    @Test void safetyCleanupPreservesTheOriginalFailureAndRefusesForeignOwnership(@TempDir Path output) throws Exception {
+        var primary = new IOException("Observation failed");
+        var missing = new IOException("Authorization missing");
+        var attempted = new ArrayList<String>();
+        var target = target("default-apache", "apache/kafka:4.0.0", "sha256:" + "a".repeat(64));
+        var foreign = JSON.readValue("""
+                {"Id":"owned-broker", "Config":{"Labels":{"org.savonitar.kafka-lifecycle":"foreign"}}}
+                """, InspectContainerResponse.class);
+        safetyCleanup(output, primary, false, "owned-broker", System::nanoTime,
+                deadline -> { throw missing; },
+                deadline -> {
+                    requireOwned(foreign, "owned-broker", target, "our-session", "default-apache", "our-network");
+                    attempted.add("destructive-stop");
+                },
+                deadline -> { attempted.add("callback"); });
+        assertEquals(List.of("callback"), attempted);
+        assertSame(missing, primary.getSuppressed()[0]); assertInstanceOf(AssertionError.class, primary.getSuppressed()[1]);
+        var receipt = JSON.readTree(output.resolve("safety-cleanup.json").toFile());
+        assertTrue(receipt.path("runtimeCleanupAttempted").asBoolean()); assertFalse(receipt.path("runtimeCleanupCompleted").asBoolean());
+        assertTrue(receipt.path("callbackCleanupCompleted").asBoolean()); assertFalse(Files.exists(output.resolve("cleanup.json")));
+    }
+
+    @Test void authorizedSafetyCleanupPublishesNormalCleanupOnlyAfterBothActions(@TempDir Path output) throws Exception {
+        var attempted = new ArrayList<String>();
+        safetyCleanup(output, null, true, "owned-broker", System::nanoTime, deadline -> {},
+                deadline -> { attempted.add("runtime"); assertFalse(Files.exists(output.resolve("cleanup.json"))); },
+                deadline -> { attempted.add("callback"); assertFalse(Files.exists(output.resolve("cleanup.json"))); });
+        assertEquals(List.of("runtime", "callback"), attempted);
+        var receipt = JSON.readTree(output.resolve("safety-cleanup.json").toFile());
+        assertTrue(receipt.path("authorizationReceived").asBoolean()); assertFalse(receipt.path("safetyFallback").asBoolean());
+        assertTrue(JSON.readTree(output.resolve("cleanup.json").toFile()).path("ownedContainerRemoved").asBoolean());
+    }
+
+    @Test void safetyCleanupRequiresFinishedStartupAndTheCapturedIdentity(@TempDir Path output) throws Exception {
+        var finished = new java.util.concurrent.atomic.AtomicBoolean();
+        var entered = new java.util.concurrent.CountDownLatch(1);
+        var release = new java.util.concurrent.CountDownLatch(1);
+        Thread worker = new Thread(() -> {
+            entered.countDown();
+            try { release.await(); }
+            catch (InterruptedException failure) { Thread.currentThread().interrupt(); }
+            finally { finished.set(true); }
+        });
+        worker.start();
+        try {
+            assertTrue(entered.await(5, TimeUnit.SECONDS));
+            for (String scenario : List.of("unfinished-startup", "changed-identity", "settled")) {
+                if (!scenario.equals("unfinished-startup")) { release.countDown(); worker.join(5000); assertFalse(worker.isAlive()); }
+                Path evidence = Files.createDirectory(output.resolve(scenario));
+                var attempted = new ArrayList<String>();
+                String currentId = scenario.equals("changed-identity") ? "different-broker" : "owned-broker";
+                Callable<Void> cleanup = () -> {
+                    safetyCleanup(evidence, null, false, "owned-broker", System::nanoTime, deadline -> {},
+                            deadline -> {
+                                requireCleanupIdentity(finished.get(), "owned-broker", currentId);
+                                attempted.add("destructive-stop");
+                            }, deadline -> { attempted.add("callback"); });
+                    return null;
+                };
+                if (scenario.equals("settled")) {
+                    cleanup.call(); assertEquals(List.of("destructive-stop", "callback"), attempted);
+                } else {
+                    assertThrows(AssertionError.class, cleanup::call); assertEquals(List.of("callback"), attempted);
+                    assertFalse(JSON.readTree(evidence.resolve("safety-cleanup.json").toFile())
+                            .path("runtimeCleanupCompleted").asBoolean());
+                    assertFalse(Files.exists(evidence.resolve("cleanup.json")));
+                }
+            }
+        } finally { release.countDown(); worker.join(5000); }
+    }
+
+    @Test void cleanupDeadlinesKeepTheirOriginalClockOriginAndRejectLateCompletion(@TempDir Path output) throws Exception {
+        var clock = new java.util.concurrent.atomic.AtomicLong();
+        long origin = clock.getAndAdd(Duration.ofSeconds(4).toNanos());
+        var deadline = cleanupDeadline(Duration.ofSeconds(10), origin,
+                () -> clock.getAndAdd(Duration.ofSeconds(1).toNanos()));
+        assertEquals(Duration.ofSeconds(6), deadline.remaining(), "Construction must not move the original deadline");
+        clock.set(Duration.ofSeconds(10).toNanos()); assertTrue(deadline.remaining().isZero());
+        clock.set(0);
+        assertThrows(IOException.class, () -> safetyCleanup(output, null, true, "owned-broker", clock::get,
+                authorization -> {}, runtime -> {}, callback -> { clock.set(CLEANUP_LIMIT.toNanos()); }));
+        var receipt = JSON.readTree(output.resolve("safety-cleanup.json").toFile());
+        assertFalse(receipt.path("callbackCleanupCompleted").asBoolean()); assertFalse(Files.exists(output.resolve("cleanup.json")));
+    }
+
+    @Test void cleanupAuthorizationRequiresTheExactSessionAndRefusesSymlinks(@TempDir Path output) throws Exception {
+        Path token = output.resolve("cleanup-authorized");
+        assertFalse(cleanupAuthorized(output, "our-session"));
+        Files.writeString(token, "our-"); assertFalse(cleanupAuthorized(output, "our-session"), "A writer may still be publishing the token");
+        Files.writeString(token, "our-session\n"); assertTrue(cleanupAuthorized(output, "our-session"));
+        Files.writeString(token, "foreign-session\n"); assertThrows(IOException.class, () -> cleanupAuthorized(output, "our-session"));
+        Files.delete(token);
+        Path other = Files.writeString(output.resolve("other-token"), "our-session\n");
+        Files.createSymbolicLink(token, other); assertThrows(IOException.class, () -> cleanupAuthorized(output, "our-session"));
+    }
+
     private static MonotonicDeadline logDeadline() { return MonotonicDeadline.start(LIMIT, System::nanoTime); }
 
     /** Drives the same request method as the live fixture, with no Docker daemon or client factory. */
@@ -377,6 +505,7 @@ class KafkaGracefulStopDockerTest {
 
     @EnabledIfSystemProperty(named = "flink.kafka.lifecycle", matches = "true")
     @Test void productionKafkaIsPidOneAndTerminatesAfterStopBeforeCleanup() throws Exception {
+        var startup = MonotonicDeadline.start(LIMIT, System::nanoTime);
         String selected = required("case"), imageName = required("image"), expectedImage = required("imageId");
         String platform = required("platform"), digest = required("digest"), session = required("session");
         String networkId = required("networkId");
@@ -393,22 +522,26 @@ class KafkaGracefulStopDockerTest {
                 .withCreateContainerCmdModifier(command -> command.withPlatform(platform));
         try (var logs = new EvidenceLog(Files.newOutputStream(output.resolve("kafka-continuous.log"), StandardOpenOption.CREATE_NEW))) {
             var callback = new EvidenceCallback(logs);
+            var startupFinished = new java.util.concurrent.atomic.AtomicBoolean(true);
             boolean accepted = false;
             Throwable primaryFailure = null;
             try {
                 var docker = DockerClientFactory.instance().client();
-                var preflight = MonotonicDeadline.start(Duration.ofSeconds(20), System::nanoTime);
-                var image = KafkaLifecycleInspection.observation(output, "image", () -> bounded(preflight, "inspect pinned image", () -> {
+                var image = KafkaLifecycleInspection.observation(output, "image", () -> bounded(startup, "inspect pinned image", () -> {
                     try (var command = docker.inspectImageCmd(imageName)) { return command.exec(); }
                 }), value -> Map.of("reference", imageName, "id", value.getId(), "platform", platform, "digest", digest,
                         "observedPlatform", value.getOs() + "/" + value.getArch(), "repoDigests", value.getRepoDigests()));
                 assertEquals(expectedImage, image.getId());
                 assertEquals(String.join("/", Arrays.copyOf(platform.split("/"), 2)), image.getOs() + "/" + image.getArch());
                 assertTrue(image.getRepoDigests().contains(digest));
-                runtime.start();
+                startupFinished.set(false);
+                bounded(startup, "start owned Kafka runtime", () -> {
+                    try { runtime.start(); return null; }
+                    finally { startupFinished.set(true); }
+                });
                 logs.assertHealthy();
                 String id = broker.getContainerId();
-                var observe = MonotonicDeadline.start(LIMIT, System::nanoTime);
+                var observe = startup; // Readiness and pre-TERM evidence share the startup allowance.
                 var before = inspectOwned(broker, target, session, selected, networkId, observe);
                 callback.follow(docker, id, observe);
                 record(output, "ready", selectedState(before));
@@ -501,19 +634,20 @@ class KafkaGracefulStopDockerTest {
                 throw failure;
             } finally {
                 // Supervisor records this boundary before granting cleanup; no cleanup death can pass STOP.
-                var cleanup = MonotonicDeadline.start(Duration.ofMinutes(1), System::nanoTime);
-                boolean observationAccepted = accepted;
-                cleanupAfter(primaryFailure,
-                        () -> { record(output, "observation-ended", Map.of("accepted", observationAccepted,
-                                "containerId", String.valueOf(broker.getContainerId()))); return null; },
-                        () -> {
-                            while (!Files.exists(output.resolve("cleanup-authorized"))) {
-                                assertFalse(cleanup.remaining().isZero(), "Supervisor did not authorize owned cleanup");
-                                Thread.sleep(50);
+                String cleanupId = broker.getContainerId();
+                safetyCleanup(output, primaryFailure, accepted, String.valueOf(cleanupId), System::nanoTime,
+                        deadline -> {
+                            while (!cleanupAuthorized(output, session)) {
+                                long remaining = deadline.remainingOrThrow(() -> new IOException(
+                                        "Supervisor did not authorize owned cleanup; attempting safety cleanup")).toNanos();
+                                TimeUnit.NANOSECONDS.sleep(Math.min(remaining, TimeUnit.MILLISECONDS.toNanos(50)));
                             }
-                            String cleanupId = broker.getContainerId();
+                        },
+                        cleanup -> {
+                            // Cancelling a bounded call does not prove its worker stopped creating resources.
+                            requireCleanupIdentity(startupFinished.get(), cleanupId, broker.getContainerId());
                             if (cleanupId != null) {
-                                try { inspectOwned(broker, target, session, selected, networkId, cleanup); }
+                                try { assertEquals(expectedImage, inspectOwned(broker, target, session, selected, networkId, cleanup).getImageId()); }
                                 catch (NotFoundException alreadyRemovedByFailedStartup) { /* Startup owns its failed container cleanup. */ }
                             }
                             bounded(cleanup, "owned runtime cleanup", () -> { runtime.stop(); return null; });
@@ -521,10 +655,8 @@ class KafkaGracefulStopDockerTest {
                                 // GenericContainer.stop clears its current ID; retain the positively checked identity.
                                 try (var command = broker.getDockerClient().inspectContainerCmd(cleanupId)) { return command.exec(); }
                             }));
-                            record(output, "cleanup", Map.of("ownedContainerRemoved", true, "containerId", String.valueOf(cleanupId)));
-                            return null;
                         },
-                        () -> bounded(cleanup, "continuous log request cleanup", () -> { callback.close(); return null; }));
+                        cleanup -> bounded(cleanup, "continuous log request cleanup", () -> { callback.close(); return null; }));
             }
         }
         // These are success postconditions after natural completion, owned cleanup and all closes.
@@ -539,6 +671,98 @@ class KafkaGracefulStopDockerTest {
         assertTrue(finalLog.contains("[BrokerServer id=1] shut down completed"), "Broker shutdown must complete");
         assertTrue(finalLog.contains("Graceful shutdown completed"), "Raft shutdown must complete");
         logs.awaitCompletion(deadline);
+    }
+
+    @FunctionalInterface private interface CleanupAction { void run(MonotonicDeadline deadline) throws Exception; }
+
+    private static void requireCleanupIdentity(boolean startupFinished, String capturedId, String currentId) {
+        assertTrue(startupFinished, "Startup worker has not finished; external reap and reconciliation are required");
+        assertEquals(capturedId, currentId, "Container identity changed after the observation boundary");
+    }
+
+    private static boolean cleanupAuthorized(Path output, String session) throws IOException {
+        Path token = output.resolve("cleanup-authorized");
+        if (!Files.exists(token, LinkOption.NOFOLLOW_LINKS)) return false;
+        if (!Files.isRegularFile(token, LinkOption.NOFOLLOW_LINKS)) throw new IOException("Cleanup authorization is not a regular owned token");
+        byte[] expected = (session + "\n").getBytes(StandardCharsets.UTF_8);
+        try (var input = Files.newInputStream(token, StandardOpenOption.READ, LinkOption.NOFOLLOW_LINKS)) {
+            byte[] observed = input.readNBytes(expected.length + 1);
+            // The supervisor creates then writes the token; an incomplete matching prefix is not authorization.
+            if (observed.length < expected.length && Arrays.equals(observed, Arrays.copyOf(expected, observed.length))) return false;
+            if (!Arrays.equals(expected, observed)) throw new IOException("Cleanup authorization belongs to a different session");
+        }
+        return true;
+    }
+
+    /** The authorization wait cannot consume the time reserved for owned runtime and callback cleanup. */
+    private static void safetyCleanup(Path output, Throwable primary, boolean observationAccepted, String containerId,
+            LongSupplier nanoTime, CleanupAction awaitAuthorization, CleanupAction runtimeCleanup,
+            CleanupAction callbackCleanup) throws Exception {
+        long origin = nanoTime.getAsLong();
+        var authorization = cleanupDeadline(CLEANUP_RESERVE, origin, nanoTime);
+        var runtime = cleanupDeadline(CLEANUP_LIMIT.minus(CLEANUP_RESERVE), origin, nanoTime);
+        var cleanup = cleanupDeadline(CLEANUP_LIMIT, origin, nanoTime);
+        var receipt = new LinkedHashMap<String, Object>();
+        receipt.put("containerId", containerId); receipt.put("observationAccepted", observationAccepted);
+        receipt.put("budgetSeconds", CLEANUP_LIMIT.toSeconds());
+        receipt.put("authorizationReceived", false); receipt.put("safetyFallback", true);
+        receipt.put("runtimeCleanupAttempted", false); receipt.put("runtimeCleanupCompleted", false);
+        receipt.put("callbackCleanupAttempted", false); receipt.put("callbackCleanupCompleted", false);
+        cleanupAfter(primary,
+                () -> { record(output, "observation-ended", Map.of("accepted", observationAccepted, "containerId", containerId)); return null; },
+                () -> {
+                    try {
+                        cleanupRemaining(authorization); awaitAuthorization.run(authorization); cleanupRemaining(authorization);
+                        receipt.put("authorizationReceived", true); receipt.put("safetyFallback", false);
+                    } catch (Exception | Error failure) {
+                        receipt.put("authorizationFailureType", failure.getClass().getName()); throw failure;
+                    }
+                    return null;
+                },
+                () -> {
+                    receipt.put("runtimeCleanupAttempted", true);
+                    try {
+                        cleanupRemaining(runtime); runtimeCleanup.run(runtime); cleanupRemaining(runtime);
+                        receipt.put("runtimeCleanupCompleted", true);
+                    } catch (Exception | Error failure) {
+                        receipt.put("runtimeCleanupFailureType", failure.getClass().getName()); throw failure;
+                    }
+                    return null;
+                },
+                () -> {
+                    receipt.put("callbackCleanupAttempted", true);
+                    try {
+                        cleanupRemaining(cleanup); callbackCleanup.run(cleanup); cleanupRemaining(cleanup);
+                        receipt.put("callbackCleanupCompleted", true);
+                    }
+                    catch (Exception | Error failure) {
+                        receipt.put("callbackCleanupFailureType", failure.getClass().getName()); throw failure;
+                    }
+                    return null;
+                },
+                () -> {
+                    record(output, "safety-cleanup", receipt);
+                    if (Boolean.TRUE.equals(receipt.get("authorizationReceived"))
+                            && Boolean.TRUE.equals(receipt.get("runtimeCleanupCompleted"))
+                            && Boolean.TRUE.equals(receipt.get("callbackCleanupCompleted")))
+                        record(output, "cleanup", Map.of("ownedContainerRemoved", true, "containerId", containerId));
+                    return null;
+                });
+    }
+
+    private static MonotonicDeadline cleanupDeadline(Duration limit, long origin, LongSupplier nanoTime) {
+        // Constructor reads use the common captured origin; subsequent reads use the actual monotonic clock.
+        return MonotonicDeadline.start(limit, new LongSupplier() {
+            private boolean initializing = true;
+            @Override public long getAsLong() {
+                if (initializing) { initializing = false; return origin; }
+                return nanoTime.getAsLong();
+            }
+        });
+    }
+
+    private static void cleanupRemaining(MonotonicDeadline deadline) throws IOException {
+        deadline.remainingOrThrow(() -> new IOException("Cleanup phase exhausted its reserved budget"));
     }
 
     /** Attempt every cleanup action without replacing the original observation failure. */
@@ -725,14 +949,18 @@ class KafkaGracefulStopDockerTest {
             String session, String selected, String network, MonotonicDeadline deadline) {
         return bounded(deadline, "owned Kafka state", () -> {
             try (var command = broker.getDockerClient().inspectContainerCmd(Objects.requireNonNull(broker.getContainerId()))) {
-                var value = command.exec(); assertEquals(broker.getContainerId(), value.getId());
-                assertEquals(session, value.getConfig().getLabels().get(LABEL));
-                assertEquals(selected, value.getConfig().getLabels().get(LABEL + ".case"));
-                assertTrue(value.getNetworkSettings().getNetworks().values().stream().anyMatch(connection ->
-                        network.equals(connection.getNetworkID()) && connection.getAliases().contains(target.networkAlias())));
+                var value = command.exec(); requireOwned(value, broker.getContainerId(), target, session, selected, network);
                 return value;
             }
         });
+    }
+    private static void requireOwned(InspectContainerResponse value, String id, KafkaRuntimeTarget target,
+            String session, String selected, String network) {
+        assertEquals(id, value.getId());
+        assertEquals(session, value.getConfig().getLabels().get(LABEL));
+        assertEquals(selected, value.getConfig().getLabels().get(LABEL + ".case"));
+        assertTrue(value.getNetworkSettings().getNetworks().values().stream().anyMatch(connection ->
+                network.equals(connection.getNetworkID()) && connection.getAliases().contains(target.networkAlias())));
     }
     private static Map<String,Object> selectedState(InspectContainerResponse value) {
         var result = new LinkedHashMap<String,Object>(); result.put("wall", Instant.now().toString()); result.put("monotonicNanos", System.nanoTime());

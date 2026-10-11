@@ -9,8 +9,9 @@ it does not qualify arbitrary custom images or a connector.
 
 Use Python 3.10 or newer, a POSIX host, JDK 21 and Maven, and a local Docker daemon
 with the selected platform available. Build a fresh checkout of the reviewed
-source. Keep the build and output inside the repository; never run `mvn clean`
-over retained logs, checkpoints or historical evidence. Do not rebuild or edit
+source. Keep the build inside the selected checkout; choose output according to
+the path policy below. Never run `mvn clean` over retained logs, checkpoints or
+historical evidence. Do not rebuild or edit
 source while the probe runs.
 
 From the checkout root, select the JDK explicitly and run the fixture's offline
@@ -31,59 +32,31 @@ mvn -B -ntp -pl cli -am \
 ```
 
 Stop if Maven fails. This builds reactor dependencies from the same checkout;
-do not substitute an installed, unrelated `0.1.0-SNAPSHOT`. Retain the command,
+do not substitute an installed, unrelated `0.1.0-SNAPSHOT`. Launcher classes must
+come from this checkout's `testcontainers/target` outputs or a matching source
+snapshot built beneath its ignored `jobs/` tree. A separate checkout's launcher
+is rejected. Retain the command,
 JDK version, source revision/patch, Maven log and Surefire reports. The source
 identity and compiled artifact hashes are separate observations; hashes alone do
 not prove when or from which sources an existing class directory was compiled.
 
-Extract the resolved entries from the successful fixture test, including its
-fresh `target/test-classes` and `target/classes` and reactor dependencies. Preserve
-the raw Surefire value, then omit empty separator entries so the launcher never
-implicitly searches its working directory:
+Pass the successful fixture report directly with `--surefire-report`. The tool
+checks the exact suite, zero failures/errors and an executed
+`evidenceSerializationWorksWithoutDocker` test; the opt-in live test may be
+skipped. It retains the report identity, raw Surefire classpath and ordered
+explicit entries after dropping empty separators. Duplicate classpath properties,
+invalid paths, a launcher from another checkout, duplicate Jackson providers or
+incompatible Jackson versions reject before live execution. Core, databind and
+annotations must each have one 2.18.4 provider.
 
-```sh
-python3 - <<'PYTHON'
-from pathlib import Path
-import os
-import xml.etree.ElementTree as ET
-report = Path('testcontainers/target/surefire-reports/'
-              'TEST-org.savonitar.flink.stability.testcontainers.KafkaGracefulStopDockerTest.xml')
-tree = ET.parse(report)
-assert int(tree.getroot().get('failures', '0')) == 0
-assert int(tree.getroot().get('errors', '0')) == 0
-classpath = tree.find(".//property[@name='surefire.test.class.path']").get('value')
-Path('jobs/kafka-probe-build/classpath.raw.txt').write_text(classpath)
-entries = [p for p in classpath.split(os.pathsep) if p]
-assert entries and all(Path(p).is_absolute() and Path(p).exists() for p in entries)
-Path('jobs/kafka-probe-build/classpath.txt').write_text(os.pathsep.join(entries))
-PYTHON
-```
-
-Verify the Jackson family on **this** classpath. The module BOM aligns Jackson
-at 2.18.4; inspect the actual providers and reject duplicates instead of relying
-only on a dependency-tree summary:
-
-```sh
-python3 - <<'PYTHON'
-from pathlib import Path
-import os, zipfile
-classpath = Path('jobs/kafka-probe-build/classpath.txt').read_text().split(os.pathsep)
-classes = {'com/fasterxml/jackson/databind/ObjectMapper.class': 'jackson-databind',
-           'com/fasterxml/jackson/core/JsonFactory.class': 'jackson-core',
-           'com/fasterxml/jackson/annotation/JsonCreator.class': 'jackson-annotations'}
-for name, artifact in classes.items():
-    providers = []
-    for entry in map(Path, classpath):
-        if entry.is_dir():
-            if (entry / name).exists(): providers.append(entry)
-        elif zipfile.is_zipfile(entry):
-            with zipfile.ZipFile(entry) as jar:
-                if name in jar.namelist(): providers.append(entry)
-    assert len(providers) == 1, (name, providers)
-    assert providers[0].name == artifact + '-2.18.4.jar', providers
-    print(name, providers[0])
-PYTHON
-```
+`--classpath` remains available and is mutually exclusive with
+`--surefire-report`. It receives the same path, launcher and Jackson checks, but
+requires explicit nonempty entries; an empty entry must never add the current
+working directory implicitly. Both modes bind actual runtime bytes and preserve
+source/build change detection. A successful report and matching source files do
+not prove that existing classes were compiled freshly: retain the fresh-build
+command and its successful reports. Do not substitute an older build merely
+because its serialization check passes.
 
 The supervisor also runs `KafkaGracefulStopDockerTest --verify-evidence` with the
 exact supplied Java executable and classpath **before creating live resources**.
@@ -122,7 +95,7 @@ new output path for every separately requested run:
 python3 tools/kafka_lifecycle_probe.py \
   --case custom-apache \
   --java "$JAVA_HOME/bin/java" \
-  --classpath "$(cat jobs/kafka-probe-build/classpath.txt)" \
+  --surefire-report "$PWD/testcontainers/target/surefire-reports/TEST-org.savonitar.flink.stability.testcontainers.KafkaGracefulStopDockerTest.xml" \
   --image "$KAFKA_PROBE_IMAGE" --image-id "$KAFKA_PROBE_IMAGE_ID" \
   --digest "$KAFKA_PROBE_DIGEST" --platform "$KAFKA_PROBE_PLATFORM" \
   --source-root "$PWD" --output "$PWD/jobs/kafka-lifecycle-custom-001"
@@ -135,6 +108,21 @@ it does not log in, read credential stores, or upload anything. Its outputs reco
 resolved image inputs, Java/classpath identities, source state and commands.
 Image availability and the requested pins must be satisfied before launch.
 
+## Output path policy
+
+The output must be fresh and must not overlap any classpath/build input or the
+selected source tree itself. Inside `--source-root`, choose an ignored directory
+such as `$PWD/jobs/kafka-lifecycle-custom-001`; tracked or unignored output is
+rejected. An external output directory is also supported when it is distinct from
+all source/build inputs and within the user's permitted filesystem scope. Its
+parent must already exist. Symlink ambiguity is rejected.
+
+The tool validates this policy before creating output, launching Java or invoking
+Docker. Ignoring run output prevents its changing command log from becoming part
+of source identity; genuine tracked/untracked source and build mutations still
+invalidate the run. Do not add ignore rules during an invocation or weaken the
+source check to make a run pass.
+
 ## Supervision and evidence contract
 
 The external supervisor owns a unique labelled network and session. It supplies
@@ -144,22 +132,49 @@ opt-in. Its reserved output directory and the Java child evidence directory are
 distinct: the latter must not exist because the fixture creates it. Stale output,
 pre-existing cleanup authorization and accidental overwrites reject.
 
-Startup, observation and cleanup are independently bounded at **120, 120 and 60
-seconds**, with an **overall 360-second limit**. Docker/preflight calls are also
-bounded. Timeouts use a monotonic clock. The supervisor reserves cleanup time even
-when observation exhausts its deadline, drains child output to files, and reaps
-only the child process/group it created. No phase timeout starts another case.
+The phases use independent monotonic deadlines within an overall **360 seconds**:
+
+| Phase | Maximum | Boundary |
+|---|---|---|
+| Preflight | 60 seconds | Input validation, source/build hashing, exact-classpath serialization, Docker inventory and image verification |
+| Live startup | 120 seconds | Before owned network creation through the fixture's pre-TERM inspections and `term-submitted.json` |
+| Shutdown observation | 120 seconds | TERM submission through accepted or failed `observation-ended.json` |
+| Cleanup | 60 seconds | Observation boundary or earlier failure through reaping, owned cleanup and final checks |
+
+Unused time is not permission to extend a phase. Startup starts after preflight;
+slow hashing or serialization cannot consume its advertised allowance. Cleanup
+retains a reserved opportunity even when startup or observation expires. Docker
+commands and serialization subprocess waits are bounded within their phase.
+Preflight and lifecycle processes have separate exit fields and launch states.
+An execution exit is populated only when that JVM reached its fixture evidence;
+otherwise it is null and the raw wrapper exit remains separate. In particular,
+`exec-submitted-unconfirmed` can mean an early JVM failure or interruption: it
+does not prove that no JVM launched. No phase timeout starts another case.
 
 After `observation-ended.json` arrives, the supervisor durably records that
 boundary before writing `cleanup-authorized`. A failed observation still needs
-bounded cleanup. The token is never created in advance. Ryuk is disabled for this
-probe; the supervisor owns the labelled broker/network cleanup, including fallback
-cleanup after interruption or a missing handshake. It reconciles an ambiguous
-creation only by this invocation's unique labels, validates IDs, labels and
-network membership before removal, and independently verifies absence. It never
-prunes globally or removes by a broad name pattern. Cleanup-induced death cannot
-satisfy the TERM-only STOP observation; forced removal is recorded as cleanup and
-leaves the invocation failed.
+bounded cleanup. The token is never created in advance. It must be a regular, non-symlink file
+containing exactly the session plus a newline; an incomplete matching prefix
+remains pending within the same deadline. The Java fixture allows at most
+10 seconds for authorization inside its fixed 45-second cleanup budget;
+owned runtime cleanup reserves the final 10 seconds for callback cleanup. The
+supervisor permits at most 50 seconds for Java to finish and retains the remaining
+outer cleanup time for process reaping, network removal and reconciliation.
+
+A missing token is a failed invocation, even when the Java safety cleanup
+succeeds. Authorization waiting and safety cleanup are separate actions: Java
+still attempts ownership verification, runtime cleanup and callback cleanup,
+retaining the original failure and a separate safety-cleanup receipt. Identity
+mismatch forbids destructive cleanup. Safety-induced death cannot satisfy STOP,
+replace pre-cleanup observations or emit normal success postconditions.
+
+Ryuk is disabled for this probe; the supervisor owns the labelled broker/network
+cleanup, including fallback after interruption or a missing handshake. SIGINT,
+SIGTERM and SIGHUP enter bounded cleanup. **SIGKILL and OOM cannot be intercepted.**
+Java fallback helps only if Java survives and reaches cleanup. An interrupted
+machine or surviving resource may require the separate reconciliation command
+below. Normal cleanup and reconciliation never prune globally or remove by a
+broad name pattern. Forced removal is cleanup and leaves the attempt failed.
 
 The Java fixture verifies the selected image ID/digest/platform, actual command,
 relevant configuration and custom launch receipt; it retains inspection/transfer
@@ -196,11 +211,38 @@ first failure and secondary cleanup diagnostics. Preserve all failed attempts;
 there is no automatic retry. Run Docker workloads serially and retain historical
 resources, catalogs, faults, timing, load and data oracles unchanged.
 
+## Reconcile an interrupted run
+
+Only after the original run is inactive, use its existing supervisor directory:
+
+```sh
+python3 tools/kafka_lifecycle_probe.py \
+  --reconcile "$PWD/jobs/kafka-lifecycle-custom-001"
+```
+
+This performs idempotent cleanup within one **60-second** deadline; it never
+relaunches the fixture. It uses
+the recorded session, case, local Docker endpoint, image and resource identities,
+checks exact IDs, ownership labels and network membership, and searches ambiguous
+creation only through the exact session labels. Foreign resources are refused.
+The original Java process must be unable to create more resources before deletion
+starts. An active run, an unverified process owner or incomplete launch identity
+is a refusal, not permission to guess. A saved PID or process-group ID alone
+cannot establish ownership because IDs can be reused. Recovery uses Linux
+process-start ticks plus boot identity, or Darwin kernel process-start time,
+and refuses unavailable identity or a surviving process-group member.
+
+Each reconciliation writes separate receipts and preserves all original evidence
+and the original verdict. Repeated cleanup of already absent owned resources may
+succeed; it cannot retroactively pass the test. Older receipts that lack sufficient
+process-start/ownership information may require manual investigation. Do not edit
+those historical receipts to make them acceptable to recovery.
+
 ## Offline regression checks and coverage limits
 
 ```sh
 PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s tools/tests \
-  -p test_kafka_lifecycle_probe.py -v
+  -p 'test_kafka_lifecycle*.py' -v
 ```
 
 These fake-process/clock tests cover supervision, ownership and partial-success

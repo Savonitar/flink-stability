@@ -1,7 +1,9 @@
 #!/usr/bin/env python3
 """Run one explicitly pinned, externally supervised Kafka lifecycle probe. No retries."""
 import argparse
+import ctypes
 from datetime import datetime, timezone
+import fcntl
 import hashlib
 import json
 import os
@@ -13,11 +15,14 @@ import sys
 import time
 import uuid
 
+from kafka_lifecycle_inputs import ordinary_path, resolve_classpath, validate_output
+
 CASES = ('default-apache', 'custom-apache', 'generic-apache', 'generic-confluent')
 MAIN = 'org.savonitar.flink.stability.testcontainers.KafkaGracefulStopDockerTest'
 LABEL = 'org.savonitar.kafka-lifecycle'
 ID = re.compile(r'[0-9a-f]{64}\Z')
 IMAGE_ID = re.compile(r'sha256:[0-9a-f]{64}\Z')
+LIMITS = {'preflight': 60, 'startup': 120, 'observation': 120, 'cleanup': 60, 'overall': 360}
 IMAGE_FORMAT = '{"Id":{{json .Id}},"Os":{{json .Os}},"Architecture":{{json .Architecture}},"Variant":{{json (index . "Variant")}},"RepoDigests":{{json .RepoDigests}}}'
 CONTAINER_FORMAT = ('{"Id":{{json .Id}},"Image":{{json .Image}},'
     '"Session":{{json (index .Config.Labels "' + LABEL + '")}},'
@@ -47,6 +52,7 @@ def object_json(text):
 
 
 def receipt(path):
+    ordinary_path(path)
     require(path.is_file() and not path.is_symlink(), 'Missing or linked receipt: ' + path.name)
     return object_json(path.read_text())
 
@@ -57,6 +63,14 @@ def write(path, value):
         output.write('\n')
         output.flush()
         os.fsync(output.fileno())
+
+
+def publish(path, value):
+    """Process identity must be complete and durable before execution is authorized."""
+    temporary = path.with_name(path.name + '.partial')
+    write(temporary, value)
+    require(not path.exists(), 'Refusing to overwrite process evidence')
+    os.rename(temporary, path)
 
 
 def digest(path, check=lambda: None):
@@ -109,7 +123,7 @@ def required_evidence(directory, case, container, image, check=lambda: None):
     names = ['startup-submitted.json', 'image.json', 'ready.json', 'created-launch.json', 'host-top.json',
         'namespace-pid-one.txt', 'selected-broker.properties', 'term-submitted.json', 'term-returned.json',
         'states.jsonl', 'kafka-final.log', 'kafka-continuous.log', 'result.json', 'observation-ended.json',
-        'cleanup.json', 'log-evidence.json', 'broker-config.raw', 'broker-config.transfer.json']
+        'cleanup.json', 'safety-cleanup.json', 'log-evidence.json', 'broker-config.raw', 'broker-config.transfer.json']
     inspections = ['pid1-status', 'pid1-stat', 'pid1-cmdline', 'pid1-namespace']
     for name in inspections:
         names.extend([name + '.stdout', name + '.stderr', name + '.command.json'])
@@ -141,6 +155,10 @@ def required_evidence(directory, case, container, image, check=lambda: None):
         and parsed['observation-ended.json'].get('containerId') == container, 'Observation boundary differs')
     require(cleanup.get('ownedContainerRemoved') is True and cleanup.get('containerId') == container,
         'Fixture cleanup was not confirmed')
+    safety = parsed['safety-cleanup.json']
+    require(safety.get('authorizationReceived') is True and safety.get('safetyFallback') is False
+        and safety.get('runtimeCleanupCompleted') is True and safety.get('callbackCleanupCompleted') is True,
+        'Safety fallback cannot substitute for authorized successful cleanup')
     for key, expected in {'complete': True, 'healthyAfterCleanupAndClose': True, 'naturalCompletion': True,
             'transportFailed': False, 'cancelled': False}.items():
         require(marker.get(key) is expected, 'Continuous capture postcondition failed: ' + key)
@@ -170,6 +188,62 @@ class System:
     popen = staticmethod(subprocess.Popen)
 
     @staticmethod
+    def process_identity(pid, timeout=2):
+        """Use kernel start identity, never second-resolution ps lstart or a PID alone."""
+        require(type(pid) is int and pid > 0, 'Invalid process ID')
+        if sys.platform.startswith('linux'):
+            try:
+                raw = Path('/proc', str(pid), 'stat').read_text()
+            except FileNotFoundError:
+                return None
+            fields = raw[raw.rindex(')') + 2:].split()
+            # Missing boot identity is uncertainty, not proof that this PID is absent.
+            boot = Path('/proc/sys/kernel/random/boot_id').read_text().strip()
+            require(bool(re.fullmatch(r'[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}', boot)),
+                'Kernel boot identity unavailable')
+            group, start = int(fields[2]), int(fields[19])
+            require(group > 0 and start > 0, 'Invalid kernel process identity')
+            return {'pid': pid, 'pgid': group, 'kind': 'linux-start-ticks', 'start': start, 'boot': boot}
+        try:
+            if sys.platform == 'darwin':
+                class BsdInfo(ctypes.Structure):
+                    _fields_ = [(name, ctypes.c_uint32) for name in
+                        ['flags', 'status', 'xstatus', 'pid', 'ppid', 'uid', 'gid', 'ruid', 'rgid', 'svuid', 'svgid', 'reserved']]
+                    _fields_ += [('comm', ctypes.c_char * 16), ('name', ctypes.c_char * 32)]
+                    _fields_ += [(name, ctypes.c_uint32) for name in ['nfiles', 'pgid', 'jobc', 'tdev', 'tpgid', 'nice']]
+                    _fields_ += [('startSeconds', ctypes.c_uint64), ('startMicroseconds', ctypes.c_uint64)]
+                library = ctypes.CDLL('/usr/lib/libproc.dylib', use_errno=True)
+                call = library.proc_pidinfo
+                call.argtypes = [ctypes.c_int, ctypes.c_int, ctypes.c_uint64, ctypes.c_void_p, ctypes.c_int]
+                call.restype = ctypes.c_int
+                value = BsdInfo()
+                size = call(pid, 3, 0, ctypes.byref(value), ctypes.sizeof(value))
+                if size == 0:
+                    os.kill(pid, 0)  # Existence only; no signal delivery.
+                    raise RuntimeError('Kernel process-start identity unavailable')
+                require(size == ctypes.sizeof(value) == 136 and value.pid == pid and value.startSeconds > 0
+                    and value.startMicroseconds < 1000000, 'Unexpected libproc process identity')
+                return {'pid': pid, 'pgid': value.pgid, 'kind': 'darwin-start-timeval',
+                    'start': [value.startSeconds, value.startMicroseconds]}
+            raise RuntimeError('Strong process identity unsupported on this platform')
+        except ProcessLookupError:
+            return None
+
+    @staticmethod
+    def group_members(pgid, timeout=2):
+        result = subprocess.run(['/bin/ps', '-axo', 'pid=,pgid='], text=True, capture_output=True, timeout=timeout)
+        require(result.returncode == 0, 'Process-group inventory failed')
+        rows = [line.split() for line in result.stdout.splitlines() if line.strip()]
+        require(all(len(row) == 2 and all(x.isdigit() for x in row) for row in rows), 'Malformed process-group inventory')
+        return {int(pid) for pid, group in rows if int(group) == pgid}
+
+    @staticmethod
+    def signal_identity(identity, signum, timeout=2):
+        require(System.process_identity(identity['pid'], timeout) == identity, 'Process-start identity changed')
+        require(identity['pgid'] == identity['pid'], 'Recorded child is not a group leader')
+        os.killpg(identity['pgid'], signum)
+
+    @staticmethod
     def signal_group(process, signum):
         if process.poll() is not None:
             return
@@ -189,10 +263,12 @@ class Supervisor:
         self.evidence = self.output / 'evidence'
         self.session = 'kafka-lifecycle-' + uuid.uuid4().hex
         self.start = self.system.monotonic()
-        self.overall = self.start + 360
-        self.deadline = self.start + 120
-        self.phase = 'startup'
+        self.overall = self.start + LIMITS['overall']
+        self.deadline = self.start + LIMITS['preflight']
+        self.phase = 'preflight'
         self.child = None
+        self.processes = {'preflight': None, 'java': None}
+        self.process_records = {}
         self.networks, self.containers = set(), set()
         self.candidate_containers = set()
         self.network = None
@@ -204,7 +280,7 @@ class Supervisor:
         self.first_failure = None
         self.cleanup_errors = []
         self.commands = 0
-        self.phases = [{'phase': 'startup', 'elapsedSeconds': 0}]
+        self.phases = [{'phase': 'preflight', 'elapsedSeconds': 0}]
         self.forced_removals = []
         self.env = dict(os.environ)
         self.env.pop('DOCKER_AUTH_CONFIG', None)
@@ -267,6 +343,11 @@ class Supervisor:
             'running': sorted(self.ids('running'))}
 
     def source_build_identity(self):
+        inputs = None
+        if hasattr(self, 'inputs'):
+            inputs = resolve_classpath(self.args.source_root, classpath=self.input_classpath,
+                surefire_report=getattr(self.args, 'surefire_report', None), check=self.remaining)
+            require(inputs == self.inputs, 'Launcher source snapshot, report, or input inventory changed')
         def git(*args, raw=False):
             value = self.command(['git', '-C', str(self.args.source_root), *args], record=False, raw=raw)
             return value if raw else value.strip()
@@ -276,7 +357,7 @@ class Supervisor:
         source['root'] = str(self.args.source_root)
         untracked = [os.fsdecode(name) for name in git('ls-files', '--others', '--exclude-standard', '-z', raw=True).split(b'\0') if name]
         source['untrackedFiles'] = {name: digest(self.args.source_root / name, self.remaining) for name in untracked}
-        return {'source': source, 'build': build_files(self.args.classpath, self.args.java, self.remaining),
+        return {'source': source, 'build': build_files(self.args.classpath, self.args.java, self.remaining), 'inputs': inputs,
             'compilationProvenanceClaimed': False}
 
     def reap(self):
@@ -295,8 +376,24 @@ class Supervisor:
             '-Djava.io.tmpdir=' + str(self.output / 'tmp'), *argv[1:]]
         with (self.output / (prefix + '.stdout')).open('x') as stdout, (self.output / (prefix + '.stderr')).open('x') as stderr:
             self.remaining()
-            self.child = self.system.popen(argv, env=self.env, stdout=stdout, stderr=stderr, start_new_session=True)
-            write(self.output / (prefix + '-process.json'), {'pid': self.child.pid, 'argv': argv, 'newSession': True})
+            intent = {'version': 1, 'session': self.session, 'kind': prefix, 'nonce': uuid.uuid4().hex,
+                'argv': argv, 'supervisor': self.supervisor_identity}
+            intent_path = self.output / (prefix + '-launch-intent.json')
+            write(intent_path, intent)
+            bootstrap = [sys.executable, '-B', str(Path(__file__).resolve()), '--_child-start', str(intent_path)]
+            self.child = self.system.popen(bootstrap, env=self.env, stdout=stdout, stderr=stderr, start_new_session=True)
+            self.processes[prefix] = self.child
+            record_path = self.output / (prefix + '-process.json')
+            while not record_path.exists():
+                require(self.child.poll() is None, 'Child bootstrap exited before durable process identity')
+                self.system.sleep(min(.02, self.remaining()))
+            record = receipt(record_path)
+            require(record['nonce'] == intent['nonce'] and record['identity']['pid'] == self.child.pid
+                and record['identity']['pgid'] == self.child.pid
+                and self.system.process_identity(self.child.pid, self.remaining(2)) == record['identity'],
+                'Child process-start identity differs')
+            self.process_records[prefix] = record
+            publish(self.output / (prefix + '-exec-authorized.json'), {'nonce': intent['nonce']})
             if wait:
                 self.child.wait(timeout=self.remaining(30))
                 require(self.child.returncode == 0, 'Exact-classpath evidence preflight failed')
@@ -378,7 +475,7 @@ class Supervisor:
                 if value['accepted'] is not True:
                     self.failure(ValueError('Fixture observation was unaccepted'))
                 # Leave time to reap and reconcile if the fixture cannot clean itself.
-                self.child.wait(timeout=max(0.001, self.remaining(60) - 15))
+                self.child.wait(timeout=max(0.001, self.remaining(60) - 10))
                 require(self.child.returncode == 0, 'Lifecycle Java returned nonzero')
                 return
             if self.child.poll() is not None:
@@ -401,6 +498,13 @@ class Supervisor:
         if self.child is not None and self.child.poll() is None:
             self.cleanup_failure('Resource deletion refused', RuntimeError('Java remains alive'))
             return
+        for record in self.process_records.values():
+            try:
+                require(not self.system.group_members(record['identity']['pgid'], self.remaining(2)),
+                    'Owned process group still has members; resource deletion refused')
+            except BaseException as error:
+                self.cleanup_failure('Process-group absence', error)
+                return
         if self.creation_attempted:
             try:
                 # A timeout or malformed create reply can still leave a labelled resource.
@@ -433,15 +537,29 @@ class Supervisor:
                 self.cleanup_failure('Independent absence/preservation check', error)
 
     def execute(self):
+        self.input_classpath = self.args.classpath
+        self.inputs = resolve_classpath(self.args.source_root, classpath=self.args.classpath,
+            surefire_report=getattr(self.args, 'surefire_report', None), check=self.remaining)
+        self.args.classpath = self.inputs['classpath']
+        policy = validate_output(self.output, self.args.source_root, self.inputs,
+            run=self.system.run, check=self.remaining, protected_paths=(self.args.java,))
         # Reserving this directory is exclusive; neither preflight nor live evidence exists yet.
         self.output.mkdir(parents=False, exist_ok=False)
+        with (self.output / 'supervisor.lock').open('x') as lock:
+            fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            return self.execute_locked(policy)
+
+    def execute_locked(self, policy):
         for name in ['docker-config', 'java-home', 'tmp']:
             (self.output / name).mkdir()
         write(self.output / 'docker-config/config.json', {})
-        write(self.output / 'invocation.json', {'case': self.args.case, 'session': self.session,
+        self.supervisor_identity = self.system.process_identity(os.getpid(), self.remaining(2))
+        require(self.supervisor_identity is not None, 'Supervisor start identity unavailable')
+        write(self.output / 'invocation.json', {'schemaVersion': 2, 'case': self.args.case, 'session': self.session,
             'startedAt': datetime.now(timezone.utc).isoformat(), 'attempts': 1, 'automaticRetry': False,
-            'limitsSeconds': {'startup': 120, 'observation': 120, 'cleanup': 60, 'overall': 360},
-            'dockerHost': self.args.docker_host})
+            'limitsSeconds': LIMITS, 'dockerHost': self.args.docker_host, 'dockerExecutable': self.args.docker,
+            'image': {'reference': self.args.image, 'id': self.args.image_id, 'digest': self.args.digest, 'platform': self.args.platform},
+            'supervisor': self.supervisor_identity, 'classpathInput': self.inputs, 'outputPolicy': policy})
         evidence_hashes = {}
         try:
             self.identity = self.source_build_identity()
@@ -456,6 +574,9 @@ class Supervisor:
             require(not self.baseline['running'], 'Competing running container before resource creation')
             require(not self.ids('containers', True) and not self.ids('networks', True), 'Session label collision')
             self.resolve_image()
+            self.phase = 'startup'
+            self.deadline = min(self.system.monotonic() + LIMITS['startup'], self.overall - LIMITS['cleanup'])
+            self.phases.append({'phase': self.phase, 'elapsedSeconds': self.system.monotonic() - self.start})
             self.creation_attempted = True
             write(self.output / 'resource-creation-submitted.json', {'session': self.session})
             nid = self.docker('network', 'create', '--label', LABEL + '=' + self.session,
@@ -483,52 +604,218 @@ class Supervisor:
             self.failure(TimeoutError('Overall deadline exhausted'))
         success = (self.first_failure is None and not self.cleanup_errors and bool(evidence_hashes)
             and self.child is not None and self.child.poll() == 0 and elapsed <= 360)
+        launches = {kind: self.launch_state(kind) for kind in self.processes}
         result = {'accepted': success, 'case': self.args.case, 'session': self.session,
             'firstFailure': self.first_failure, 'cleanup': {'passed': not self.cleanup_errors,
                 'errors': self.cleanup_errors, 'forcedContainerRemovals': self.forced_removals,
                 'childReaped': self.child is None or self.child.poll() is not None},
             'shutdownObservationAccepted': self.boundary is not None and self.boundary['accepted'] is True,
-            'javaExitCode': self.child.poll() if self.child is not None else None,
+            'preflightExitCode': self.processes['preflight'].poll() if launches['preflight'] == 'fixture-confirmed' else None,
+            'lifecycleExitCode': self.processes['java'].poll() if launches['java'] == 'fixture-confirmed' else None,
+            'launchStates': launches,
+            'wrapperExitCodes': {key: value.poll() if value is not None else None for key, value in self.processes.items()},
             'elapsedSeconds': elapsed, 'phases': self.phases, 'evidenceHashes': evidence_hashes,
             'ownedContainerIds': sorted(self.containers), 'ownedNetworkIds': sorted(self.networks)}
         write(self.output / 'completed.json', result)
         return result
 
+    def launch_state(self, kind):
+        if self.processes[kind] is None:
+            return 'not-submitted'
+        if (self.output / (kind + '-exec-failed.json')).exists():
+            return 'exec-failed'
+        marker = self.output / ('serialization-check/startup-submitted.json' if kind == 'preflight'
+            else 'evidence/startup-submitted.json')
+        if marker.is_file():
+            return 'fixture-confirmed'
+        if (self.output / (kind + '-exec-submitted.json')).exists():
+            return 'exec-submitted-unconfirmed'
+        return 'bootstrap-only'
+
+
+def child_start(intent_path):
+    """Persist kernel identity before Java can execute; no Docker access here."""
+    intent = receipt(intent_path)
+    kind, nonce = intent['kind'], intent['nonce']
+    require(kind in ('preflight', 'java') and re.fullmatch('[0-9a-f]{32}', nonce), 'Invalid child launch intent')
+    directory = intent_path.parent
+    identity = System.process_identity(os.getpid())
+    require(identity is not None and identity['pid'] == identity['pgid'], 'Bootstrap must own a new process group')
+    publish(directory / (kind + '-process.json'), {'nonce': nonce, 'session': intent['session'], 'identity': identity})
+    deadline = time.monotonic() + 10
+    authorization = directory / (kind + '-exec-authorized.json')
+    while not authorization.exists():
+        require(System.process_identity(intent['supervisor']['pid']) == intent['supervisor'], 'Supervisor disappeared before Java authorization')
+        require(time.monotonic() < deadline, 'Java execution authorization timed out')
+        time.sleep(.02)
+    require(receipt(authorization).get('nonce') == nonce, 'Stale Java execution authorization')
+    require(System.process_identity(intent['supervisor']['pid']) == intent['supervisor'], 'Supervisor disappeared before Java exec')
+    publish(directory / (kind + '-exec-submitted.json'), {'nonce': nonce})
+    try:
+        os.execve(intent['argv'][0], intent['argv'], dict(os.environ))
+    except BaseException as error:
+        publish(directory / (kind + '-exec-failed.json'), {'nonce': nonce, 'failureType': type(error).__name__})
+        raise
+
+
+def stop_recorded_child(record, system, remaining):
+    identity = record['identity']
+    require(identity['pid'] == identity['pgid'], 'Ambiguous child process group')
+    actual = system.process_identity(identity['pid'], remaining(2))
+    if actual is None:
+        require(not system.group_members(identity['pgid'], remaining(2)), 'Leader absent but live group members remain')
+        return
+    require(actual == identity, 'Recorded PID was reused or process-start identity differs')
+    for signum in (signal.SIGTERM, signal.SIGKILL):
+        system.signal_identity(identity, signum, remaining(2))
+        end = system.monotonic() + remaining(2)
+        while system.monotonic() < end:
+            current = system.process_identity(identity['pid'], remaining(2))
+            if current is None:
+                require(not system.group_members(identity['pgid'], remaining(2)), 'Orphan descendants remain; deletion refused')
+                return
+            require(current == identity, 'Process identity changed while stopping orphan')
+            system.sleep(min(.02, remaining()))
+    raise TimeoutError('Recorded Java group did not terminate')
+
+
+def reconcile(run_directory, system=None):
+    """Cleanup-only recovery. Original receipts and the original verdict are immutable."""
+    system = system or System()
+    run_directory = ordinary_path(run_directory)
+    require(run_directory.is_dir(), 'Invalid existing run directory')
+    lock_path = ordinary_path(run_directory / 'supervisor.lock')
+    require(lock_path.is_file(), 'Missing ordinary supervisor lock')
+    outputs = run_directory / 'reconciliations'
+    ordinary_path(outputs, existing=False)
+    outputs.mkdir(exist_ok=True)
+    output = outputs / uuid.uuid4().hex
+    output.mkdir()
+    start = system.monotonic()
+    result = {'reconciled': False, 'originalRun': str(run_directory), 'originalVerdictModified': False,
+        'deadlineSeconds': 60, 'errors': []}
+    def remaining(maximum=10):
+        value = start + 60 - system.monotonic()
+        if value <= 0: raise TimeoutError('Reconciliation deadline exhausted')
+        return min(maximum, value)
+    try:
+        with lock_path.open('r') as lock:
+            fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            original = receipt(run_directory / 'invocation.json')
+            require(original.get('schemaVersion') == 2, 'Legacy run lacks safe reconciliation identity')
+            require(re.fullmatch(r'kafka-lifecycle-[0-9a-f]{32}', original['session']) and original['case'] in CASES,
+                'Invalid recorded session/case')
+            require(original['dockerHost'].startswith('unix:///') and IMAGE_ID.fullmatch(original['image']['id']), 'Invalid recorded endpoint/image')
+            owner = original['supervisor']
+            actual = system.process_identity(owner['pid'], remaining(2))
+            require(actual is None, 'Active supervisor or reused supervisor PID; reconciliation refused')
+            for kind in ['preflight', 'java']:
+                intent_path = run_directory / (kind + '-launch-intent.json')
+                process_path = run_directory / (kind + '-process.json')
+                if intent_path.exists():
+                    intent, process = receipt(intent_path), receipt(process_path)
+                    require(intent['session'] == process['session'] == original['session']
+                        and intent['nonce'] == process['nonce'] and intent['kind'] == kind,
+                        'Ambiguous or incomplete child creation records')
+                    stop_recorded_child(process, system, remaining)
+                else:
+                    require(not process_path.exists(), 'Process record without launch intent')
+            write(output / 'processes-quiescent.json', {'confirmed': True})
+            if (run_directory / 'resource-creation-submitted.json').exists():
+                require(receipt(run_directory / 'resource-creation-submitted.json').get('session') == original['session'],
+                    'Resource creation intent belongs to another session')
+                baseline = receipt(run_directory / 'preflight.json')
+                require(all(isinstance(baseline.get(key), list) and all(ID.fullmatch(x) for x in baseline[key])
+                    for key in ('containers', 'networks', 'running')), 'Missing protected baseline inventory')
+                image = original['image']
+                args = argparse.Namespace(case=original['case'], image=image['reference'], image_id=image['id'],
+                    digest=image['digest'], platform=image['platform'], docker=original['dockerExecutable'],
+                    docker_host=original['dockerHost'], output=output)
+                recovery = Supervisor(args, system)
+                recovery.session = original['session']
+                recovery.start = start; recovery.overall = start + 60
+                recovery.phase = 'cleanup'; recovery.deadline = start + 60; recovery.cleanup_deadline = start + 60
+                recovery.baseline = baseline; recovery.creation_attempted = True
+                (output / 'docker-config').mkdir(); write(output / 'docker-config/config.json', {})
+                for name in ['ready-observed.json', 'evidence/ready.json', 'evidence/observation-ended.json']:
+                    if (run_directory / name).exists():
+                        cid = receipt(run_directory / name).get('containerId')
+                        if cid != 'null':
+                            require(isinstance(cid, str) and ID.fullmatch(cid), 'Malformed saved container candidate')
+                            recovery.candidate_containers.add(cid)
+                # Saved IDs remain candidates until the same inspect/label/network proof succeeds.
+                if (run_directory / 'network-created.json').exists():
+                    nid = receipt(run_directory / 'network-created.json')['id']
+                    recovery.inspect_network(nid)
+                recovery.cleanup()
+                result['cleanupErrors'] = recovery.cleanup_errors
+                result['removedContainers'] = recovery.forced_removals
+                result['ownedContainerIds'] = sorted(recovery.containers)
+                result['ownedNetworkIds'] = sorted(recovery.networks)
+                require(not recovery.cleanup_errors, 'Reconciliation cleanup incomplete')
+            else:
+                require(not any((run_directory / name).exists() for name in ['java-launch-intent.json',
+                    'network-created.json', 'ready-observed.json', 'launch-submitted.json', 'evidence']),
+                    'Resource or lifecycle evidence without resource creation intent')
+                result['noResourceCreationSubmitted'] = True
+            remaining()
+            result['reconciled'] = True
+    except BaseException as error:
+        result['errors'].append({'type': type(error).__name__, 'message': str(error)})
+    result['elapsedSeconds'] = system.monotonic() - start
+    write(output / 'completed.json', result)
+    result['receipt'] = str(output / 'completed.json')
+    return result
+
 
 def parser():
     value = argparse.ArgumentParser(description=__doc__)
-    value.add_argument('--case', required=True, choices=CASES)
-    value.add_argument('--java', required=True, type=Path)
-    value.add_argument('--classpath', required=True)
-    value.add_argument('--image', required=True)
-    value.add_argument('--image-id', required=True)
-    value.add_argument('--digest', required=True)
-    value.add_argument('--platform', required=True)
-    value.add_argument('--source-root', required=True, type=Path)
-    value.add_argument('--output', required=True, type=Path)
+    value.add_argument('--reconcile', type=Path)
+    value.add_argument('--case', choices=CASES)
+    value.add_argument('--java', type=Path)
+    inputs = value.add_mutually_exclusive_group()
+    inputs.add_argument('--classpath')
+    inputs.add_argument('--surefire-report', type=Path)
+    value.add_argument('--image')
+    value.add_argument('--image-id')
+    value.add_argument('--digest')
+    value.add_argument('--platform')
+    value.add_argument('--source-root', type=Path)
+    value.add_argument('--output', type=Path)
     value.add_argument('--docker', default='docker')
     value.add_argument('--docker-host', default='unix:///var/run/docker.sock')
     return value
 
 
 def main(argv=None):
+    argv = list(sys.argv[1:] if argv is None else argv)
+    if len(argv) == 2 and argv[0] == '--_child-start':
+        child_start(Path(argv[1]))
+        return 0
     args = parser().parse_args(argv)
-    require(args.java.is_absolute() and args.source_root.is_absolute() and args.output.is_absolute(), 'Use absolute Java/source/output paths')
-    require(IMAGE_ID.fullmatch(args.image_id), 'An explicit sha256 image configuration ID is required')
-    require(re.fullmatch(r'[^\s@]+@sha256:[0-9a-f]{64}', args.digest), 'An explicit repository digest is required')
-    require(re.fullmatch(r'linux/[a-z0-9_]+(?:/[a-zA-Z0-9_]+)?', args.platform), 'Use the complete observed Linux platform')
-    require(args.docker_host.startswith('unix:///'), 'Only an explicit local Unix Docker endpoint is supported')
+    if args.reconcile is None:
+        require(all([args.java, args.source_root, args.output, args.case, args.image, args.image_id, args.digest, args.platform])
+            and (args.classpath is not None or args.surefire_report is not None), 'Explicit launch arguments are required')
+        require(args.java.is_absolute() and args.source_root.is_absolute() and args.output.is_absolute(), 'Use absolute Java/source/output paths')
+        require(IMAGE_ID.fullmatch(args.image_id), 'An explicit sha256 image configuration ID is required')
+        require(re.fullmatch(r'[^\s@]+@sha256:[0-9a-f]{64}', args.digest), 'An explicit repository digest is required')
+        require(re.fullmatch(r'linux/[a-z0-9_]+(?:/[a-zA-Z0-9_]+)?', args.platform), 'Use the complete observed Linux platform')
+        require(args.docker_host.startswith('unix:///'), 'Only an explicit local Unix Docker endpoint is supported')
+    else:
+        require(not any([args.case, args.java, args.classpath, args.surefire_report, args.image, args.image_id,
+            args.digest, args.platform, args.source_root, args.output]), 'Reconciliation uses recorded inputs only')
     previous = {}
     def interrupted(signum, frame):
         signal.signal(signal.SIGINT, signal.SIG_IGN)
         signal.signal(signal.SIGTERM, signal.SIG_IGN)
+        signal.signal(signal.SIGHUP, signal.SIG_IGN)
         raise InterruptedError('Supervisor signal ' + str(signum))
     try:
-        for signum in [signal.SIGINT, signal.SIGTERM]:
+        for signum in [signal.SIGINT, signal.SIGTERM, signal.SIGHUP]:
             previous[signum] = signal.signal(signum, interrupted)
-        result = Supervisor(args).execute()
+        result = reconcile(args.reconcile) if args.reconcile is not None else Supervisor(args).execute()
         print(json.dumps(result))
-        return 0 if result['accepted'] else 1
+        return 0 if result.get('reconciled', result.get('accepted')) else 1
     finally:
         for signum, handler in previous.items():
             signal.signal(signum, handler)

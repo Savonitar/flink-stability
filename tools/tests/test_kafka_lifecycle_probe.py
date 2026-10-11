@@ -2,6 +2,7 @@
 import argparse
 import hashlib
 import json
+import os
 from pathlib import Path
 import signal
 import subprocess
@@ -52,14 +53,28 @@ def evidence(directory, case):
 
 def final_evidence(directory):
     put(directory, 'cleanup.json', {'ownedContainerRemoved': True, 'containerId': CID})
+    put(directory, 'safety-cleanup.json', {'authorizationReceived': True, 'safetyFallback': False,
+        'runtimeCleanupCompleted': True, 'callbackCleanupCompleted': True})
     put(directory, 'log-evidence.json', {'complete': True, 'healthyAfterCleanupAndClose': True,
         'naturalCompletion': True, 'transportFailed': False, 'cancelled': False})
 
 
 class FakeChild:
-    def __init__(self, system, argv):
-        self.system, self.argv, self.pid, self.returncode = system, argv, 123456, None
+    def __init__(self, system, argv, intent_path):
+        self.system, self.argv, self.pid, self.returncode = system, argv, 123456 + len(system.children), None
+        self.intent_path = intent_path
+        self.started = False
         self.preflight = '--verify-evidence' in argv
+        self.identity = {'pid': self.pid, 'pgid': self.pid, 'kind': 'fake-start', 'start': self.pid}
+
+    def start_if_authorized(self):
+        kind = 'preflight' if self.preflight else 'java'
+        if self.started or not (self.intent_path.parent / (kind + '-exec-authorized.json')).exists():
+            return
+        self.started = True
+        argv, system = self.argv, self.system
+        intent = probe.receipt(self.intent_path)
+        probe.publish(self.intent_path.parent / (kind + '-exec-submitted.json'), {'nonce': intent['nonce']})
         if self.preflight:
             output = Path(argv[-1]); output.mkdir()
             for name in ['startup-submitted', 'ready', 'runtime-evidence']:
@@ -85,12 +100,15 @@ class FakeChild:
                 self.returncode = 1
 
     def poll(self):
+        self.start_if_authorized()
         return self.returncode
 
     def wait(self, timeout):
+        self.start_if_authorized()
         if self.returncode is not None:
             return self.returncode
         if self.preflight:
+            self.system.now += self.system.preflight_delay
             if self.system.mode == 'preflight-timeout':
                 self.system.now += timeout
                 raise subprocess.TimeoutExpired(self.argv, timeout)
@@ -115,6 +133,9 @@ class FakeChild:
             put(self.output, 'log-evidence.json.partial', '{')
         elif self.system.mode == 'missing-required':
             (self.output / 'namespace-pid-one.txt').unlink()
+        elif self.system.mode == 'safety-fallback':
+            put(self.output, 'safety-cleanup.json', {'authorizationReceived': False, 'safetyFallback': True,
+                'runtimeCleanupCompleted': True, 'callbackCleanupCompleted': True})
         self.returncode = 1 if self.system.mode == 'java-failure' else 0
         return self.returncode
 
@@ -122,6 +143,10 @@ class FakeChild:
 class FakeSystem:
     def __init__(self, mode='success'):
         self.mode, self.now, self.live_delay = mode, 0.0, 0
+        self.preflight_delay = 0
+        self.owner_alive = True
+        self.identity_overrides = {}
+        self.orphan_groups = {}
         self.session = None
         self.containers, self.networks = {HISTORIC_CONTAINER}, {HISTORIC_NETWORK}
         self.calls, self.children, self.signals, self.deleted = [], [], [], []
@@ -141,9 +166,29 @@ class FakeSystem:
     def popen(self, argv, **kwargs):
         assert kwargs['start_new_session'] is True
         assert kwargs['stdout'] is not subprocess.PIPE and kwargs['stderr'] is not subprocess.PIPE
-        child = FakeChild(self, argv)
+        assert argv[-2] == '--_child-start'
+        intent_path = Path(argv[-1]); intent = probe.receipt(intent_path)
+        child = FakeChild(self, intent['argv'], intent_path)
         self.children.append(child)
+        probe.publish(intent_path.parent / (intent['kind'] + '-process.json'),
+            {'nonce': intent['nonce'], 'session': intent['session'], 'identity': child.identity})
         return child
+
+    def process_identity(self, pid, timeout=2):
+        if pid in self.identity_overrides: return self.identity_overrides[pid]
+        if pid == os.getpid():
+            return {'pid': pid, 'pgid': 1, 'kind': 'fake-start', 'start': 99} if self.owner_alive else None
+        for child in self.children:
+            if child.pid == pid and child.returncode is None: return child.identity
+        return None
+
+    def group_members(self, pgid, timeout=2):
+        return self.orphan_groups.get(pgid, {c.pid for c in self.children if c.pid == pgid and c.returncode is None})
+
+    def signal_identity(self, identity, signum, timeout=2):
+        assert self.process_identity(identity['pid']) == identity
+        child = next(child for child in self.children if child.pid == identity['pid'])
+        self.signal_group(child, signum)
 
     def signal_group(self, child, signum):
         assert child in self.children
@@ -224,12 +269,14 @@ class LifecycleSupervisorTest(unittest.TestCase):
             image='example/kafka:tag', image_id=IMAGE, digest=DIGEST, platform='linux/amd64',
             source_root=self.root, output=self.root / 'output', docker='docker', docker_host='unix:///fake.sock')
 
-    def run_probe(self, mode='success', overall=None, live_delay=0):
-        system = FakeSystem(mode); system.live_delay = live_delay
+    def run_probe(self, mode='success', overall=None, live_delay=0, preflight_delay=0):
+        system = FakeSystem(mode); system.live_delay = live_delay; system.preflight_delay = preflight_delay
         supervisor = probe.Supervisor(self.args, system)
         if overall is not None: supervisor.overall = overall
         with patch('subprocess.run', side_effect=AssertionError('Real command forbidden')), \
-             patch('subprocess.Popen', side_effect=AssertionError('Real child forbidden')):
+             patch('subprocess.Popen', side_effect=AssertionError('Real child forbidden')), \
+             patch.object(probe, 'resolve_classpath', return_value={'classpath': self.args.classpath}), \
+             patch.object(probe, 'validate_output', return_value={'validated': True}):
             result = supervisor.execute()
         return result, system
 
@@ -316,7 +363,7 @@ class LifecycleSupervisorTest(unittest.TestCase):
         self.assertFalse(result['accepted'])
         self.assertEqual('TimeoutExpired', result['firstFailure']['type'])
         self.assertTrue(result['cleanup']['childReaped'])
-        self.assertEqual([(123456, signal.SIGTERM)], system.signals)
+        self.assertEqual([(123457, signal.SIGTERM)], system.signals)
 
     def test_overall_limit_reserves_cleanup_when_observation_is_shortened(self):
         result, system = self.run_probe('observation-timeout', overall=180, live_delay=119)
@@ -389,7 +436,7 @@ class LifecycleSupervisorTest(unittest.TestCase):
         self.assertFalse((self.args.output / 'evidence/cleanup-authorized').exists())
 
     def test_partial_or_malformed_success_is_rejected(self):
-        for mode in ['partial-success', 'bad-log-marker', 'malformed-cleanup', 'partial-publication', 'missing-required', 'java-failure']:
+        for mode in ['partial-success', 'bad-log-marker', 'malformed-cleanup', 'partial-publication', 'missing-required', 'java-failure', 'safety-fallback']:
             with self.subTest(mode=mode):
                 self.args.output = self.root / mode
                 result, _ = self.run_probe(mode)
@@ -456,6 +503,232 @@ class LifecycleSupervisorTest(unittest.TestCase):
         process.poll.side_effect = [None, None]
         with patch('os.getpgid', side_effect=ProcessLookupError):
             with self.assertRaises(ProcessLookupError): probe.System.signal_group(process, signal.SIGTERM)
+
+    def test_preflight_and_lifecycle_exit_codes_remain_distinct(self):
+        result, _ = self.run_probe('preflight-failure')
+        self.assertEqual(1, result['preflightExitCode'])
+        self.assertIsNone(result['lifecycleExitCode'])
+        self.assertIsNone(result['wrapperExitCodes']['java'])
+
+    def test_preflight_does_not_consume_live_startup_budget(self):
+        result, _ = self.run_probe('startup-timeout', preflight_delay=25)
+        self.assertEqual({'phase': 'startup', 'elapsedSeconds': 25}, result['phases'][1])
+        self.assertGreaterEqual(result['elapsedSeconds'], 145)
+        self.assertTrue(result['cleanup']['passed'])
+
+    def test_output_policy_rejection_precedes_output_and_process_creation(self):
+        system = FakeSystem()
+        with patch.object(probe, 'resolve_classpath', return_value={'classpath': self.args.classpath}), \
+             patch.object(probe, 'validate_output', side_effect=ValueError('unsafe output')):
+            with self.assertRaisesRegex(ValueError, 'unsafe output'):
+                probe.Supervisor(self.args, system).execute()
+        self.assertFalse(self.args.output.exists())
+        self.assertEqual([], system.calls)
+        self.assertEqual([], system.children)
+
+    def test_report_normalized_classpath_is_used_for_actual_preflight(self):
+        self.args.surefire_report = self.root / 'report.xml'
+        self.args.classpath = None
+        system = FakeSystem()
+        with patch.object(probe, 'resolve_classpath', return_value={'classpath': str(self.classes)}) as resolve, \
+             patch.object(probe, 'validate_output', return_value={'validated': True}):
+            result = probe.Supervisor(self.args, system).execute()
+        self.assertTrue(result['accepted'])
+        self.assertEqual(self.args.surefire_report, resolve.call_args.kwargs['surefire_report'])
+        self.assertIn(str(self.classes), system.children[0].argv)
+
+    def test_sighup_uses_same_interruption_and_repeated_signal_suppression(self):
+        handlers = {}
+        def register(signum, handler):
+            handlers[signum] = handler
+            return signal.SIG_DFL
+        def interrupted_reconcile(_):
+            with self.assertRaisesRegex(InterruptedError, 'Supervisor signal'):
+                handlers[signal.SIGHUP](signal.SIGHUP, None)
+            self.assertTrue(all(handlers[s] == signal.SIG_IGN for s in
+                (signal.SIGINT, signal.SIGTERM, signal.SIGHUP)))
+            return {'reconciled': False}
+        with patch.object(signal, 'signal', side_effect=register), \
+             patch.object(probe, 'reconcile', side_effect=interrupted_reconcile), patch('builtins.print'):
+            self.assertEqual(1, probe.main(['--reconcile', str(self.root)]))
+
+    def test_reconciliation_is_idempotent_and_preserves_original_verdict(self):
+        _, system = self.run_probe('cleanup-failure')
+        original = (self.args.output / 'completed.json').read_bytes()
+        system.owner_alive = False; system.mode = 'success'
+        first = probe.reconcile(self.args.output, system)
+        second = probe.reconcile(self.args.output, system)
+        self.assertTrue(first['reconciled'], first)
+        self.assertTrue(second['reconciled'], second)
+        self.assertNotEqual(first['receipt'], second['receipt'])
+        self.assertEqual(original, (self.args.output / 'completed.json').read_bytes())
+        self.assertEqual({HISTORIC_NETWORK}, system.networks)
+
+    def test_reconciliation_refuses_active_supervisor_without_docker(self):
+        _, system = self.run_probe('cleanup-failure')
+        calls = len(system.calls)
+        result = probe.reconcile(self.args.output, system)
+        self.assertFalse(result['reconciled'])
+        self.assertEqual(calls, len(system.calls))
+        self.assertIn(NID, system.networks)
+
+    def test_reconciliation_refuses_lifetime_lock_even_with_absent_pid(self):
+        _, system = self.run_probe()
+        system.owner_alive = False
+        calls = len(system.calls)
+        with (self.args.output / 'supervisor.lock').open() as lock:
+            probe.fcntl.flock(lock, probe.fcntl.LOCK_EX | probe.fcntl.LOCK_NB)
+            result = probe.reconcile(self.args.output, system)
+        self.assertFalse(result['reconciled'])
+        self.assertEqual(calls, len(system.calls))
+
+    def test_reconciliation_refuses_reused_child_pid_and_orphan_descendants(self):
+        _, system = self.run_probe('cleanup-failure')
+        system.owner_alive = False
+        child = system.children[-1]
+        system.identity_overrides[child.pid] = dict(child.identity, start=999)
+        calls = len(system.calls)
+        result = probe.reconcile(self.args.output, system)
+        self.assertFalse(result['reconciled'])
+        self.assertEqual([], system.signals)
+        self.assertEqual(calls, len(system.calls))
+        system.identity_overrides.clear()
+        system.orphan_groups[child.pid] = {987654}
+        result = probe.reconcile(self.args.output, system)
+        self.assertFalse(result['reconciled'])
+        self.assertEqual(calls, len(system.calls))
+
+    def test_reconciliation_refuses_ambiguous_bootstrap_creation(self):
+        _, system = self.run_probe('cleanup-failure')
+        system.owner_alive = False
+        (self.args.output / 'java-process.json').unlink()
+        calls = len(system.calls)
+        result = probe.reconcile(self.args.output, system)
+        self.assertFalse(result['reconciled'])
+        self.assertEqual(calls, len(system.calls))
+
+    def test_reconciliation_reaps_identity_proven_child_before_any_docker(self):
+        _, system = self.run_probe('cleanup-failure')
+        system.owner_alive = False; system.mode = 'success'
+        child = system.children[-1]; child.returncode = None
+        original_run = system.run
+        def after_reap(argv, **kwargs):
+            self.assertIsNotNone(child.returncode)
+            return original_run(argv, **kwargs)
+        system.run = after_reap
+        result = probe.reconcile(self.args.output, system)
+        self.assertTrue(result['reconciled'], result)
+        self.assertEqual([(child.pid, signal.SIGTERM)], system.signals)
+
+    def test_reconciliation_refuses_foreign_labels_and_legacy_evidence(self):
+        _, system = self.run_probe('foreign-label')
+        system.owner_alive = False
+        result = probe.reconcile(self.args.output, system)
+        self.assertFalse(result['reconciled'])
+        self.assertNotIn(CID, system.deleted)
+        original = probe.receipt(self.args.output / 'invocation.json')
+        original.pop('schemaVersion')
+        put(self.args.output, 'invocation.json', original)
+        calls = len(system.calls)
+        result = probe.reconcile(self.args.output, system)
+        self.assertFalse(result['reconciled'])
+        self.assertEqual(calls, len(system.calls))
+
+    def test_bootstrap_requires_durable_identity_and_authorization_before_exec(self):
+        identity = {'pid': os.getpid(), 'pgid': os.getpid(), 'start': [5, 1], 'kind': 'fake-start'}
+        owner = {'pid': 888, 'pgid': 888, 'start': [4, 1], 'kind': 'fake-start'}
+        intent = {'session': 'session', 'kind': 'java', 'nonce': 'a' * 32,
+            'supervisor': owner, 'argv': [str(self.java), '-version']}
+        path = self.root / 'java-launch-intent.json'; probe.write(path, intent)
+        def authorize(_):
+            self.assertEqual(identity, probe.receipt(self.root / 'java-process.json')['identity'])
+            self.assertFalse((self.root / 'java-exec-submitted.json').exists())
+            probe.publish(self.root / 'java-exec-authorized.json', {'nonce': intent['nonce']})
+        def exec_check(java, argv, environment):
+            self.assertTrue((self.root / 'java-exec-submitted.json').exists())
+            self.assertEqual(intent['argv'], argv)
+        with patch.object(probe.System, 'process_identity', side_effect=lambda pid: identity if pid == os.getpid() else owner), \
+             patch.object(probe.time, 'sleep', side_effect=authorize), patch.object(probe.os, 'execve', side_effect=exec_check):
+            probe.child_start(path)
+
+    def test_bootstrap_without_authorization_cannot_exec_after_supervisor_dies(self):
+        identity = {'pid': os.getpid(), 'pgid': os.getpid(), 'start': [5, 1], 'kind': 'fake-start'}
+        intent = {'session': 'session', 'kind': 'java', 'nonce': 'a' * 32,
+            'supervisor': {'pid': 888}, 'argv': [str(self.java), '-version']}
+        path = self.root / 'java-launch-intent.json'; probe.write(path, intent)
+        with patch.object(probe.System, 'process_identity', side_effect=lambda pid: identity if pid == os.getpid() else None), \
+             patch.object(probe.os, 'execve') as execute:
+            with self.assertRaisesRegex(ValueError, 'Supervisor disappeared'):
+                probe.child_start(path)
+            execute.assert_not_called()
+        self.assertTrue((self.root / 'java-process.json').exists())
+
+    def test_linux_missing_boot_identity_is_not_process_absence(self):
+        fields = ['0'] * 20; fields[2] = '123'; fields[19] = '123456'
+        with patch.object(probe.sys, 'platform', 'linux'), \
+             patch.object(Path, 'read_text', side_effect=['123 (java) ' + ' '.join(fields), FileNotFoundError()]):
+            with self.assertRaises(FileNotFoundError): probe.System.process_identity(123)
+        with patch.object(probe.sys, 'platform', 'linux'), patch.object(Path, 'read_text', side_effect=FileNotFoundError()):
+            self.assertIsNone(probe.System.process_identity(123))
+
+    def test_linux_kernel_identity_rejects_malformed_boot_start_or_group(self):
+        for group, start, boot in [('123', '4', ''), ('123', '4', '-' * 36), ('0', '4', 'a' * 8 + '-1234-1234-1234-' + 'a' * 12),
+                ('123', '0', 'a' * 8 + '-1234-1234-1234-' + 'a' * 12)]:
+            fields = ['0'] * 20; fields[2] = group; fields[19] = start
+            with self.subTest(group=group, start=start, boot=boot), patch.object(probe.sys, 'platform', 'linux'), \
+                 patch.object(Path, 'read_text', side_effect=['123 (java) ' + ' '.join(fields), boot]):
+                with self.assertRaises(ValueError): probe.System.process_identity(123)
+
+    def test_launch_states_do_not_attribute_bootstrap_or_unconfirmed_exit_to_java(self):
+        supervisor = probe.Supervisor(self.args, FakeSystem())
+        self.args.output.mkdir()
+        self.assertEqual('not-submitted', supervisor.launch_state('java'))
+        supervisor.processes['java'] = unittest.mock.Mock()
+        self.assertEqual('bootstrap-only', supervisor.launch_state('java'))
+        put(self.args.output, 'java-exec-submitted.json', {'nonce': 'a' * 32})
+        self.assertEqual('exec-submitted-unconfirmed', supervisor.launch_state('java'))
+        put(self.args.output, 'java-exec-failed.json', {'failureType': 'FileNotFoundError'})
+        self.assertEqual('exec-failed', supervisor.launch_state('java'))
+        self.args.output.joinpath('java-exec-failed.json').unlink()
+        supervisor.evidence.mkdir(); put(supervisor.evidence, 'startup-submitted.json', {'started': True})
+        self.assertEqual('fixture-confirmed', supervisor.launch_state('java'))
+
+    def test_snapshot_input_mutation_is_rechecked_at_identity_boundary(self):
+        self.args.output.mkdir()
+        supervisor = probe.Supervisor(self.args, FakeSystem())
+        supervisor.input_classpath = str(self.classes)
+        supervisor.inputs = {'classpath': str(self.classes), 'sourceInputs': {'snapshot.java': 'before'}}
+        with patch.object(probe, 'resolve_classpath', return_value={'classpath': str(self.classes),
+                'sourceInputs': {'snapshot.java': 'after'}}):
+            with self.assertRaisesRegex(ValueError, 'source snapshot'):
+                supervisor.source_build_identity()
+
+    def test_reconciliation_rejects_linked_run_ancestors_and_output_parent_before_writing(self):
+        _, system = self.run_probe()
+        system.owner_alive = False
+        link = self.root / 'alias'; link.symlink_to(self.args.output, target_is_directory=True)
+        with self.assertRaisesRegex(ValueError, 'Symlink'):
+            probe.reconcile(link, system)
+        destination = self.root / 'destination'; destination.mkdir()
+        (self.args.output / 'reconciliations').symlink_to(destination, target_is_directory=True)
+        with self.assertRaisesRegex(ValueError, 'Symlink'):
+            probe.reconcile(self.args.output, system)
+        self.assertEqual([], list(destination.iterdir()))
+
+    def test_reconciliation_rejects_foreign_intent_and_contradictory_resource_evidence(self):
+        _, system = self.run_probe('cleanup-failure')
+        system.owner_alive = False
+        creation = self.args.output / 'resource-creation-submitted.json'
+        put(self.args.output, creation.name, {'session': 'foreign'})
+        calls = len(system.calls)
+        result = probe.reconcile(self.args.output, system)
+        self.assertFalse(result['reconciled'])
+        self.assertEqual(calls, len(system.calls))
+        creation.unlink()
+        result = probe.reconcile(self.args.output, system)
+        self.assertFalse(result['reconciled'])
+        self.assertNotIn('noResourceCreationSubmitted', result)
+        self.assertEqual(calls, len(system.calls))
 
 
 if __name__ == '__main__': unittest.main()
