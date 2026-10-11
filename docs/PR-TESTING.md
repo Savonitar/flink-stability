@@ -48,6 +48,7 @@ names with repeated `--scenario` options when comparing connector artifacts:
 | Recovery across workers and partitions | `distributed-eos` and `distributed-eos-no-fault`: two TaskManagers, parallelism four, four Kafka partitions and a named worker kill/restart. See [distributed recovery](DISTRIBUTED-RECOVERY.md). |
 | Recovery after a JobManager leadership change | `ha-eos-control`, `ha-eos-kill`, `ha-eos-pause`, `ha-eos-isolate`: a ZooKeeper-backed pair, matched process identities, leader sessions and recovery of the submitted job. See [HA scenarios](HA-TOKEN-TESTING.md). |
 | Token acquisition/distribution during HA recovery | `ha-token-control`, `ha-token-delay`, `ha-token-failure`, `ha-token-linkage`; the `ha-token-repeat-*` catalogs add token/checkpoint barriers around repeated transfers. See [token faults and proof](HA-TOKEN-TESTING.md). |
+| Pooled transactional-ID recovery after tolerated checkpoint failures | `pool-reuse-precommitted-{failover,control}-{v1,v2}`: workload-driven asynchronous checkpoint declines and graceful in-place task failover. See the [mechanism, confirmation rule and matrix](POOL-REUSE-PRECOMMITTED-FAILOVER.md). |
 
 These are executable capabilities, not promises that the released connector passes
 every catalog. The HA guide retains observed bounded-completion failures. The
@@ -206,6 +207,31 @@ Unexpected data failures keep their original failing verdict and reason even
 when window evidence is missing. REST observation failures retain their separate
 infrastructure reason and original error evidence. A successful calibration audit
 means the evidence satisfies the recipe's [qualification rules](../calibration/pool-reuse-mutant/README.md#calibration-contract).
+
+The four `pool-reuse-precommitted-{failover,control}-{v1,v2}` catalogs extend that
+family to tolerated asynchronous checkpoint failures followed by graceful task
+failover. Select them explicitly; neither family silently expands the default
+gate or the existing chaos profiles. For example:
+
+```sh
+python3 tools/pr_gate.py --prepare-only \
+  --connector-jar jobs/pr/321/candidate/connector.jar \
+  --runtime-dir jobs/pr/321/candidate/runtime \
+  --scenario pool-reuse-precommitted-failover-v1 \
+  --scenario pool-reuse-precommitted-failover-v2 \
+  --scenario pool-reuse-precommitted-control-v1 \
+  --scenario pool-reuse-precommitted-control-v2 \
+  --output jobs/pr/321/precommitted-prepared
+```
+
+The released Maven baseline and local-JAR candidate copies preserve the custom
+checkpoint-failure tolerance, required markers, fault arguments and PASS siblings.
+The [new cell guide](POOL-REUSE-PRECOMMITTED-FAILOVER.md) gives explicit retained
+runs for both arms and a distinct confirmation rule: required markers and barrier
+timing, JobManager declines/restart/restore from checkpoint 1, and the reused
+transaction's COMMIT/ABORT history. `restWindowConfirmed` cannot qualify these
+runs. Report unresolved post-fence transactions separately from the ID verdict;
+the TV1 mutant's intended duplicate failure must remain a failing gate.
 
 Run the Python checks without Docker:
 

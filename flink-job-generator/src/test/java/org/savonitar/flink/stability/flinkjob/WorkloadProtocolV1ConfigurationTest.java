@@ -140,6 +140,23 @@ class WorkloadProtocolV1ConfigurationTest {
     }
 
     @Test
+    void checkpointFailureOptionsUseSnapshotOperatorEvenWithZeroAsyncDelay() {
+        for (String option : new String[]{"--failAsyncSnapshotForCheckpoints",
+                "--failAfterSnapshotOfCheckpoint", "--failAfterSnapshotDelayMs"}) {
+            StreamExecutionEnvironment env = StreamExecutionEnvironment.getExecutionEnvironment(
+                    Configuration.fromMap(baseExactlyOnceValues()));
+            FlinkKafkaEosJob.buildPipeline(env, WorkloadProtocolV1Configuration.from(env.getConfiguration()),
+                    FlinkKafkaEosJobArguments.from(new String[]{option, "3"}));
+            StreamGraph graph = env.getStreamGraph();
+            StreamNode node = graph.getStreamNodes().stream()
+                    .filter(value -> FlinkKafkaEosJob.THROTTLE_UID.equals(value.getTransformationUID())).findFirst().orElseThrow();
+            var factory = (org.apache.flink.streaming.api.operators.SimpleOperatorFactory<?>) node.getOperatorFactory();
+            assertEquals(AsyncSnapshotDelay.class, factory.getOperator().getClass());
+            assertDoesNotThrow(() -> graph.getJobGraph());
+        }
+    }
+
+    @Test
     void chainsTheProcessingDelayToTheSourceBeforeTheKeyedShuffle() {
         Configuration configuration = Configuration.fromMap(baseExactlyOnceValues());
         StreamExecutionEnvironment env =

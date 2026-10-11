@@ -62,10 +62,12 @@ public class FlinkKafkaEosJob {
         var records = env.fromSource(source, workload.watermarks().toFlinkStrategy(), "Kafka Source")
                 .uid(SOURCE_UID);
         var throttle = new SourceThrottle(arguments.processingDelayMs());
-        var throttled = arguments.snapshotAsyncDelayMs() == 0
+        var throttled = !arguments.snapshotHooksEnabled()
                 ? records.map(throttle)
                 : records.transform("Source Throttle", Types.STRING,
-                        new AsyncSnapshotDelay(throttle, arguments.snapshotAsyncDelayMs()));
+                        new AsyncSnapshotDelay(throttle, arguments.snapshotAsyncDelayMs(),
+                                arguments.failAsyncSnapshotForCheckpoints(), arguments.failAfterSnapshotOfCheckpoint(),
+                                arguments.failAfterSnapshotDelayMs()));
         throttled.name("Source Throttle")
                 .uid(THROTTLE_UID)
                 .keyBy(value -> value)

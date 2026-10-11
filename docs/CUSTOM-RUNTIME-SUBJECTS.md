@@ -231,8 +231,8 @@ uses `OperatorSnapshotFutures.getOperatorStateRawFuture()` and
 `setOperatorStateRawFuture(...)`. Compilation against the selected
 `flink.version` checks those exact APIs; no alternate timer or synchronous sleep
 is substituted when an API is absent. Its tests exercise cancellation and
-preservation of the original snapshot result. Jobs with zero async delay keep
-the ordinary map operator.
+preservation of the original snapshot result. Jobs with zero async delay and no
+snapshot-failure options keep the ordinary map operator.
 
 The maintained compilation baseline for this extension is Flink 2.2.0 and Kafka
 connector 5.0.0-2.2. No broader version range is claimed by accepting an explicit
@@ -247,6 +247,16 @@ and an explicit repeatable `--candidate-flink-config key=value` may differ. The
 candidate overlay can replace a common configuration value or add a new one.
 Omitting either naming or transaction-version option preserves the catalog's
 original choice; selecting `connector-default` or `broker-default` is explicit.
+
+The companion `pool-reuse-precommitted-{failover,control}-{v1,v2}` cells can also
+be selected explicitly with four repeated `--scenario` options. Their canonical
+checkpoint-failure tolerance and required log markers survive local-JAR catalog
+copies, including `--prepare-only`. Keep those declarations when preparing the
+comparison: configuration or marker override flags reject existing canonical
+declarations rather than replacing them. See the
+[precommitted-failover guide](POOL-REUSE-PRECOMMITTED-FAILOVER.md) for both arms,
+retention commands and its separate window-confirmation rule. The custom-runtime
+results recorded below do not cover these new cells.
 
 For an image-supplied connector with a configuration flag as the dimension under
 test, both arms can select the same pinned image subject:

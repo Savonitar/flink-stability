@@ -78,6 +78,72 @@ class AnalyzeAttemptTest(unittest.TestCase):
         self.assertEqual(2, invalid.returncode)
         self.assertNotIn('Traceback', invalid.stderr)
 
+    def test_jobmanager_markers_keep_line_order_and_scope_separate(self):
+        path = self.root / 'flink-logs/flink-stability-output-jobmanager-1-1.log'
+        path.write_text('Completed checkpoint 1\n'
+                        'Declining checkpoint 2\n'
+                        'Declining checkpoint 3\n'
+                        'Restarting job\n'
+                        'Restoring job from checkpoint 1\n')
+        patterns = [r'Completed checkpoint', r'Declining checkpoint', r'Restart', r'Restor']
+        report = self.analyze(jobmanager_markers=patterns)
+        self.assertEqual([], report['diagnostics'])
+        self.assertEqual(1, len(report['taskManagerMarkers'][0]['matches']))
+        jobmanager = report['jobManagerMarkers'][0]
+        self.assertEqual(str(path), jobmanager['file'])
+        self.assertEqual([1, 2, 3, 4, 5], [match['lineNumber'] for match in jobmanager['matches']])
+        self.assertEqual(['Restoring job from checkpoint 1'], [match['line'] for match in jobmanager['matches']
+                                                             if r'Restor' in match['patterns']])
+        self.assertIn('JobManager log: ' + str(path), analyzer.render(report))
+        cli = subprocess.run([sys.executable, str(ROOT / 'tools/analyze_attempt.py'),
+                              str(self.result), str(self.logs), '--json',
+                              '--jobmanager-marker', 'Completed checkpoint',
+                              '--jobmanager-marker', 'Restoring'], capture_output=True, text=True)
+        self.assertEqual(0, cli.returncode, cli.stderr)
+        self.assertEqual([1, 5], [match['lineNumber'] for match in json.loads(cli.stdout)['jobManagerMarkers'][0]['matches']])
+        invalid = subprocess.run([sys.executable, str(ROOT / 'tools/analyze_attempt.py'),
+                                  str(self.result), str(self.logs), '--jobmanager-marker', '['],
+                                 capture_output=True, text=True)
+        self.assertEqual(2, invalid.returncode)
+        self.assertNotIn('Traceback', invalid.stderr)
+
+    def test_jobmanager_logs_are_optional_but_requested_missing_or_symlinked_logs_are_reported(self):
+        self.assertEqual([], self.analyze()['jobManagerMarkers'])
+        report = self.analyze(jobmanager_markers=['checkpoint'])
+        self.assertTrue(any(item['code'] == 'flink.logs-missing' and 'JobManager' in item['message']
+                            for item in report['diagnostics']))
+        path = self.root / 'flink-logs/flink-stability-output-jobmanager-1-1.log'
+        path.symlink_to(self.root / 'flink-logs/flink-stability-output-taskmanager-1-1.log')
+        report = self.analyze(jobmanager_markers=['transaction'])
+        self.assertEqual([], report['jobManagerMarkers'])
+        self.assertTrue(any(item['code'] == 'flink.log-unreadable' and 'symlink' in item['message']
+                            for item in report['diagnostics']))
+
+    def test_unresolved_sink_transactions_are_separate_from_the_data_verdict(self):
+        data = json.loads(self.result.read_text())
+        data['status'] = 'pass'
+        unresolved = [{'transactionalId': 'fixture-sink-0-0', 'state': 'Ongoing',
+                       'producerId': 7, 'producerEpoch': 2, 'partitions': ['output-0']}]
+        data['evidence']['sinkTransactions'].update(unresolved=unresolved)
+        self.result.write_text(json.dumps(data))
+        report = self.analyze()
+        self.assertEqual('pass', report['verdict']['status'])
+        self.assertEqual(unresolved, report['sinkTransactions']['unresolved'])
+        self.assertEqual(1, report['sinkTransactions']['total'])
+        self.assertIn('Sink transactions after fence:', analyzer.render(report))
+        data['evidence']['sinkTransactions'] = {'status': 'not-listed'}
+        self.result.write_text(json.dumps(data))
+        report = self.analyze()
+        self.assertIsNone(report['sinkTransactions']['unresolved'])
+        self.assertIsNone(report['sinkTransactions']['total'])
+        data['evidence']['sinkTransactions'] = {'status': 'listed', 'total': 'unknown', 'unresolved': [{}]}
+        self.result.write_text(json.dumps(data))
+        report = self.analyze()
+        self.assertIsNone(report['sinkTransactions']['unresolved'])
+        self.assertIsNone(report['sinkTransactions']['total'])
+        self.assertIn('kafka.unresolved-unavailable', [item['code'] for item in report['diagnostics']])
+        self.assertIn('kafka.transaction-total-unavailable', [item['code'] for item in report['diagnostics']])
+
     def test_noncontiguous_or_extra_copies_do_not_prove_a_two_transaction_block(self):
         def noncontiguous(data):
             data['logs'][0]['segment']['batches'][2]['records'][1]['canonicalId'] = 4
@@ -92,6 +158,51 @@ class AnalyzeAttemptTest(unittest.TestCase):
         self.assertFalse(proof['sameTwoTransactions'])
         self.assertEqual('not-proven', proof['status'])
         self.assertEqual(3, len(duplicates[0]['copies']))
+
+    def test_newer_epoch_abort_marker_closes_old_data_and_preserves_both_epochs(self):
+        self.rewrite('decoded-0.json', lambda data: data['logs'][0]['segment']['batches'][5].update(producerEpoch=1))
+        report = self.analyze()
+        self.assertEqual([], report['diagnostics'])
+        transaction = report['transactions'][-1]
+        self.assertEqual(3, len(report['transactions']))
+        self.assertEqual('ABORT', transaction['outcome'])
+        self.assertEqual(0, transaction['producerEpoch'])
+        self.assertEqual(1, transaction['marker']['producerEpoch'])
+        self.assertEqual([{'offset': 6, 'id': 3}], transaction['records'])
+
+    def test_new_session_after_commit_keeps_prior_marker_boundary(self):
+        def update(data):
+            for batch in data['logs'][0]['segment']['batches'][2:4]:
+                batch['producerEpoch'] = 3
+        self.rewrite('decoded-0.json', update)
+        report = self.analyze()
+        self.assertEqual([], report['diagnostics'])
+        first, second = report['transactions'][:2]
+        self.assertEqual((2, 3), (first['producerEpoch'], second['producerEpoch']))
+        self.assertEqual('after-prior-marker', second['startBoundary'])
+        self.assertEqual([1, 2], [record['id'] for record in second['records']])
+
+    def test_older_epoch_marker_does_not_close_newer_data(self):
+        self.rewrite('decoded-0.json', lambda data: data['logs'][0]['segment']['batches'][4].update(producerEpoch=1))
+        report = self.analyze()
+        self.assertEqual('NO_RETAINED_MARKER', report['transactions'][-2]['outcome'])
+        self.assertEqual([], report['transactions'][-1]['records'])
+        self.assertIn('kafka.marker-epoch-regression', [item['code'] for item in report['diagnostics']])
+        self.assertEqual('not-proven-incomplete-evidence', report['duplicateBlockProof']['status'])
+
+    def test_marker_does_not_choose_between_multiple_open_epochs(self):
+        def update(data):
+            batches = data['logs'][0]['segment']['batches']
+            batches[1].update(control=False)
+            batches[1]['records'][0].update(canonicalId=9, marker=None)
+            batches[2]['producerEpoch'] = 3
+            batches[3]['producerEpoch'] = 4
+        self.rewrite('decoded-0.json', update)
+        report = self.analyze()
+        self.assertEqual(['NO_RETAINED_MARKER', 'NO_RETAINED_MARKER', 'COMMIT'],
+                         [item['outcome'] for item in report['transactions'][:3]])
+        self.assertEqual([], report['transactions'][2]['records'])
+        self.assertIn('kafka.marker-ambiguous', [item['code'] for item in report['diagnostics']])
 
     def test_interleaved_nonduplicate_record_breaks_contiguous_block_proof(self):
         transactions = self.analyze()['transactions']

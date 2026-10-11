@@ -1,0 +1,9 @@
+format: v1
+kind: expected-result
+
+meta:
+  name: pool-reuse-precommitted-failover-v1.expected
+  scenario: pool-reuse-precommitted-failover-v1
+
+default:
+  outcome: pass

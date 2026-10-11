@@ -4,8 +4,8 @@ The four `pool-reuse-inflight-{kill,control}-{v1,v2}` catalogs test producer reu
 with POOLING naming against Kafka 4.0 and Flink 2.2. The workload uses 14,000 IDs,
 5 ms processing delay, a 12 s checkpoint interval and an 8 s asynchronous snapshot
 delay. The delay wraps an asynchronous snapshot future in the source throttle
-operator without blocking the mailbox or sink snapshot. Jobs with zero delay use
-the plain map operator. Both release and mutant use the harness default transaction
+operator without blocking the mailbox or sink snapshot. Jobs with zero delay and
+no snapshot-failure options use the plain map operator. Both release and mutant use the harness default transaction
 timeout of 7,200,000 ms (two hours). The [harness setting](../core/src/main/java/org/savonitar/flink/stability/core/execution/plan/ExecutableScenarioPlan.java)
 explicitly overrides the released
 [connector's one-hour default](https://github.com/apache/flink-connector-kafka/blob/v5.0.0/flink-connector-kafka/src/main/java/org/apache/flink/connector/kafka/sink/KafkaSinkBuilder.java#L65).
@@ -15,6 +15,12 @@ session reinitialization only when a recycled producer is requested with the sam
 non-null transactional ID. Release and mutant each have a no-kill control for
 both Kafka transaction versions. All catalogs expect PASS; a duplicate-ID failure
 from the deliberately broken TV1 connector demonstrates detection by the oracle.
+
+The separate [precommitted graceful-failover cells](POOL-REUSE-PRECOMMITTED-FAILOVER.md)
+tolerate failed checkpoints before an in-place task restart. They keep the same
+exactly-once invariant but run normal task cleanup, without process loss. Their
+confirmation rule uses retained logs and transaction history rather than this
+report's kill-window observations; the existing calibration contract is unchanged.
 
 ## Window and qualification
 

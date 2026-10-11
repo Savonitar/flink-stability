@@ -3,6 +3,7 @@ import argparse
 import hashlib
 import json
 from pathlib import Path
+import shutil
 import subprocess
 import sys
 import unittest
@@ -155,6 +156,49 @@ class CustomRuntimeCommandTest(unittest.TestCase):
     setUp = fixtures.GateCommandTest.setUp
     command = fixtures.GateCommandTest.command
     raw_command = fixtures.GateCommandTest.raw_command
+
+    def test_precommitted_pool_reuse_catalogs_prepare_with_config_and_markers_intact(self):
+        names = [f'pool-reuse-precommitted-{mode}-v{version}'
+                 for mode in ('failover', 'control') for version in (1, 2)]
+        source = ROOT / 'scenarios/pooling'
+        target = self.root / 'scenarios/pooling'
+        target.mkdir()
+        for name in names:
+            for suffix in ('.yaml', '.expected.yaml'):
+                shutil.copyfile(source / (name + suffix), target / (name + suffix))
+        output = self.root / 'precommitted-prepared'
+        command = [sys.executable, '-B', 'tools/pr_gate.py', '--prepare-only',
+                   '--connector-jar', 'candidate.jar', '--runtime-dir', 'runtime',
+                   '--output', str(output)]
+        for name in names:
+            command.extend(['--scenario', name])
+        result = subprocess.run(command, cwd=self.root, env={'PATH': str(self.bin)},
+                                capture_output=True, text=True)
+        self.assertEqual(0, result.returncode, result.stderr)
+        self.assertFalse(self.calls.exists())
+        manifest = json.loads((output / 'manifest.json').read_text())
+        for side in ('baseline', 'candidate'):
+            self.assertEqual(set(names), set(manifest['catalogHashes'][side]))
+            for name in names:
+                with self.subTest(side=side, scenario=name):
+                    original = (source / (name + '.yaml')).read_text()
+                    prepared = output / (side + '-catalog') / (name + '.yaml')
+                    copied = prepared.read_text()
+                    self.assertEqual(original.split('\nsubject:\n')[0],
+                                     copied.split('\nsubject:\n')[0])
+                    self.assertEqual(original.split('\nworkload:\n')[1],
+                                     copied.split('\nworkload:\n')[1])
+                    self.assertIn('execution.checkpointing.tolerable-failed-checkpoints: "2"', copied)
+                    self.assertIn('name: checkpoint-2-declined', copied)
+                    if '-failover-' in name:
+                        self.assertIn('name: checkpoint-3-declined', copied)
+                        self.assertIn('name: planned-failover', copied)
+                        self.assertIn('--failAsyncSnapshotForCheckpoints, "2,3"', copied)
+                    self.assertEqual(subjects.sha256(prepared),
+                                     manifest['catalogHashes'][side][name]['scenarioSha256'])
+                    self.assertEqual((source / (name + '.expected.yaml')).read_bytes(),
+                                     prepared.with_name(name + '.expected.yaml').read_bytes())
+                    self.assertEqual(original, (target / (name + '.yaml')).read_text())
 
     def test_single_arm_prepares_one_catalog_with_identity_and_markers(self):
         original = (self.root / 'scenarios/bounded-eos.yaml').read_bytes()

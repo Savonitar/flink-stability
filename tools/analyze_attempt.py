@@ -272,30 +272,49 @@ def group_transactions(batches, output_topic, reader):
             for identity in list(open_groups):
                 if identity[0] == partition:
                     del open_groups[identity]
-                    last_closed[identity] = 'capture-gap'
+                    last_closed[identity[:2]] = 'capture-gap'
         previous_end[partition] = batch['lastOffset']
         if not batch['transactional'] or batch['producerId'] < 0 or batch['producerEpoch'] < 0:
             reader.diagnostic('kafka.nontransactional-output', 'Output batch has no valid transactional producer identity')
             continue
         identity = (partition, batch['producerId'], batch['producerEpoch'])
-        group = open_groups.get(identity)
+        producer = identity[:2]
+        group = None
+        if batch['control']:
+            # A broker fencing an old transaction can append its ABORT with a
+            # newer epoch. Bind only an unambiguous open range for this producer;
+            # the marker's epoch must never resolve data from a newer session.
+            candidates = [key for key in open_groups if key[:2] == producer]
+            if len(candidates) == 1 and candidates[0][2] <= identity[2]:
+                identity = candidates[0]
+                group = open_groups[identity]
+            elif len(candidates) > 1:
+                reader.diagnostic('kafka.marker-ambiguous', 'Multiple open epochs precede one producer marker',
+                                  f'{output_topic}-{partition}@{batch["baseOffset"]}')
+            elif candidates:
+                reader.diagnostic('kafka.marker-epoch-regression', 'Marker cannot resolve data from a newer producer epoch',
+                                  f'{output_topic}-{partition}@{batch["baseOffset"]}')
+        else:
+            group = open_groups.get(identity)
         if group is None:
             ordinals[identity] += 1
             group = {'transaction': f'{output_topic}:{partition}/{identity[1]}:{identity[2]}#{ordinals[identity]}',
                      'topic': output_topic, 'partition': partition, 'producerId': identity[1],
                      'producerEpoch': identity[2], 'occurrence': ordinals[identity],
-                     'startBoundary': last_closed.get(identity, 'first-retained-batch'),
+                     'startBoundary': last_closed.get(producer, 'first-retained-batch'),
                      'firstOffset': batch['baseOffset'], 'lastOffset': batch['lastOffset'],
                      'batches': [], 'records': [], 'marker': None}
-            open_groups[identity] = group
+            if not batch['control']:
+                open_groups[identity] = group
             groups.append(group)
         group['lastOffset'] = batch['lastOffset']
         group['batches'].append({key: batch[key] for key in ('baseOffset', 'lastOffset', 'control')})
         for record in batch['records']:
             if batch['control']:
-                group['marker'] = {'offset': record['offset'], **record['marker']}
-                del open_groups[identity]
-                last_closed[identity] = 'after-prior-marker'
+                group['marker'] = {'offset': record['offset'], **record['marker'], 'producerEpoch': batch['producerEpoch']}
+                if open_groups.get(identity) is group:
+                    del open_groups[identity]
+                last_closed[producer] = 'after-prior-marker'
             else:
                 group['records'].append({'offset': record['offset'], 'id': record.get('canonicalId')})
                 if record.get('canonicalId') is None:
@@ -387,20 +406,21 @@ def transaction_history(evidence, log_root, prefix, reader):
     return sorted(history, key=lambda item: (item['partition'], item['offset']))
 
 
-def taskmanager_markers(directory, patterns, reader):
+def component_markers(directory, patterns, reader, role):
+    label = {'taskmanager': 'TaskManager', 'jobmanager': 'JobManager'}[role]
     if directory is None:
-        reader.diagnostic('flink.logs-missing', 'No TaskManager log directory found; use --flink-log-dir')
+        reader.diagnostic('flink.logs-missing', f'No {label} log directory found; use --flink-log-dir')
         return []
     try:
         directory = guarded_path(directory, reader.roots)
         if not directory.is_dir():
-            raise EvidenceError('TaskManager log directory is missing')
-        paths = sorted(directory.glob('flink-stability-output-taskmanager-*-*.log'))
+            raise EvidenceError(f'{label} log directory is missing')
+        paths = sorted(directory.glob(f'flink-stability-output-{role}-*-*.log'))
     except (OSError, ValueError) as error:
         reader.diagnostic('flink.logs-unreadable', error, directory)
         return []
     if not paths:
-        reader.diagnostic('flink.logs-missing', 'No retained TaskManager output logs', directory)
+        reader.diagnostic('flink.logs-missing', f'No retained {label} output logs', directory)
     matches = []
     for path in paths:
         try:
@@ -419,8 +439,32 @@ def taskmanager_markers(directory, patterns, reader):
     return matches
 
 
+def sink_transactions(evidence, reader):
+    """Preserve the post-fence listing separately from the terminal data verdict."""
+    listing = object_section(evidence, 'sinkTransactions', reader)
+    result = {key: listing.get(key) for key in ('status', 'transactionalIdPrefix', 'total', 'unresolved')}
+    if listing.get('status') == 'listed':
+        unresolved = listing.get('unresolved')
+        valid = isinstance(unresolved, list) and all(
+            isinstance(item, dict)
+            and all(isinstance(item.get(key), str) for key in ('transactionalId', 'state'))
+            and all(integer(item.get(key)) for key in ('producerId', 'producerEpoch'))
+            and isinstance(item.get('partitions'), list)
+            and all(isinstance(partition, str) for partition in item['partitions'])
+            for item in unresolved)
+        if not valid:
+            result['unresolved'] = None
+            reader.diagnostic('kafka.unresolved-unavailable', 'Listed sink transactions have missing/malformed unresolved evidence')
+        if not integer(listing.get('total')) or listing['total'] < 0:
+            result['total'] = None
+            reader.diagnostic('kafka.transaction-total-unavailable', 'Listed sink transaction total is missing/malformed')
+    elif listing.get('status') != 'not-listed':
+        reader.diagnostic('kafka.listing-status-unavailable', 'Sink transaction listing status is missing/malformed')
+    return result
+
+
 def analyze(result_path, log_root, *, evidence_roots=(), flink_log_dir=None,
-            markers=(), output_topic=None, sink_prefix=None):
+            markers=(), jobmanager_markers=(), output_topic=None, sink_prefix=None):
     result_path, log_root = guarded_path(result_path), guarded_path(log_root)
     roots = [result_path.parent, log_root, *(guarded_path(path) for path in evidence_roots)]
     if flink_log_dir is not None:
@@ -480,7 +524,7 @@ def analyze(result_path, log_root, *, evidence_roots=(), flink_log_dir=None,
     if integer(terminal.get('duplicates')) and terminal['duplicates'] != committed_extra:
         reader.diagnostic('oracle.physical-copy-count-differs',
                           'Oracle duplicate count differs from retained COMMIT-marked extra copies; physical markers do not establish read-committed visibility')
-    if any(item['code'].startswith(('kafka.batch-', 'kafka.offset-', 'kafka.decode-', 'kafka.id-', 'evidence.')) for item in reader.diagnostics):
+    if any(item['code'].startswith(('kafka.batch-', 'kafka.offset-', 'kafka.decode-', 'kafka.id-', 'kafka.marker-', 'evidence.')) for item in reader.diagnostics):
         if block['status'] == 'proven-in-retained-bytes':
             block['status'] = 'not-proven-incomplete-evidence'
     prefix = sink_prefix
@@ -503,7 +547,9 @@ def analyze(result_path, log_root, *, evidence_roots=(), flink_log_dir=None,
             reader.diagnostic('flink.log-root-malformed', 'checkpointRoot is not a path string')
             flink_log_dir = None
     compiled = [re.compile(pattern) for pattern in (markers or [DEFAULT_MARKER])]
-    marker_matches = taskmanager_markers(flink_log_dir, compiled, reader)
+    marker_matches = component_markers(flink_log_dir, compiled, reader, 'taskmanager')
+    jobmanager_matches = component_markers(flink_log_dir, [re.compile(pattern) for pattern in jobmanager_markers],
+                                          reader, 'jobmanager') if jobmanager_markers else []
     report = {'scope': 'Retained physical evidence only; markers do not prove consumer visibility or fault attribution.',
               'scenario': result.get('scenario'),
               'verdict': {key: result.get(key) for key in ('status', 'reason', 'message')},
@@ -514,8 +560,9 @@ def analyze(result_path, log_root, *, evidence_roots=(), flink_log_dir=None,
               'killWindows': windows, 'outputTopic': output_topic, 'transactions': transactions,
               'duplicateIds': duplicates, 'duplicateBlockProof': block,
               'physicalCommittedExtraCopies': committed_extra,
-              'sinkPrefix': prefix, 'transactionStateHistory': history,
-              'taskManagerMarkers': marker_matches, 'diagnostics': reader.diagnostics}
+              'sinkPrefix': prefix, 'sinkTransactions': sink_transactions(evidence, reader),
+              'transactionStateHistory': history, 'taskManagerMarkers': marker_matches,
+              'jobManagerMarkers': jobmanager_matches, 'diagnostics': reader.diagnostics}
     if not all(integer(job.get(key)) for key in ('completedCheckpoints', 'restoredCheckpoints')):
         reader.diagnostic('flink.checkpoint-counts-unavailable', 'Checkpoint/restore counts are missing or malformed')
     return report
@@ -525,6 +572,7 @@ def render(report):
     lines = [report['scope'], 'Verdict: ' + json.dumps(report['verdict'], sort_keys=True),
              'Oracle: ' + json.dumps(report['oracle'], sort_keys=True),
              'Checkpoints/restores: ' + json.dumps(report['checkpoints'], sort_keys=True)]
+    lines.append('Sink transactions after fence: ' + json.dumps(report['sinkTransactions'], sort_keys=True))
     for window in report['killWindows']:
         lines.append('Kill window: ' + json.dumps(window, sort_keys=True))
     lines.append('Output topic: ' + str(report['outputTopic']))
@@ -538,10 +586,11 @@ def render(report):
     lines.append('Duplicate block proof: ' + json.dumps(report['duplicateBlockProof'], sort_keys=True))
     for item in report['transactionStateHistory']:
         lines.append('Transaction state: ' + json.dumps(item, sort_keys=True))
-    for process in report['taskManagerMarkers']:
-        lines.append('TaskManager log: ' + process['file'] + ' matches=' + str(len(process['matches'])))
-        for match in process['matches']:
-            lines.append(str(match['lineNumber']) + ': ' + match['line'])
+    for label, key in (('TaskManager', 'taskManagerMarkers'), ('JobManager', 'jobManagerMarkers')):
+        for process in report[key]:
+            lines.append(label + ' log: ' + process['file'] + ' matches=' + str(len(process['matches'])))
+            for match in process['matches']:
+                lines.append(str(match['lineNumber']) + ': ' + match['line'])
     lines.extend('Diagnostic: ' + json.dumps(item, sort_keys=True) for item in report['diagnostics'])
     return '\n'.join(lines) + '\n'
 
@@ -551,15 +600,16 @@ def main(argv=None):
     parser.add_argument('result', type=Path)
     parser.add_argument('kafka_log_output', type=Path)
     parser.add_argument('--evidence-root', action='append', type=Path, default=[], help='Additional retained-evidence root for path checks')
-    parser.add_argument('--flink-log-dir', type=Path, help='Explicit retained TaskManager output directory')
+    parser.add_argument('--flink-log-dir', type=Path, help='Explicit retained Flink process output directory')
     parser.add_argument('--marker', action='append', default=[], help='TaskManager Python regex; repeatable, replaces the upstream recovery default')
+    parser.add_argument('--jobmanager-marker', action='append', default=[], help='JobManager Python regex; repeatable, no default')
     parser.add_argument('--output-topic', help='Required when decoded transactional output topic is ambiguous')
     parser.add_argument('--sink-prefix', help='Explicit sink prefix when absent from the result')
     parser.add_argument('--json', action='store_true', help='Print the structured analysis instead of text')
     args = parser.parse_args(argv)
     try:
         report = analyze(args.result, args.kafka_log_output, evidence_roots=args.evidence_root,
-                         flink_log_dir=args.flink_log_dir, markers=args.marker,
+                         flink_log_dir=args.flink_log_dir, markers=args.marker, jobmanager_markers=args.jobmanager_marker,
                          output_topic=args.output_topic, sink_prefix=args.sink_prefix)
     except (ValueError, OSError, re.error) as error:
         parser.error(str(error))
