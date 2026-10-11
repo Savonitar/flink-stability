@@ -214,6 +214,13 @@ Prepare both local-JAR arms without starting containers. The baseline JAR below
 is the recipe's hash-verified released 5.0.0-2.2 binary; its dependencies match
 the mutant's closure. `--prepare-only` preserves config, log markers, workload
 arguments, phases and expected results in both copied catalogs.
+Additional `--flink-config` keys apply to both arms, and an explicit
+`--candidate-flink-config` overlay applies only to the candidate. New keys and
+log-marker names append to the canonical declarations; any canonical key or
+marker-name collision rejects, even with the same value. The manifest's
+`flinkInputProvenance[arm][scenario]` distinguishes canonical inputs, shared CLI
+inputs and candidate CLI configuration. Custom runtime comparisons still require
+explicit matching subject modes and dependency closures.
 
 ```sh
 evidence=jobs/validation/pool-reuse-precommitted-YYYYMMDD-HHMMSS
@@ -414,6 +421,17 @@ parser-only rejection of orphan delay flags. That validation change has separate
 unit coverage; the valid, paired arguments in these catalogs and their injected
 timing behavior are unchanged. No additional live batch was run for that parser
 validation change.
+
+Final Docker-free review verification passed `mvn -B -ntp verify` with JDK 21
+and an isolated offline Maven cache, including all 52 generator tests, and all
+240 Python tooling tests. The four released-Maven catalogs passed CLI
+`validate --show-plan`. Both local-JAR arms copied all four catalogs through
+`--prepare-only`, with and without an extra `--flink-config` key; the eight
+additional arm/scenario plans confirmed both that key and the canonical
+tolerance. Final copies retain identical catalog hashes after the gate's
+comment/plain-scalar compatibility fixes. Those extra-key copies were validated
+without live container runs. Existing kill catalogs, calibration contract files
+and every expected-result document remain unchanged.
 
 ## Follow-ups
 
