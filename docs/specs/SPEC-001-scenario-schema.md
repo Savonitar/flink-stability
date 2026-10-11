@@ -1066,6 +1066,11 @@ Connector pull-request gating is the same mechanism with one axis:
   `max.block.ms` unchanged. Omission keeps Kafka's default. This is an explicit
   calibration input, independent of processing delay and transaction timeout;
   it does not alter the typed workload protocol or canonical catalogs.
+  The bundled generator's `--failAsyncSnapshotForCheckpoints`,
+  `--failAsyncSnapshotDelayMs`, `--failAfterSnapshotOfCheckpoint` and
+  `--failAfterSnapshotDelayMs` are also generator-specific arguments outside
+  the typed workload protocol. Their tokens and values are preserved byte-for-byte
+  in declaration order; the runner never interprets these fault-injection options.
 - **R5.2b** `setup.flink.config` passes literal scalar configuration through to
   `FLINK_PROPERTIES` in every JobManager and TaskManager and to the REST
   submission's `flinkConfiguration`. The resolved map is immutable and recorded

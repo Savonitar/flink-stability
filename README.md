@@ -289,6 +289,16 @@ The separate [distributed recovery scenarios](docs/DISTRIBUTED-RECOVERY.md) use 
 TaskManagers, parallelism four, four Kafka partitions and a named kill/restart.
 They retain the same exact-ID oracle; existing canonical scenarios keep their parameters.
 
+The POOLING reuse family has two explicitly selected sets:
+`pool-reuse-inflight-{kill,control}-{v1,v2}` targets a physical kill during an
+unfinished checkpoint ([calibration report](docs/POOL-REUSE-CALIBRATION.md));
+`pool-reuse-precommitted-{failover,control}-{v1,v2}` tolerates checkpoint failures
+before graceful task failover
+([mechanism and evidence](docs/POOL-REUSE-PRECOMMITTED-FAILOVER.md)). Both require
+exact output with the released connector, and the same-ID mutant calibrates
+duplicate detection. Select canonical names with repeated `--scenario` flags in
+the PR gate. A data PASS alone does not confirm either fault window.
+
 Token proof is explicit: `setup.flink.token_provider.proof_scope` accepts `bootstrap`
 or `submitted-job`; omission preserves the existing service-wide evidence check.
 Both explicit scopes require a fresh completed request after submission and matching token

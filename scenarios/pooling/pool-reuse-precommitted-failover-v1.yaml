@@ -1,0 +1,81 @@
+format: v1
+kind: scenario
+
+meta:
+  name: pool-reuse-precommitted-failover-v1
+  description: POOLING tolerated checkpoint failures then graceful task failover; transaction version 1.
+
+runs: 1
+health_retry_limit: 0
+completion_timeout: 10m
+
+setup:
+  kafka:
+    clusters:
+      main:
+        image: apache/kafka:4.0.0
+        brokers: 1
+        transaction_version: 1
+        topics:
+          - name: input
+            partitions: 1
+            replication_factor: 1
+            input_source:
+              mode: generated
+              format: integer-sequence
+              total: 14000
+          - name: output
+            partitions: 1
+            replication_factor: 1
+  flink:
+    image: docker.io/library/flink:2.2.0
+    jobmanagers: 1
+    taskmanagers: 1
+    config:
+      execution.checkpointing.tolerable-failed-checkpoints: "2"
+    log_markers:
+      - { name: checkpoint-2-declined, regex: 'POOL_REUSE_SNAPSHOT_ASYNC_FAIL checkpoint=2\b', scope: taskmanager, required: true }
+      - { name: checkpoint-3-declined, regex: 'POOL_REUSE_SNAPSHOT_ASYNC_FAIL checkpoint=3\b', scope: taskmanager, required: true }
+      - { name: planned-failover, regex: 'POOL_REUSE_PLANNED_FAILURE after checkpoint=3\b', scope: taskmanager, required: true }
+      - { name: restored-commit-fenced, regex: 'it is expected in some cases \(e\.g\., aborted checkpoints in previous attempt\)', scope: taskmanager, required: false }
+
+subject:
+  connectors:
+    kafka:
+      artifact: maven:org.apache.flink:flink-connector-kafka:5.0.0-2.2
+
+workload:
+  jobs:
+    - alias: eos-job
+      jar: ./flink-job-generator/target/flink-job-generator.jar
+      connectors: [kafka]
+      parallelism: 1
+      source: { cluster: main, topic: input }
+      sink:
+        cluster: main
+        topic: output
+        delivery_guarantee: EXACTLY_ONCE
+        transactional_id_prefix: pool-reuse-precommitted-failover-v1
+        transaction_id_naming_strategy: POOLING
+      checkpointing:
+        interval: 12s
+        mode: EXACTLY_ONCE
+        storage: { type: filesystem }
+      restart_strategy: { type: flink-default }
+      # Checkpoint 3 also declines, so its completion cannot race the planned failure.
+      program_args: [--processingDelayMs, "5", --snapshotAsyncDelayMs, "8000", --failAsyncSnapshotDelayMs, "500", --failAsyncSnapshotForCheckpoints, "2,3", --failAfterSnapshotOfCheckpoint, "3", --failAfterSnapshotDelayMs, "2000"]
+
+phases:
+  - name: run
+    steps:
+      - await:
+          condition: { type: job-state, job: eos-job, state: RUNNING }
+          timeout: 2m
+          on_timeout: inconclusive
+
+terminal_validations:
+  - type: kafka.id-set
+    cluster: main
+    topic: output
+    expected: input-manifest
+    timeout: 5m

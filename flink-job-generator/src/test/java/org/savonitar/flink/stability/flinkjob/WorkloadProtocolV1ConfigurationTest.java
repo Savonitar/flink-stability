@@ -140,6 +140,26 @@ class WorkloadProtocolV1ConfigurationTest {
     }
 
     @Test
+    void checkpointFailureOptionsUseSnapshotOperatorEvenWithZeroAsyncDelay() {
+        for (String[] args : new String[][]{
+                {"--failAsyncSnapshotForCheckpoints", "3"},
+                {"--failAfterSnapshotOfCheckpoint", "3"},
+                {"--failAsyncSnapshotForCheckpoints", "3", "--failAsyncSnapshotDelayMs", "0"},
+                {"--failAfterSnapshotOfCheckpoint", "3", "--failAfterSnapshotDelayMs", "0"}}) {
+            StreamExecutionEnvironment env = StreamExecutionEnvironment.getExecutionEnvironment(
+                    Configuration.fromMap(baseExactlyOnceValues()));
+            FlinkKafkaEosJob.buildPipeline(env, WorkloadProtocolV1Configuration.from(env.getConfiguration()),
+                    FlinkKafkaEosJobArguments.from(args));
+            StreamGraph graph = env.getStreamGraph();
+            StreamNode node = graph.getStreamNodes().stream()
+                    .filter(value -> FlinkKafkaEosJob.THROTTLE_UID.equals(value.getTransformationUID())).findFirst().orElseThrow();
+            var factory = (org.apache.flink.streaming.api.operators.SimpleOperatorFactory<?>) node.getOperatorFactory();
+            assertEquals(AsyncSnapshotDelay.class, factory.getOperator().getClass());
+            assertDoesNotThrow(() -> graph.getJobGraph());
+        }
+    }
+
+    @Test
     void chainsTheProcessingDelayToTheSourceBeforeTheKeyedShuffle() {
         Configuration configuration = Configuration.fromMap(baseExactlyOnceValues());
         StreamExecutionEnvironment env =

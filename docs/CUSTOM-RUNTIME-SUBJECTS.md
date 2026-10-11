@@ -231,8 +231,8 @@ uses `OperatorSnapshotFutures.getOperatorStateRawFuture()` and
 `setOperatorStateRawFuture(...)`. Compilation against the selected
 `flink.version` checks those exact APIs; no alternate timer or synchronous sleep
 is substituted when an API is absent. Its tests exercise cancellation and
-preservation of the original snapshot result. Jobs with zero async delay keep
-the ordinary map operator.
+preservation of the original snapshot result. Jobs with zero async delay and no
+snapshot-failure options keep the ordinary map operator.
 
 The maintained compilation baseline for this extension is Flink 2.2.0 and Kafka
 connector 5.0.0-2.2. No broader version range is claimed by accepting an explicit
@@ -247,6 +247,18 @@ and an explicit repeatable `--candidate-flink-config key=value` may differ. The
 candidate overlay can replace a common configuration value or add a new one.
 Omitting either naming or transaction-version option preserves the catalog's
 original choice; selecting `connector-default` or `broker-default` is explicit.
+
+The companion `pool-reuse-precommitted-{failover,control}-{v1,v2}` cells can also
+be selected explicitly with four repeated `--scenario` options. Their canonical
+checkpoint-failure tolerance and required log markers survive local-JAR catalog
+copies, including `--prepare-only`. Additional `--flink-config` and
+`--candidate-flink-config` keys are appended when absent from the canonical map;
+a canonical key collision rejects even when the supplied value is identical.
+Additional log markers are appended only when their names are distinct from the
+canonical markers. Existing entries keep their original text. See the
+[precommitted-failover guide](POOL-REUSE-PRECOMMITTED-FAILOVER.md) for both arms,
+retention commands and its separate window-confirmation rule. The custom-runtime
+results recorded below do not cover these new cells.
 
 For an image-supplied connector with a configuration flag as the dimension under
 test, both arms can select the same pinned image subject:
@@ -309,6 +321,16 @@ Maven or Docker. `--dry-run` prints the plan without writing catalogs. Each
 manifest records all runtime substitutions, workload hash, connector pins,
 common and candidate configuration, and SHA-256 for every resulting scenario
 and copied expected-result document. The canonical files are never rewritten.
+`flinkInputProvenance[arm][scenario]` records the input origins for each catalog:
+`configKeys` lists `canonical`, `commonCommandLine` and `candidateCommandLine`
+keys, and `logMarkerNames` lists `canonical` and `commonCommandLine` names.
+These lists retain supplied origins: a candidate key may appear in both CLI
+lists when the explicit candidate overlay replaces a shared CLI value. It may
+never replace a canonical value. The additive reader accepts scalar block/flow
+config maps, block lists of scalar marker maps and generated inline JSON. Plain
+scalar values may contain spaces, and trailing comments remain intact; quoted
+or attached `#` characters remain part of the scalar. Ambiguous structures,
+aliases and tags reject without creating output.
 Configuration values are evidence, so do not put passwords or other secrets in
 these options.
 

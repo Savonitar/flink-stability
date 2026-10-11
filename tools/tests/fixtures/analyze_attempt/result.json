@@ -107,7 +107,10 @@
       }
     ],
     "sinkTransactions": {
-      "transactionalIdPrefix": "fixture-sink"
+      "status": "listed",
+      "transactionalIdPrefix": "fixture-sink",
+      "total": 1,
+      "unresolved": []
     },
     "kafkaLogs": {
       "status": "collected",

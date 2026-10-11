@@ -22,7 +22,8 @@ from gate_evidence import fault_requirements, fault_status, coverage_table, data
 
 from subject_catalog import (artifact_reference, replace_subject, sha256, subject_snippet,
                              with_producer_max_block, add_runtime_arguments, runtime_substitutions,
-                             with_runtime_substitutions, image_subject, with_flink_image)
+                             with_runtime_substitutions, image_subject, with_flink_image,
+                             flink_input_provenance)
 
 DEFAULT_SCENARIOS = ["bounded-eos", "commit-request-lost", "commit-response-lost"]
 RELEASED_SHA256 = "6bb63f7b09930d99745325393b481c092b0c26d626e738b7a1fd6fd8d7d4f1da"
@@ -155,6 +156,11 @@ def main():
                                    if not strict_inputs and args.flink_image else
                                    with_runtime_substitutions(
                                        document, common_runtime, candidate_config if side == "candidate" else None))
+    provenance = {
+        side: {name: flink_input_provenance(path.read_text(), common_runtime,
+                                          candidate_config if side == "candidate" else None)
+               for name, path in scenarios.items()}
+        for side in (("subject",) if args.single_arm else ("baseline", "candidate"))}
     output = args.output.resolve()
     if not output.is_relative_to(root):
         raise SystemExit("Output directory must stay inside the artifact root")
@@ -173,7 +179,8 @@ def main():
                for name in names}
         for side, catalog in catalogs.items()}
     manifest = {"baseline": baseline, "candidate": candidate, "scenarios": names, "runs": args.runs,
-                "plan": plan, "faultRequirements": requirements, "catalogHashes": catalog_hashes}
+                "plan": plan, "faultRequirements": requirements, "catalogHashes": catalog_hashes,
+                "flinkInputProvenance": provenance}
     if args.single_arm:
         del manifest["baseline"]
         del manifest["candidate"]
