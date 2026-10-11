@@ -15,6 +15,7 @@ final class FlinkKafkaEosJobArguments {
     private static final String PRODUCER_REQUEST_TIMEOUT_OPTION = "--producerRequestTimeoutMs";
     private static final String SNAPSHOT_ASYNC_DELAY_OPTION = "--snapshotAsyncDelayMs";
     private static final String FAIL_ASYNC_SNAPSHOTS_OPTION = "--failAsyncSnapshotForCheckpoints";
+    private static final String FAIL_ASYNC_SNAPSHOT_DELAY_OPTION = "--failAsyncSnapshotDelayMs";
     private static final String FAIL_AFTER_SNAPSHOT_OPTION = "--failAfterSnapshotOfCheckpoint";
     private static final String FAIL_AFTER_SNAPSHOT_DELAY_OPTION = "--failAfterSnapshotDelayMs";
 
@@ -23,19 +24,21 @@ final class FlinkKafkaEosJobArguments {
     private final Integer producerRequestTimeoutMs;
     private final int snapshotAsyncDelayMs;
     private final Set<Long> failAsyncSnapshotForCheckpoints;
+    private final int failAsyncSnapshotDelayMs;
     private final Long failAfterSnapshotOfCheckpoint;
     private final int failAfterSnapshotDelayMs;
     private final boolean snapshotHooksEnabled;
 
     private FlinkKafkaEosJobArguments(int processingDelayMs, Integer producerMaxBlockMs,
             Integer producerRequestTimeoutMs, int snapshotAsyncDelayMs,
-            Set<Long> failAsyncSnapshotForCheckpoints, Long failAfterSnapshotOfCheckpoint,
+            Set<Long> failAsyncSnapshotForCheckpoints, int failAsyncSnapshotDelayMs, Long failAfterSnapshotOfCheckpoint,
             int failAfterSnapshotDelayMs, boolean snapshotHooksEnabled) {
         this.processingDelayMs = processingDelayMs;
         this.producerMaxBlockMs = producerMaxBlockMs;
         this.producerRequestTimeoutMs = producerRequestTimeoutMs;
         this.snapshotAsyncDelayMs = snapshotAsyncDelayMs;
         this.failAsyncSnapshotForCheckpoints = Set.copyOf(failAsyncSnapshotForCheckpoints);
+        this.failAsyncSnapshotDelayMs = failAsyncSnapshotDelayMs;
         this.failAfterSnapshotOfCheckpoint = failAfterSnapshotOfCheckpoint;
         this.failAfterSnapshotDelayMs = failAfterSnapshotDelayMs;
         this.snapshotHooksEnabled = snapshotHooksEnabled;
@@ -48,7 +51,8 @@ final class FlinkKafkaEosJobArguments {
             String option = Objects.requireNonNull(args[index], "Program arguments must not be null");
             if (!PROCESSING_DELAY_OPTION.equals(option) && !PRODUCER_MAX_BLOCK_OPTION.equals(option)
                     && !PRODUCER_REQUEST_TIMEOUT_OPTION.equals(option) && !SNAPSHOT_ASYNC_DELAY_OPTION.equals(option)
-                    && !FAIL_ASYNC_SNAPSHOTS_OPTION.equals(option) && !FAIL_AFTER_SNAPSHOT_OPTION.equals(option)
+                    && !FAIL_ASYNC_SNAPSHOTS_OPTION.equals(option) && !FAIL_ASYNC_SNAPSHOT_DELAY_OPTION.equals(option)
+                    && !FAIL_AFTER_SNAPSHOT_OPTION.equals(option)
                     && !FAIL_AFTER_SNAPSHOT_DELAY_OPTION.equals(option)) {
                 throw new IllegalArgumentException("Unknown program argument: " + option);
             }
@@ -71,16 +75,24 @@ final class FlinkKafkaEosJobArguments {
             }
         }
         int asyncDelay = integer(SNAPSHOT_ASYNC_DELAY_OPTION, values.getOrDefault(SNAPSHOT_ASYNC_DELAY_OPTION, "0"), false);
+        int failureDelay = integer(FAIL_ASYNC_SNAPSHOT_DELAY_OPTION, values.getOrDefault(FAIL_ASYNC_SNAPSHOT_DELAY_OPTION, "500"), false);
+        Long failAfterCheckpoint = values.containsKey(FAIL_AFTER_SNAPSHOT_OPTION)
+                ? checkpointId(FAIL_AFTER_SNAPSHOT_OPTION, values.get(FAIL_AFTER_SNAPSHOT_OPTION)) : null;
+        int failAfterDelay = integer(FAIL_AFTER_SNAPSHOT_DELAY_OPTION, values.getOrDefault(FAIL_AFTER_SNAPSHOT_DELAY_OPTION, "2000"), false);
+        if (!failedSnapshots.isEmpty() && failAfterCheckpoint != null && failureDelay >= failAfterDelay) {
+            throw new IllegalArgumentException(FAIL_ASYNC_SNAPSHOT_DELAY_OPTION + " must be strictly smaller than "
+                    + FAIL_AFTER_SNAPSHOT_DELAY_OPTION + ": checkpoint " + failAfterCheckpoint
+                    + " must decline before the planned failure cancels the task; otherwise its "
+                    + "POOL_REUSE_SNAPSHOT_ASYNC_FAIL marker cannot match");
+        }
         return new FlinkKafkaEosJobArguments(
                 integer(PROCESSING_DELAY_OPTION, values.getOrDefault(PROCESSING_DELAY_OPTION, "0"), false),
                 integer(PRODUCER_MAX_BLOCK_OPTION, values.get(PRODUCER_MAX_BLOCK_OPTION), true),
                 integer(PRODUCER_REQUEST_TIMEOUT_OPTION, values.get(PRODUCER_REQUEST_TIMEOUT_OPTION), true),
-                asyncDelay, failedSnapshots,
-                values.containsKey(FAIL_AFTER_SNAPSHOT_OPTION)
-                        ? checkpointId(FAIL_AFTER_SNAPSHOT_OPTION, values.get(FAIL_AFTER_SNAPSHOT_OPTION)) : null,
-                integer(FAIL_AFTER_SNAPSHOT_DELAY_OPTION, values.getOrDefault(FAIL_AFTER_SNAPSHOT_DELAY_OPTION, "2000"), false),
+                asyncDelay, failedSnapshots, failureDelay, failAfterCheckpoint, failAfterDelay,
                 asyncDelay > 0 || values.containsKey(FAIL_ASYNC_SNAPSHOTS_OPTION)
-                        || values.containsKey(FAIL_AFTER_SNAPSHOT_OPTION) || values.containsKey(FAIL_AFTER_SNAPSHOT_DELAY_OPTION));
+                        || values.containsKey(FAIL_ASYNC_SNAPSHOT_DELAY_OPTION) || values.containsKey(FAIL_AFTER_SNAPSHOT_OPTION)
+                        || values.containsKey(FAIL_AFTER_SNAPSHOT_DELAY_OPTION));
     }
 
     private static Integer integer(String option, String raw, boolean positive) {
@@ -115,6 +127,8 @@ final class FlinkKafkaEosJobArguments {
     int snapshotAsyncDelayMs() { return snapshotAsyncDelayMs; }
 
     Set<Long> failAsyncSnapshotForCheckpoints() { return failAsyncSnapshotForCheckpoints; }
+
+    int failAsyncSnapshotDelayMs() { return failAsyncSnapshotDelayMs; }
 
     Long failAfterSnapshotOfCheckpoint() { return failAfterSnapshotOfCheckpoint; }
 

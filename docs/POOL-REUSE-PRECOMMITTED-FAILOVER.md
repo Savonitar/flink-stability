@@ -71,6 +71,7 @@ pass these extra workload arguments:
 
 ```text
 --failAsyncSnapshotForCheckpoints 2,3
+--failAsyncSnapshotDelayMs 500
 --failAfterSnapshotOfCheckpoint 3
 --failAfterSnapshotDelayMs 2000
 ```
@@ -78,18 +79,30 @@ pass these extra workload arguments:
 | Event | Writer/committer state | Checkpoint result |
 | --- | --- | --- |
 | Barrier 1 and its delayed completion | X is committed and recycled | 1 completes; restore point is 1 |
-| Barrier 2 | Writer precommits the next ID and takes X again | 2 fails on the asynchronous snapshot thread |
+| Barrier 2, then about 0.5 s after synchronous snapshot 2 | Writer precommits the next ID and takes X again | 2 fails on the asynchronous snapshot thread |
 | Records between barriers 2 and 3 | X collects approximately one interval of records | Failure is tolerated; processing continues |
-| Barrier 3 | Writer precommits X, emits its committable and selects Y | 3 also fails asynchronously |
+| Barrier 3, then about 0.5 s after synchronous snapshot 3 | Writer precommits X, emits its committable and selects Y | 3 also fails asynchronously |
 | First element at least 2,000 ms after synchronous snapshot 3 returns | Workload throws on the task thread; close aborts current Y | One in-place restart restores 1 |
 | Restore, before replay | Committer resumes X using checkpoint 1's producer ID/epoch | Old resume is fenced or commits the later transaction |
 
 Failing checkpoint 3 as well removes the race with its asynchronous completion:
 checkpoint 3 can never replace checkpoint 1 as the restore point. The configured
 8 s delay still applies to every unlisted checkpoint, including checkpoint 1.
-For listed checkpoints, the raw state future is cancelled and its wrapper throws
-`POOL_REUSE_SNAPSHOT_ASYNC_FAIL checkpoint=<id>` on the asynchronous caller thread,
-before any delay. This declines a checkpoint without failing the task.
+For listed checkpoints, `--failAsyncSnapshotDelayMs 500` replaces the ordinary
+8 s delay. The asynchronous caller waits at least 500 ms, cancels the raw state
+future and throws `POOL_REUSE_SNAPSHOT_ASYNC_FAIL checkpoint=<id> timeMs=<now>`.
+This declines a checkpoint without failing the task. Both controls also declare
+the 500 ms failure delay explicitly. The generator defaults it to 500 ms and
+requires it to be strictly smaller than the planned-failure delay whenever both
+faults are configured, so checkpoint 3 can decline before the task is cancelled.
+
+Flink's `SubtaskCheckpointCoordinatorImpl.checkpointState` broadcasts the barrier
+before taking the operator's synchronous snapshot. The subsequent failure delay
+gives the downstream writer time to process that barrier before an abort
+notification can cause it to skip the checkpoint. This removes the immediate
+decline from the barrier's critical window, but does not prove ordering under
+arbitrary scheduling. Retained evidence must still establish the writer's actual
+precommit; required marker matches alone cannot qualify a repetition.
 The task trigger arms only after the synchronous snapshot for the exact requested
 ID returns and fires on the first eligible subsequent element. Job checkpoint IDs
 continue increasing across the restart, so restored execution cannot arm it again.
@@ -127,6 +140,9 @@ when retained evidence establishes all of the following:
 
 1. All three required markers match in the same, single TaskManager incarnation:
    checkpoint 2 failure, checkpoint 3 failure and the planned failure after 3.
+   Each checkpoint's decline line follows its `POOL_REUSE_SNAPSHOT_SYNC` line
+   by at least the configured 500 ms failure delay, comparing their `timeMs`
+   values. Checkpoint 3's decline must precede the planned-failure line.
    The `POOL_REUSE_SNAPSHOT_SYNC checkpoint=3` line precedes the planned-failure
    line by at least the configured 2,000 ms, comparing their `timeMs` values.
    Verify that the writer actually precommitted X at barrier 3; the throttle's
@@ -286,9 +302,12 @@ pool-reuse-precommitted-<batch>/
 
 ## Verification status
 
-The retained 2026-10-11 batch at
+The retained **immediate-failure variant** batch from 2026-10-11 at
 `jobs/validation/precommitted-failover-20261011-1805/` ran all 16 attempts from
-the requested `main` baseline `4e8a927` with this change. All 12 fault windows
+the requested `main` baseline `4e8a927` before the 500 ms failure delay was added.
+It qualifies that earlier variant, **not the current catalogs**. Its asynchronous
+failure markers did not include `timeMs`; the new decline-delay requirement
+cannot be applied retrospectively to this batch. All 12 fault windows
 were confirmed, with zero misses or unconfirmed attempts; all four controls
 passed without failover. The canonical data verdicts remain 13 PASS and three
 TV1 mutant duplicate-ID FAIL results.
@@ -341,6 +360,53 @@ prior baseline and are preserved separately; they do not count toward this
 matrix. Historical kill-cell results also do not qualify this cell.
 Raw evidence is retained locally and is not distributed with this repository.
 These observations qualify this recorded batch, not every future timing window.
+
+### Follow-up with the 500 ms failure delay
+
+The fresh 2026-10-11 batch at
+`jobs/validation/precommitted-failover-review-20261011-210738/` ran the current
+catalog timing: an explicit 500 ms asynchronous failure delay and a 2,000 ms
+planned-failure delay. It contains one fault repetition per subject and
+transaction version plus all four controls. All four fault windows were
+confirmed, with zero misses; all four controls passed without failover.
+This is a measured eight-attempt follow-up, not a replacement for the
+three-repetition-per-cell campaign described above.
+
+| Subject | TV | Fault result | Control result |
+| --- | --- | --- | --- |
+| Released 5.0.0-2.2 | 1 | PASS; recycled interval ABORT; restored commit fenced | PASS |
+| Released 5.0.0-2.2 | 2 | PASS; recycled interval ABORT; restored commit fenced | PASS |
+| Same-ID mutant | 1 | Duplicate-ID FAIL; 1,836 contiguous IDs, 2891–4726, on one recycled ID | PASS |
+| Same-ID mutant | 2 | PASS; recycled interval ABORT; stale resume fenced | PASS |
+
+Across the four faults, declines followed their synchronous snapshots by
+502–510 ms. Snapshot 3 preceded the planned failure by 2,001–2,002 ms, and
+decline 3 preceded it by 1,491–1,500 ms. Fresh producer Y was created before
+decline 3 and the planned failure in every fault. JobManager logs confirmed
+asynchronous checkpoint exceptions for 2 and 3, no completed checkpoint 3,
+one restart, and restore from checkpoint 1. Restart transitions lasted
+1,006–1,096 ms; planned failure to restore took 1,045–1,139 ms.
+
+The mutant TV1 duplicate block exactly matched X's second transaction and its
+COMMIT marker. The other three faults emitted the fenced-recovery warning and
+aborted the reused interval. All eight post-fence unresolved listings were
+empty, reported separately from the seven PASS and one intended FAIL data
+verdicts. The expected-result siblings remain PASS.
+
+The batch retains the isolated offline mutant build and both decision checks
+under `recipe/target/`, exact runtime artifacts and workload/catalog source
+hashes, `timing-prepared/`, and `faults/<subject>-v<tv>-1/` and
+`controls/<subject>-v<tv>-1/`. Each attempt has its command, result, stderr,
+exit code, broker captures, retained Flink logs, `analysis.json` and
+`window-audit-v2.json`; `batch-window-audit.json` summarizes all eight. Earlier
+audit sidecars are preserved and superseded for an audit-only correction to
+expected fencing-event classification; no runtime result or window changed.
+All 32 retained process/class-loading logs passed size/hash verification.
+No binary checkpoint state remained after FINISHED. Both subjects used the
+same workload, Flink image and 11 dependency hashes in the same order; the
+connector mutation remained limited to `ProducerPoolImpl.class`.
+Full timing confirmation requires the retained logs and transaction
+history, not only the terminal result or required-marker matches.
 
 ## Follow-ups
 

@@ -66,7 +66,8 @@ public class FlinkKafkaEosJob {
                 ? records.map(throttle)
                 : records.transform("Source Throttle", Types.STRING,
                         new AsyncSnapshotDelay(throttle, arguments.snapshotAsyncDelayMs(),
-                                arguments.failAsyncSnapshotForCheckpoints(), arguments.failAfterSnapshotOfCheckpoint(),
+                                arguments.failAsyncSnapshotForCheckpoints(), arguments.failAsyncSnapshotDelayMs(),
+                                arguments.failAfterSnapshotOfCheckpoint(),
                                 arguments.failAfterSnapshotDelayMs()));
         throttled.name("Source Throttle")
                 .uid(THROTTLE_UID)

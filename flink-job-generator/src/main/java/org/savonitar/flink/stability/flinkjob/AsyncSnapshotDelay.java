@@ -22,18 +22,21 @@ final class AsyncSnapshotDelay extends StreamMap<String, String> {
     private static final Logger LOG = LoggerFactory.getLogger(AsyncSnapshotDelay.class);
     private final int delayMs;
     private final Set<Long> failedCheckpoints;
+    private final int failureDelayMs;
     private final PlannedFailure plannedFailure;
 
     AsyncSnapshotDelay(MapFunction<String, String> function, int delayMs) {
-        this(function, delayMs, Set.of(), null, 2000);
+        this(function, delayMs, Set.of(), 500, null, 2000);
     }
 
     AsyncSnapshotDelay(MapFunction<String, String> function, int delayMs,
-            Set<Long> failedCheckpoints, Long failAfterCheckpoint, int failAfterDelayMs) {
+            Set<Long> failedCheckpoints, int failureDelayMs, Long failAfterCheckpoint, int failAfterDelayMs) {
         super(function);
         if (delayMs < 0) throw new IllegalArgumentException("Negative async delay");
+        if (failureDelayMs < 0) throw new IllegalArgumentException("Negative async failure delay");
         this.delayMs = delayMs;
         this.failedCheckpoints = Set.copyOf(failedCheckpoints);
+        this.failureDelayMs = failureDelayMs;
         this.plannedFailure = failAfterCheckpoint == null ? null : new PlannedFailure(failAfterCheckpoint, failAfterDelayMs);
     }
 
@@ -62,7 +65,8 @@ final class AsyncSnapshotDelay extends StreamMap<String, String> {
     <T extends StateObject> RunnableFuture<SnapshotResult<T>> wrapSnapshot(
             RunnableFuture<SnapshotResult<T>> original, long checkpointId) {
         boolean fail = failedCheckpoints.contains(checkpointId);
-        return delayMs > 0 || fail ? snapshotFuture(original, delayMs, checkpointId, fail) : original;
+        return delayMs > 0 || fail
+                ? snapshotFuture(original, fail ? failureDelayMs : delayMs, checkpointId, fail) : original;
     }
 
     static <T extends StateObject> RunnableFuture<SnapshotResult<T>> delayed(
@@ -74,7 +78,9 @@ final class AsyncSnapshotDelay extends StreamMap<String, String> {
             RunnableFuture<SnapshotResult<T>> original, int delayMs, long checkpointId, boolean fail) {
         return new FutureTask<>(() -> {
             if (fail) {
-                String message = "POOL_REUSE_SNAPSHOT_ASYNC_FAIL checkpoint=" + checkpointId;
+                Thread.sleep(delayMs);
+                String message = "POOL_REUSE_SNAPSHOT_ASYNC_FAIL checkpoint=" + checkpointId
+                        + " timeMs=" + System.currentTimeMillis();
                 LOG.info(message);
                 original.cancel(true);
                 throw new RuntimeException(message);

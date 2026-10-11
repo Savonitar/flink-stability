@@ -14,7 +14,7 @@ import java.util.concurrent.atomic.AtomicReference;
 import static org.junit.jupiter.api.Assertions.*;
 
 class AsyncSnapshotDelayTest {
-    @Test void listedCheckpointFailsOnTheFutureCallerBeforeAnyDelayAndCancelsOriginal() throws Exception {
+    @Test void listedCheckpointFailsAfterFailureDelayIndependentlyOfOrdinaryDelay() throws Exception {
         AtomicReference<Thread> cancellationThread = new AtomicReference<>();
         AtomicBoolean executed = new AtomicBoolean();
         var original = new FutureTask<>(() -> {
@@ -26,17 +26,24 @@ class AsyncSnapshotDelayTest {
                 return super.cancel(interrupt);
             }
         };
-        var operator = new AsyncSnapshotDelay(value -> value, 20000, Set.of(2L, 3L), null, 2000);
+        var operator = new AsyncSnapshotDelay(value -> value, 20000, Set.of(2L, 3L), 100, null, 2000);
         var failing = operator.wrapSnapshot(original, 2);
         assertFalse(failing.isDone());
         assertFalse(original.isCancelled());
         Thread worker = new Thread(failing, "checkpoint-async-test");
+        long start = System.nanoTime();
+        long startTimeMs = System.currentTimeMillis();
         worker.start();
         ExecutionException failure = assertThrows(ExecutionException.class,
                 () -> failing.get(3, TimeUnit.SECONDS));
         worker.join();
+        assertTrue(TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - start) >= 100);
         assertInstanceOf(RuntimeException.class, failure.getCause());
-        assertEquals("POOL_REUSE_SNAPSHOT_ASYNC_FAIL checkpoint=2", failure.getCause().getMessage());
+        String markerPrefix = "POOL_REUSE_SNAPSHOT_ASYNC_FAIL checkpoint=2 timeMs=";
+        assertTrue(failure.getCause().getMessage().startsWith(markerPrefix));
+        long failureTimeMs = Long.parseLong(failure.getCause().getMessage().substring(markerPrefix.length()));
+        assertTrue(failureTimeMs >= startTimeMs + 100);
+        assertTrue(failureTimeMs <= System.currentTimeMillis());
         assertSame(worker, cancellationThread.get());
         assertTrue(original.isCancelled());
         assertFalse(executed.get());
@@ -46,7 +53,7 @@ class AsyncSnapshotDelayTest {
         AtomicReference<Thread> executionThread = new AtomicReference<>();
         SnapshotResult<OperatorStateHandle> snapshot = SnapshotResult.empty();
         var original = new FutureTask<>(() -> { executionThread.set(Thread.currentThread()); return snapshot; });
-        var operator = new AsyncSnapshotDelay(value -> value, 100, Set.of(2L, 3L), null, 2000);
+        var operator = new AsyncSnapshotDelay(value -> value, 100, Set.of(2L, 3L), 20000, null, 2000);
         var delayed = operator.wrapSnapshot(original, 4);
         assertNull(executionThread.get());
         Thread worker = new Thread(delayed);
@@ -60,18 +67,18 @@ class AsyncSnapshotDelayTest {
     }
 
     @Test void checkpointFailuresAlsoWorkWithoutAsyncDelay() {
-        var operator = new AsyncSnapshotDelay(value -> value, 0, Set.of(2L), null, 2000);
+        var operator = new AsyncSnapshotDelay(value -> value, 0, Set.of(2L), 0, null, 2000);
         var original = new FutureTask<>(() -> SnapshotResult.<OperatorStateHandle>empty());
         assertSame(original, operator.wrapSnapshot(original, 1));
         var failing = operator.wrapSnapshot(original, 2);
         assertDoesNotThrow(failing::run); // Future.run captures the error; it never fails the task thread.
         ExecutionException failure = assertThrows(ExecutionException.class, failing::get);
-        assertEquals("POOL_REUSE_SNAPSHOT_ASYNC_FAIL checkpoint=2", failure.getCause().getMessage());
+        assertTrue(failure.getCause().getMessage().matches("POOL_REUSE_SNAPSHOT_ASYNC_FAIL checkpoint=2 timeMs=[0-9]+"));
         assertTrue(original.isCancelled());
     }
 
     @Test void cancellingAnUnstartedFailureFutureAlsoCancelsOriginal() {
-        var operator = new AsyncSnapshotDelay(value -> value, 0, Set.of(2L), null, 2000);
+        var operator = new AsyncSnapshotDelay(value -> value, 0, Set.of(2L), 500, null, 2000);
         var original = new FutureTask<>(() -> SnapshotResult.<OperatorStateHandle>empty());
         var failing = operator.wrapSnapshot(original, 2);
         assertTrue(failing.cancel(true));

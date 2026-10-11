@@ -59,7 +59,7 @@ workload:
         mode: EXACTLY_ONCE
         storage: { type: filesystem }
       restart_strategy: { type: flink-default }
-      program_args: [--processingDelayMs, "5", --snapshotAsyncDelayMs, "8000", --failAsyncSnapshotForCheckpoints, "2"]
+      program_args: [--processingDelayMs, "5", --snapshotAsyncDelayMs, "8000", --failAsyncSnapshotDelayMs, "500", --failAsyncSnapshotForCheckpoints, "2"]
 
 phases:
   - name: run

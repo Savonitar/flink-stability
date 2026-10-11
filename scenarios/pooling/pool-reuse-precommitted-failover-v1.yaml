@@ -63,7 +63,7 @@ workload:
         storage: { type: filesystem }
       restart_strategy: { type: flink-default }
       # Checkpoint 3 also declines, so its completion cannot race the planned failure.
-      program_args: [--processingDelayMs, "5", --snapshotAsyncDelayMs, "8000", --failAsyncSnapshotForCheckpoints, "2,3", --failAfterSnapshotOfCheckpoint, "3", --failAfterSnapshotDelayMs, "2000"]
+      program_args: [--processingDelayMs, "5", --snapshotAsyncDelayMs, "8000", --failAsyncSnapshotDelayMs, "500", --failAsyncSnapshotForCheckpoints, "2,3", --failAfterSnapshotOfCheckpoint, "3", --failAfterSnapshotDelayMs, "2000"]
 
 phases:
   - name: run
