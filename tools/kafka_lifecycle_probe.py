@@ -275,6 +275,7 @@ class Supervisor:
         self.boundary = None
         self.creation_attempted = False
         self.baseline = None
+        self.reconciliation_baseline = None
         self.identity = None
         self.cleanup_deadline = None
         self.first_failure = None
@@ -529,10 +530,18 @@ class Supervisor:
                 self.cleanup_failure('Resource cleanup', error)
         if self.baseline is not None:
             try:
+                expected = self.baseline
+                if self.reconciliation_baseline is not None:
+                    # Historical IDs remain deletion exclusions. Preservation during a
+                    # later reconciliation uses its own inventory, less proved ownership.
+                    expected = {key: sorted(set(self.reconciliation_baseline[key]) - owned)
+                        for key, owned in [('containers', self.containers), ('networks', self.networks),
+                            ('running', self.containers)]}
+                    write(self.output / 'preservation-expected.json', expected)
                 final = self.inventory()
                 write(self.output / 'postflight.json', final)
                 require(not final['running'], 'Running containers remain after cleanup')
-                require(final == self.baseline, 'Inventory differs: protected resource missing or unexplained resource remains')
+                require(final == expected, 'Inventory differs: protected resource missing or unexplained resource remains')
             except BaseException as error:
                 self.cleanup_failure('Independent absence/preservation check', error)
 
@@ -737,6 +746,8 @@ def reconcile(run_directory, system=None):
                 recovery.phase = 'cleanup'; recovery.deadline = start + 60; recovery.cleanup_deadline = start + 60
                 recovery.baseline = baseline; recovery.creation_attempted = True
                 (output / 'docker-config').mkdir(); write(output / 'docker-config/config.json', {})
+                recovery.reconciliation_baseline = recovery.inventory()
+                write(output / 'reconciliation-preflight.json', recovery.reconciliation_baseline)
                 for name in ['ready-observed.json', 'evidence/ready.json', 'evidence/observation-ended.json']:
                     if (run_directory / name).exists():
                         cid = receipt(run_directory / name).get('containerId')

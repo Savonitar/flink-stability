@@ -15,6 +15,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 import kafka_lifecycle_probe as probe
 
 NID, CID, HISTORIC_NETWORK, HISTORIC_CONTAINER = ('a' * 64, 'b' * 64, 'c' * 64, 'd' * 64)
+OTHER_CONTAINER, OTHER_NETWORK = '1' * 64, '2' * 64
 IMAGE = 'sha256:' + 'e' * 64
 DIGEST = 'example/kafka@sha256:' + 'f' * 64
 
@@ -149,6 +150,7 @@ class FakeSystem:
         self.orphan_groups = {}
         self.session = None
         self.containers, self.networks = {HISTORIC_CONTAINER}, {HISTORIC_NETWORK}
+        self.labelled_containers, self.labelled_networks = {CID}, {NID}
         self.calls, self.children, self.signals, self.deleted = [], [], [], []
         self.handshake_observed_before_authorization = False
         self.interrupted = False
@@ -217,9 +219,9 @@ class FakeSystem:
         elif args[:2] == ['ps', '-q']:
             output = HISTORIC_CONTAINER if self.mode == 'competing-workload' else ''
         elif args[:2] == ['ps', '-aq']:
-            output = '\n'.join(sorted(self.containers - {HISTORIC_CONTAINER} if labelled else self.containers))
+            output = '\n'.join(sorted(self.containers & self.labelled_containers if labelled else self.containers))
         elif args[:2] == ['network', 'ls']:
-            output = '\n'.join(sorted(self.networks - {HISTORIC_NETWORK} if labelled else self.networks))
+            output = '\n'.join(sorted(self.networks & self.labelled_networks if labelled else self.networks))
         elif args[:2] == ['network', 'create']:
             self.session = args[args.index('--label') + 1].split('=', 1)[1]
             self.networks.add(NID)
@@ -231,14 +233,14 @@ class FakeSystem:
             if nid not in self.networks:
                 code, error = 1, 'network ' + nid + ' not found'
             else:
-                output = json.dumps({'Id': nid, 'Session': self.session, 'Case': 'default-apache',
-                    'Containers': {CID: {}} if CID in self.containers else {}})
+                output = json.dumps({'Id': nid, 'Session': self.session if nid == NID else 'unrelated', 'Case': 'default-apache',
+                    'Containers': {CID: {}} if nid == NID and CID in self.containers else {}})
         elif args[:3] == ['inspect', '--type', 'container']:
             cid = args[3]
             if cid not in self.containers:
                 code, error = 1, 'No such container: ' + cid
             else:
-                output = json.dumps({'Id': cid, 'Image': IMAGE, 'Session': self.session if self.mode != 'foreign-label' else 'foreign',
+                output = json.dumps({'Id': cid, 'Image': IMAGE, 'Session': self.session if cid == CID and self.mode != 'foreign-label' else 'foreign',
                     'Case': 'default-apache', 'Networks': {'owned': {'NetworkID': NID if self.mode != 'foreign-network' else HISTORIC_NETWORK,
                         'Aliases': ['kafka-lifecycle']}}, 'NetworkMode': NID, 'Binds': [], 'Running': False, 'Status': 'exited'})
         elif args[:2] == ['rm', '--force']:
@@ -261,7 +263,7 @@ class LifecycleSupervisorTest(unittest.TestCase):
     def setUp(self):
         self.temporary = tempfile.TemporaryDirectory()
         self.addCleanup(self.temporary.cleanup)
-        self.root = Path(self.temporary.name)
+        self.root = Path(self.temporary.name).resolve()
         self.java = self.root / 'java'; self.java.write_bytes(b'fake-java')
         self.classes = self.root / 'classes'; self.classes.mkdir()
         (self.classes / 'Probe.class').write_bytes(b'fake-class')
@@ -563,6 +565,94 @@ class LifecycleSupervisorTest(unittest.TestCase):
         self.assertNotEqual(first['receipt'], second['receipt'])
         self.assertEqual(original, (self.args.output / 'completed.json').read_bytes())
         self.assertEqual({HISTORIC_NETWORK}, system.networks)
+
+    def test_reconciliation_current_preserves_unrelated_additions_and_original_evidence(self):
+        _, system = self.run_probe('cleanup-failure')
+        original = {str(path.relative_to(self.args.output)): path.read_bytes()
+            for path in self.args.output.rglob('*') if path.is_file()}
+        system.owner_alive = False; system.mode = 'success'
+        # Model an interrupted fixture that left both positively identifiable resources.
+        system.containers.add(CID)
+        system.containers.add(OTHER_CONTAINER); system.networks.add(OTHER_NETWORK)
+        first = probe.reconcile(self.args.output, system)
+        second = probe.reconcile(self.args.output, system)
+        self.assertTrue(first['reconciled'], first)
+        self.assertTrue(second['reconciled'], second)
+        self.assertEqual({HISTORIC_CONTAINER, OTHER_CONTAINER}, system.containers)
+        self.assertEqual({HISTORIC_NETWORK, OTHER_NETWORK}, system.networks)
+        self.assertEqual([CID, NID], system.deleted)
+        output = Path(first['receipt']).parent
+        before = probe.receipt(output / 'reconciliation-preflight.json')
+        self.assertEqual(sorted([HISTORIC_CONTAINER, OTHER_CONTAINER, CID]), before['containers'])
+        self.assertEqual(sorted([HISTORIC_NETWORK, OTHER_NETWORK, NID]), before['networks'])
+        expected = probe.receipt(output / 'preservation-expected.json')
+        self.assertEqual(probe.receipt(output / 'postflight.json'), expected)
+        self.assertEqual(sorted([HISTORIC_CONTAINER, OTHER_CONTAINER]), expected['containers'])
+        self.assertEqual(sorted([HISTORIC_NETWORK, OTHER_NETWORK]), expected['networks'])
+        for name, content in original.items():
+            self.assertEqual(content, (self.args.output / name).read_bytes(), name)
+
+    def test_reconciliation_current_accepts_already_clean_session_with_unrelated_additions(self):
+        _, system = self.run_probe()
+        system.owner_alive = False
+        system.containers.add(OTHER_CONTAINER); system.networks.add(OTHER_NETWORK)
+        deleted_before = list(system.deleted)
+        result = probe.reconcile(self.args.output, system)
+        self.assertTrue(result['reconciled'], result)
+        self.assertEqual(deleted_before, system.deleted)
+
+    def test_reconciliation_current_rejects_inventory_drift_during_cleanup(self):
+        for change in ('addition', 'removal'):
+            with self.subTest(change=change):
+                self.args.output = self.root / change
+                _, system = self.run_probe('cleanup-failure')
+                system.owner_alive = False; system.mode = 'success'
+                if change == 'removal': system.containers.add(OTHER_CONTAINER)
+                original_run = system.run
+                def mutate_during_removal(argv, **kwargs):
+                    result = original_run(argv, **kwargs)
+                    if argv[3:5] == ['network', 'rm']:
+                        if change == 'addition': system.containers.add(OTHER_CONTAINER)
+                        else: system.containers.discard(OTHER_CONTAINER)
+                    return result
+                system.run = mutate_during_removal
+                result = probe.reconcile(self.args.output, system)
+                self.assertFalse(result['reconciled'], result)
+
+    def test_reconciliation_current_never_deletes_historical_id_with_matching_labels(self):
+        _, system = self.run_probe('cleanup-failure')
+        system.owner_alive = False; system.mode = 'success'
+        system.labelled_containers.add(HISTORIC_CONTAINER)
+        result = probe.reconcile(self.args.output, system)
+        self.assertFalse(result['reconciled'])
+        self.assertNotIn(HISTORIC_CONTAINER, system.deleted)
+        self.assertIn(HISTORIC_CONTAINER, system.containers)
+        self.assertTrue(any('Protected or invalid container ID' in error for error in result['cleanupErrors']))
+        self.assertFalse(any(HISTORIC_CONTAINER in argv and argv[3:4] in (['inspect'], ['rm'])
+            for argv, _ in system.calls))
+
+    def test_reconciliation_current_never_subtracts_unproven_foreign_resource(self):
+        _, system = self.run_probe('cleanup-failure')
+        system.owner_alive = False; system.mode = 'success'
+        system.containers.add(OTHER_CONTAINER)
+        system.labelled_containers.add(OTHER_CONTAINER)
+        result = probe.reconcile(self.args.output, system)
+        self.assertFalse(result['reconciled'])
+        self.assertNotIn(OTHER_CONTAINER, system.deleted)
+        self.assertNotIn(OTHER_CONTAINER, result['ownedContainerIds'])
+
+    def test_reconciliation_current_rejects_malformed_snapshot_before_deletion(self):
+        _, system = self.run_probe('cleanup-failure')
+        system.owner_alive = False; system.mode = 'success'
+        original_run = system.run
+        def malformed_inventory(argv, **kwargs):
+            if argv[3:5] == ['ps', '-aq'] and '--filter' not in argv:
+                return subprocess.CompletedProcess(argv, 0, 'malformed-id', '')
+            return original_run(argv, **kwargs)
+        system.run = malformed_inventory
+        result = probe.reconcile(self.args.output, system)
+        self.assertFalse(result['reconciled'])
+        self.assertEqual([], system.deleted)
 
     def test_reconciliation_refuses_active_supervisor_without_docker(self):
         _, system = self.run_probe('cleanup-failure')

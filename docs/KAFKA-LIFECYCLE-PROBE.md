@@ -232,6 +232,14 @@ cannot establish ownership because IDs can be reused. Recovery uses Linux
 process-start ticks plus boot identity, or Darwin kernel process-start time,
 and refuses unavailable identity or a surviving process-group member.
 
+Historical preflight IDs remain deletion exclusions. After process quiescence,
+reconciliation records a fresh Docker inventory before resource deletion and
+checks preservation against that snapshot, excluding only positively identified
+owned resources. Unrelated stopped containers or networks added since the original
+probe are preserved and do not prevent recovery. Unexplained inventory changes
+during reconciliation still fail its preservation check; ordinary live probes
+continue to require their original preflight inventory after cleanup.
+
 Each reconciliation writes separate receipts and preserves all original evidence
 and the original verdict. Repeated cleanup of already absent owned resources may
 succeed; it cannot retroactively pass the test. Older receipts that lack sufficient
