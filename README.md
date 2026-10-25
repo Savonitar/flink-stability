@@ -30,6 +30,9 @@ broker images, image-supplied connectors and rebuilt workloads use the
 [custom runtime subject contract](docs/CUSTOM-RUNTIME-SUBJECTS.md); acceptance of
 those declarations does not claim live support for an untested build.
 
+For contributor and coding-agent guidance, see [AGENTS.md](AGENTS.md). It includes
+the module map, focused checks and rules for preserving correctness evidence.
+
 ## Execution boundary
 
 The supported path is:
@@ -131,6 +134,10 @@ Build and test every module, including the thin workload JAR:
 ```bash
 mvn clean install
 ```
+
+If this checkout contains experiment evidence you need to keep, use `mvn install`
+instead. Root `mvn clean` also removes `logs/`, `cli/logs/`, `checkpoints/` and
+`.flink-stability/`; preserve those files before a clean build.
 
 See [validation and evidence](docs/VALIDATION.md) for regression coverage,
 optional container runs, and the no-match control. Unit tests alone do not show that
