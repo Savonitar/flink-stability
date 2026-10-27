@@ -129,7 +129,8 @@ public record FlinkRuntimeIdentity(Outcome outcome, String detail, String reason
         }
         PhaseExecutionEvidence phase = phases.orElseThrow();
         List<PhaseExecutionEvidence.StepEvidence> restartSteps = phase.steps().stream()
-                .filter(step -> step.kind() == PhaseExecutionEvidence.StepKind.RESTART_TASKMANAGER
+                .filter(step -> (step.kind() == PhaseExecutionEvidence.StepKind.RESTART_TASKMANAGER
+                        || step.kind() == PhaseExecutionEvidence.StepKind.CHECKPOINT_STORAGE_FAULT)
                         && step.status() == PhaseExecutionEvidence.StepStatus.SUCCEEDED)
                 .toList();
         if (restartSteps.size() != phase.taskManagerRestarts().size()) {
@@ -293,14 +294,16 @@ public record FlinkRuntimeIdentity(Outcome outcome, String detail, String reason
         for (PhaseExecutionEvidence.StepEvidence step : phase.steps()) {
             if (step.status() != PhaseExecutionEvidence.StepStatus.SUCCEEDED
                     || (step.kind() != PhaseExecutionEvidence.StepKind.KILL_TASKMANAGER
-                    && step.kind() != PhaseExecutionEvidence.StepKind.RESTART_TASKMANAGER)) {
+                    && step.kind() != PhaseExecutionEvidence.StepKind.RESTART_TASKMANAGER
+                    && step.kind() != PhaseExecutionEvidence.StepKind.CHECKPOINT_STORAGE_FAULT)) {
                 continue;
             }
             StepIdentity location = new StepIdentity(step.path(), step.loopIterations());
             if (!locations.add(location)) {
                 return false;
             }
-            if (step.kind() == PhaseExecutionEvidence.StepKind.KILL_TASKMANAGER) {
+            if (step.kind() == PhaseExecutionEvidence.StepKind.KILL_TASKMANAGER
+                    || step.kind() == PhaseExecutionEvidence.StepKind.CHECKPOINT_STORAGE_FAULT) {
                 if (killIndex >= phase.taskManagerKills().size()) {
                     return false;
                 }
@@ -309,14 +312,18 @@ public record FlinkRuntimeIdentity(Outcome outcome, String detail, String reason
                         || unhealed.putIfAbsent(kill.target(), kill) != null) {
                     return false;
                 }
-            } else {
+            }
+            if (step.kind() == PhaseExecutionEvidence.StepKind.RESTART_TASKMANAGER
+                    || step.kind() == PhaseExecutionEvidence.StepKind.CHECKPOINT_STORAGE_FAULT) {
                 if (restartIndex >= phase.taskManagerRestarts().size()) {
                     return false;
                 }
                 var restart = phase.taskManagerRestarts().get(restartIndex++);
                 var kill = unhealed.remove(restart.target());
                 if (!location.equals(new StepIdentity(restart.path(), restart.loopIterations()))
-                        || kill == null || !kill.identity().equals(restart.previousIdentity())) {
+                        || kill == null || !kill.identity().equals(restart.previousIdentity())
+                        || (step.kind() == PhaseExecutionEvidence.StepKind.CHECKPOINT_STORAGE_FAULT
+                        && !location.equals(new StepIdentity(kill.path(), kill.loopIterations())))) {
                     return false;
                 }
             }

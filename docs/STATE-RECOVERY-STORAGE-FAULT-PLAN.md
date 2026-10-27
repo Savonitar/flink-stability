@@ -23,7 +23,16 @@ gate passed the retained twelve-attempt matrix below. PR 3's isolated
 qualified on Docker Desktop `linux/arm64` on 2026-10-27: all seven standalone
 probe cases passed, including create/write EIO and explicit healing. Native
 Linux qualification is separate. PR 4 integrated Flink checkpoint-storage faults
-remain unimplemented.
+are implemented and [verified with Docker Desktop pilots](CHECKPOINT-STORAGE-FAULTS.md):
+healthy control PASS, EIO/replacement with correct state PASS, and reset-state
+mutant raw state-mismatch FAIL with all 30,000 IDs intact. Fault, physical
+replacement and restoration evidence are confirmed in both recovery pilots.
+The report preserves the earlier failed attempts and the producer-fencing
+component events. PR 5's [fixed twelve-attempt matrix](CHECKPOINT-STORAGE-QUALIFICATION.md)
+is now qualified on Docker Desktop `linux/arm64`: nine raw PASS results and three
+state-mismatch FAIL mutants, zero ID defects, no retries or missing windows.
+JSON and Markdown reports reproduce byte-for-byte. All 120 observed native EIO
+operations were `create`; the 18 producer-fenced component events remain visible.
 
 The delivery order is **state-dependent workload and independent oracle → restore
 calibration → FUSE prototype → integrated checkpoint-storage experiment**. Each
@@ -318,6 +327,10 @@ adapter into Flink provisioning.
 
 ## PR 4 — Typed storage control and checkpoint-failure orchestration
 
+Implemented, with the contract, commands, offline checks and retained pilot
+results in the [checkpoint-storage guide](CHECKPOINT-STORAGE-FAULTS.md).
+The remaining text records this package's design and acceptance boundaries.
+
 Add `StorageFaultControl` targets/receipts in `runtime-api`; provisioning,
 mount/helper lifecycle and cleanup in `testcontainers`; and the bounded phase
 state machine plus REST checkpoint correlation in `core`.
@@ -364,6 +377,10 @@ matching real failed operation; a synthetic probe failure does not count.
 4. **Keep the fault armed.** Kill the sole TaskManager, confirm physical death
    and absence of active data-processing tasks, and verify that no checkpoint
    newer than N completed. A newer completion makes this attempt a window miss.
+   Checkpoints triggered while the JobManager detects the dead worker can fail;
+   account for each retained failed ID, trigger timestamp and exact count delta,
+   retaining the originally correlated failure and rejecting unfinished or
+   missing entries. Wait for pending cached statistics within the same budget.
 5. Disarm surviving instances; a deliberately stopped instance is accounted for
    by its confirmed death. Verify healthy storage, then recreate the TaskManager
    with a freshly verified healthy FUSE instance.
@@ -392,6 +409,15 @@ cover every incarnation. Missing fault evidence prevents PASS without erasing
 an independently observed data/state FAIL or any `verification.*` failure.
 
 ## PR 5 — Live qualification and reproducible evidence
+
+Implemented in the [qualification recipe](../calibration/checkpoint-storage/README.md):
+offline artifact preparation, frozen direct-Java execution, four preflight
+validations, an immutable twelve-attempt allocation, independent raw-evidence
+checker and deterministic JSON/Markdown reporting. The
+[2026-10-27 retained matrix](CHECKPOINT-STORAGE-QUALIFICATION.md) confirmed three
+results per cell on Docker Desktop `linux/arm64`. The scope remains checkpoint
+create EIO for the observed native fault operations; write-only, fsync and
+permanent disk loss require separate experiments.
 
 Use the same FUSE configuration, externalization settings, workload parameters,
 checkpoint tolerance and artifact set across the appropriate controls:

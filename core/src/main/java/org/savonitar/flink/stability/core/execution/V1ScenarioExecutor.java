@@ -217,7 +217,7 @@ public final class V1ScenarioExecutor {
         FlinkRuntimeIdentity.ExpectedTarget expectedRuntime = new FlinkRuntimeIdentity.ExpectedTarget(
                 plan.flink().expectedImageId(), plan.flink().expectedComponents(),
                 plan.flink().expectedRuntimeJar(), plan.flink().declaredLine(),
-                Optional.of(plan.flink().imageReference()), plan.flink().config());
+                Optional.of(plan.flink().imageReference()), prepared.flinkRuntimeTarget().effectiveConfig());
         FlinkHaEvidence.Expected expectedHa = FlinkHaEvidence.Expected.from(
                 plan.phases(), plan.flink().highAvailability().isPresent(), plan.flink().tokenProvider().isPresent(),
                 plan.flink().taskmanagers()).withTokenProof(plan.flink().tokenProvider()
@@ -286,6 +286,12 @@ public final class V1ScenarioExecutor {
                     input.stoppingOffsets(),
                     context.attemptOrdinal(),
                     context.attemptNonce8());
+            if (plan.job().checkpointing().fuse().isPresent()) {
+                var storage = runtime.storageSnapshot(Duration.ofSeconds(10));
+                var isolated = new java.util.TreeMap<>(configuration);
+                isolated.put("execution.checkpointing.dir", CheckpointStorageFault.verifiedCheckpointUri(storage));
+                configuration = java.util.Collections.unmodifiableMap(isolated);
+            }
             var initialSubmission = new FlinkJobSubmission(
                     uploadedJarId,
                     plan.job().parallelism(),
@@ -390,6 +396,10 @@ public final class V1ScenarioExecutor {
                 status = V1ScenarioExecutionResult.Status.INCONCLUSIVE;
                 reason = "packet.fault.effect-unconfirmed";
                 message = "The terminal oracle passed, but packet identity/counters/healing or running-job evidence is unconfirmed";
+            } else if (phases.storageFaults().stream().anyMatch(operation -> !operation.confirmed())) {
+                status = V1ScenarioExecutionResult.Status.INCONCLUSIVE;
+                reason = CheckpointStorageFault.UNCONFIRMED;
+                message = "The terminal oracle passed, but checkpoint storage fault/replacement evidence is unconfirmed";
             } else if (phases.brokerOperations().stream().anyMatch(operation -> !operation.raw().confirmed())) {
                 status = V1ScenarioExecutionResult.Status.INCONCLUSIVE;
                 reason = "broker.operation.effect-unconfirmed";
@@ -544,6 +554,9 @@ public final class V1ScenarioExecutor {
         }
 
         result = result.withFlinkRestErrors(flink == null ? List.of() : flink.restErrors());
+        if (plan.job().checkpointing().fuse().isPresent()) {
+            result = result.withCheckpointStorage(CheckpointStorageFault.finalCapture(runtime));
+        }
         if (plan.job().workloadConfiguration().behavior().isPresent()) {
             result = result.withStateRecovery(StateRecoveryReport.collect(prepared,
                     job == null ? "unsubmitted" : job.jobId(), result, runtime, stateRecoveryGate));
@@ -880,7 +893,8 @@ public final class V1ScenarioExecutor {
             }
         }
         return new PhaseExecutionEvidence(phases.steps(), phases.taskManagerKills(), completed,
-                phases.taskManagerRestarts(), phases.leaderFaults(), phases.brokerOperations(), phases.packetFaults(), phases.savepointRestores());
+                phases.taskManagerRestarts(), phases.leaderFaults(), phases.brokerOperations(), phases.packetFaults(),
+                phases.savepointRestores(), phases.storageFaults(), phases.checkpointStorage());
     }
 
     /** Starts the plan's Kafka proxy, if it has one, and returns how to fault through it. */

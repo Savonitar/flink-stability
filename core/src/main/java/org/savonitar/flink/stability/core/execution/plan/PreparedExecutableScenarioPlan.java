@@ -61,6 +61,14 @@ public final class PreparedExecutableScenarioPlan {
         if (!flinkRuntimeTarget.expectedRuntimeJar().equals(executablePlan.flink().expectedRuntimeJar())) {
             throw new IllegalArgumentException("Runtime JAR differs from executable plan");
         }
+        if (flinkRuntimeTarget.checkpointStorage().isPresent() != executablePlan.job().checkpointing().fuse().isPresent())
+            throw new IllegalArgumentException("Runtime checkpoint storage differs from executable plan");
+        executablePlan.job().checkpointing().fuse().ifPresent(expected -> {
+            var actual = flinkRuntimeTarget.checkpointStorage().orElseThrow();
+            if (!expected.manifestSha256().equals(actual.manifestSha256())
+                    || !expected.imageId().equals(actual.imageId()) || !expected.platform().equals(actual.platform()))
+                throw new IllegalArgumentException("Runtime helper identity differs from executable plan");
+        });
     }
 
     public PreparedScenarioPlan preparedScenarioPlan() {

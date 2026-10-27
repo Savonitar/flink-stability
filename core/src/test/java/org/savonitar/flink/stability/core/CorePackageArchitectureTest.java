@@ -27,8 +27,8 @@ class CorePackageArchitectureTest {
     private static final Map<Layer, Integer> EXPECTED_COUNTS = Map.of(
             Layer.DOCUMENT, 13,
             Layer.RESOLUTION, 29,
-            Layer.ARTIFACT, 33,
-            Layer.EXECUTION_PLAN, 16);
+            Layer.ARTIFACT, 34,
+            Layer.EXECUTION_PLAN, 17);
 
     @Test
     void preservesThePreExecutionPackageBoundaries() {

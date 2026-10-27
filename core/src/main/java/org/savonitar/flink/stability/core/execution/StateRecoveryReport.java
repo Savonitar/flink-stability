@@ -94,7 +94,8 @@ public record StateRecoveryReport(String jobId, String workloadSha256, int keyCo
     private static int countKills(List<ExecutableScenarioPlan.Step> steps) {
         int count = 0;
         for (var step : steps) {
-            if (step instanceof ExecutableScenarioPlan.KillTaskManager) count++;
+            if (step instanceof ExecutableScenarioPlan.KillTaskManager
+                    || step instanceof ExecutableScenarioPlan.CheckpointStorageFault) count++;
             else if (step instanceof ExecutableScenarioPlan.Loop loop) count += loop.times() * countKills(loop.steps());
         }
         return count;

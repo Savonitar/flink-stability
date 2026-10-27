@@ -1049,12 +1049,29 @@
             }
           ]
         },
+        "small_file_threshold": { "type": "integer", "const": 0 },
+        "max_concurrent": { "type": "integer", "const": 1 },
+        "tolerable_failures": { "type": "integer", "minimum": 1, "maximum": 10 },
         "storage": {
           "$ref": "#/$defs/checkpointStorage",
           "default": {
             "type": "jobmanager"
           }
         }
+      }
+    },
+    "fuseCheckpointStorage": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["bundle", "manifest_sha256", "image_id", "platform"],
+      "properties": {
+        "bundle": { "type": "string", "minLength": 1, "maxLength": 1024 },
+        "manifest_sha256": { "oneOf": [
+          { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+          { "$ref": "#/$defs/templatedString" }
+        ] },
+        "image_id": { "type": "string", "pattern": "^sha256:[0-9a-f]{64}$" },
+        "platform": { "enum": ["linux/arm64"] }
       }
     },
     "checkpointStorage": {
@@ -1076,7 +1093,7 @@
         },
         {
           "type": "object",
-          "description": "Harness-managed filesystem storage; the runner generates file:/flink/checkpoints/attempt-<ordinal>-<nonce>/<job-alias> and no public path is accepted.",
+          "description": "Harness-managed filesystem storage; the runner generates the attempt/job URI, or the isolated FUSE URI when explicitly selected. No public checkpoint path is accepted.",
           "additionalProperties": false,
           "required": [
             "type"
@@ -1087,7 +1104,8 @@
               "enum": [
                 "filesystem"
               ]
-            }
+            },
+            "fuse": { "$ref": "#/$defs/fuseCheckpointStorage" }
           }
         },
         {
@@ -1388,6 +1406,7 @@
         { "$ref": "#/$defs/brokerFaultStep" },
         { "$ref": "#/$defs/packetFaultStep" },
         { "$ref": "#/$defs/savepointRestoreStep" },
+        { "$ref": "#/$defs/checkpointStorageFaultStep" },
         {
           "$ref": "#/$defs/checkpointStep"
         },
@@ -1404,6 +1423,23 @@
           "$ref": "#/$defs/validateStep"
         }
       ]
+    },
+    "checkpointStorageFaultStep": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["checkpoint_storage_fault"],
+      "properties": {
+        "checkpoint_storage_fault": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["job", "timeout", "lease"],
+          "properties": {
+            "job": { "$ref": "#/$defs/kebabName" },
+            "timeout": { "$ref": "#/$defs/durationOrTemplate" },
+            "lease": { "$ref": "#/$defs/durationOrTemplate" }
+          }
+        }
+      }
     },
     "savepointRestoreStep": {
       "type": "object",

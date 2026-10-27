@@ -190,6 +190,17 @@ public final class ExecutablePhaseExecutor {
             } else if (step instanceof ExecutableScenarioPlan.RestartTaskManager restart) {
                 restartTaskManager(
                         phaseIndex, phaseName, path, loopIterations, restart, evidence);
+            } else if (step instanceof ExecutableScenarioPlan.CheckpointStorageFault storage) {
+                var observed = new CheckpointStorageFault(flink, runtime,
+                        stateRecoveryGate == null ? null : stateRecoveryGate::awaitReady, nanoTime, sleeper)
+                        .execute(path, loopIterations, job, storage);
+                evidence.storageFaults.add(observed);
+                if (observed.kill() != null) evidence.kills.add(observed.kill());
+                if (observed.restart() != null) evidence.restarts.add(observed.restart());
+                evidence.stopFurtherSteps |= !observed.confirmed();
+                succeeded(evidence, phaseIndex, phaseName, path, loopIterations,
+                        PhaseExecutionEvidence.StepKind.CHECKPOINT_STORAGE_FAULT,
+                        "effectConfirmed=" + observed.confirmed());
             } else if (step instanceof ExecutableScenarioPlan.SavepointRestore restore) {
                 var observation = SavepointLifecycle.execute(path, flink, job, restoreSubmission, savepointDirectory, restore, sleeper, nanoTime);
                 evidence.savepoints.add(observation);
@@ -902,6 +913,7 @@ public final class ExecutablePhaseExecutor {
         private final List<PhaseExecutionEvidence.BrokerOperation> brokers = new ArrayList<>();
         private final List<PhaseExecutionEvidence.PacketFault> packets = new ArrayList<>();
         private final List<SavepointLifecycle.Evidence> savepoints = new ArrayList<>();
+        private final List<CheckpointStorageFault.Evidence> storageFaults = new ArrayList<>();
         private final List<org.savonitar.flink.stability.runtime.api.KafkaLogCapture.Partition> kafkaPartitions;
         private final int expectedTaskManagers;
         private final Optional<TokenScopeProof.Requirement> tokenProof;
@@ -926,7 +938,7 @@ public final class ExecutablePhaseExecutor {
         }
 
         private PhaseExecutionEvidence snapshot() {
-            return new PhaseExecutionEvidence(steps, kills, networkFaults, restarts, leaderFaults, brokers, packets, savepoints);
+            return new PhaseExecutionEvidence(steps, kills, networkFaults, restarts, leaderFaults, brokers, packets, savepoints, storageFaults);
         }
     }
 }

@@ -15,7 +15,7 @@ import java.util.OptionalLong;
 final class StateRecoveryEvidenceRenderer {
     private StateRecoveryEvidenceRenderer() {}
 
-    static JsonNode render(StateRecoveryReport report, ObjectMapper mapper) {
+    static JsonNode render(Object report, ObjectMapper mapper) {
         return mapper.valueToTree(value(report));
     }
 

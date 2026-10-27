@@ -78,8 +78,15 @@ def fixture(mode="correct", execution="uninterrupted", nonce="00000001"):
         restarts = [{"previousIdentity": target, "replacementIdentity": replacement}]
     status = "fail" if bad_state else "pass"
     reason = "validator.kafka.state-prefix.state-mismatch" if bad_state else "validator.kafka.state-prefix.match"
-    sample = {"partition": 0, "offset": 20, "id": 16, "expectedKey": 0, "actualKey": 0,
-              "expectedCount": 3, "actualCount": 1, "expectedSum": 27, "actualSum": 17}
+    samples = []
+    for event_id in range(16, 116):
+        key = event_id % 8
+        count = event_id // 8 + 1
+        expected_sum = count * (key + 1) + 8 * count * (count - 1) // 2
+        samples.append({"partition": 0, "offset": event_id + 4, "id": event_id,
+                        "expectedKey": key, "actualKey": key, "expectedCount": count,
+                        "actualCount": count - 2, "expectedSum": expected_sum,
+                        "actualSum": expected_sum - (10 + 2 * key)})
     component_ids = ["jm-a", "tm-a"] + (["tm-b"] if restart else [])
     components = [{"logicalName": "jobmanager-1" if value.startswith("jm") else "taskmanager-1", "runtimeId": value,
                    "imageReference": "flink:2.2.0", "imageId": "sha256:" + "d" * 64, "connectorArtifactsRef": 0}
@@ -92,7 +99,7 @@ def fixture(mode="correct", execution="uninterrupted", nonce="00000001"):
                       "snapshotComplete": True, "expected": 6000, "observed": 6000, "distinctExpected": 6000,
                       "missing": 0, "duplicates": 0, "unexpected": 0, "malformed": 0, "status": status, "reason": reason,
                       "statePrefix": {"keyCount": 8, "mismatches": 5984 if bad_state else 0,
-                                      "mismatchSamples": [sample] if bad_state else []}},
+                                      "mismatchSamples": samples if bad_state else []}},
                   "input": {"status": "complete", "complete": True, "reconciliationComplete": True,
                             "records": 6000, "observed": 6000, "partitions": 1},
                   "phases": {"completed": True, "failed": 0},

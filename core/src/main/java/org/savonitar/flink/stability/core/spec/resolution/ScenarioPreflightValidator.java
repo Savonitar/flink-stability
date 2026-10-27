@@ -726,6 +726,9 @@ final class ScenarioPreflightValidator {
                         networkFault,
                         stepPath + "/network_fault",
                         issues);
+            } else if (step.get("checkpoint_storage_fault") instanceof ObjectNode fault) {
+                validateJobReference(source, index, fault.path("job").textValue(),
+                        stepPath + "/checkpoint_storage_fault/job", "Checkpoint storage fault", issues);
             } else if (step.get("checkpoint") instanceof ObjectNode checkpoint) {
                 validateStateProducer(
                         source, index, "checkpoint", checkpoint,

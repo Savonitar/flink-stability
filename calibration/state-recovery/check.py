@@ -19,6 +19,10 @@ MISMATCH = "validator.kafka.state-prefix.state-mismatch"
 ENTRY_CLASSES = ("org.apache.flink.connector.kafka.source.KafkaSource",
                  "org.apache.flink.connector.kafka.sink.KafkaSink")
 MAX_FILE_BYTES = 64 * 1024 * 1024
+MAX_LONG = (1 << 63) - 1
+STATE_SAMPLE_FIELDS = {"partition", "offset", "id", "expectedKey", "actualKey", "expectedCount",
+                       "actualCount", "expectedSum", "actualSum"}
+KEY_PROGRESS_FIELDS = {"keyCount", "key", "inputId", "previousCount", "previousSum", "newCount", "newSum"}
 
 
 def require(condition, message):
@@ -28,6 +32,10 @@ def require(condition, message):
 
 def integer(value, minimum=0):
     return type(value) is int and value >= minimum
+
+
+def bounded_integer(value, minimum=0, maximum=MAX_LONG):
+    return integer(value, minimum) and value <= maximum
 
 
 def digest(data):
@@ -178,6 +186,10 @@ def check_recovery(proof, kill, restart, keys, total, mode, markers):
     expected_mode = MUTATION if mode == "mutant" else "correct"
     require(start["buildMode"] == expected_mode, "Restored workload build mode mismatch")
     rows = proof["restoredKeys"]
+    require(isinstance(rows, list) and all(isinstance(row, dict) and isinstance(row.get("keyProgress"), dict)
+            and set(row["keyProgress"]) == KEY_PROGRESS_FIELDS
+            and all(bounded_integer(value) for value in row["keyProgress"].values()) for row in rows),
+            "Malformed numeric restored-key receipt")
     require(len(rows) == keys and {row["keyProgress"]["key"] for row in rows} == set(range(keys)),
             "Missing or duplicate per-key restore receipts")
     for row in rows:
@@ -202,15 +214,51 @@ def check_recovery(proof, kill, restart, keys, total, mode, markers):
             and after_progress["progress"]["minimumObservedCount"] == min(row["keyProgress"]["newCount"] for row in rows),
             "Post-restore summary does not match the per-key transitions")
     resets = proof["mutantResets"]
-    require(len(resets) == (keys if mode == "mutant" else 0), "Mutant activation count mismatch")
+    require(isinstance(resets, list) and len(resets) == (keys if mode == "mutant" else 0)
+            and all(isinstance(row, dict) and isinstance(row.get("keyProgress"), dict)
+                    and set(row["keyProgress"]) == KEY_PROGRESS_FIELDS
+                    and all(bounded_integer(value) for value in row["keyProgress"].values()) for row in resets),
+            "Mutant activation count or numeric fields mismatch")
     if mode == "mutant":
         require({row["keyProgress"]["key"] for row in resets} == set(range(keys)), "Mutant did not activate once per key")
         by_key = {row["keyProgress"]["key"]: row for row in rows}
         for reset in resets:
             require(reset in markers and reset["event"] == "MUTANT_RESET"
                     and marker_identity(reset) == marker_identity(start) and reset["restoredCheckpointId"] == checkpoint
-                    and reset["keyProgress"] == by_key[reset["keyProgress"]["key"]]["keyProgress"],
+                    and isinstance(reset["keyProgress"], dict) and set(reset["keyProgress"]) == KEY_PROGRESS_FIELDS
+                    and all(bounded_integer(value) for value in reset["keyProgress"].values())
+                    and reset["keyProgress"] == by_key[reset["keyProgress"]["key"]]["keyProgress"]
+                    and by_key[reset["keyProgress"]["key"]]["lineNumber"] < reset["lineNumber"] < after_progress["lineNumber"],
                     "Mutant activation provenance does not match the restored transition")
+
+
+def check_mutant_state(state, proof, keys, total):
+    """Bind the fixed once-per-key reset mutant's entire corrupt suffix to its restored transitions."""
+    rows = {row["keyProgress"]["key"]: row["keyProgress"] for row in proof["restoredKeys"]}
+    saved = proof["readiness"]["completedSnapshots"][str(proof["restoredCheckpointId"])]["snapshot"]
+    first_id = saved["progress"]["maximumInputId"] + 1
+    corrupted = 0
+    for key, transition in rows.items():
+        # Single ordered input partition: the first restored record for each key must immediately
+        # follow that key's saved prefix. Skipping records cannot describe this pinned mutant.
+        require(transition["inputId"] == key + keys * transition["previousCount"],
+                "Mutant reset does not begin immediately after the saved key prefix")
+        corrupted += (total - 1 - transition["inputId"]) // keys + 1
+    require(state["mismatches"] == corrupted == total - first_id,
+            "State mismatch total differs from the restored mutant's corrupted suffix")
+    previous_offset = -1
+    for ordinal, sample in enumerate(state["mismatchSamples"]):
+        event_id, key = sample["id"], sample["expectedKey"]
+        transition = rows[key]
+        require(event_id == first_id + ordinal and sample["offset"] > previous_offset,
+                "State samples are not the first distinct ordered records of the corrupted suffix")
+        previous_offset = sample["offset"]
+        count = (event_id - transition["inputId"]) // keys + 1
+        aggregate = count * (transition["inputId"] + 1) + keys * count * (count - 1) // 2
+        require((sample["actualKey"], sample["actualCount"], sample["actualSum"]) == (key, count, aggregate)
+                and sample["expectedCount"] - sample["actualCount"] == transition["previousCount"]
+                and sample["expectedSum"] - sample["actualSum"] == transition["previousSum"],
+                "State sample differs from the proven reset mutant's per-key suffix arithmetic")
 
 
 def verify_marker_logs(directory, markers):
@@ -279,6 +327,7 @@ def audit_attempt(result, exit_code, cell, manifest):
     mode, execution = cell["mode"], cell["execution"]
     mutant_failure = mode == "mutant" and execution == "restart"
     keys, total = manifest["workload"]["keyCount"], manifest["workload"]["totalRecords"]
+    require(bounded_integer(keys, 1, 1024) and bounded_integer(total, 1), "Invalid workload dimensions")
     evidence = result["evidence"]
     diagnostics = result["diagnostics"]
     require(isinstance(diagnostics, list) and all(isinstance(item, str) for item in diagnostics),
@@ -291,21 +340,25 @@ def audit_attempt(result, exit_code, cell, manifest):
     oracle = evidence["terminalValidation"]
     require(oracle["type"] == "kafka.state-prefix" and oracle["mode"] == "exactly-once"
             and oracle["completed"] is True and oracle["snapshotComplete"] is True, "Terminal state snapshot is incomplete")
-    require(oracle["expected"] == oracle["observed"] == oracle["distinctExpected"] == total
+    require(all(bounded_integer(oracle[name]) and oracle[name] == total
+                for name in ("expected", "observed", "distinctExpected"))
             and all(type(oracle[name]) is int and oracle[name] == 0 for name in ("missing", "duplicates", "unexpected", "malformed")),
             "ID integrity is not exact")
     state = oracle["statePrefix"]
-    require(state["keyCount"] == keys and integer(state["mismatches"]), "State totals are missing")
+    require(bounded_integer(state["keyCount"], 1, 1024) and state["keyCount"] == keys
+            and bounded_integer(state["mismatches"], 0, total), "State totals are missing or out of bounds")
     samples = state["mismatchSamples"]
-    require(isinstance(samples, list) and len(samples) <= min(100, state["mismatches"]), "Invalid bounded state samples")
+    require(isinstance(samples, list) and len(samples) == min(100, state["mismatches"]),
+            "Incomplete or invalid bounded state samples")
     if mutant_failure:
         require(state["mismatches"] > 0 and samples and oracle["reason"] == MISMATCH
                 and oracle["status"] == "fail" and result["attempt"]["status"] == result["status"] == "fail"
                 and result["attempt"]["reason"] == MISMATCH and exit_code == 1
                 and result["expectation"]["matched"] is False, "Mutant recovery did not expose the required raw state failure")
         for sample in samples:
-            require(all(type(value) is int for value in sample.values()) and integer(sample["partition"])
-                    and integer(sample["offset"]), "Malformed numeric mismatch sample")
+            require(isinstance(sample, dict) and set(sample) == STATE_SAMPLE_FIELDS
+                    and all(bounded_integer(value) for value in sample.values()) and sample["partition"] == 0,
+                    "Malformed numeric mismatch sample")
             event_id = sample["id"]
             require(integer(event_id) and event_id < total, "Mismatch sample has unexpected ID")
             key, count = event_id % keys, event_id // keys + 1
@@ -357,6 +410,8 @@ def audit_attempt(result, exit_code, cell, manifest):
     if execution == "restart":
         require(len(kills) == len(restarts) == len(report["recoveries"]) == 1, "Expected one recovery operation")
         check_recovery(report["recoveries"][0], kills[0], restarts[0], keys, total, mode, markers)
+        if mutant_failure:
+            check_mutant_state(state, report["recoveries"][0], keys, total)
     else:
         require(kills == restarts == report["recoveries"] == [] and evidence["flinkJob"]["restoredCheckpoints"] == 0,
                 "Uninterrupted control contains a recovery")

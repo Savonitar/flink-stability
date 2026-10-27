@@ -111,9 +111,21 @@ confirmed all twelve fixed attempts: nine PASS controls and three raw mutant
 FAIL results, with zero ID defects throughout. The isolated
 [FUSE prototype](docs/CHECKPOINT-STORAGE-FUSE-PROTOTYPE.md) subsequently passed
 seven live checks on Docker Desktop `linux/arm64`, including write EIO and recovery
-after healing. It uses a standalone Java I/O probe; actual Flink checkpoint fault
-integration remains the next gate in the
-[implementation plan](docs/STATE-RECOVERY-STORAGE-FAULT-PLAN.md).
+after healing. The opt-in [Flink checkpoint-storage experiment](docs/CHECKPOINT-STORAGE-FAULTS.md)
+now binds real checkpoint-file EIO to a failed checkpoint, kills the sole
+TaskManager while the fault remains armed, heals storage and verifies state
+restoration in a fresh TaskManager. Docker Desktop `linux/arm64` pilots confirmed
+the healthy control and correct recovery with all 30,000 IDs and keyed values
+intact. The reset-state mutant retained complete IDs but produced 29,671 state
+mismatches. Earlier failed attempts and producer-fencing component events remain
+visible in the report. The subsequent
+[PR 5 qualification](docs/CHECKPOINT-STORAGE-QUALIFICATION.md) confirmed all twelve
+fixed attempts on Docker Desktop `linux/arm64`: nine raw PASS results and three
+state-mismatch FAIL mutants, with all 30,000 IDs intact in every attempt.
+The [frozen recipe](calibration/checkpoint-storage/README.md) retains the exact
+artifacts, raw evidence and byte-reproducible JSON/Markdown reports. All 120
+observed EIO operations were `create`; 18 producer-fenced component events remain
+visible. This does not qualify other disk failure paths or platforms.
 
 A requested Kafka transaction feature selection or `broker-default` observation
 must be confirmed by the broker before the workload starts. A declared version alone does not prove that the broker accepted

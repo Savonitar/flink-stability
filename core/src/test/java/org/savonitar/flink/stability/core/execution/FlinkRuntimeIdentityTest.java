@@ -288,6 +288,82 @@ class FlinkRuntimeIdentityTest {
     }
 
     @Test
+    void atomicCheckpointStorageStepCoversItsExactKillAndReplacement() {
+        var atomic = atomicStorageRestart();
+        assertEquals(FlinkRuntimeIdentity.Outcome.CONFIRMED,
+                evaluate(provisioning(2), Optional.of(IMAGE_ID), fence(2), atomic).outcome());
+        assertEquals(FlinkRuntimeIdentity.Outcome.UNCONFIRMED,
+                evaluate(provisioning(2), Optional.of(IMAGE_ID), fence(1), atomic).outcome());
+    }
+
+    @Test
+    void atomicCheckpointStorageStepRejectsMissingOrForeignKillAndRestartEvidence() {
+        var original = atomicStorageRestart();
+        var kill = original.taskManagerKills().getFirst();
+        var restart = original.taskManagerRestarts().getFirst();
+        var wrongLoop = List.of(new PhaseExecutionEvidence.LoopIteration("$/phases/0/steps/0", 2, 2));
+        var invalidKills = List.of(
+                new PhaseExecutionEvidence.TaskManagerKill("$/phases/0/steps/99", kill.loopIterations(),
+                        kill.target(), kill.jobBeforeKill(), kill.jobManagerTimeBeforeKill(),
+                        kill.jobManagerTimeAfterKill(), kill.identity()),
+                new PhaseExecutionEvidence.TaskManagerKill(kill.path(), wrongLoop,
+                        kill.target(), kill.jobBeforeKill(), kill.jobManagerTimeBeforeKill(),
+                        kill.jobManagerTimeAfterKill(), kill.identity()),
+                new PhaseExecutionEvidence.TaskManagerKill(kill.path(), kill.loopIterations(),
+                        "taskmanager-2", kill.jobBeforeKill(), kill.jobManagerTimeBeforeKill(),
+                        kill.jobManagerTimeAfterKill(), kill.identity()),
+                new PhaseExecutionEvidence.TaskManagerKill(kill.path(), kill.loopIterations(),
+                        kill.target(), kill.jobBeforeKill(), kill.jobManagerTimeBeforeKill(),
+                        kill.jobManagerTimeAfterKill(), Optional.of(new TaskManagerControl.Identity(
+                                "taskmanager-1", "tm-1", "foreign-resource"))));
+        var invalid = new ArrayList<PhaseExecutionEvidence>();
+        for (var badKill : invalidKills) invalid.add(new PhaseExecutionEvidence(original.steps(),
+                List.of(badKill), List.of(), original.taskManagerRestarts()));
+        for (var badRestart : List.of(
+                new PhaseExecutionEvidence.TaskManagerRestart("$/phases/0/steps/99", restart.loopIterations(),
+                        restart.target(), restart.previousIdentity(), restart.replacementIdentity()),
+                new PhaseExecutionEvidence.TaskManagerRestart(restart.path(), wrongLoop,
+                        restart.target(), restart.previousIdentity(), restart.replacementIdentity()),
+                new PhaseExecutionEvidence.TaskManagerRestart(restart.path(), restart.loopIterations(),
+                        "taskmanager-2", restart.previousIdentity(), restart.replacementIdentity()),
+                new PhaseExecutionEvidence.TaskManagerRestart(restart.path(), restart.loopIterations(),
+                        restart.target(), Optional.of(identity("taskmanager-1", "tm-unknown")), restart.replacementIdentity()),
+                new PhaseExecutionEvidence.TaskManagerRestart(restart.path(), restart.loopIterations(),
+                        restart.target(), restart.previousIdentity(), restart.previousIdentity()))) {
+            invalid.add(new PhaseExecutionEvidence(original.steps(), original.taskManagerKills(),
+                    List.of(), List.of(badRestart)));
+        }
+        invalid.add(new PhaseExecutionEvidence(original.steps(), List.of(), List.of(), original.taskManagerRestarts()));
+        invalid.add(new PhaseExecutionEvidence(original.steps(), original.taskManagerKills(), List.of(), List.of()));
+        invalid.add(new PhaseExecutionEvidence(original.steps(), List.of(kill, kill), List.of(), original.taskManagerRestarts()));
+        invalid.add(new PhaseExecutionEvidence(List.of(original.steps().getFirst(), original.steps().getFirst()),
+                List.of(kill, kill), List.of(), List.of(restart, restart)));
+        var step = original.steps().getFirst();
+        invalid.add(new PhaseExecutionEvidence(List.of(new PhaseExecutionEvidence.StepEvidence(step.phaseIndex(),
+                step.phaseName(), step.path(), step.loopIterations(), step.kind(),
+                PhaseExecutionEvidence.StepStatus.FAILED, "failed")), original.taskManagerKills(), List.of(),
+                original.taskManagerRestarts()));
+        for (var phases : invalid) {
+            assertEquals(FlinkRuntimeIdentity.Outcome.UNCONFIRMED,
+                    evaluate(provisioning(2), Optional.of(IMAGE_ID), fence(2), phases).outcome());
+        }
+    }
+
+    private static PhaseExecutionEvidence atomicStorageRestart() {
+        String path = "$/phases/0/steps/0";
+        var loops = List.of(new PhaseExecutionEvidence.LoopIteration("$/phases/0/steps/0", 1, 2));
+        var kill = new PhaseExecutionEvidence.TaskManagerKill(path, loops, "taskmanager-1",
+                new FlinkJobObservation.Attempt(Optional.empty(), Optional.of("not sampled")),
+                OptionalLong.empty(), OptionalLong.empty(), Optional.of(identity("taskmanager-1", "tm-1")));
+        var restart = new PhaseExecutionEvidence.TaskManagerRestart(path, loops, "taskmanager-1",
+                kill.identity(), Optional.of(identity("taskmanager-1", "tm-2")));
+        var step = new PhaseExecutionEvidence.StepEvidence(0, "storage", path, loops,
+                PhaseExecutionEvidence.StepKind.CHECKPOINT_STORAGE_FAULT,
+                PhaseExecutionEvidence.StepStatus.SUCCEEDED, "completed");
+        return new PhaseExecutionEvidence(List.of(step), List.of(kill), List.of(), List.of(restart));
+    }
+
+    @Test
     void absentPhasesCannotEstablishReplacementCoverage() {
         assertEquals(FlinkRuntimeIdentity.Outcome.UNCONFIRMED,
                 FlinkRuntimeIdentity.evaluate(expected(Optional.empty()), provisioning(1),

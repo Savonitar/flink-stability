@@ -51,6 +51,27 @@ final class VerifiedFlinkContainer extends GenericContainer<VerifiedFlinkContain
     private String tokenPluginContainerId;
     private FlinkSessionLog sessionLog;
     private final RetainedFlinkLog retainedLog;
+    private FuseCheckpointStorageRuntime storage;
+    private FuseCheckpointStorageRuntime.Mount storageMount;
+
+    void configureStorage(FuseCheckpointStorageRuntime storage, FuseCheckpointStorageRuntime.Mount mount) {
+        this.storage = storage; this.storageMount = mount;
+    }
+
+    void storageProcessDead(FlinkHaControl.ProcessState proof, ContainerOperationDeadline deadline) {
+        if (storage != null) storage.processDead(storageMount, proof, deadline);
+    }
+
+    void verifyStorageProcess() { if (storage != null) storage.verifyFlinkProcess(storageMount); }
+
+    private boolean literalConfiguration() { return !runtimeTarget.effectiveConfig().isEmpty(); }
+
+    private Map<String, String> requestedConfiguration() { return runtimeTarget.effectiveConfig(); }
+
+    @Override protected void containerIsStarting(com.github.dockerjava.api.command.InspectContainerResponse info) {
+        super.containerIsStarting(info);
+        if (storage != null) storage.start(storageMount);
+    }
 
     VerifiedFlinkContainer(
             DockerImageName image,
@@ -126,7 +147,7 @@ final class VerifiedFlinkContainer extends GenericContainer<VerifiedFlinkContain
 
     /** Opt-in image contract; no image-specific entrypoint is allowed to reinterpret values. */
     void useLiteralConfigurationLauncher(String role) {
-        if (runtimeTarget.config().isEmpty()) return;
+        if (!literalConfiguration()) return;
         configurationLauncher = FlinkProcessConfiguration.launcher(role);
         withCopyToContainer(Transferable.of(FlinkProcessConfiguration.launcherBytes(), READ_ONLY_FILE_MODE),
                 FlinkProcessConfiguration.LAUNCHER_PATH);
@@ -156,10 +177,14 @@ final class VerifiedFlinkContainer extends GenericContainer<VerifiedFlinkContain
         verifyRuntimeJarBeforeStart(containerId, this::readJarSha256);
         verifyCopiedBundle(runtimeTarget.connectorBundle());
         verifyImageConnectorsBeforeStart(containerId);
-        if (!runtimeTarget.config().isEmpty()) {
+        if (literalConfiguration()) {
             var config = getDockerClient().inspectContainerCmd(containerId).exec().getConfig();
-            verifyConfigurationLaunch(Arrays.asList(config.getEnv()), Arrays.asList(config.getEntrypoint()),
+            if (storage == null) verifyConfigurationLaunch(Arrays.asList(config.getEnv()), Arrays.asList(config.getEntrypoint()),
                     Arrays.asList(config.getCmd()));
+            else {
+                verifyStorageEnvironment(Arrays.asList(config.getEnv()));
+                storage.verifyCreated(storageMount);
+            }
             prepareProcessConfiguration(containerId, this::readConfiguration,
                     (path, bytes) -> copyFileToContainer(Transferable.of(bytes, READ_ONLY_FILE_MODE), path));
         }
@@ -170,8 +195,16 @@ final class VerifiedFlinkContainer extends GenericContainer<VerifiedFlinkContain
         }
     }
 
+    private void verifyStorageEnvironment(List<String> environment) {
+        for (String key : List.of("FLINK_HOME", "FLINK_CONF_DIR", "FLINK_PROPERTIES", "JOB_MANAGER_RPC_ADDRESS")) {
+            String expected = key + "=" + getEnvMap().get(key);
+            if (!environment.stream().filter(value -> value.startsWith(key + "=")).toList().equals(List.of(expected)))
+                throw new IllegalStateException("FUSE Flink launch environment differs at " + key);
+        }
+    }
+
     void verifyConfigurationLaunch(List<String> environment, List<String> entrypoint, List<String> command) {
-        if (runtimeTarget.config().isEmpty()) return;
+        if (!literalConfiguration()) return;
         String expected = "FLINK_PROPERTIES=" + getEnvMap().get("FLINK_PROPERTIES");
         List<String> actual = environment.stream()
                 .filter(value -> value.startsWith("FLINK_PROPERTIES=")).toList();
@@ -187,10 +220,10 @@ final class VerifiedFlinkContainer extends GenericContainer<VerifiedFlinkContain
         configurationContainerId = null;
         preparedConfiguration = null;
         observedConfig = Map.of();
-        if (runtimeTarget.config().isEmpty()) return;
+        if (!literalConfiguration()) return;
         if (configurationLauncher.isEmpty()) throw new IllegalStateException("No literal Flink configuration launcher");
         byte[] merged = FlinkProcessConfiguration.merge(reader.apply(FlinkProcessConfiguration.PATH),
-                getEnvMap().get("FLINK_PROPERTIES"), runtimeTarget.config(),
+                getEnvMap().get("FLINK_PROPERTIES"), requestedConfiguration(),
                 getEnvMap().get("JOB_MANAGER_RPC_ADDRESS"));
         writer.accept(FlinkProcessConfiguration.PATH, merged.clone());
         if (!Arrays.equals(merged, reader.apply(FlinkProcessConfiguration.PATH))) {
@@ -202,18 +235,18 @@ final class VerifiedFlinkContainer extends GenericContainer<VerifiedFlinkContain
 
     Optional<FlinkComponentProvisioningEvidence.EffectiveConfigurationEvidence> effectiveConfigurationEvidence(
             String containerId) {
-        if (runtimeTarget.config().isEmpty()) return Optional.empty();
+        if (!literalConfiguration()) return Optional.empty();
         return effectiveConfigurationEvidence(containerId, this::readConfiguration, getLogs());
     }
 
     Optional<FlinkComponentProvisioningEvidence.EffectiveConfigurationEvidence> effectiveConfigurationEvidence(
             String containerId, Function<String, byte[]> reader, String startupLog) {
-        if (runtimeTarget.config().isEmpty()) return Optional.empty();
+        if (!literalConfiguration()) return Optional.empty();
         if (!Objects.equals(configurationContainerId, containerId) || preparedConfiguration == null) {
             throw new IllegalStateException("Flink configuration has no stopped-container verification for " + containerId);
         }
         byte[] actual = reader.apply(FlinkProcessConfiguration.PATH);
-        observedConfig = FlinkProcessConfiguration.observe(actual, preparedConfiguration, runtimeTarget.config(), startupLog);
+        observedConfig = FlinkProcessConfiguration.observe(actual, preparedConfiguration, requestedConfiguration(), startupLog);
         return Optional.of(new FlinkComponentProvisioningEvidence.EffectiveConfigurationEvidence(
                 FlinkProcessConfiguration.PATH, Digests.sha256(preparedConfiguration), Digests.sha256(actual),
                 configurationLauncher, observedConfig));

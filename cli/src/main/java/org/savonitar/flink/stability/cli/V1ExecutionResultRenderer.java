@@ -436,6 +436,21 @@ final class V1ExecutionResultRenderer {
         });
         ObjectNode terminal = evidence.putObject("terminalValidation");
         result.stateRecovery().ifPresent(state -> evidence.set("stateRecovery", StateRecoveryEvidenceRenderer.render(state, JSON)));
+        result.phaseEvidence().ifPresent(phases -> {
+            phases.checkpointStorage().ifPresent(storage -> evidence.set("checkpointStorage",
+                    StateRecoveryEvidenceRenderer.render(storage, JSON)));
+            if (!phases.storageFaults().isEmpty()) {
+                ArrayNode faults = evidence.putArray("checkpointStorageFaults");
+                phases.storageFaults().forEach(fault -> {
+                    ObjectNode node = (ObjectNode) StateRecoveryEvidenceRenderer.render(fault, JSON);
+                    node.put("confirmed", fault.confirmed());
+                    node.put("finalCaptureConfirmed", phases.checkpointStorage()
+                            .map(storage -> org.savonitar.flink.stability.core.execution.CheckpointStorageFault.finalConfirmed(fault, storage))
+                            .orElse(false));
+                    faults.add(node);
+                });
+            }
+        });
         terminal.put("status", "not-run");
         terminal.put("completed", false);
         terminal.put("snapshotComplete", false);

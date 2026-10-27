@@ -371,6 +371,36 @@ class ScenarioVerdictTest {
         }
     }
 
+    @Test
+    void incompleteFinalStorageEvidenceDowngradesPassAndPreservesObservedDataFailure() {
+        var incomplete = new org.savonitar.flink.stability.runtime.api.StorageFaultControl.Snapshot(
+                "attempt", "storage", "job_test", "file:/flink/checkpoints/job_test", "a".repeat(64),
+                List.of(), List.of(), false, false, List.of("journal truncated"));
+        var passed = attempt(V1ScenarioExecutionResult.Status.PASS, "validator.kafka.id-set.match")
+                .withCheckpointStorage(incomplete);
+        assertEquals(V1ScenarioExecutionResult.Status.INCONCLUSIVE, passed.status());
+        assertEquals(CheckpointStorageFault.UNCONFIRMED, passed.reason());
+        assertFalse(ScenarioVerdict.of(ExpectedOutcome.pass(), passed).matched());
+        var failed = attempt(V1ScenarioExecutionResult.Status.FAIL, DUPLICATES).withCheckpointStorage(incomplete);
+        assertEquals(V1ScenarioExecutionResult.Status.FAIL, failed.status());
+        assertEquals(DUPLICATES, failed.reason());
+        assertEquals(ScenarioVerdict.Status.INCONCLUSIVE, ScenarioVerdict.of(EXPECT_DUPLICATES, failed).status());
+        assertEquals(CheckpointStorageFault.UNCONFIRMED, ScenarioVerdict.of(EXPECT_DUPLICATES, failed).reason());
+        assertEquals("journal truncated", failed.phaseEvidence().orElseThrow().checkpointStorage().orElseThrow().diagnostics().getFirst());
+    }
+
+    @Test
+    void verificationFailureIsNeverReplacedByMissingStorageEvidence() {
+        var incomplete = new org.savonitar.flink.stability.runtime.api.StorageFaultControl.Snapshot(
+                "attempt", "storage", "job_test", "file:/flink/checkpoints/job_test", "a".repeat(64),
+                List.of(), List.of(), false, false, List.of("capture failed"));
+        var failed = attempt(V1ScenarioExecutionResult.Status.FAIL, "verification.kafka.incomplete-after-timeout")
+                .withCheckpointStorage(incomplete);
+        assertEquals(V1ScenarioExecutionResult.Status.FAIL, failed.status());
+        assertEquals("verification.kafka.incomplete-after-timeout", failed.reason());
+        assertEquals(ScenarioVerdict.Status.FAIL, ScenarioVerdict.of(ExpectedOutcome.pass(), failed).status());
+    }
+
     private static V1ScenarioExecutionResult attempt(
             V1ScenarioExecutionResult.Status status,
             String reason) {

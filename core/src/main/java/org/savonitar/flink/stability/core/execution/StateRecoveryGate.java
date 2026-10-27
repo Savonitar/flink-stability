@@ -49,7 +49,11 @@ final class StateRecoveryGate {
     }
 
     Optional<StateRecoveryEvidence.Readiness> awaitReady(FlinkJobHandle job, String target) throws Exception {
-        var deadline = MonotonicDeadline.start(TIMEOUT, nanoTime);
+        return awaitReady(job, target, TIMEOUT);
+    }
+
+    Optional<StateRecoveryEvidence.Readiness> awaitReady(FlinkJobHandle job, String target, Duration budget) throws Exception {
+        var deadline = MonotonicDeadline.start(budget.compareTo(TIMEOUT) < 0 ? budget : TIMEOUT, nanoTime);
         StateRecoveryEvidence.Readiness latest = null;
         StateRecoveryEvidence.CommittedPrefix prefix = null;
         try {

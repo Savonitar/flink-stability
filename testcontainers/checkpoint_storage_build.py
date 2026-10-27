@@ -22,6 +22,7 @@ from urllib.parse import unquote, urlsplit
 REPO = Path(__file__).resolve().parents[1]
 NATIVE = Path('testcontainers/src/main/native/checkpoint-fuse')
 JAVA = Path('testcontainers/src/main/java/org/savonitar/flink/stability/testcontainers/storage/CheckpointStorageIoProbe.java')
+INSPECTOR = JAVA.with_name('CheckpointStateInspector.java')
 MAIN = 'org.savonitar.flink.stability.testcontainers.storage.CheckpointStorageIoProbe'
 NATIVE_SOURCES = ('core.c', 'core.h', 'jail.c', 'jail.h', 'checkpoint_fuse.c', 'selftest.c')
 IMAGE_ID = 'sha256:2e93ded2cb7bf1a50f71b663d5e3ea01420bcc4e549cbf666d05120f939713c7'
@@ -233,7 +234,7 @@ def freeze_sources(output, lock_path):
     frozen = output / 'source'
     frozen.mkdir()
     pairs = [(REPO / NATIVE / name, frozen / name) for name in NATIVE_SOURCES]
-    pairs += [(REPO / JAVA, frozen / JAVA.name), (lock_path, frozen / 'dependencies.json'),
+    pairs += [(REPO / JAVA, frozen / JAVA.name), (REPO / INSPECTOR, frozen / INSPECTOR.name), (lock_path, frozen / 'dependencies.json'),
               (Path(__file__), frozen / 'checkpoint_storage_build.py')]
     hashes = {}
     for source, target in pairs:
@@ -343,7 +344,7 @@ readelf -d /work/bundle/checkpoint-fuse-selftest > /work/receipts/selftest-dynam
         if not re.fullmatch(r'javac 21(?:\.[0-9A-Za-z.+_-]+)?', evidence['javac']):
             raise RuntimeError('Use JDK21 for the standalone Java probe build')
         command.run('compile-java', [str(java_tools['javac']), '--release', '17', '-encoding', 'UTF-8',
-                    '-classpath', str(classes), '-sourcepath', str(empty), '-d', str(classes), str(frozen / JAVA.name)])
+                    '-classpath', str(classes), '-sourcepath', str(empty), '-d', str(classes), str(frozen / JAVA.name), str(frozen / INSPECTOR.name)])
         command.run('package-java', [str(java_tools['jar']), '--create', '--file', str(output / 'bundle/probe.jar'),
                     '--main-class', MAIN, '--date=2026-01-01T00:00:00Z', '-C', str(classes), '.'])
         # Run native binaries with the pristine runtime, proving the builder's libc
