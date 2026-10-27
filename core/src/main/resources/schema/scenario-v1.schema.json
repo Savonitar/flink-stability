@@ -875,6 +875,9 @@
         "parallelism": {
           "$ref": "#/$defs/positiveIntegerOrTemplate"
         },
+        "behavior": {
+          "$ref": "#/$defs/keyedPrefixBehavior"
+        },
         "state_backend": {
           "$ref": "#/$defs/stateBackend",
           "default": "hashmap"
@@ -2657,10 +2660,27 @@
         }
       ]
     },
+    "keyedPrefixBehavior": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["type", "key_count"],
+      "properties": {
+        "type": {"const": "keyed-prefix-v1"},
+        "key_count": {
+          "oneOf": [
+            {"type": "integer", "minimum": 1, "maximum": 1024},
+            {"$ref": "#/$defs/templateString"}
+          ]
+        }
+      }
+    },
     "terminalValidation": {
       "oneOf": [
         {
           "$ref": "#/$defs/kafkaIdSetValidation"
+        },
+        {
+          "$ref": "#/$defs/kafkaStatePrefixValidation"
         },
         {
           "$ref": "#/$defs/kafkaNoHangingTransactionsValidation"
@@ -2675,6 +2695,23 @@
           "$ref": "#/$defs/customTerminalValidation"
         }
       ]
+    },
+    "kafkaStatePrefixValidation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["type", "job", "cluster", "topic", "expected"],
+      "properties": {
+        "type": {"const": "kafka.state-prefix"},
+        "job": {"$ref": "#/$defs/kebabName"},
+        "cluster": {"$ref": "#/$defs/kebabName"},
+        "topic": {"$ref": "#/$defs/kafkaNameOrTemplate"},
+        "expected": {"const": "input-manifest"},
+        "timeout": {
+          "$ref": "#/$defs/durationOrTemplate",
+          "description": "One absolute deadline covers discovery, the fixed fenced read_committed snapshot, strict decoding and state/ID comparison.",
+          "default": "2m"
+        }
+      }
     },
     "kafkaIdSetValidation": {
       "type": "object",

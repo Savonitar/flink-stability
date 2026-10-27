@@ -55,8 +55,8 @@ public final class ExecutableScenarioPlanCompiler {
     private static final String RESERVED_WORKLOAD_ARGUMENT_PREFIX =
             "--flink-stability.workload.";
     private static final String FORBIDDEN_BOOTSTRAP_OVERRIDE_ARGUMENT = "--bootstrapServers";
-    /** The only terminal oracle the first runner executes. */
     static final String KAFKA_ID_SET = "kafka.id-set";
+    static final String KAFKA_STATE_PREFIX = "kafka.state-prefix";
     private static final BigInteger LONG_MAX = BigInteger.valueOf(Long.MAX_VALUE);
     private static final BigInteger INT_MAX = BigInteger.valueOf(Integer.MAX_VALUE);
 
@@ -94,6 +94,7 @@ public final class ExecutableScenarioPlanCompiler {
         validateInvocation(source, document, issues);
         validateSetup(source, document, issues);
         validateWorkload(source, document, issues);
+        StatePrefixPlanCompiler.validate(source, document, issues);
         PhasePlanCompiler.validatePhases(source, document, issues);
         validateTerminalValidation(source, document, issues);
         ExpectationCompiler.validate(sourcePlan, issues);
@@ -123,7 +124,9 @@ public final class ExecutableScenarioPlanCompiler {
                 .filter(artifact -> artifact.role() == ArtifactRole.WORKLOAD_JOB)
                 .orElseThrow(() -> new IllegalStateException(
                         "Prepared plan has no workload artifact at " + jobPath));
-        validateWorkloadProtocol(preparedPlan, workloadArtifact, jobPath);
+        validateWorkloadProtocol(preparedPlan, workloadArtifact, jobPath,
+                executablePlan.job().workloadConfiguration().behavior().isPresent()
+                        ? Set.of(WorkloadProtocolArtifactValidator.KEYED_PREFIX_V1) : Set.of());
 
         PreparedConnectorBundle connectorBundle = connectorBundleBuilder.build(
                 preparedPlan,
@@ -459,20 +462,22 @@ public final class ExecutableScenarioPlanCompiler {
             return;
         }
         ObjectNode validator = (ObjectNode) validators.get(0);
-        IdSetModeCompiler.validate(source, document, issues);
-        if (!KAFKA_ID_SET.equals(validator.path("type").textValue())) {
+        if (KAFKA_ID_SET.equals(validator.path("type").textValue())) {
+            IdSetModeCompiler.validate(source, document, issues);
+        }
+        if (!Set.of(KAFKA_ID_SET, KAFKA_STATE_PREFIX).contains(validator.path("type").textValue())) {
             issues.add(issue(
                     source,
                     "runner.validation.type-unsupported",
                     "$/terminal_validations/0/type",
-                    "The first runner supports only terminal kafka.id-set validation"));
+                    "The runner supports terminal kafka.id-set or kafka.state-prefix validation"));
         }
         if (!"input-manifest".equals(validator.path("expected").textValue())) {
             issues.add(issue(
                     source,
                     "runner.validation.expected-unsupported",
                     "$/terminal_validations/0/expected",
-                    "kafka.id-set must compare against input-manifest"));
+                    "The terminal Kafka oracle must compare against input-manifest"));
         }
         if (validator.has("timeout")) {
             requireDuration(
@@ -571,7 +576,9 @@ public final class ExecutableScenarioPlanCompiler {
                         stateTtl,
                         watermarks,
                         identityPolicy,
-                        SinkCompiler.transactionTimeout(sinkNode));
+                        SinkCompiler.transactionTimeout(sinkNode),
+                        jobNode.has("behavior") ? Optional.of(new ExecutableScenarioPlan.KeyedPrefixBehavior(
+                                jobNode.at("/behavior/key_count").intValue())) : Optional.empty());
         ExecutableScenarioPlan.Checkpointing checkpointing =
                 new ExecutableScenarioPlan.Checkpointing(
                         parseDuration(jobNode.at("/checkpointing/interval").textValue()),
@@ -609,8 +616,13 @@ public final class ExecutableScenarioPlanCompiler {
         Duration terminalTimeout = validationNode.has("timeout")
                 ? parseDuration(validationNode.path("timeout").textValue())
                 : ExecutableScenarioPlan.DEFAULT_TERMINAL_VALIDATION_TIMEOUT;
-        ExecutableScenarioPlan.KafkaIdSetValidation validation =
-                new ExecutableScenarioPlan.KafkaIdSetValidation(
+        ExecutableScenarioPlan.TerminalValidationPlan validation =
+                KAFKA_STATE_PREFIX.equals(validationNode.path("type").asText())
+                ? new ExecutableScenarioPlan.KafkaStatePrefixValidation(
+                        validationNode.path("job").asText(), topicReference(validationNode),
+                        ExecutableScenarioPlan.ExpectedRecords.INPUT_MANIFEST, terminalTimeout,
+                        workloadConfiguration.behavior().orElseThrow().keyCount())
+                : new ExecutableScenarioPlan.KafkaIdSetValidation(
                         topicReference(validationNode),
                         ExecutableScenarioPlan.ExpectedRecords.INPUT_MANIFEST,
                         terminalTimeout, IdSetModeCompiler.mode(validationNode));
@@ -687,7 +699,8 @@ public final class ExecutableScenarioPlanCompiler {
     private static void validateWorkloadProtocol(
             PreparedScenarioPlan preparedPlan,
             ResolvedArtifact artifact,
-            String path) {
+            String path,
+            Set<String> requiredCapabilities) {
         Path jar = artifact.preparedPath();
         try {
             if (!Files.isRegularFile(jar, LinkOption.NOFOLLOW_LINKS) || !Files.isReadable(jar)) {
@@ -702,7 +715,7 @@ public final class ExecutableScenarioPlanCompiler {
                         "Prepared workload JAR changed after preparation; expected SHA-256 "
                                 + artifact.sha256() + ", actual " + actualSha256);
             }
-            WorkloadProtocolArtifactValidator.validate(jar);
+            WorkloadProtocolArtifactValidator.validate(jar, requiredCapabilities);
         } catch (SpecificationException exception) {
             throw exception;
         } catch (WorkloadProtocolArtifactValidator.ValidationException exception) {

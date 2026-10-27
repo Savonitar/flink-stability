@@ -217,6 +217,7 @@ final class ScenarioPreflightValidator {
                             sinkEndpoint.path("delivery_guarantee").textValue(),
                             optionalText(sinkEndpoint, "transactional_id_prefix"),
                             jobPath + "/sink"),
+                    job.path("behavior").path("type").asText(""),
                     jobPath);
             JobIndex earlier = jobs.putIfAbsent(alias, indexedJob);
             if (earlier != null) {
@@ -382,7 +383,7 @@ final class ScenarioPreflightValidator {
         boolean hasCustomValidator = index.terminalValidators().stream()
                 .anyMatch(validator -> validator.type().equals("custom"));
         boolean hasManifestValidator = index.terminalValidators().stream()
-                .anyMatch(validator -> validator.type().equals("kafka.id-set"));
+                .anyMatch(validator -> isManifestValidator(validator.type()));
 
         if (input != null && input.mode().equals("custom")) {
             if (!hasCustomValidator) {
@@ -398,7 +399,7 @@ final class ScenarioPreflightValidator {
                                     + validator.type() + "'")));
         } else if (input != null && !hasManifestValidator) {
             issues.add(issue(source, scope, "preflight.input.built-in-validator-required",
-                    input.path(), "Harness-owned input requires a kafka.id-set terminal validator"));
+                    input.path(), "Harness-owned input requires a kafka.id-set or kafka.state-prefix terminal validator"));
         }
     }
 
@@ -413,6 +414,17 @@ final class ScenarioPreflightValidator {
             validateValidatorReferences(
                     source, scope, index, validator, !customInput, issues);
         }
+        for (JobIndex job : index.jobs().values()) {
+            if (job.behavior().equals("keyed-prefix-v1")
+                    && index.terminalValidators().stream().noneMatch(validator ->
+                            validator.type().equals("kafka.state-prefix")
+                                    && job.alias().equals(validator.config().path("job").textValue()))) {
+                issues.add(issue(source, scope, "preflight.workload.state-validator-required",
+                        job.path() + "/behavior",
+                        "keyed-prefix-v1 requires a kafka.state-prefix terminal validator bound to job '"
+                                + job.alias() + "'"));
+            }
+        }
     }
 
     private static void validateValidatorReferences(
@@ -424,7 +436,7 @@ final class ScenarioPreflightValidator {
             List<Diagnostic> issues) {
         ObjectNode config = validator.config();
         switch (validator.type()) {
-            case "kafka.id-set", "kafka.record-count" -> validateTopicReference(
+            case "kafka.id-set", "kafka.state-prefix", "kafka.record-count" -> validateTopicReference(
                     source,
                     scope,
                     index,
@@ -464,12 +476,31 @@ final class ScenarioPreflightValidator {
             }
         }
 
+        if (validator.type().equals("kafka.state-prefix")) {
+            String alias = config.path("job").textValue();
+            validateJobReference(source, index, alias, validator.path() + "/job", "Validator", issues);
+            JobIndex job = index.jobs().get(alias);
+            if (job != null && !job.behavior().equals("keyed-prefix-v1")) {
+                issues.add(issue(source, scope, "preflight.validator.behavior-mismatch",
+                        validator.path() + "/job",
+                        "kafka.state-prefix requires job behavior keyed-prefix-v1"));
+            }
+            if (job != null && (!job.sink().cluster().equals(config.path("cluster").textValue())
+                    || !job.sink().topic().equals(config.path("topic").textValue()))) {
+                issues.add(issue(source, scope, "preflight.validator.job-sink-mismatch",
+                        validator.path(), "kafka.state-prefix must read its bound job's sink"));
+            }
+        }
         InputEndpoint input = index.inputs().size() == 1 ? index.inputs().getFirst() : null;
         if (validateManifestLink
-                && validator.type().equals("kafka.id-set")
+                && isManifestValidator(validator.type())
                 && index.inputs().size() <= 1) {
             validateIdSetManifestLink(source, scope, index, validator, input, issues);
         }
+    }
+
+    private static boolean isManifestValidator(String type) {
+        return type.equals("kafka.id-set") || type.equals("kafka.state-prefix");
     }
 
     private static void validateIdSetManifestLink(
@@ -482,8 +513,13 @@ final class ScenarioPreflightValidator {
         if (input == null || input.mode().equals("custom")) {
             issues.add(issue(source, scope, "preflight.input.manifest-not-available",
                     validator.path() + "/expected",
-                    "kafka.id-set requires one harness-owned input manifest"));
+                    validator.type() + " requires one harness-owned input manifest"));
             return;
+        }
+        if (validator.type().equals("kafka.state-prefix") && !input.mode().equals("generated")) {
+            issues.add(issue(source, scope, "preflight.validator.state-input-unsupported",
+                    validator.path() + "/expected",
+                    "kafka.state-prefix requires the generated integer-sequence input manifest"));
         }
         String outputCluster = validator.config().path("cluster").textValue();
         String outputTopic = validator.config().path("topic").textValue();
@@ -498,17 +534,21 @@ final class ScenarioPreflightValidator {
         if (outputJobs.size() != 1) {
             issues.add(issue(source, scope, "preflight.input.validator-source-mismatch",
                     validator.path(),
-                    "kafka.id-set output '" + outputCluster + "/" + outputTopic
+                    validator.type() + " output '" + outputCluster + "/" + outputTopic
                             + "' must be the sink of exactly one job, found "
                             + outputJobs.stream().map(JobIndex::alias).toList()));
             return;
         }
         JobIndex outputJob = outputJobs.getFirst();
+        if (validator.type().equals("kafka.id-set") && outputJob.behavior().equals("keyed-prefix-v1")) {
+            issues.add(issue(source, scope, "preflight.validator.behavior-mismatch",
+                    validator.path(), "keyed-prefix-v1 output requires kafka.state-prefix, not kafka.id-set"));
+        }
         if (!outputJob.source().cluster().equals(input.cluster())
                 || !outputJob.source().topic().equals(input.topic())) {
             issues.add(issue(source, scope, "preflight.input.validator-source-mismatch",
                     validator.path(),
-                    "Job '" + outputJob.alias() + "' writes kafka.id-set output '"
+                    "Job '" + outputJob.alias() + "' writes " + validator.type() + " output '"
                             + outputCluster + "/" + outputTopic + "' but reads '"
                             + outputJob.source().cluster() + "/" + outputJob.source().topic()
                             + "' instead of input manifest topic '" + input.cluster() + "/"
@@ -1098,7 +1138,7 @@ final class ScenarioPreflightValidator {
             String path) {}
 
     private record JobIndex(
-            String alias, TopicEndpoint source, SinkEndpoint sink, String path) {}
+            String alias, TopicEndpoint source, SinkEndpoint sink, String behavior, String path) {}
 
     record KafkaEndpoint(
             KafkaFaultApiRegistry.EndpointKind kind,

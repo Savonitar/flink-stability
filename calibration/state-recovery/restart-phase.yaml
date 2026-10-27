@@ -1,0 +1,5 @@
+  - name: taskmanager-recovery
+    steps:
+      - kill:
+          target: { kind: named, role: taskmanager, name: taskmanager-1 }
+      - restart: { component: taskmanager }

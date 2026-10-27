@@ -46,7 +46,7 @@ public final class ExecutableScenarioPlan {
     private final GeneratedIntegerSequenceInput input;
     private final Job job;
     private final List<Phase> phases;
-    private final KafkaIdSetValidation terminalValidation;
+    private final TerminalValidationPlan terminalValidation;
     private final ExpectedOutcome expectedOutcome;
     private final Duration jobCompletionTimeout;
 
@@ -59,7 +59,7 @@ public final class ExecutableScenarioPlan {
             GeneratedIntegerSequenceInput input,
             Job job,
             List<Phase> phases,
-            KafkaIdSetValidation terminalValidation,
+            TerminalValidationPlan terminalValidation,
             ExpectedOutcome expectedOutcome,
             Duration jobCompletionTimeout) {
         this.sourcePlan = Objects.requireNonNull(sourcePlan, "sourcePlan");
@@ -111,6 +111,23 @@ public final class ExecutableScenarioPlan {
         }
         if (!job.sink().topic().equals(terminalValidation.output())) {
             throw new IllegalArgumentException("Terminal validation must inspect the job sink");
+        }
+        boolean keyed = job.workloadConfiguration().behavior().isPresent();
+        if (keyed != (terminalValidation instanceof KafkaStatePrefixValidation)) {
+            throw new IllegalArgumentException("keyed-prefix-v1 requires kafka.state-prefix validation");
+        }
+        if (terminalValidation instanceof KafkaStatePrefixValidation state) {
+            if (!state.jobAlias().equals(job.alias())
+                    || state.keyCount() != job.workloadConfiguration().behavior().orElseThrow().keyCount()
+                    || flink.jobmanagers() != 1 || flink.taskmanagers() != 1
+                    || flink.highAvailability().isPresent() || job.parallelism() != 1
+                    || input.partitions() != 1
+                    || topicIndex.get(job.sink().topic().topic()).partitions() != 1
+                    || job.checkpointing().storage() != CheckpointStorage.FILESYSTEM
+                    || job.sink().transactionIdNamingStrategy().orElse(null)
+                            != TransactionIdNamingStrategy.INCREMENTING) {
+                throw new IllegalArgumentException("Unsupported keyed-prefix-v1 topology or oracle binding");
+            }
         }
         if (job.sink().proxy().isPresent() && !job.sink().proxy().equals(kafka.proxy())) {
             throw new IllegalArgumentException("A routed sink must use the cluster's proxy");
@@ -171,7 +188,7 @@ public final class ExecutableScenarioPlan {
         return phases;
     }
 
-    public KafkaIdSetValidation terminalValidation() {
+    public TerminalValidationPlan terminalValidation() {
         return terminalValidation;
     }
 
@@ -749,6 +766,14 @@ public final class ExecutableScenarioPlan {
     }
 
     /** Canonical workload settings, materialized only after Kafka endpoints/offsets exist. */
+    public record KeyedPrefixBehavior(int keyCount) {
+        public KeyedPrefixBehavior {
+            if (keyCount < 1 || keyCount > 1024) {
+                throw new IllegalArgumentException("keyCount must be in [1,1024]");
+            }
+        }
+    }
+
     public record WorkloadConfiguration(
             String jobAlias,
             TopicReference source,
@@ -758,8 +783,16 @@ public final class ExecutableScenarioPlan {
             StateTtl stateTtl,
             Watermarks watermarks,
             RunScopedIdentityPolicy identityPolicy,
-            Duration transactionTimeout) {
+            Duration transactionTimeout,
+            Optional<KeyedPrefixBehavior> behavior) {
         public static final String PREFIX = "flink-stability.workload.v1.";
+
+        public WorkloadConfiguration(String jobAlias, TopicReference source, int sourcePartitions,
+                long expectedInputRecords, Sink sink, StateTtl stateTtl, Watermarks watermarks,
+                RunScopedIdentityPolicy identityPolicy, Duration transactionTimeout) {
+            this(jobAlias, source, sourcePartitions, expectedInputRecords, sink, stateTtl,
+                    watermarks, identityPolicy, transactionTimeout, Optional.empty());
+        }
 
         public WorkloadConfiguration {
             jobAlias = requireNonBlank(jobAlias, "jobAlias");
@@ -772,6 +805,11 @@ public final class ExecutableScenarioPlan {
             Objects.requireNonNull(stateTtl, "stateTtl");
             Objects.requireNonNull(watermarks, "watermarks");
             Objects.requireNonNull(identityPolicy, "identityPolicy");
+            Objects.requireNonNull(behavior, "behavior");
+            if (behavior.isPresent() && (sourcePartitions != 1 || stateTtl.enabled()
+                    || sink.deliveryGuarantee() != DeliveryGuarantee.EXACTLY_ONCE)) {
+                throw new IllegalArgumentException("keyed-prefix-v1 requires one source partition, EOS and disabled TTL");
+            }
             transactionTimeout = requirePositive(transactionTimeout, "transactionTimeout");
             if (!jobAlias.equals(identityPolicy.jobAlias())) {
                 throw new IllegalArgumentException("Identity policy must target this job");
@@ -800,6 +838,10 @@ public final class ExecutableScenarioPlan {
             String canonicalOffsets = canonicalStoppingOffsets(stoppingOffsets);
             Map<String, String> values = new TreeMap<>();
             values.put("flink-stability.workload.protocol", "v1");
+            behavior.ifPresent(value -> {
+                values.put(PREFIX + "behavior.type", "keyed-prefix-v1");
+                values.put(PREFIX + "behavior.key-count", Integer.toString(value.keyCount()));
+            });
             values.put(PREFIX + "job-alias", jobAlias);
             values.put(PREFIX + "source.bootstrap-servers", kafkaBootstrapServers);
             values.put(PREFIX + "source.topic", source.topic());
@@ -1073,11 +1115,20 @@ public final class ExecutableScenarioPlan {
 
     public enum IdSetMode { EXACTLY_ONCE, AT_LEAST_ONCE }
 
+    public sealed interface TerminalValidationPlan permits KafkaIdSetValidation, KafkaStatePrefixValidation {
+        TopicReference output();
+        ExpectedRecords expected();
+        Duration timeout();
+        IdSetMode mode();
+        String validatorType();
+    }
+
     public record KafkaIdSetValidation(
             TopicReference output,
             ExpectedRecords expected,
             Duration timeout,
-            IdSetMode mode) {
+            IdSetMode mode) implements TerminalValidationPlan {
+        @Override public String validatorType() { return "kafka.id-set"; }
         public KafkaIdSetValidation(TopicReference output, ExpectedRecords expected, Duration timeout) {
             this(output, expected, timeout, IdSetMode.EXACTLY_ONCE);
         }
@@ -1087,6 +1138,19 @@ public final class ExecutableScenarioPlan {
             Objects.requireNonNull(expected, "expected");
             timeout = requirePositive(timeout, "timeout");
         }
+    }
+
+    public record KafkaStatePrefixValidation(String jobAlias, TopicReference output,
+            ExpectedRecords expected, Duration timeout, int keyCount) implements TerminalValidationPlan {
+        public KafkaStatePrefixValidation {
+            jobAlias = requireNonBlank(jobAlias, "jobAlias");
+            Objects.requireNonNull(output, "output");
+            Objects.requireNonNull(expected, "expected");
+            timeout = requirePositive(timeout, "timeout");
+            new KeyedPrefixBehavior(keyCount);
+        }
+        @Override public IdSetMode mode() { return IdSetMode.EXACTLY_ONCE; }
+        @Override public String validatorType() { return "kafka.state-prefix"; }
     }
 
     public enum ExpectedRecords {

@@ -11,6 +11,12 @@ final class ValidatorReasonRegistry {
                     "validator.kafka.id-set.unexpected-ids",
                     "validator.kafka.id-set.duplicate-ids",
                     "validator.kafka.id-set.missing-ids"),
+            "kafka.state-prefix", Set.of(
+                    "validator.kafka.state-prefix.malformed-records",
+                    "validator.kafka.state-prefix.unexpected-ids",
+                    "validator.kafka.state-prefix.duplicate-ids",
+                    "validator.kafka.state-prefix.missing-ids",
+                    "validator.kafka.state-prefix.state-mismatch"),
             "kafka.no-hanging-transactions", Set.of(
                     "validator.kafka.transaction.ongoing-after-timeout"));
 

@@ -337,7 +337,7 @@ class ScenarioVerdictTest {
                 case "successful-phases" -> Optional.of(failedPhase);
                 default -> complete.phaseEvidence();
             };
-            Optional<KafkaIdSetValidationResult> oracle = switch (missing) {
+            Optional<? extends org.savonitar.flink.stability.core.validation.kafka.KafkaTerminalValidationResult> oracle = switch (missing) {
                 case "oracle", "both-fences" -> Optional.empty();
                 case "complete-snapshot" -> Optional.of(new KafkaIdSetValidationResult(
                         KafkaIdSetValidationResult.Status.FAIL, DUPLICATES, "partial",

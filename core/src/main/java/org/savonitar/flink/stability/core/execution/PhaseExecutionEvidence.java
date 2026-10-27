@@ -136,7 +136,8 @@ public record PhaseExecutionEvidence(
             OptionalLong jobManagerTimeAfterKill,
             Optional<TaskManagerControl.Identity> identity,
             Optional<String> identityFailure,
-            Optional<CheckpointKillWindow> checkpointWindow) {
+            Optional<CheckpointKillWindow> checkpointWindow,
+            Optional<StateRecoveryEvidence.Readiness> stateReadiness) {
         public TaskManagerKill {
             path = requireNonBlank(path, "path");
             loopIterations = List.copyOf(Objects.requireNonNull(
@@ -148,9 +149,19 @@ public record PhaseExecutionEvidence(
             Objects.requireNonNull(identity, "identity");
             Objects.requireNonNull(identityFailure, "identityFailure");
             Objects.requireNonNull(checkpointWindow, "checkpointWindow");
+            Objects.requireNonNull(stateReadiness, "stateReadiness");
             if (identity.isPresent() && identityFailure.isPresent()) {
                 throw new IllegalArgumentException("Identity observation cannot both succeed and fail");
             }
+        }
+
+        public TaskManagerKill(String path, List<LoopIteration> loopIterations, String target,
+                               FlinkJobObservation.Attempt jobBeforeKill,
+                               OptionalLong jobManagerTimeBeforeKill, OptionalLong jobManagerTimeAfterKill,
+                               Optional<TaskManagerControl.Identity> identity, Optional<String> identityFailure,
+                               Optional<CheckpointKillWindow> checkpointWindow) {
+            this(path, loopIterations, target, jobBeforeKill, jobManagerTimeBeforeKill,
+                    jobManagerTimeAfterKill, identity, identityFailure, checkpointWindow, Optional.empty());
         }
 
         public TaskManagerKill(String path, List<LoopIteration> loopIterations, String target,

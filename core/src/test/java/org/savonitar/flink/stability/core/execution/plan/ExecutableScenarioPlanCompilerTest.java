@@ -54,6 +54,63 @@ class ExecutableScenarioPlanCompilerTest {
     @TempDir
     Path artifactRoot;
 
+    @Test void keyedPrefixCompilesOnlyWithItsStateOracleAndMaterializesReservedSettings() {
+        var plan = compiler.compile(resolved(ExecutableScenarioPlanCompilerTest::keyedPrefix));
+        var oracle = (ExecutableScenarioPlan.KafkaStatePrefixValidation) plan.terminalValidation();
+        assertEquals("eos-job", oracle.jobAlias());
+        assertEquals(8, oracle.keyCount());
+        assertEquals("kafka.state-prefix", oracle.validatorType());
+        var config = plan.job().workloadConfiguration().materialize("localhost:9092", Map.of(0, 10L), 1, "a1b2c3d4");
+        assertEquals("keyed-prefix-v1", config.get(ExecutableScenarioPlan.WorkloadConfiguration.PREFIX + "behavior.type"));
+        assertEquals("8", config.get(ExecutableScenarioPlan.WorkloadConfiguration.PREFIX + "behavior.key-count"));
+        assertFalse(compiler.compile(resolved(document -> {})).job().workloadConfiguration().materialize(
+                "localhost:9092", Map.of(0, 10L), 1, "a1b2c3d4").keySet().stream().anyMatch(key -> key.contains("behavior")));
+    }
+
+    @Test void stateRecoveryRejectsInsufficientPerKeyInputBeforeArtifacts() {
+        assertFailsAt(Stage.RUNNER_CAPABILITY, () -> compiler.compile(resolved(document -> {
+            keyedPrefix(document);
+            var steps = replaceSteps(document);
+            steps.addObject().putObject("kill").putObject("target").put("kind", "named")
+                    .put("role", "taskmanager").put("name", "taskmanager-1");
+            steps.addObject().putObject("restart").put("component", "taskmanager");
+        })));
+        var control = compiler.compile(resolved(document -> {
+            keyedPrefix(document);
+            ((ObjectNode) document.at("/workload/jobs/0/behavior")).put("key_count", 16);
+        }));
+        assertEquals(10, control.input().totalRecords());
+    }
+
+    @Test void keyedPrefixRejectsUnsupportedTopologiesBeforeArtifacts() {
+        for (String change : List.of("parallelism", "taskmanagers", "source-partitions", "sink-partitions", "ttl", "storage", "pooling", "restore")) {
+            var failure = assertThrows(SpecificationException.class, () -> compiler.compile(resolved(document -> {
+                keyedPrefix(document);
+                var job = (ObjectNode) document.at("/workload/jobs/0");
+                switch (change) {
+                    case "parallelism" -> job.put("parallelism", 2);
+                    case "taskmanagers" -> ((ObjectNode) document.at("/setup/flink")).put("taskmanagers", 2);
+                    case "source-partitions" -> ((ObjectNode) document.at("/setup/kafka/clusters/main/topics/0")).put("partitions", 2);
+                    case "sink-partitions" -> ((ObjectNode) document.at("/setup/kafka/clusters/main/topics/1")).put("partitions", 2);
+                    case "ttl" -> job.putObject("state_ttl").put("enabled", true).put("ttl", "1m");
+                    case "storage" -> ((ObjectNode) job.at("/checkpointing/storage")).put("type", "jobmanager");
+                    case "pooling" -> ((ObjectNode) job.path("sink")).put("transaction_id_naming_strategy", "POOLING");
+                    case "restore" -> replaceSteps(document).addObject().putObject("savepoint_restore").put("job", "eos-job")
+                            .put("parallelism", 1).put("transaction_id_naming_strategy", "INCREMENTING").put("timeout", "3m");
+                }
+            })), change);
+            assertEquals(Stage.RUNNER_CAPABILITY, failure.stage(), change);
+            assertTrue(failure.diagnostics().stream().anyMatch(d -> d.code().startsWith("runner.state-prefix.")), change);
+        }
+    }
+
+    private static void keyedPrefix(ObjectNode document) {
+        var job = (ObjectNode) document.at("/workload/jobs/0");
+        job.putObject("behavior").put("type", "keyed-prefix-v1").put("key_count", 8);
+        ((ObjectNode) job.path("checkpointing")).putObject("storage").put("type", "filesystem");
+        ((ObjectNode) document.at("/terminal_validations/0")).put("type", "kafka.state-prefix").put("job", "eos-job");
+    }
+
     @Test void savepointRestoreRequiresOneFinalEosTransitionWithinCapacityAndSupportedStrategy() {
         for (String invalid : List.of("none", "capacity", "overflow", "reverse", "non-eos", "later", "loop", "wrong-job", "long-timeout")) {
             Runnable compile = () -> {
@@ -1231,6 +1288,33 @@ class ExecutableScenarioPlanCompilerTest {
             prepared.close();
         }
         assertFalse(Files.exists(preparedJob));
+    }
+
+    @Test
+    void bindingChecksTypedBehaviorCapabilityEvenWithLegacySourceProvenance()
+            throws IOException {
+        createJar(artifactRoot.resolve("connector.jar"), false, null);
+        createJar(artifactRoot.resolve("job.jar"), true, "v1");
+        ResolvedScenarioPlan legacySource = resolved(this::useLocalArtifacts);
+        ExecutableScenarioPlan keyed = compiler.compile(resolved(document -> {
+            useLocalArtifacts(document);
+            keyedPrefix(document);
+        }));
+        // Sharing the resolved-plan identity does not attest the separately typed behavior.
+        ExecutableScenarioPlan rebound = new ExecutableScenarioPlan(
+                legacySource, keyed.scenarioName(), keyed.invocation(), keyed.kafka(),
+                keyed.flink(), keyed.input(), keyed.job(), keyed.phases(),
+                keyed.terminalValidation(), keyed.expectedOutcome(), keyed.jobCompletionTimeout());
+
+        try (PreparedScenarioPlan prepared = new ArtifactPlanResolver().resolve(
+                legacySource, ArtifactResolutionOptions.online(artifactRoot))) {
+            SpecificationException exception = assertFailsAt(
+                    Stage.RUNNER_CAPABILITY, () -> compiler.bind(prepared, rebound));
+
+            assertEquals("runner.workload.protocol-capability-missing",
+                    exception.diagnostics().getFirst().code());
+            assertEquals("$/workload/jobs/0/jar", exception.diagnostics().getFirst().path());
+        }
     }
 
     @Test

@@ -193,7 +193,8 @@ public final class KafkaIdSetValidator {
                 record.partition(), record.offset(), record.value());
     }
 
-    private static final class Accumulator {
+    /** Shared ID accounting; the state oracle supplies its independently decoded IDs. */
+    static final class Accumulator {
         private final long[] expected;
         private final long expectedCount;
         private final Map<Long, ExpectedIdState> expectedIds = new HashMap<>();
@@ -210,16 +211,18 @@ public final class KafkaIdSetValidator {
         private long unexpectedCount;
         private long duplicateCount;
 
-        private Accumulator(long[] expected) {
+        Accumulator(long[] expected) {
             this.expected = expected;
             this.expectedCount = expected.length;
         }
 
         private void accept(KafkaTopicSnapshot.ObservedRecord record) {
+            accept(sample(record), parseCanonicalId(record.value()));
+        }
+
+        void accept(KafkaIdSetValidationResult.RecordSample coordinate, Long id) {
             observedCount++;
-            KafkaIdSetValidationResult.RecordSample coordinate = sample(record);
             retainSmallest(observedSamples, coordinate);
-            Long id = parseCanonicalId(record.value());
             if (id == null) {
                 malformedCount++;
                 retainSmallest(malformedSamples, coordinate);
@@ -240,7 +243,7 @@ public final class KafkaIdSetValidator {
             }
         }
 
-        private KafkaIdSetValidationResult.Evidence evidence(
+        KafkaIdSetValidationResult.Evidence evidence(
                 Map<Integer, Long> beginningOffsets,
                 Map<Integer, Long> endOffsets,
                 MonotonicDeadline deadline) {
@@ -276,7 +279,7 @@ public final class KafkaIdSetValidator {
                     true);
         }
 
-        private KafkaIdSetValidationResult.Evidence partialEvidence(
+        KafkaIdSetValidationResult.Evidence partialEvidence(
                 Map<Integer, Long> beginningOffsets,
                 Map<Integer, Long> endOffsets) {
             return new KafkaIdSetValidationResult.Evidence(
@@ -337,5 +340,5 @@ public final class KafkaIdSetValidator {
         }
     }
 
-    private static final class DeadlineExpired extends RuntimeException {}
+    static final class DeadlineExpired extends RuntimeException {}
 }
