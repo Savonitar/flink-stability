@@ -51,18 +51,23 @@ final class TestcontainersContainerHandle implements ContainerHandle {
 
     @Override
     public FlinkHaControl.ProcessState killAndRemoveWithin(ContainerOperationDeadline deadline) {
-        return lifecycle.killAndRemoveWithin(deadline);
+        return killAndRemoveWithin(deadline, ignored -> {});
     }
 
     @Override
     public FlinkHaControl.ProcessState killAndRemoveWithin(ContainerOperationDeadline deadline,
             java.util.function.Consumer<FlinkHaControl.ProcessState> observed) {
-        return lifecycle.killAndRemoveWithin(deadline, observed);
+        return lifecycle.killAndRemoveWithin(deadline, proof -> {
+            observed.accept(proof);
+            verifiedContainer.storageProcessDead(proof, deadline);
+        });
     }
 
     @Override
     public FlinkHaControl.ProcessState killProcessForWriteFence(ContainerOperationDeadline deadline) {
-        return lifecycle.killProcessForWriteFence(deadline);
+        FlinkHaControl.ProcessState proof = lifecycle.killProcessForWriteFence(deadline);
+        verifiedContainer.storageProcessDead(proof, deadline);
+        return proof;
     }
 
     @Override
@@ -118,6 +123,7 @@ final class TestcontainersContainerHandle implements ContainerHandle {
     public FlinkComponentProvisioningEvidence provisioningEvidence() {
         String runtimeId = runtimeId();
         verifiedContainer.verifyTokenPluginAfterStart(runtimeId);
+        verifiedContainer.verifyStorageProcess();
         FlinkConnectorBundleInstallation installation = runtimeTarget.connectorBundle();
 
         VerifiedFlinkContainer.ConnectorBundleVerification verification =

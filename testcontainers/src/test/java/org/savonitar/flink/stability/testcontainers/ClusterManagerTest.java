@@ -48,6 +48,65 @@ class ClusterManagerTest {
     Path temporaryDirectory;
 
     @Test
+    void fuseProvisioningRequiresExactMergedConfigurationOnInitialAndReplacementProcesses() {
+        var storage = new org.savonitar.flink.stability.runtime.api.FuseCheckpointStorage(
+                temporaryDirectory.resolve("prepared").toAbsolutePath().normalize(), "d".repeat(64),
+                org.savonitar.flink.stability.runtime.api.FuseCheckpointStorage.SUPPORTED_IMAGE_ID, "linux/arm64",
+                Map.of("checkpoint-fuse", "a".repeat(64), "checkpoint-fuse-selftest", "b".repeat(64), "probe.jar", "c".repeat(64)));
+        var target = target().withExpectedImageId(storage.imageId()).withConfig(Map.of("custom.setting", "literal"))
+                .withCheckpointStorage(storage);
+        RecordingFactory factory = new RecordingFactory();
+        factory.imageId = storage.imageId();
+        factory.observedConfiguration = target.effectiveConfig();
+        try (ClusterManager manager = manager(factory)) {
+            manager.startFlink(target);
+            manager.killTaskManager("taskmanager-1", ACTION_TIMEOUT);
+            manager.restartTaskManager("taskmanager-1", ACTION_TIMEOUT);
+            assertEquals(2, factory.generations.get("taskmanager-1"));
+        }
+        var changed = new java.util.TreeMap<>(target.effectiveConfig());
+        changed.put("execution.checkpointing.max-concurrent-checkpoints", "2");
+        var extra = new java.util.TreeMap<>(target.effectiveConfig());
+        extra.put("unplanned.setting", "value");
+        for (Map<String, String> observed : List.of(target.config(), changed, extra)) {
+            RecordingFactory mismatched = new RecordingFactory();
+            mismatched.imageId = storage.imageId();
+            mismatched.observedConfiguration = observed;
+            try (ClusterManager manager = manager(mismatched)) {
+                var failure = assertThrows(IllegalStateException.class, () -> manager.startFlink(target));
+                assertTrue(failure.getMessage().contains("effective configuration evidence"));
+            }
+        }
+    }
+
+    @Test
+    void storageOwnerSurvivesReplacementAndClosesAfterEveryContainer() {
+        RecordingFactory processes = new RecordingFactory();
+        AtomicInteger storageClosed = new AtomicInteger();
+        var control = new org.savonitar.flink.stability.runtime.api.StorageFaultControl() {};
+        FlinkComponentFactory owner = new FlinkComponentFactory() {
+            @Override public ContainerHandle newJobManager(String name) { return processes.newJobManager(name); }
+            @Override public ContainerHandle newTaskManager(String name) { return processes.newTaskManager(name); }
+            @Override public Optional<org.savonitar.flink.stability.runtime.api.StorageFaultControl> storageControl() { return Optional.of(control); }
+            @Override public void closeStorage() {
+                assertTrue(processes.handles.values().stream().noneMatch(handle -> handle.running));
+                storageClosed.incrementAndGet();
+            }
+        };
+        ClusterManager manager = new ClusterManager(Network.SHARED, false, (target, network, root) -> {
+            processes.bind(target, root); return owner;
+        }, (network, target) -> { throw new AssertionError("No Kafka launch"); }, temporaryDirectory.resolve("storage-lifecycle"));
+        manager.startFlink(target());
+        assertSame(control, manager.storageControl());
+        manager.killTaskManager("taskmanager-1", ACTION_TIMEOUT);
+        manager.restartTaskManager("taskmanager-1", ACTION_TIMEOUT);
+        assertSame(control, manager.storageControl());
+        assertEquals(2, processes.generations.get("taskmanager-1"));
+        manager.close(); manager.close();
+        assertEquals(1, storageClosed.get());
+    }
+
+    @Test
     void brokerObservationSelectsTheNamedClusterAndNeverFallsBack() {
         var sink = new org.savonitar.flink.stability.runtime.api.KafkaRuntimeEndpoints("sink", "apache/kafka:4.0.0", "sink:9092", "localhost:9093");
         var other = new org.savonitar.flink.stability.runtime.api.KafkaRuntimeEndpoints("other", "apache/kafka:4.0.0", "other:9092", "localhost:9094");
@@ -598,6 +657,7 @@ class ClusterManagerTest {
         private boolean badEvidence;
         private String imageId = IMAGE_ID;
         private String taskManagerImageId;
+        private Map<String, String> observedConfiguration;
 
         @Override
         public void configureHighAvailability(FlinkHaRuntime runtime) {
@@ -640,7 +700,7 @@ class ClusterManagerTest {
                     events,
                     (failTaskManagerStart && role == FlinkComponentRole.TASK_MANAGER)
                             || name.equals(failedTaskManagerName),
-                    badEvidence);
+                    badEvidence, observedConfiguration);
             handles.put(name, handle);
             return handle;
         }
@@ -655,6 +715,7 @@ class ClusterManagerTest {
         private final List<String> events;
         private final boolean failStart;
         private final boolean badEvidence;
+        private final Map<String, String> observedConfiguration;
         private boolean running;
         private boolean removed;
         private RuntimeException fenceFailure;
@@ -670,7 +731,7 @@ class ClusterManagerTest {
                 String imageId,
                 List<String> events,
                 boolean failStart,
-                boolean badEvidence) {
+                boolean badEvidence, Map<String, String> observedConfiguration) {
             this.name = name;
             this.role = role;
             this.runtimeId = runtimeId;
@@ -679,6 +740,7 @@ class ClusterManagerTest {
             this.events = events;
             this.failStart = failStart;
             this.badEvidence = badEvidence;
+            this.observedConfiguration = observedConfiguration;
         }
 
         @Override
@@ -783,7 +845,7 @@ class ClusterManagerTest {
         @Override
         public FlinkComponentProvisioningEvidence provisioningEvidence() {
             FlinkConnectorBundleInstallation installation = target.connectorBundle();
-            return FlinkComponentProvisioningEvidence.verified(
+            var evidence = FlinkComponentProvisioningEvidence.verified(
                     name,
                     role,
                     runtimeId,
@@ -792,6 +854,11 @@ class ClusterManagerTest {
                     installation.targetBindingSha256(),
                     installation.classpathManifest().manifestSha256(),
                     List.of());
+            return observedConfiguration == null ? evidence : evidence
+                    .withProcessConfiguration(observedConfiguration, name + "#" + runtimeId)
+                    .withEffectiveConfiguration(new FlinkComponentProvisioningEvidence.EffectiveConfigurationEvidence(
+                            "/opt/flink/conf/config.yaml", "e".repeat(64), "e".repeat(64),
+                            List.of("/bin/bash", "/opt/flink/flink-stability-launch.sh"), observedConfiguration));
         }
     }
 }

@@ -6,6 +6,11 @@ import org.savonitar.flink.stability.runtime.api.FlinkHaControl;
 import java.util.List;
 
 interface FlinkComponentFactory {
+    default java.util.Optional<org.savonitar.flink.stability.runtime.api.StorageFaultControl> storageControl() {
+        return java.util.Optional.empty();
+    }
+    default void closeStorage() {}
+
     ContainerHandle newJobManager(String logicalName);
 
     ContainerHandle newTaskManager(String logicalName);

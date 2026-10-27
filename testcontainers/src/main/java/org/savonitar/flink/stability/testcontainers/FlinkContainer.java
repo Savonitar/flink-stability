@@ -40,6 +40,7 @@ final class FlinkContainer implements FlinkComponentFactory {
     private FlinkHaRuntime highAvailability;
     private SyntheticTokenPlugin tokenPlugin;
     private int tokenServicePort;
+    private final FuseCheckpointStorageRuntime storage;
     private final List<VerifiedFlinkContainer> containers = new ArrayList<>();
 
     /** Creates a factory for one exact image/bundle binding. */
@@ -73,6 +74,7 @@ final class FlinkContainer implements FlinkComponentFactory {
         this.checkpointStorageRoot = prepareCheckpointStorage(checkpointStorageRoot);
         this.classLoadLogs = Objects.requireNonNull(classLoadLogs, "classLoadLogs");
         this.pinnedImageId = Objects.requireNonNull(pinnedImageId, "pinnedImageId");
+        this.storage = runtimeTarget.checkpointStorage().map(target -> new FuseCheckpointStorageRuntime(target, this.checkpointStorageRoot)).orElse(null);
     }
 
     GenericContainer<?> createJobManager(String logicalName) {
@@ -83,6 +85,7 @@ final class FlinkContainer implements FlinkComponentFactory {
         containers.add(container);
         configurePlugin(container);
         container.useLiteralConfigurationLauncher("jobmanager");
+        if (storage != null) storage.configure(container, logicalName, FlinkComponentRole.JOB_MANAGER);
         return container
                 .withNetwork(network)
                 .withNetworkAliases(highAvailability == null
@@ -91,7 +94,7 @@ final class FlinkContainer implements FlinkComponentFactory {
                 .withLabel(COMPONENT_LABEL, logicalName)
                 .withExposedPorts(JOB_MANAGER_PORT)
                 .withFileSystemBind(
-                        checkpointStorageRoot.toString(), CHECKPOINT_PATH, BindMode.READ_WRITE)
+                        checkpointStorageRoot.toString(), evidencePath(), BindMode.READ_WRITE)
                 .withEnv("JOB_MANAGER_RPC_ADDRESS", highAvailability == null
                         ? PRIMARY_JOB_MANAGER_ALIAS : container.advertisedAlias())
                 .withEnv("FLINK_PROPERTIES", flinkProperties("jobmanager", log, logicalName,
@@ -112,12 +115,13 @@ final class FlinkContainer implements FlinkComponentFactory {
         containers.add(container);
         configurePlugin(container);
         container.useLiteralConfigurationLauncher("taskmanager");
+        if (storage != null) storage.configure(container, logicalName, FlinkComponentRole.TASK_MANAGER);
         container
                 .withNetwork(network)
                 .withNetworkAliases(logicalName)
                 .withLabel(COMPONENT_LABEL, logicalName)
                 .withFileSystemBind(
-                        checkpointStorageRoot.toString(), CHECKPOINT_PATH, BindMode.READ_WRITE)
+                        checkpointStorageRoot.toString(), evidencePath(), BindMode.READ_WRITE)
                 .withEnv("JOB_MANAGER_RPC_ADDRESS", PRIMARY_JOB_MANAGER_ALIAS)
                 .withEnv("FLINK_PROPERTIES", flinkProperties("taskmanager", log, logicalName,
                         container.advertisedAlias())
@@ -125,7 +129,7 @@ final class FlinkContainer implements FlinkComponentFactory {
                 .withCommand("taskmanager")
                 .withLogConsumer(createLogConsumer("TASK_MANAGER_LOGS." + logicalName));
         if (runtimeTarget.expectedRuntimeJar().isPresent() || runtimeTarget.tokenProvider().isPresent()
-                || !runtimeTarget.config().isEmpty()
+                || !runtimeTarget.effectiveConfig().isEmpty() || storage != null
                 || !runtimeTarget.connectorBundle().imageConnectors().isEmpty()) {
             // Docker running alone can precede an entrypoint's JAR replacement. This message
             // comes from TaskManagerRunner, before accepting the second runtime-byte read.
@@ -149,6 +153,14 @@ final class FlinkContainer implements FlinkComponentFactory {
                 container, logicalName, FlinkComponentRole.TASK_MANAGER, runtimeTarget);
     }
 
+    private String evidencePath() { return storage == null ? CHECKPOINT_PATH : FuseCheckpointStorageRuntime.EVIDENCE; }
+
+    @Override public java.util.Optional<org.savonitar.flink.stability.runtime.api.StorageFaultControl> storageControl() {
+        return java.util.Optional.ofNullable(storage);
+    }
+
+    @Override public void closeStorage() { if (storage != null) storage.close(); }
+
     private void verifyImageId(String actual) {
         pinnedImageId.compareAndSet(null, actual);
         String expected = pinnedImageId.get();
@@ -169,7 +181,7 @@ final class FlinkContainer implements FlinkComponentFactory {
         // required --add-opens flags. The value stays unquoted: quotes would reach the JVM.
         String result = TASK_SLOTS_PROPERTY + "\n"
                 + "env.java.opts." + process + ": -Xlog:class+load=info:file="
-                + CHECKPOINT_PATH + "/" + log.hostPath().getFileName()
+                + evidencePath() + "/" + log.hostPath().getFileName()
                 + "::filecount=0";
         if (highAvailability != null) {
             result += highAvailability.properties(process, logicalName, incarnationAlias);
@@ -179,7 +191,7 @@ final class FlinkContainer implements FlinkComponentFactory {
                             runtimeTarget.tokenProvider().orElseThrow().retryBackoff())
                     + "\nsecurity.delegation.tokens.renewal.time-ratio: 0.5";
         }
-        return result + org.savonitar.flink.stability.runtime.api.FlinkConfiguration.properties(runtimeTarget.config());
+        return result + org.savonitar.flink.stability.runtime.api.FlinkConfiguration.properties(runtimeTarget.effectiveConfig());
     }
 
     @Override

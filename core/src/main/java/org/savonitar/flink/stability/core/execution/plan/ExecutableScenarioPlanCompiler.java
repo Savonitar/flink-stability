@@ -95,6 +95,7 @@ public final class ExecutableScenarioPlanCompiler {
         validateSetup(source, document, issues);
         validateWorkload(source, document, issues);
         StatePrefixPlanCompiler.validate(source, document, issues);
+        CheckpointStoragePlanCompiler.validate(source, document, issues);
         PhasePlanCompiler.validatePhases(source, document, issues);
         validateTerminalValidation(source, document, issues);
         ExpectationCompiler.validate(sourcePlan, issues);
@@ -150,6 +151,12 @@ public final class ExecutableScenarioPlanCompiler {
         runtimeTarget = executablePlan.flink().declaredLine()
                 .map(runtimeTarget::withDeclaredLine).orElse(runtimeTarget);
         runtimeTarget = runtimeTarget.withConfig(executablePlan.flink().config()).withLogMarkers(executablePlan.flink().logMarkers());
+        if (executablePlan.job().checkpointing().fuse().isPresent()) {
+            var fuse = executablePlan.job().checkpointing().fuse().orElseThrow();
+            runtimeTarget = runtimeTarget.withCheckpointStorage(
+                    org.savonitar.flink.stability.core.artifact.FuseCheckpointBundlePreparer.prepare(
+                            preparedPlan, fuse.bundle(), fuse.manifestSha256(), fuse.imageId(), fuse.platform()));
+        }
         return new PreparedExecutableScenarioPlan(
                 preparedPlan,
                 executablePlan,
@@ -586,7 +593,9 @@ public final class ExecutableScenarioPlanCompiler {
                         "filesystem".equals(jobNode.at("/checkpointing/storage/type")
                                         .asText("jobmanager"))
                                 ? ExecutableScenarioPlan.CheckpointStorage.FILESYSTEM
-                                : ExecutableScenarioPlan.CheckpointStorage.JOBMANAGER);
+                                : ExecutableScenarioPlan.CheckpointStorage.JOBMANAGER,
+                        CheckpointStoragePlanCompiler.specification(jobNode.path("checkpointing")),
+                        CheckpointStoragePlanCompiler.controls(jobNode.path("checkpointing")));
         Map<String, String> standardFlinkConfiguration =
                 new java.util.TreeMap<>(ExecutableScenarioPlan.standardFlinkConfiguration(
                         jobNode.path("parallelism").intValue(),

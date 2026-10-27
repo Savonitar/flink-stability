@@ -49,6 +49,8 @@ public record ScenarioVerdict(Status status, String reason, String message, bool
         boolean attemptPassed = attempt.status() == V1ScenarioExecutionResult.Status.PASS;
         if (expected.outcome() == ExecutableScenarioPlan.ExpectedOutcome.Outcome.PASS) {
             if (attemptPassed) {
+                if (attempt.phaseEvidence().filter(value -> !value.storageConfirmed()).isPresent())
+                    return unconfirmed(CheckpointStorageFault.UNCONFIRMED, "Checkpoint storage proof is incomplete");
                 if (attempt.terminalValidation().filter(value -> value.validatorType().equals("kafka.state-prefix")).isPresent()
                         && attempt.stateRecovery().filter(StateRecoveryReport::confirmed).isEmpty())
                     return unconfirmed(StateRecoveryReport.UNCONFIRMED,
@@ -91,6 +93,9 @@ public record ScenarioVerdict(Status status, String reason, String message, bool
 
     /** Keep the observed data failure, but do not bless an invalid negative control. */
     private static ScenarioVerdict matchingFailure(V1ScenarioExecutionResult attempt) {
+        if (attempt.phaseEvidence().filter(value -> !value.storageConfirmed()).isPresent())
+            return unconfirmed(CheckpointStorageFault.UNCONFIRMED,
+                    "The expected data failure lacks complete checkpoint storage fault and final capture evidence");
         if (attempt.terminalValidation().filter(value -> value.validatorType().equals("kafka.state-prefix")).isPresent()
                 && attempt.stateRecovery().filter(StateRecoveryReport::confirmed).isEmpty())
             return unconfirmed(StateRecoveryReport.UNCONFIRMED,

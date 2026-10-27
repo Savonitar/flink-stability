@@ -610,10 +610,19 @@ public final class ClusterManager implements AutoCloseable {
         stopAll();
     }
 
+    synchronized org.savonitar.flink.stability.runtime.api.StorageFaultControl storageControl() {
+        var controls = flinkFactories.stream().flatMap(factory -> factory.storageControl().stream()).toList();
+        if (controls.size() != 1) throw new IllegalStateException("Exactly one attempt-owned checkpoint storage is required");
+        return controls.getFirst();
+    }
+
     private RuntimeException stopFlink(RuntimeException failure) {
         RuntimeException result = stopSlots(taskManagers, failure);
         result = stopSlots(jobManagers, result);
         result = stopPendingCleanup(result);
+        for (FlinkComponentFactory factory : flinkFactories) {
+            try { factory.closeStorage(); } catch (RuntimeException failureToClose) { result = appendFailure(result, failureToClose); }
+        }
         if (result == null) {
             taskManagers.clear();
             jobManagers.clear();
@@ -912,7 +921,7 @@ public final class ClusterManager implements AutoCloseable {
                     throw new IllegalStateException("Component did not remain running: " + name);
                 }
                 FlinkComponentProvisioningEvidence evidence = runtimeTarget.expectedRuntimeJar().isPresent()
-                        || !runtimeTarget.config().isEmpty()
+                        || !runtimeTarget.effectiveConfig().isEmpty()
                         || runtimeTarget.tokenProvider().isPresent()
                         || !runtimeTarget.connectorBundle().imageConnectors().isEmpty()
                         ? ContainerDriverCallBoundary.call(deadline, "verifying provisioning for " + name,
@@ -1074,9 +1083,9 @@ public final class ClusterManager implements AutoCloseable {
                 throw new ConnectorBundleProvisioningException(
                         "Connector bundle provisioning evidence does not match target for " + name);
             }
-            if (!evidence.flinkConfig().equals(runtimeTarget.config())
-                    || (!runtimeTarget.config().isEmpty() && evidence.effectiveConfiguration().filter(receipt ->
-                            receipt.observedValues().equals(runtimeTarget.config())
+            if (!evidence.flinkConfig().equals(runtimeTarget.effectiveConfig())
+                    || (!runtimeTarget.effectiveConfig().isEmpty() && evidence.effectiveConfiguration().filter(receipt ->
+                            receipt.observedValues().equals(runtimeTarget.effectiveConfig())
                                     && receipt.sourceSha256().equals(receipt.observedSha256())).isEmpty())) {
                 throw new IllegalStateException("Flink effective configuration evidence does not match target for " + name);
             }

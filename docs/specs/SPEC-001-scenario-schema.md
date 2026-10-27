@@ -1175,6 +1175,36 @@ Connector pull-request gating is the same mechanism with one axis:
   `runner.workload.restart-strategy-unsupported`. This is a runner capability
   boundary, not schema narrowing. Harness-managed filesystem checkpoint storage
   is executable in the first vertical per R5.4a.
+- **R5.4c** Explicit FUSE checkpoint storage extends the filesystem object with
+  `fuse: { bundle, manifest_sha256, image_id, platform }`. `bundle` is a local
+  directory relative to the artifact root containing the PR3
+  `build-evidence.json` and its `bundle/` files. The manifest SHA-256, local
+  Docker image ID and `linux/arm64` platform are mandatory. The image ID must
+  match both `setup.flink.image_id` and the qualified released Flink image;
+  another image/platform requires separate adapter qualification. Bundle path
+  traversal, symbolic links, missing/extra helpers, changed hashes and incomplete
+  build/cleanup receipts reject before Docker. Preparation snapshots the bounded
+  manifest and the exact daemon, native self-test and Java probe files into the
+  existing owned artifact workspace. Provisioning verifies the snapshot again.
+
+  FUSE requires explicit sibling checkpointing settings
+  `small_file_threshold: 0`, `max_concurrent: 1` and
+  `tolerable_failures: <integer 1..10>`. They materialize as
+  `execution.checkpointing.data-inline-threshold: 0 bytes`,
+  `execution.checkpointing.max-concurrent-checkpoints: 1` and
+  `execution.checkpointing.tolerable-failed-checkpoints`. Canonical keys and the
+  deprecated small-file-threshold aliases cannot be overridden through generic
+  Flink configuration or program arguments when FUSE is selected. Omitted FUSE
+  retains the existing filesystem path and does not add these settings.
+
+  This slice requires `keyed-prefix-v1`, its bound state oracle, HashMap state,
+  TTL disabled, EOS/INCREMENTING, one JobManager/TaskManager, parallelism one,
+  one source/sink partition, no HA/token provider or custom runtime JAR. The
+  adapter generates the checkpoint namespace and mounted URI. Authors cannot
+  supply raw backing, mount, device or checkpoint paths. Ordinary healthy FUSE
+  controls may await/wait and perform one TaskManager kill/restart pair. The
+  atomic experiment below permits no additional faults or loops. Implementation
+  and offline validation do not establish integrated live qualification.
 - **R5.5** A job has a stable **alias** within the scenario, so steps and
   validators can name it. Job identity must survive stop/restart and version
   upgrade — the alias is scenario-level, not the Flink job ID. Resolved job
@@ -1989,6 +2019,26 @@ Connector pull-request gating is the same mechanism with one axis:
   only the mutant restart cell is expected by the independent checker to produce
   raw state-mismatch FAIL with zero ID defects. A miss leaves qualification
   incomplete and does not authorize replacement attempts or expectation changes.
+- **R6.12a.2** `checkpoint_storage_fault: { job, timeout, lease }` names the one
+  FUSE-backed stateful job. `timeout` and `lease` are positive and at most
+  `120s`; the lease must cover the timeout. One operation owns the complete
+  readiness, arm, failed checkpoint, kill, heal and recovery sequence under its
+  shared budget. Exactly one non-looping operation is permitted, with
+  `N >= 2*K`, and no other fault or savepoint/rescale operation.
+
+  Require healthy instances, a materialized completed checkpoint N with nonzero
+  keyed progress and a suffix remaining, and no known in-flight checkpoint.
+  Arm every required instance before one REST checkpoint trigger; never retry an
+  uncertain trigger. Confirm one unambiguous newer checkpoint failure and a real
+  matching checkpoint-file create/write EIO. Keep the fault armed through the
+  sole TaskManager's confirmed death and verify no newer checkpoint completed.
+  Only then heal surviving instances and recreate the TaskManager with verified
+  healthy storage. Require restore of N, further events for the same keys and
+  a later successful checkpoint, followed by natural completion, physical writer
+  fencing and the independent state oracle. Missing history, competing
+  checkpoints, expired leases, absent materialization/EIO receipts or an
+  unexpected restart leave the operation unconfirmed. Preserve observed data
+  failures and cleanup errors; passing output cannot substitute for fault proof.
 - **R6.12b** `leader_fault: { mode, duration, timeout, token_fault?, recovery_barrier? }` is an atomic,
   automatically healed HA operation. `mode` is `kill`, `pause`, or
   `isolate-zookeeper`; the target is the observed current leader, never a guessed

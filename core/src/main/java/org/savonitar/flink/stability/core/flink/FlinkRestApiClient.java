@@ -118,6 +118,26 @@ public final class FlinkRestApiClient implements FlinkScenarioControl {
     }
 
     @Override
+    public FlinkCheckpointEvidence.History checkpointHistory(FlinkJobHandle job, Duration timeout) throws IOException {
+        return FlinkCheckpointEvidence.history(job, timeout, this::checkpointEvidence, nanoTime);
+    }
+
+    @Override
+    public FlinkCheckpointEvidence.Checkpoint checkpointDetails(
+            FlinkJobHandle job, long checkpointId, Duration timeout) throws IOException {
+        return FlinkCheckpointEvidence.details(job, checkpointId, timeout, this::checkpointEvidence, nanoTime);
+    }
+
+    @Override
+    public FlinkCheckpointEvidence.Configuration checkpointConfiguration(FlinkJobHandle job, Duration timeout) throws IOException {
+        return FlinkCheckpointEvidence.configuration(job, timeout, this::checkpointEvidence, nanoTime);
+    }
+
+    private JsonNode checkpointEvidence(String endpoint, MonotonicDeadline deadline) throws IOException {
+        return execute("GET", endpoint, null, deadline, FlinkCheckpointEvidence.MAX_RESPONSE_BYTES);
+    }
+
+    @Override
     public String uploadJar(Path jar, String expectedSha256) throws IOException {
         Objects.requireNonNull(jar, "jar");
         Objects.requireNonNull(expectedSha256, "expectedSha256");
@@ -303,8 +323,13 @@ public final class FlinkRestApiClient implements FlinkScenarioControl {
 
     @Override
     public long jobManagerTimeMillis(FlinkJobHandle job) throws IOException {
+        return jobManagerTimeMillis(job, OBSERVATION_TIMEOUT);
+    }
+
+    @Override
+    public long jobManagerTimeMillis(FlinkJobHandle job, Duration timeout) throws IOException {
         Objects.requireNonNull(job, "job");
-        MonotonicDeadline deadline = MonotonicDeadline.start(OBSERVATION_TIMEOUT, nanoTime);
+        MonotonicDeadline deadline = MonotonicDeadline.start(timeout, nanoTime);
         return requiredLong(get("/jobs/" + pathSegment(job.jobId()), deadline), "now");
     }
 
@@ -465,11 +490,16 @@ public final class FlinkRestApiClient implements FlinkScenarioControl {
             String endpoint,
             byte[] requestBody,
             MonotonicDeadline deadline) throws IOException {
+        return execute(method, endpoint, requestBody, deadline, Integer.MAX_VALUE);
+    }
+
+    private JsonNode execute(String method, String endpoint, byte[] requestBody,
+            MonotonicDeadline deadline, int maximumResponseBytes) throws IOException {
         while (true) {
             Duration remaining = deadline == null ? DEFAULT_CALL_TIMEOUT : remaining(deadline);
             HttpResponse response;
             try {
-                response = transport.execute(method, endpoint, requestBody, remaining);
+                response = transport.executeBounded(method, endpoint, requestBody, remaining, maximumResponseBytes);
             } catch (InterruptedIOException timeout) {
                 if (deadline != null) {
                     throw new FlinkRestTimeoutException(
@@ -487,6 +517,16 @@ public final class FlinkRestApiClient implements FlinkScenarioControl {
             }
             if (deadline != null) {
                 remaining(deadline);
+            }
+            if (maximumResponseBytes != Integer.MAX_VALUE) {
+                try (var parser = mapper.getFactory().createParser(response.body())) {
+                    parser.enable(com.fasterxml.jackson.core.JsonParser.Feature.STRICT_DUPLICATE_DETECTION);
+                    JsonNode parsed = mapper.readTree(parser);
+                    if (parsed == null || parser.nextToken() != null) {
+                        throw new IOException("Missing or trailing checkpoint REST JSON");
+                    }
+                    return parsed;
+                }
             }
             return parseResponse(response, endpoint);
         }
@@ -567,6 +607,13 @@ public final class FlinkRestApiClient implements FlinkScenarioControl {
         HttpResponse execute(String method, String endpoint, byte[] body, Duration timeout)
                 throws IOException;
 
+        default HttpResponse executeBounded(String method, String endpoint, byte[] body,
+                Duration timeout, int maximumResponseBytes) throws IOException {
+            HttpResponse response = execute(method, endpoint, body, timeout);
+            if (response.body.length > maximumResponseBytes) throw new IOException("Flink REST response exceeds evidence size limit");
+            return response;
+        }
+
         default HttpResponse uploadJar(Path jar, Duration timeout) throws IOException {
             throw new IOException("This Flink transport does not support JAR upload");
         }
@@ -581,12 +628,23 @@ public final class FlinkRestApiClient implements FlinkScenarioControl {
         }
         // Error responses are intercepted before OkHttp's transparent decompression. On its
         // ordinary success path OkHttp has already removed this header after decompression.
+        ResponseLimit limit = response.request().tag(ResponseLimit.class);
+        int maximum = limit == null ? Integer.MAX_VALUE : limit.bytes();
         if ("gzip".equalsIgnoreCase(response.header("Content-Encoding"))) {
             try (var decompressed = new GZIPInputStream(response.body().byteStream())) {
-                return new HttpResponse(response.code(), decompressed.readAllBytes());
+                return new HttpResponse(response.code(), readBounded(decompressed, maximum));
             }
         }
-        return new HttpResponse(response.code(), response.body().bytes());
+        return new HttpResponse(response.code(), readBounded(response.body().byteStream(), maximum));
+    }
+
+    private record ResponseLimit(int bytes) {}
+
+    private static byte[] readBounded(java.io.InputStream input, int maximum) throws IOException {
+        if (maximum == Integer.MAX_VALUE) return input.readAllBytes();
+        byte[] bytes = input.readNBytes(maximum + 1);
+        if (bytes.length > maximum) throw new IOException("Flink REST response exceeds evidence size limit");
+        return bytes;
     }
 
     /** Internal transport handoff; callers receive HttpResponse, not this exception. */
@@ -615,8 +673,15 @@ public final class FlinkRestApiClient implements FlinkScenarioControl {
                 String endpoint,
                 byte[] body,
                 Duration timeout) throws IOException {
+            return executeBounded(method, endpoint, body, timeout, Integer.MAX_VALUE);
+        }
+
+        @Override
+        public HttpResponse executeBounded(String method, String endpoint, byte[] body,
+                Duration timeout, int maximumResponseBytes) throws IOException {
             MonotonicDeadline deadline = MonotonicDeadline.start(timeout, System::nanoTime);
-            Request.Builder builder = new Request.Builder().url(resolve(deadline) + endpoint);
+            Request.Builder builder = new Request.Builder().url(resolve(deadline) + endpoint)
+                    .tag(ResponseLimit.class, new ResponseLimit(maximumResponseBytes));
             if ("GET".equals(method)) {
                 builder.get();
             } else if ("POST".equals(method)) {

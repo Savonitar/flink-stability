@@ -116,6 +116,33 @@ public final class ExecutableScenarioPlan {
         if (keyed != (terminalValidation instanceof KafkaStatePrefixValidation)) {
             throw new IllegalArgumentException("keyed-prefix-v1 requires kafka.state-prefix validation");
         }
+        if (job.checkpointing().fuse().isPresent()) {
+            var fuse = job.checkpointing().fuse().orElseThrow();
+            if (!keyed || job.stateBackend() != StateBackend.HASHMAP || job.stateTtl().enabled()
+                    || flink.tokenProvider().isPresent() || flink.expectedRuntimeJar().isPresent()
+                    || !flink.expectedImageId().equals(Optional.of(fuse.imageId())))
+                throw new IllegalArgumentException("FUSE checkpoint storage requires the pinned keyed-prefix HashMap runtime");
+            long atomicFaults = this.phases.stream().flatMap(phase -> phase.steps().stream())
+                    .filter(CheckpointStorageFault.class::isInstance).count();
+            long ordinaryKills = this.phases.stream().flatMap(phase -> phase.steps().stream())
+                    .filter(KillTaskManager.class::isInstance).count();
+            if (atomicFaults > 1 || ordinaryKills > 1 || atomicFaults > 0 && ordinaryKills > 0)
+                throw new IllegalArgumentException("Only one storage fault or ordinary recovery control is supported");
+            for (Step step : this.phases.stream().flatMap(phase -> phase.steps().stream()).toList()) {
+                if (step instanceof CheckpointStorageFault fault) {
+                    if (!fault.jobAlias().equals(job.alias())
+                            || input.totalRecords() < 2L * job.workloadConfiguration().behavior().orElseThrow().keyCount())
+                        throw new IllegalArgumentException("Storage fault requires the compiled job and a prefix/suffix for every key");
+                } else if (!(step instanceof AwaitJobState || step instanceof AwaitCheckpoints
+                        || step instanceof AwaitCheckpointInProgress || step instanceof Wait
+                        || atomicFaults == 0 && (step instanceof KillTaskManager || step instanceof RestartTaskManager))) {
+                    throw new IllegalArgumentException("FUSE checkpoint storage cannot be combined with other faults or loops");
+                }
+            }
+        } else if (this.phases.stream().flatMap(phase -> phase.steps().stream())
+                .anyMatch(CheckpointStorageFault.class::isInstance)) {
+            throw new IllegalArgumentException("Checkpoint storage fault requires explicit FUSE provisioning");
+        }
         if (terminalValidation instanceof KafkaStatePrefixValidation state) {
             if (!state.jobAlias().equals(job.alias())
                     || state.keyCount() != job.workloadConfiguration().behavior().orElseThrow().keyCount()
@@ -586,15 +613,53 @@ public final class ExecutableScenarioPlan {
     public record Checkpointing(
             Duration interval,
             CheckpointMode mode,
-            CheckpointStorage storage) {
+            CheckpointStorage storage,
+            Optional<FuseStorageSpec> fuse,
+            Optional<CheckpointControls> controls) {
+        public Checkpointing(Duration interval, CheckpointMode mode, CheckpointStorage storage) {
+            this(interval, mode, storage, Optional.empty(), Optional.empty());
+        }
+
         public Checkpointing {
             interval = requirePositive(interval, "interval");
             Objects.requireNonNull(mode, "mode");
             Objects.requireNonNull(storage, "storage");
+            Objects.requireNonNull(fuse, "fuse");
+            Objects.requireNonNull(controls, "controls");
+            if (fuse.isPresent() != controls.isPresent()
+                    || fuse.isPresent() && storage != CheckpointStorage.FILESYSTEM) {
+                throw new IllegalArgumentException("FUSE requires filesystem storage and explicit checkpoint controls");
+            }
             if (mode != CheckpointMode.EXACTLY_ONCE) {
                 throw new IllegalArgumentException(
                         "The first executable boundary requires exactly-once checkpointing");
             }
+        }
+    }
+
+    /** The only author-selected filesystem input is a pinned helper bundle, never a mount path. */
+    public record FuseStorageSpec(String bundle, String manifestSha256, String imageId, String platform) {
+        public FuseStorageSpec {
+            bundle = requireNonBlank(bundle, "bundle");
+            java.nio.file.Path path = java.nio.file.Path.of(bundle);
+            if (path.isAbsolute() || bundle.contains("\\") || bundle.contains(":")
+                    || path.getNameCount() == 0 || path.normalize().toString().isEmpty()
+                    || java.util.stream.StreamSupport.stream(path.spliterator(), false)
+                            .anyMatch(component -> component.toString().equals(".."))) {
+                throw new IllegalArgumentException("FUSE bundle must be an artifact-root-relative directory without traversal");
+            }
+            if (manifestSha256 == null || !manifestSha256.matches("[0-9a-f]{64}")
+                    || imageId == null || !imageId.matches("sha256:[0-9a-f]{64}")
+                    || !"linux/arm64".equals(platform)) {
+                throw new IllegalArgumentException("FUSE helper requires a manifest hash, image identity and supported Linux platform");
+            }
+        }
+    }
+
+    public record CheckpointControls(int smallFileThreshold, int maxConcurrent, int tolerableFailures) {
+        public CheckpointControls {
+            if (smallFileThreshold != 0 || maxConcurrent != 1 || tolerableFailures < 1 || tolerableFailures > 10)
+                throw new IllegalArgumentException("FUSE requires threshold 0, one concurrent checkpoint and failure tolerance 1..10");
         }
     }
 
@@ -918,7 +983,19 @@ public final class ExecutableScenarioPlan {
     }
 
     public sealed interface Step permits AwaitJobState, AwaitCheckpoints, AwaitCheckpointInProgress, Wait,
-            KillTaskManager, RestartTaskManager, BrokerOperation, BrokerFault, PacketFault, SavepointRestore, Loop, ProtocolFault, LeaderFault {}
+            KillTaskManager, RestartTaskManager, BrokerOperation, BrokerFault, PacketFault, SavepointRestore, Loop, ProtocolFault, LeaderFault, CheckpointStorageFault {}
+
+    /** One indivisible write-EIO, TaskManager replacement and recovery experiment. */
+    public record CheckpointStorageFault(String jobAlias, Duration timeout, Duration lease) implements Step {
+        public CheckpointStorageFault {
+            jobAlias = requireNonBlank(jobAlias, "jobAlias");
+            timeout = requirePositive(timeout, "timeout");
+            lease = requirePositive(lease, "lease");
+            if (timeout.compareTo(Duration.ofSeconds(120)) > 0 || lease.compareTo(Duration.ofSeconds(120)) > 0
+                    || lease.compareTo(timeout) < 0)
+                throw new IllegalArgumentException("Storage fault timeout must fit within a lease of at most 120s");
+        }
+    }
 
     public record SavepointRestore(int parallelism, TransactionIdNamingStrategy strategy, Duration timeout) implements Step {
         public SavepointRestore {
@@ -1199,6 +1276,11 @@ public final class ExecutableScenarioPlan {
         values.put("execution.checkpointing.mode", checkpointing.mode().name());
         values.put("execution.checkpointing.storage",
                 checkpointing.storage().configurationValue());
+        checkpointing.controls().ifPresent(controls -> {
+            values.put("execution.checkpointing.data-inline-threshold", controls.smallFileThreshold() + " bytes");
+            values.put("execution.checkpointing.max-concurrent-checkpoints", Integer.toString(controls.maxConcurrent()));
+            values.put("execution.checkpointing.tolerable-failed-checkpoints", Integer.toString(controls.tolerableFailures()));
+        });
         values.put("parallelism.default", Integer.toString(parallelism));
         values.put("state.backend.type", stateBackend.configurationValue());
         return Collections.unmodifiableMap(new LinkedHashMap<>(values));

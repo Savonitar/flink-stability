@@ -266,6 +266,20 @@ filesystem fault; those remain separate gates in the
 | SV-SP-023 | A state-prefix result lacks confirmed recovery evidence or has only an empty/wrong-incarnation physical fence. | It cannot satisfy PASS or a matching expected state failure. Report `state-recovery.evidence-unconfirmed` as appropriate; preserve any raw data FAIL and retained diagnostics. |
 | SV-SP-024 | Calibration contains three correct controls, three correct restores, three uninterrupted mutant controls and three mutant restores, each with frozen identities and complete provenance. | Qualify only when the first three cells PASS and mutant restores are raw state-mismatch FAIL with zero ID defects. Keep all twelve catalog expectations at PASS. Missing windows, missing attempts or infrastructure failures leave the matrix incomplete; do not discard or replace them. |
 
+### FUSE checkpoint-storage contract
+
+| ID | Case | Expected result |
+| --- | --- | --- |
+| SV-CS-001 | Independent filesystem/FUSE fixture declares bundle/manifest/image/platform pins, threshold zero, one concurrent checkpoint and explicit failure tolerance. | Compile the exact helper identity, checkpoint configuration and atomic job/timeout/lease step without Docker. |
+| SV-CS-002 | Legacy filesystem storage omits FUSE. | Preserve existing checkpoint directory/configuration; add no helper target or checkpoint-control keys. |
+| SV-CS-003 | Storage fault names an unknown job, supplies a raw path/mode, omits helper pins or selects an unsupported platform. | Reject semantic or structural validation, with no artifact execution. |
+| SV-CS-004 | FUSE omits a checkpoint control, conflicts with generic canonical/deprecated configuration, selects another image, or supplies absolute/traversing bundle paths. | Reject runner capability before preparation/Docker. |
+| SV-CS-005 | Timeout exceeds 120s, lease is shorter than timeout, atomic operation repeats/inherits a loop, or another fault accompanies it. | Reject the unsupported sequence. Healthy controls retain one ordinary TaskManager kill/restart pair. |
+| SV-CS-006 | Atomic operation has fewer than two input events per key, wrong topology/state backend/TTL, HA/token configuration or custom runtime JAR. | Reject before provisioning; readiness still requires actual prefix/checkpoint evidence for an accepted input size. |
+| SV-CS-007 | Pinned helper manifest and exact three files match complete build/cleanup evidence. | Snapshot all bytes into the owned preparation workspace, retain hashes and image/platform, and remain independent of later changes to originals. |
+| SV-CS-008 | Helper or manifest hash differs; JSON has duplicate fields; build/cleanup is incomplete; entries are missing, extra, symbolic, outside root or oversized. | Reject `artifact.checkpoint-storage.bundle-invalid` before any container/helper execution. Bound manifest reads to 1 MiB and each helper to 32 MiB. |
+
+
 | ID | Case | Expected result |
 | --- | --- | --- |
 | SV-100 | Built-in `kafka.id-set` validator with no `input_source` on source topic. | Reject no expected-data artifact. |

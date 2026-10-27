@@ -127,6 +127,20 @@ class StateRecoveryEvidenceRendererTest {
         assertFalse(rendered.path("physicalFenceConfirmed").booleanValue());
     }
 
+    @Test
+    void storageFailureRetainsPartialTypedEvidenceAndExplicitNulls() throws Exception {
+        var failed = new org.savonitar.flink.stability.core.execution.CheckpointStorageFault.Evidence(
+                "$/phases/0/steps/0", JOB, "a".repeat(32), 120000, -1, -1,
+                null, null, null, null, null, null, null, List.of(), List.of(), null, null, null,
+                List.of("Unknown POST outcome; not replayed"));
+        var rendered = JSON.readTree(JSON.writeValueAsString(StateRecoveryEvidenceRenderer.render(failed, JSON)));
+        assertEquals("Unknown POST outcome; not replayed", rendered.at("/errors/0").textValue());
+        assertTrue(rendered.path("triggerResult").isNull());
+        assertTrue(rendered.path("materialization").isNull());
+        assertEquals(-1, rendered.path("failedCheckpointId").longValue());
+        assertEquals(0, rendered.path("samples").size());
+    }
+
     private static JsonNode roundTrip(StateRecoveryReport report) throws Exception {
         return JSON.readTree(JSON.writeValueAsString(StateRecoveryEvidenceRenderer.render(report, JSON)));
     }

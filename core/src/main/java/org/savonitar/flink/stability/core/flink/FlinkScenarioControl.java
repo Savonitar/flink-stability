@@ -38,6 +38,19 @@ public interface FlinkScenarioControl extends FlinkJobControl, AutoCloseable {
         throw new UnsupportedOperationException("Checkpoint overview unavailable");
     }
 
+    default FlinkCheckpointEvidence.History checkpointHistory(FlinkJobHandle job, Duration timeout) throws IOException {
+        throw new UnsupportedOperationException("Typed checkpoint history unavailable");
+    }
+
+    default FlinkCheckpointEvidence.Checkpoint checkpointDetails(
+            FlinkJobHandle job, long checkpointId, Duration timeout) throws IOException {
+        throw new UnsupportedOperationException("Typed checkpoint details unavailable");
+    }
+
+    default FlinkCheckpointEvidence.Configuration checkpointConfiguration(FlinkJobHandle job, Duration timeout) throws IOException {
+        throw new UnsupportedOperationException("Typed checkpoint configuration unavailable");
+    }
+
     /** Every received HTTP error, including failures followed by a successful retry. */
     default List<RestError> restErrors() {
         return List.of();

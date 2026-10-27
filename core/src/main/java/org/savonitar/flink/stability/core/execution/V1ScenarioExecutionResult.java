@@ -168,6 +168,9 @@ public record V1ScenarioExecutionResult(
         }
         if (status == Status.PASS && phaseEvidence.map(value -> value.savepointRestores().stream().anyMatch(item -> !item.confirmed())).orElse(false))
             throw new IllegalArgumentException("PASS requires confirmed savepoint restoration");
+        if (status == Status.PASS && phaseEvidence.filter(value -> value.storageFaults().stream().anyMatch(item -> !item.confirmed())
+                || value.checkpointStorage().isPresent() && !value.storageConfirmed()).isPresent())
+            throw new IllegalArgumentException("PASS requires confirmed checkpoint storage evidence");
         if (status == Status.PASS && TaskManagerKillEffect.evaluate(
                         phaseEvidence.map(PhaseExecutionEvidence::taskManagerKills)
                                 .orElse(List.of()),
@@ -409,6 +412,20 @@ public record V1ScenarioExecutionResult(
                 runtimeClassOrigins, kafkaTransactionVersion, flinkRestErrors, expectedHa, tokenEvidence, haObservations,
                 processObservations, kafkaLogs, componentErrors, kafkaRuntime, flinkLogMarkers, checkpointRetention,
                 Optional.of(evidence), updated);
+    }
+
+    public V1ScenarioExecutionResult withCheckpointStorage(org.savonitar.flink.stability.runtime.api.StorageFaultControl.Snapshot evidence) {
+        var phases = phaseEvidence.orElseGet(() -> new PhaseExecutionEvidence(List.of())).withCheckpointStorage(evidence);
+        var updated = new java.util.ArrayList<>(diagnostics);
+        if (!phases.storageConfirmed()) updated.add(CheckpointStorageFault.UNCONFIRMED + ": " + evidence.diagnostics());
+        boolean downgrade = status == Status.PASS && !phases.storageConfirmed();
+        return new V1ScenarioExecutionResult(downgrade ? Status.INCONCLUSIVE : status,
+                downgrade ? CheckpointStorageFault.UNCONFIRMED : reason,
+                downgrade ? "The data oracle passed, but final checkpoint storage evidence is incomplete" : message,
+                inputManifest, Optional.of(phases), writeFenceEvidence, processFenceEvidence, finalJobObservation,
+                terminalValidation, sinkTransactions, subjectClassOrigins, flinkProvisioningEvidence, expectedFlinkRuntime,
+                runtimeClassOrigins, kafkaTransactionVersion, flinkRestErrors, expectedHa, tokenEvidence, haObservations,
+                processObservations, kafkaLogs, componentErrors, kafkaRuntime, flinkLogMarkers, checkpointRetention, stateRecovery, updated);
     }
 
     public V1ScenarioExecutionResult withCheckpointRetention(CheckpointRetentionEvidence evidence) {

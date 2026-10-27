@@ -1,0 +1,81 @@
+format: v1
+kind: scenario
+meta:
+  name: checkpoint-storage-fault
+  description: Opt-in FUSE checkpoint write-EIO and state recovery experiment; integrated live qualification is separate.
+parameters:
+  helper_bundle: { type: string, required: true }
+  helper_manifest_sha256: { type: string, required: true }
+completion_timeout: 5m
+runs: 1
+health_retry_limit: 0
+setup:
+  kafka:
+    clusters:
+      main:
+        image: apache/kafka:4.0.0
+        brokers: 1
+        topics:
+          - name: input
+            partitions: 1
+            replication_factor: 1
+            input_source: { mode: generated, format: integer-sequence, total: 30000 }
+          - name: output
+            partitions: 1
+            replication_factor: 1
+  flink:
+    image: flink:2.2.0
+    image_id: sha256:2e93ded2cb7bf1a50f71b663d5e3ea01420bcc4e549cbf666d05120f939713c7
+    jobmanagers: 1
+    taskmanagers: 1
+subject:
+  connectors:
+    kafka:
+      artifact: maven:org.apache.flink:flink-connector-kafka:5.0.0-2.2
+workload:
+  jobs:
+    - alias: state-job
+      jar: ./flink-job-generator/target/flink-job-generator.jar
+      connectors: [kafka]
+      parallelism: 1
+      behavior: { type: keyed-prefix-v1, key_count: 8 }
+      state_backend: hashmap
+      state_ttl: { enabled: false }
+      source: { cluster: main, topic: input }
+      sink:
+        cluster: main
+        topic: output
+        delivery_guarantee: EXACTLY_ONCE
+        transactional_id_prefix: keyed-prefix
+        transaction_id_naming_strategy: INCREMENTING
+      checkpointing:
+        interval: 10s
+        mode: EXACTLY_ONCE
+        small_file_threshold: 0
+        max_concurrent: 1
+        tolerable_failures: 10
+        storage:
+          type: filesystem
+          fuse:
+            bundle: ${helper_bundle}
+            manifest_sha256: ${helper_manifest_sha256}
+            image_id: sha256:2e93ded2cb7bf1a50f71b663d5e3ea01420bcc4e549cbf666d05120f939713c7
+            platform: linux/arm64
+      program_args: [--processingDelayMs, "5"]
+phases:
+  - name: verify-running
+    steps:
+      - await:
+          condition: { type: job-state, job: state-job, state: RUNNING }
+          timeout: 2m
+          on_timeout: inconclusive
+      - checkpoint_storage_fault:
+          job: state-job
+          timeout: 90s
+          lease: 120s
+terminal_validations:
+  - type: kafka.state-prefix
+    job: state-job
+    cluster: main
+    topic: output
+    expected: input-manifest

@@ -21,4 +21,9 @@ public interface FlinkJobControl {
     default long jobManagerTimeMillis(FlinkJobHandle job) throws IOException {
         return observe(job).jobManagerTimeMillis();
     }
+
+    /** Reads the clock within the caller's remaining atomic-operation budget. */
+    default long jobManagerTimeMillis(FlinkJobHandle job, Duration timeout) throws IOException {
+        return observe(job, timeout).jobManagerTimeMillis();
+    }
 }
