@@ -56,6 +56,40 @@ class RunScenarioCommandTest {
     @TempDir
     Path temporaryDirectory;
 
+    @Test void statePrefixReportKeepsIdAndStateEvidenceTogetherAndOmitsIncompleteTotals() throws Exception {
+        for (boolean complete : List.of(true, false)) {
+            var terminal = new org.savonitar.flink.stability.core.validation.kafka.KafkaStatePrefixValidationResult(
+                    KafkaIdSetValidationResult.Status.FAIL, complete ? "validator.kafka.state-prefix.state-mismatch"
+                            : "verification.kafka.incomplete-after-timeout", "state validation",
+                    complete ? passResult().terminalValidation().orElseThrow().evidence()
+                            : KafkaIdSetValidationResult.Evidence.unavailable(10),
+                    new org.savonitar.flink.stability.core.validation.kafka.KafkaStatePrefixValidationResult.StateEvidence(
+                            8, complete ? java.util.OptionalLong.of(1) : java.util.OptionalLong.empty(),
+                            complete ? List.of(new org.savonitar.flink.stability.core.validation.kafka.KafkaStatePrefixValidationResult.StateMismatchSample(
+                                    0, 8, 8, 0, 0, 2, 1, 10, 9)) : List.of()));
+            var result = new V1ScenarioExecutionResult(V1ScenarioExecutionResult.Status.FAIL,
+                    terminal.reason(), terminal.message(), Optional.empty(), Optional.empty(), Optional.empty(),
+                    Optional.of(runtimeFence()), Optional.empty(), Optional.of(terminal), Optional.empty(),
+                    SUBJECT_ORIGINS, runtimeComponents(), EXPECTED_RUNTIME, Optional.empty(),
+                    KafkaTransactionVersion.Selection.notRequested(), List.of());
+            var output = JSON.readTree(new V1ExecutionResultRenderer().render("state-prefix", context("1234abcd"),
+                    ExecutableScenarioPlan.ExpectedOutcome.pass(), result)).at("/evidence/terminalValidation");
+            assertEquals("kafka.state-prefix", output.path("type").asText());
+            assertEquals(8, output.at("/statePrefix/keyCount").asInt());
+            assertEquals(complete, output.path("snapshotComplete").asBoolean());
+            assertEquals(complete, output.path("statePrefix").has("mismatches"));
+            if (complete) {
+                assertEquals(0, output.path("missing").asInt());
+                assertEquals(1, output.at("/statePrefix/mismatches").asInt());
+                assertEquals(10, output.at("/statePrefix/mismatchSamples/0/expectedSum").asLong());
+            }
+        }
+        var legacy = JSON.readTree(new V1ExecutionResultRenderer().render("bounded-eos", context("1234abcd"),
+                ExecutableScenarioPlan.ExpectedOutcome.pass(), passResult())).at("/evidence/terminalValidation");
+        assertFalse(legacy.has("statePrefix"));
+        assertFalse(legacy.has("type"));
+    }
+
     @Test
     void customKafkaReceiptsSurviveLogSnapshotsAndBothCleanupPaths() throws Exception {
         var launch = org.savonitar.flink.stability.runtime.api.KafkaRuntimeLaunch.command("confluent-platform");
@@ -844,7 +878,7 @@ class RunScenarioCommandTest {
                         List.of(otherTaskManager, lostTaskManager), List.of())),
                 Optional.empty());
         FlinkProcessWriteFenceEvidence processes = runtimeFence();
-        KafkaIdSetValidationResult terminal = passResult().terminalValidation().orElseThrow();
+        var terminal = passResult().terminalValidation().orElseThrow();
         V1ScenarioExecutionResult result = new V1ScenarioExecutionResult(
                 V1ScenarioExecutionResult.Status.PASS,
                 terminal.reason(),

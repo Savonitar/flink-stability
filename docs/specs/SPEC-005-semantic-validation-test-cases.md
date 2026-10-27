@@ -5,13 +5,14 @@ Pre-provisioning cases through artifact/suite/CLI validation, connector
 lock/bundle-binding and classpath preparation, and the Testcontainers copy,
 pre-start verification, and component-lifecycle infrastructure are implemented
 as applicable. The public `run` path now implements the first narrow bounded
-plain-scenario execution, physical write fence, `kafka.id-set` terminal
-verification, and structured result/evidence cases. Broader scenario-step
+plain-scenario execution, physical write fence, `kafka.id-set` and opt-in
+`kafka.state-prefix` terminal verification, automatic stateful pre-kill readiness,
+typed recovery receipts and structured result/evidence cases. Broader scenario-step
 orchestration, OCI-digest and complete R8.2 report assembly, environment health,
 repetition/experiment verdicts, and complete broad-v1 execution remain roadmap
 work.
 
-**Last updated:** 2026-10-04. Custom runtime subjects extend the existing
+**Last updated:** 2026-10-26. Custom runtime subjects and state-prefix extend the existing
 execution-vertical cases below. Broader contract cases are not thereby marked
 implemented, and Docker-free acceptance does not establish live image support.
 
@@ -231,6 +232,39 @@ expected validation code.
 | SV-099r | A first-runner job combines its required `state_backend: hashmap` with `state_ttl.cleanup: rocksdb-compaction-filter`. | Reject before artifact preparation/Docker with `runner.workload.state-ttl-cleanup-unsupported`; do not silently accept a RocksDB-only cleanup policy that cannot apply. |
 
 ## 6. Input source and terminal validators
+
+The keyed-prefix package adds contract, workload and independent-oracle coverage,
+plus PR2 readiness/recovery evidence and a separate mutant calibration recipe.
+Implemented code and offline tests do not qualify restore sensitivity or a
+filesystem fault; those remain separate gates in the
+[implementation plan](../STATE-RECOVERY-STORAGE-FAULT-PLAN.md).
+
+| ID | Case | Expected result |
+| --- | --- | --- |
+| SV-SP-001 | The independent keyed-prefix fixture declares `behavior: { type: keyed-prefix-v1, key_count: 2 }` and one `kafka.state-prefix` validator bound to its job, sink and generated input manifest. | Resolve successfully; materialize only the validator's `2m` timeout, no oracle mode. |
+| SV-SP-002 | Job behavior is omitted. | Preserve integer passthrough and existing defaults/results; do not materialize a behavior object or either reserved behavior key. |
+| SV-SP-003 | Key count is 1 or 1024; a whole-scalar integer parameter supplies 8. | Accept. Missing, fractional, string-numeric, zero or >1024 values, unknown fields and unsupported types reject, including after parameter resolution. |
+| SV-SP-004 | The state validator has a missing job, a passthrough job, another job's sink, an ambiguous sink owner, or a source unrelated to the input manifest. | Reject semantic preflight. A state job lacking its bound state validator or using an ID-only validator also rejects. |
+| SV-SP-005 | `kafka.state-prefix` declares either `mode: exactly-once` or `mode: at-least-once`. | Reject the unknown field; this composite oracle has no mode option. |
+| SV-SP-006 | Selected keyed-prefix behavior references an otherwise valid old v1 JAR without capability. | Reject staged bytes before Docker with `artifact.workload.protocol-capability-missing`. The same JAR remains valid for omitted behavior. |
+| SV-SP-007 | The JAR declares its capability once in the main section, with folded lines or case-insensitive attribute name. | Accept exact `keyed-prefix-v1` token. Reject a substring, named-section-only marker, duplicate attributes/tokens or malformed token list when capability is required. |
+| SV-SP-008 | Expected fail names the state oracle with a registered defect reason. | Accept; reject `.match`, unregistered reasons and every `verification.*` reason. |
+| SV-SP-009 | First executable state slice uses multiple workers/partitions, parallelism >1, TTL, a non-EOS sink, input fault, HA, rescaling or savepoint transitions. | Reject before preparation/provisioning. |
+| SV-SP-010 | Every ID occurs once, but keys, counts or prefix sums are wrong, including reset prefixes. | Complete independent comparison fails with `validator.kafka.state-prefix.state-mismatch` and preserves bounded mismatch samples. |
+| SV-SP-011 | A handwritten K=2 control emits IDs 0..5 with sums 1,2,4,6,9,12 in arbitrary arrival order. | Pass independent key/count/sum and exact-ID checks. |
+| SV-SP-012 | State records contain duplicate/unknown JSON fields, invalid UTF-8, non-integral/overflowing values, tombstones or >1 KiB payloads. | Fail as malformed records; never accept a truncated record as valid JSON. Valid records longer than 64 characters remain intact. |
+| SV-SP-013 | State snapshot exceeds 128 MiB retained bytes or 1,000,000 records; input manifest is partial/noncanonical; traversal or comparison exhausts the absolute deadline. | Return the corresponding `verification.kafka.*` failure, not an expected state failure. |
+| SV-SP-014 | Complete output contains malformed, unexpected, duplicate, missing and state-mismatch defects together. | Preserve all totals and deterministic samples, using primary-reason precedence malformed > unexpected > duplicate > missing > state mismatch. |
+| SV-SP-015 | An uninterrupted input has `N < K`; the same small input declares a kill. | Preserve uninterrupted execution using final snapshot evidence for the reachable keys. A kill with `N < 2*K` rejects before provisioning with `runner.state-prefix.input-too-small`. |
+| SV-SP-016 | A keyed TaskManager kill has RUNNING alone, only a checkpoint count, an incomplete committed-prefix read, missing keys, or checkpoint receipts from another physical incarnation/attempt. | The automatic gate cannot admit the kill. All observations share its fixed `45s` budget; neither sleep nor configured input size substitutes for proof. |
+| SV-SP-017 | Readiness never becomes confirmed or the gate exhausts its deadline. | Retain the miss/error, skip the kill and remaining phase steps, and still attempt natural completion, physical fencing and the terminal oracle. Passing data becomes INCONCLUSIVE; existing data FAIL remains visible. |
+| SV-SP-018 | The target restores a checkpoint absent from the pre-kill admitted set, starts on an unbound process, or lacks first post-restore events for every key. | Preserve typed readiness/recovery evidence but do not confirm recovery. A passing state oracle alone cannot produce scenario PASS. |
+| SV-SP-019 | State receipt capture has missing/duplicate physical-process registration, duplicate or malformed markers, truncated logs, wrong JobID/operator/attempt/checkpoint, or exceeded capture bounds. | Record incomplete trace and bounded diagnostics. Reject ambiguous recovery proof without hiding independently observed data defects. |
+| SV-SP-020 | The separately built mutant starts normally, including a nonzero execution-attempt number without a restored checkpoint. | Preserve the correct arm's output; emit no mutation activation. Build mode comes only from its own packaged identity, never runtime arguments/properties or an ambient resource. |
+| SV-SP-021 | The mutant processes several events per key after genuine restore from serialized state. | Reset only the keyed aggregate on the first event per key; later events accumulate normally. Preserve source/sink behavior, UID and serializer. Retain per-key previous/new values and one matching reset receipt; a failed state update or absent previous value cannot claim activation. |
+| SV-SP-022 | Own-JAR build identity is absent, duplicated, malformed or oversized, or a build reuses an output tree belonging to the other mode. | Reject. Frozen builds retain source/recipe/JAR hashes and separate outputs; class bytes match between arms and only the manifest/private identity resource differ. |
+| SV-SP-023 | A state-prefix result lacks confirmed recovery evidence or has only an empty/wrong-incarnation physical fence. | It cannot satisfy PASS or a matching expected state failure. Report `state-recovery.evidence-unconfirmed` as appropriate; preserve any raw data FAIL and retained diagnostics. |
+| SV-SP-024 | Calibration contains three correct controls, three correct restores, three uninterrupted mutant controls and three mutant restores, each with frozen identities and complete provenance. | Qualify only when the first three cells PASS and mutant restores are raw state-mismatch FAIL with zero ID defects. Keep all twelve catalog expectations at PASS. Missing windows, missing attempts or infrastructure failures leave the matrix incomplete; do not discard or replace them. |
 
 | ID | Case | Expected result |
 | --- | --- | --- |

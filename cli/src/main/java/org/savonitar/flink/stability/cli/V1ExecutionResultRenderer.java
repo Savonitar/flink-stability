@@ -435,6 +435,7 @@ final class V1ExecutionResultRenderer {
             processFence.put("completedAt", fence.completedAt().toString());
         });
         ObjectNode terminal = evidence.putObject("terminalValidation");
+        result.stateRecovery().ifPresent(state -> evidence.set("stateRecovery", StateRecoveryEvidenceRenderer.render(state, JSON)));
         terminal.put("status", "not-run");
         terminal.put("completed", false);
         terminal.put("snapshotComplete", false);
@@ -446,6 +447,13 @@ final class V1ExecutionResultRenderer {
             terminal.put("expected", validation.evidence().expectedCount());
             terminal.put("observed", validation.evidence().observedCount());
             terminal.put("snapshotComplete", validation.evidence().snapshotComplete());
+            if (validation instanceof org.savonitar.flink.stability.core.validation.kafka.KafkaStatePrefixValidationResult state) {
+                terminal.put("type", state.validatorType());
+                ObjectNode stateEvidence = terminal.putObject("statePrefix");
+                stateEvidence.put("keyCount", state.stateEvidence().keyCount());
+                state.stateEvidence().mismatchCount().ifPresent(count -> stateEvidence.put("mismatches", count));
+                stateEvidence.set("mismatchSamples", JSON.valueToTree(state.stateEvidence().mismatchSamples()));
+            }
             ArrayNode missingSamples = terminal.putArray("missingSamples");
             validation.evidence().missingSamples().forEach(missingSamples::add);
             if (!validation.evidence().duplicateSamples().isEmpty())

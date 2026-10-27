@@ -21,6 +21,8 @@
         <kafka.connector.version>${flink.kafka.connector.version}</kafka.connector.version>
         <kafka.connector.groupId>org.apache.flink</kafka.connector.groupId>
         <kafka.clients.version>4.0.0</kafka.clients.version>
+        <workload.build.directory>${project.basedir}/target</workload.build.directory>
+        <workload.build.mode>correct</workload.build.mode>
     </properties>
 
     <dependencies>
@@ -64,7 +66,18 @@
     </dependencies>
 
     <build>
+        <directory>${workload.build.directory}</directory>
         <finalName>flink-job-generator</finalName>
+        <resources>
+            <resource>
+                <directory>src/main/resources</directory>
+                <filtering>false</filtering>
+            </resource>
+            <resource>
+                <directory>src/build-identity</directory>
+                <filtering>true</filtering>
+            </resource>
+        </resources>
         <plugins>
             <plugin>
                 <groupId>org.codehaus.mojo</groupId>
@@ -85,6 +98,7 @@
                                 <argument>${kafka.connector.version}</argument>
                                 <argument>${maven.compiler.release}</argument>
                                 <argument>${kafka.clients.version}</argument>
+                                <argument>${workload.build.mode}</argument>
                             </arguments>
                         </configuration>
                     </execution>
@@ -106,11 +120,34 @@
                         </manifest>
                         <manifestEntries>
                             <Flink-Stability-Workload-Protocol>v1</Flink-Stability-Workload-Protocol>
+                            <Flink-Stability-Workload-Capabilities>keyed-prefix-v1</Flink-Stability-Workload-Capabilities>
+                            <Flink-Stability-Workload-Build-Mode>${workload.build.mode}</Flink-Stability-Workload-Build-Mode>
                         </manifestEntries>
                     </archive>
                 </configuration>
             </plugin>
         </plugins>
     </build>
+
+    <profiles>
+        <profile>
+            <id>state-reset-on-restore</id>
+            <properties>
+                <workload.build.mode>reset-state-on-restore-v1</workload.build.mode>
+                <workload.build.directory>${project.basedir}/target/state-reset-on-restore</workload.build.directory>
+            </properties>
+            <build>
+                <plugins>
+                    <plugin>
+                        <groupId>org.apache.maven.plugins</groupId>
+                        <artifactId>maven-jar-plugin</artifactId>
+                        <configuration>
+                            <classifier>state-reset-on-restore</classifier>
+                        </configuration>
+                    </plugin>
+                </plugins>
+            </build>
+        </profile>
+    </profiles>
 
 </project>

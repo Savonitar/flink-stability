@@ -13,6 +13,9 @@ import org.savonitar.flink.stability.core.flink.FlinkScenarioControl;
 import org.savonitar.flink.stability.core.execution.plan.ExecutableScenarioPlan;
 import org.savonitar.flink.stability.core.execution.plan.PreparedExecutableScenarioPlan;
 import org.savonitar.flink.stability.core.validation.kafka.KafkaIdSetValidationResult;
+import org.savonitar.flink.stability.core.validation.kafka.KafkaStatePrefixValidator;
+import org.savonitar.flink.stability.core.validation.kafka.KafkaStatePrefixValidationResult;
+import org.savonitar.flink.stability.core.validation.kafka.KafkaTerminalValidationResult;
 import org.savonitar.flink.stability.core.validation.kafka.KafkaAdminTransactionLister;
 import org.savonitar.flink.stability.core.validation.kafka.KafkaIdSetValidator;
 import org.savonitar.flink.stability.core.validation.kafka.KafkaTransactionListing;
@@ -47,6 +50,7 @@ public final class V1ScenarioExecutor {
     private final InputPreparation inputPreparation;
     private final FlinkControlFactory flinkControlFactory;
     private final TerminalValidation terminalValidation;
+    private final StateTerminalValidation stateTerminalValidation;
     private final TransactionListing transactionListing;
     private final TransactionVersionSelection transactionVersionSelection;
     private final AttemptCleanupBoundary cleanupBoundary;
@@ -112,6 +116,22 @@ public final class V1ScenarioExecutor {
             Duration cleanupTimeout,
             Function<KafkaProxyEndpoint, ExecutablePhaseExecutor.NetworkFaults> networkFaultFactory,
             TransactionVersionSelection transactionVersionSelection) {
+        this(runtimeFactory, inputPreparation, flinkControlFactory, terminalValidation,
+                transactionListing, cleanupTimeout, networkFaultFactory, transactionVersionSelection,
+                new KafkaStatePrefixValidator()::validate);
+    }
+
+    V1ScenarioExecutor(
+            V1AttemptRuntimeFactory runtimeFactory,
+            InputPreparation inputPreparation,
+            FlinkControlFactory flinkControlFactory,
+            TerminalValidation terminalValidation,
+            TransactionListing transactionListing,
+            Duration cleanupTimeout,
+            Function<KafkaProxyEndpoint, ExecutablePhaseExecutor.NetworkFaults> networkFaultFactory,
+            TransactionVersionSelection transactionVersionSelection,
+            StateTerminalValidation stateTerminalValidation) {
+        this.stateTerminalValidation = Objects.requireNonNull(stateTerminalValidation, "stateTerminalValidation");
         this.runtimeFactory = Objects.requireNonNull(runtimeFactory, "runtimeFactory");
         this.inputPreparation = Objects.requireNonNull(
                 inputPreparation, "inputPreparation");
@@ -178,7 +198,7 @@ public final class V1ScenarioExecutor {
         return cleanupFailure == null ? result : result.withCleanupFailure(cleanupFailure);
     }
 
-    private static boolean confirmedPhysicalFence(V1ScenarioExecutionResult result) {
+    static boolean confirmedPhysicalFence(V1ScenarioExecutionResult result) {
         if (result.processFenceEvidence().isEmpty()) return false;
         var stopped = result.processFenceEvidence().orElseThrow().components();
         return result.expectedFlinkRuntime().components().entrySet().stream().allMatch(slot ->
@@ -212,7 +232,8 @@ public final class V1ScenarioExecutor {
         FlinkTerminalWriteFence.Evidence fence = null;
         FlinkProcessWriteFenceEvidence processFence = null;
         FlinkJobObservation.Attempt finalJob = null;
-        KafkaIdSetValidationResult validation = null;
+        KafkaTerminalValidationResult validation = null;
+        StateRecoveryGate stateRecoveryGate = null;
         KafkaTransactionListing sinkTransactions = null;
         SubjectClassOrigins subjectOrigins = null;
         SubjectClassOrigins runtimeOrigins = null;
@@ -282,7 +303,13 @@ public final class V1ScenarioExecutor {
                 }
             }
             stage = Stage.PHASES;
+            if (plan.job().workloadConfiguration().behavior().isPresent()) {
+                stateRecoveryGate = new StateRecoveryGate(flink, runtime, input.inputManifest(),
+                        endpoints.hostBootstrapServers(), plan.job().sink().topic().topic(),
+                        plan.job().workloadConfiguration().behavior().orElseThrow().keyCount());
+            }
             phases = new ExecutablePhaseExecutor(flink, runtime, networkFaults)
+                    .withStateRecoveryGate(stateRecoveryGate)
                     .withSavepointSubmission(initialSubmission, "file:/flink/checkpoints/savepoints-attempt-"
                             + context.attemptOrdinal() + "-" + context.attemptNonce8())
                     .execute(plan, job, expectedHa.tokenProof());
@@ -315,12 +342,17 @@ public final class V1ScenarioExecutor {
             }
 
             stage = Stage.TERMINAL_VALIDATION;
-            validation = terminalValidation.validate(
-                    endpoints.hostBootstrapServers(),
-                    plan.terminalValidation().output().topic(),
-                    input.inputManifest().presentIds(),
-                    plan.terminalValidation().timeout()).forMode(
-                            KafkaIdSetValidationResult.Mode.valueOf(plan.terminalValidation().mode().name()));
+            if (plan.terminalValidation() instanceof ExecutableScenarioPlan.KafkaStatePrefixValidation state) {
+                validation = stateTerminalValidation.validate(endpoints.hostBootstrapServers(),
+                        state.output().topic(), input.inputManifest(), state.keyCount(), state.timeout());
+            } else {
+                validation = terminalValidation.validate(
+                        endpoints.hostBootstrapServers(),
+                        plan.terminalValidation().output().topic(),
+                        input.inputManifest().presentIds(),
+                        plan.terminalValidation().timeout()).forMode(
+                                KafkaIdSetValidationResult.Mode.valueOf(plan.terminalValidation().mode().name()));
+            }
             // Only a transactional (exactly-once) sink has a prefix to list.
             String bootstrapServers = endpoints.hostBootstrapServers();
             sinkTransactions = plan.job().sink().transactionalIdPrefix()
@@ -511,7 +543,12 @@ public final class V1ScenarioExecutor {
                     diagnostics(failure));
         }
 
-        return result.withFlinkRestErrors(flink == null ? List.of() : flink.restErrors());
+        result = result.withFlinkRestErrors(flink == null ? List.of() : flink.restErrors());
+        if (plan.job().workloadConfiguration().behavior().isPresent()) {
+            result = result.withStateRecovery(StateRecoveryReport.collect(prepared,
+                    job == null ? "unsubmitted" : job.jobId(), result, runtime, stateRecoveryGate));
+        }
+        return result;
     }
 
     private static SubjectClassOrigins subjectOrigins(
@@ -587,7 +624,7 @@ public final class V1ScenarioExecutor {
             FlinkTerminalWriteFence.Evidence fence,
             FlinkProcessWriteFenceEvidence processFence,
             FlinkJobObservation.Attempt finalJob,
-            KafkaIdSetValidationResult validation,
+            KafkaTerminalValidationResult validation,
             KafkaTransactionListing sinkTransactions,
             SubjectClassOrigins subjectOrigins,
             V1AttemptRuntime runtime,
@@ -809,6 +846,12 @@ public final class V1ScenarioExecutor {
                 String bootstrapServers,
                 String transactionalIdPrefix,
                 Duration timeout) throws Exception;
+    }
+
+    @FunctionalInterface
+    interface StateTerminalValidation {
+        KafkaStatePrefixValidationResult validate(String bootstrapServers, String topic,
+                KafkaInputManifest manifest, int keyCount, Duration timeout);
     }
 
     @FunctionalInterface

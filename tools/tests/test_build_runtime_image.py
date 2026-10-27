@@ -203,7 +203,7 @@ class WorkloadBuildGuardTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory).resolve()
             target = root / 'target'
-            settings = ['2.2.0', 'org.apache.flink', '5.0.0-2.2', '11', '4.0.0']
+            settings = ['2.2.0', 'org.apache.flink', '5.0.0-2.2', '11', '4.0.0', 'correct']
             def run(values):
                 return subprocess.run([self.java, '-Duser.home=' + str(root), str(ROOT / 'flink-job-generator/WorkloadBuildGuard.java'),
                                        str(target), *values], env={'PATH': os.defpath}, capture_output=True, text=True)
@@ -229,11 +229,59 @@ class WorkloadBuildGuardTest(unittest.TestCase):
             target = Path(directory).resolve() / 'target'
             (target / 'classes').mkdir(parents=True)
             result = subprocess.run([self.java, str(ROOT / 'flink-job-generator/WorkloadBuildGuard.java'),
-                                     str(target), '2.2.0', 'org.apache.flink', '5.0.0-2.2', '11', '4.0.0'],
+                                     str(target), '2.2.0', 'org.apache.flink', '5.0.0-2.2', '11', '4.0.0', 'correct'],
                                     env={'PATH': os.defpath}, capture_output=True, text=True)
             self.assertNotEqual(0, result.returncode)
             self.assertIn('unrecorded', result.stderr)
             self.assertFalse((target / 'flink.version').exists())
+
+    def test_mutation_modes_require_separate_output_and_preserve_original_markers(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory).resolve()
+
+            def run(target, mode):
+                return subprocess.run([self.java, '-Duser.home=' + str(root),
+                                       str(ROOT / 'flink-job-generator/WorkloadBuildGuard.java'),
+                                       str(target), '2.2.0', 'org.apache.flink', '5.0.0-2.2', '11', '4.0.0', mode],
+                                      env={'PATH': os.defpath}, capture_output=True, text=True)
+
+            for mode, other in [('correct', 'reset-state-on-restore-v1'),
+                                ('reset-state-on-restore-v1', 'correct')]:
+                target = root / mode
+                self.assertEqual(0, run(target, mode).returncode)
+                (target / 'classes').mkdir()
+                markers = {name: (target / name).read_bytes()
+                           for name in ('flink.version', 'workload-build.signature', 'workload-build.mode')}
+                failed = run(target, other)
+                self.assertNotEqual(0, failed.returncode)
+                self.assertIn('another mutation mode', failed.stderr)
+                for name, original in markers.items():
+                    self.assertEqual(original, (target / name).read_bytes())
+                self.assertEqual(0, run(target, mode).returncode)
+
+    def test_pre_mutant_build_markers_can_upgrade_only_as_correct(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory).resolve()
+            target = root / 'target'
+
+            def run(mode):
+                return subprocess.run([self.java, '-Duser.home=' + str(root),
+                                       str(ROOT / 'flink-job-generator/WorkloadBuildGuard.java'),
+                                       str(target), '2.2.0', 'org.apache.flink', '5.0.0-2.2', '11', '4.0.0', mode],
+                                      env={'PATH': os.defpath}, capture_output=True, text=True)
+
+            self.assertEqual(0, run('correct').returncode)
+            (target / 'classes').mkdir()
+            # Reproduce an older successful build with the existing version/signature only.
+            (target / 'workload-build.mode').unlink()
+            signature = (target / 'workload-build.signature').read_bytes()
+            rejected = run('reset-state-on-restore-v1')
+            self.assertNotEqual(0, rejected.returncode)
+            self.assertIn('another mutation mode', rejected.stderr)
+            self.assertFalse((target / 'workload-build.mode').exists())
+            self.assertEqual(signature, (target / 'workload-build.signature').read_bytes())
+            self.assertEqual(0, run('correct').returncode)
+            self.assertEqual('correct\n', (target / 'workload-build.mode').read_text())
 
 
 if __name__ == '__main__':

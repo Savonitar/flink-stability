@@ -49,6 +49,10 @@ public record ScenarioVerdict(Status status, String reason, String message, bool
         boolean attemptPassed = attempt.status() == V1ScenarioExecutionResult.Status.PASS;
         if (expected.outcome() == ExecutableScenarioPlan.ExpectedOutcome.Outcome.PASS) {
             if (attemptPassed) {
+                if (attempt.terminalValidation().filter(value -> value.validatorType().equals("kafka.state-prefix")).isPresent()
+                        && attempt.stateRecovery().filter(StateRecoveryReport::confirmed).isEmpty())
+                    return unconfirmed(StateRecoveryReport.UNCONFIRMED,
+                            "The state oracle passed without complete workload and recovery receipts");
                 ScenarioVerdict window = unconfirmedWindow(attempt);
                 if (window != null) return window;
             }
@@ -58,7 +62,9 @@ public record ScenarioVerdict(Status status, String reason, String message, bool
                             Status.FAIL, attempt.reason(), attempt.message(), false);
         }
         String expectedReason = expected.reason().orElseThrow();
-        if (!attemptPassed && attempt.reason().equals(expectedReason)) {
+        if (!attemptPassed && attempt.reason().equals(expectedReason)
+                && attempt.terminalValidation().filter(validation ->
+                        !validation.validatorType().equals(expected.oracle().orElseThrow())).isEmpty()) {
             return matchingFailure(attempt);
         }
         return new ScenarioVerdict(Status.FAIL, EXPECTATION_MISMATCH,
@@ -85,6 +91,10 @@ public record ScenarioVerdict(Status status, String reason, String message, bool
 
     /** Keep the observed data failure, but do not bless an invalid negative control. */
     private static ScenarioVerdict matchingFailure(V1ScenarioExecutionResult attempt) {
+        if (attempt.terminalValidation().filter(value -> value.validatorType().equals("kafka.state-prefix")).isPresent()
+                && attempt.stateRecovery().filter(StateRecoveryReport::confirmed).isEmpty())
+            return unconfirmed(StateRecoveryReport.UNCONFIRMED,
+                    "The expected state failure lacks complete workload and recovery receipts");
         if (attempt.flinkLogMarkers().filter(markers -> !markers.requiredConfirmed()).isPresent())
             return unconfirmed(FlinkLogMarkerEvidence.MISSING, "The expected data failure lacks required per-incarnation log markers");
         ScenarioVerdict window = unconfirmedWindow(attempt);

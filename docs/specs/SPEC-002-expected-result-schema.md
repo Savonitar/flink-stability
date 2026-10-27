@@ -73,6 +73,14 @@ from run artifacts, especially the input manifest defined in SPEC-001.
   validator, declared in that validator's `failure_reasons`. It is never an
   error-message substring, await/fault/infrastructure code, or inconclusive
   reason.
+- **E2.11** `oracle: kafka.state-prefix` permits exactly the registered
+  `validator.kafka.state-prefix.{malformed-records,unexpected-ids,duplicate-ids,missing-ids,state-mismatch}`
+  failure reasons. It identifies the one job-bound composite terminal oracle,
+  not a second ID-only read. A state-mismatch expectation matches only a complete
+  fenced validation with that primary reason; an incomplete Kafka traversal,
+  timeout, invalid input manifest, payload limit, execution failure or missing
+  recovery proof cannot satisfy it. Existing `kafka.id-set` expectations and
+  their result format retain their previous meaning.
 
 ## 3. Parameter-selected cases
 

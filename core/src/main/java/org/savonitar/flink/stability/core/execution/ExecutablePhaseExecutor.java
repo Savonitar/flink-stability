@@ -60,6 +60,13 @@ public final class ExecutablePhaseExecutor {
     private final LongSupplier nanoTime;
     private org.savonitar.flink.stability.core.flink.FlinkJobSubmission restoreSubmission;
     private String savepointDirectory;
+    private StateRecoveryGate stateRecoveryGate;
+    private boolean keyedPrefix;
+
+    ExecutablePhaseExecutor withStateRecoveryGate(StateRecoveryGate gate) {
+        this.stateRecoveryGate = gate;
+        return this;
+    }
 
     ExecutablePhaseExecutor withSavepointSubmission(org.savonitar.flink.stability.core.flink.FlinkJobSubmission submission, String directory) {
         this.restoreSubmission = Objects.requireNonNull(submission); this.savepointDirectory = Objects.requireNonNull(directory); return this;
@@ -131,6 +138,7 @@ public final class ExecutablePhaseExecutor {
                                    Optional<TokenScopeProof.Requirement> tokenProof) throws PhaseExecutionException {
         Objects.requireNonNull(plan, "plan");
         Objects.requireNonNull(job, "job");
+        keyedPrefix = plan.job().workloadConfiguration().behavior().isPresent();
         if (!tokenProof.map(TokenScopeProof.Requirement::scope)
                 .equals(plan.flink().tokenProvider().flatMap(provider -> provider.proofScope()))
                 || tokenProof.flatMap(TokenScopeProof.Requirement::submission).filter(binding ->
@@ -471,9 +479,10 @@ public final class ExecutablePhaseExecutor {
             ExecutableScenarioPlan.KillTaskManager kill,
             Recorder evidence)
             throws PhaseExecutionException {
-        // Observe first: whether the kill affected the job is judged against this baseline.
-        FlinkJobObservation.Attempt jobBeforeKill = FlinkJobObservation.Attempt.of(flink, job);
-        IdentityObservation identity = taskManagerIdentity(kill.targetName());
+        Optional<StateRecoveryEvidence.Readiness> stateReadiness = Optional.empty();
+        // For keyed jobs the final readiness observation supplies the bound baseline.
+        FlinkJobObservation.Attempt jobBeforeKill = keyedPrefix ? null : FlinkJobObservation.Attempt.of(flink, job);
+        IdentityObservation identity = keyedPrefix ? null : taskManagerIdentity(kill.targetName());
         // The baseline spans multiple REST calls; its initial timestamp is not the kill boundary.
         com.fasterxml.jackson.databind.JsonNode checkpointBefore = null;
         String checkpointFailure = null;
@@ -484,6 +493,33 @@ public final class ExecutablePhaseExecutor {
                 brokerBefore = observeSinkProducers(evidence);
             }
             catch (Exception failure) { checkpointFailure = failure.toString(); }
+        }
+        if (keyedPrefix) {
+            if (stateRecoveryGate == null) throw failed(evidence, phaseIndex, phaseName, path, loopIterations,
+                    PhaseExecutionEvidence.StepKind.KILL_TASKMANAGER, PhaseExecutionException.Outcome.INCONCLUSIVE,
+                    StateRecoveryReport.UNCONFIRMED, new IllegalStateException("State recovery readiness gate is unavailable"));
+            try {
+                stateReadiness = stateRecoveryGate.awaitReady(job, kill.targetName());
+            } catch (InterruptedException interrupted) {
+                Thread.currentThread().interrupt();
+                throw failed(evidence, phaseIndex, phaseName, path, loopIterations,
+                        PhaseExecutionEvidence.StepKind.KILL_TASKMANAGER, PhaseExecutionException.Outcome.INCONCLUSIVE,
+                        StateRecoveryReport.UNCONFIRMED, interrupted);
+            } catch (Exception failure) {
+                stateRecoveryGate.recordFailure(failure);
+            }
+            if (stateReadiness.isEmpty() || !stateReadiness.orElseThrow().ready()) {
+                evidence.stopFurtherSteps = true;
+                succeeded(evidence, phaseIndex, phaseName, path, loopIterations,
+                        PhaseExecutionEvidence.StepKind.KILL_TASKMANAGER,
+                        "State recovery readiness unconfirmed; kill not injected");
+                return;
+            }
+        }
+        if (stateReadiness.isPresent()) {
+            var readiness = stateReadiness.orElseThrow();
+            jobBeforeKill = new FlinkJobObservation.Attempt(Optional.of(readiness.jobObservation()), Optional.empty());
+            identity = new IdentityObservation(Optional.of(readiness.target()), Optional.empty());
         }
         OptionalLong beforeInjection = jobManagerTimeForKill(job);
         try {
@@ -503,7 +539,7 @@ public final class ExecutablePhaseExecutor {
             }
             evidence.kills.add(new PhaseExecutionEvidence.TaskManagerKill(
                     path, loopIterations, kill.targetName(), jobBeforeKill,
-                    beforeInjection, afterInjection, identity.identity(), identity.failure(), checkpointWindow));
+                    beforeInjection, afterInjection, identity.identity(), identity.failure(), checkpointWindow, stateReadiness));
             succeeded(
                     evidence,
                     phaseIndex,
