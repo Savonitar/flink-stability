@@ -181,6 +181,22 @@ an artifact referenced by an old run, rerun into an old output directory, or use
 `mvn clean` to remove retained checkpoints/logs. A later rerun is a new attempt,
 not a replacement for an earlier miss or failure.
 
+The JSON result references each complete journal with `journalPath`,
+`journalSha256`, `journalBytes` and `lastSequence`. Its `operationCount` and
+`operationCounts` summarize the full journal by operation, state and errno;
+`operationsRepresentation: bound-subset-v1` identifies the compact inline list.
+That list retains lifecycle/control acknowledgements, every errno=5 create/write,
+and reads/writes of the recorded materialized checkpoint files. Commands remain
+inline and are bounded at 1,024 per instance. The in-memory validator still sees
+every operation. The independent checker reads the hash-bound raw journals,
+verifies the exact subset and counts, then uses all records for its audit.
+
+A regression with 10,000 operations renders below 32 KiB per snapshot and
+224 KiB for seven copies. Real result size depends on the required EIO and
+materialization receipts, commands and other evidence; these fixture bounds are
+not a universal size cap. Full journals are retained as files instead of being
+repeated in every stage's stdout JSON.
+
 ## Six-stage causal proof
 
 The [core state machine](../core/src/main/java/org/savonitar/flink/stability/core/execution/CheckpointStorageFault.java)

@@ -3,6 +3,8 @@
 Original source paths are lookup keys only. This module never opens paths from
 the result outside the copied attempt evidence, starts processes, or repairs a run.
 """
+import copy
+from collections import Counter
 import hashlib
 import json
 from pathlib import Path, PurePosixPath
@@ -74,6 +76,43 @@ def read(root, relative, expected=None, maximum=FILE_BYTES):
     return data
 
 
+def projected_operation(row, identity):
+    expected = {key: row[key] for key in PROJECTED}
+    expected.update(instance=identity, timestampMillis=row["timestampMs"], monotonicNanos=row["monotonicNs"])
+    return expected
+
+
+def relative_journal_path(path):
+    return path.removeprefix("/flink/checkpoints/").removeprefix("/")
+
+
+def bound_operation(row, storage):
+    paths = {relative_journal_path(file["path"]) for file in storage["materializedFiles"]}
+    return (row["operation"] in {"START", "READY", "ARM", "HEAL", "ABORT", "STOP", "EXPIRE", "FATAL", "REJECT"}
+            or row["errno"] == 5 and row["operation"] in {"create", "write"}
+            or relative_journal_path(row["path"]) in paths and row["operation"] in {"create", "write", "read"})
+
+
+def verify_operation_projection(instance, storage, rows):
+    projected = [projected_operation(row, instance["instance"]) for row in rows]
+    representation = instance.get("operationsRepresentation")
+    if representation is None:
+        require(json.dumps(instance["operations"], sort_keys=True) == json.dumps(projected, sort_keys=True),
+                "Typed native operation differs from raw journal")
+        return
+    require(representation == "bound-subset-v1", "Unknown native journal representation")
+    require(type(instance.get("operationCount")) is int and instance["operationCount"] == len(rows),
+            "Native operation count differs from raw journal")
+    counts = Counter((row["operation"], row["state"], row["errno"]) for row in rows)
+    expected_counts = [{"operation": operation, "state": state, "errno": errno, "count": count}
+                       for (operation, state, errno), count in sorted(counts.items())]
+    require(json.dumps(instance.get("operationCounts"), sort_keys=True) == json.dumps(expected_counts, sort_keys=True),
+            "Native operation totals differ from raw journal")
+    expected = [value for row, value in zip(rows, projected) if bound_operation(row, storage)]
+    require(json.dumps(instance["operations"], sort_keys=True) == json.dumps(expected, sort_keys=True),
+            "Bound native operation subset differs from raw journal")
+
+
 class RetainedEvidence:
     def __init__(self, directory):
         self.directory = Path(directory)
@@ -111,14 +150,14 @@ class RetainedEvidence:
             self.journals[source] = (data, rows)
         data, rows = self.journals[source]
         require(integer(instance["journalBytes"], 1) and len(data) == instance["journalBytes"]
-                and integer(instance["lastSequence"], 1) and len(rows) == instance["lastSequence"]
-                and len(rows) == len(instance["operations"]), "Journal length or sequence differs from result")
+                and integer(instance["lastSequence"], 1) and len(rows) == instance["lastSequence"], "Journal length or sequence differs from result")
         identity = instance["instance"]
         require(len(rows) >= 2 and rows[0]["operation"] == "START" and rows[0]["state"] == "STARTING"
                 and rows[1]["operation"] == "READY" and rows[1]["state"] == "HEALTHY" and rows[1]["reason"] == READY
                 and sum(row["operation"] == "READY" for row in rows) == 1, "Native mount readiness/cache-policy receipt is missing")
         previous = 0
-        for sequence, (row, projected) in enumerate(zip(rows, instance["operations"]), 1):
+        verify_operation_projection(instance, storage, rows)
+        for sequence, row in enumerate(rows, 1):
             require(row["version"] == 1 and row["sequence"] == sequence and row["journalComplete"] is True
                     and row["state"] in ("STARTING", "HEALTHY", "ARMED")
                     and integer(row["monotonicNs"], previous), "Invalid, expired, aborted or incomplete native journal")
@@ -127,9 +166,6 @@ class RetainedEvidence:
                     and all(row[key] == identity[key] for key in ("instanceId", "daemonPid")), "Native journal identity mismatch")
             require(all(integer(row[key]) for key in ("revision", "timestampMs", "requestedBytes", "returnedBytes", "errno"))
                     and type(row["result"]) is int, "Malformed native operation numbers")
-            expected = {key: row[key] for key in PROJECTED}
-            expected.update(instance=identity, timestampMillis=row["timestampMs"], monotonicNanos=row["monotonicNs"])
-            require(projected == expected, "Typed native operation differs from raw journal")
             if row["state"] == "ARMED":
                 require(row["leaseMs"] == 120000 and row["monotonicNs"] < row["leaseDeadlineMonotonicNs"], "Armed journal operation outlived its lease")
         status = instance["status"]
@@ -232,6 +268,8 @@ def materialization(proof, before, final, job, checkpoint, arm_started, original
 
 
 def audit_storage(result, cell, manifest, retained):
+    # Expand only a private copy after checking every reference and inline subset.
+    result = copy.deepcopy(result)
     evidence = result["evidence"]
     final = evidence["checkpointStorage"]
     require(final["complete"] is True and final["quiescent"] is True and final["diagnostics"] == [], "Final storage capture is incomplete")
@@ -262,6 +300,7 @@ def audit_storage(result, cell, manifest, retained):
         require(item["processDead"] is True, "Final storage daemon is not stopped")
         final_data[item["instance"]["instanceId"]], final_rows[item["instance"]["instanceId"]] = retained.journal(item, final)
     references = 0
+    hydrate = []
     for snapshot in snapshots:
         require(snapshot["complete"] is True and snapshot["diagnostics"] == [], "A storage stage is incomplete")
         require(all(snapshot[key] == final[key] for key in ("attemptId", "storageId", "namespace", "checkpointUri", "helperManifestSha256")), "Stage storage identity changed")
@@ -272,7 +311,8 @@ def audit_storage(result, cell, manifest, retained):
             require(iid not in seen and identities.get(iid) == identity and integer(identity["daemonPid"], 1), "Stage has duplicate or changed daemon identity")
             seen.add(iid)
             require(item["journalComplete"] is True and item["diagnostics"] == [], "Stage native journal is incomplete")
-            data, unused = retained.journal(item, snapshot)
+            data, rows = retained.journal(item, snapshot)
+            hydrate.append((item, rows))
             require(final_data[iid].startswith(data), "Earlier journal is not an immutable prefix of final capture")
             references += 1
             verification = item["verification"]
@@ -286,6 +326,8 @@ def audit_storage(result, cell, manifest, retained):
                     and verification["imageId"] == helper["imageId"]
                     and verification["helperSha256"] == helper["files"]["checkpoint-fuse"]
                     and verification["probeSha256"] == helper["files"]["probe.jar"], "FUSE mount, isolation or helper identity is unproven")
+    for item, rows in hydrate:
+        item["operations"] = [projected_operation(row, item["instance"]) for row in rows]
     summary = {"complete": True, "journalReferences": references, "uniqueJournals": len(retained.journals),
                "journalBytes": retained.journal_bytes, "finalJournals": [
                    {"instance": item["instance"], "sha256": item["journalSha256"], "bytes": item["journalBytes"], "records": item["lastSequence"]}
