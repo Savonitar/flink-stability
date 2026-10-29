@@ -49,6 +49,7 @@ public final class ExecutableScenarioPlan {
     private final TerminalValidationPlan terminalValidation;
     private final ExpectedOutcome expectedOutcome;
     private final Duration jobCompletionTimeout;
+    private final boolean allowStateResetMutant;
 
     ExecutableScenarioPlan(
             ResolvedScenarioPlan sourcePlan,
@@ -62,6 +63,14 @@ public final class ExecutableScenarioPlan {
             TerminalValidationPlan terminalValidation,
             ExpectedOutcome expectedOutcome,
             Duration jobCompletionTimeout) {
+        this(sourcePlan, scenarioName, invocation, kafka, flink, input, job, phases, terminalValidation,
+                expectedOutcome, jobCompletionTimeout, false);
+    }
+
+    ExecutableScenarioPlan(ResolvedScenarioPlan sourcePlan, String scenarioName, InvocationPolicy invocation,
+            KafkaCluster kafka, FlinkCluster flink, GeneratedIntegerSequenceInput input, Job job, List<Phase> phases,
+            TerminalValidationPlan terminalValidation, ExpectedOutcome expectedOutcome, Duration jobCompletionTimeout,
+            boolean allowStateResetMutant) {
         this.sourcePlan = Objects.requireNonNull(sourcePlan, "sourcePlan");
         this.scenarioName = requireNonBlank(scenarioName, "scenarioName");
         this.invocation = Objects.requireNonNull(invocation, "invocation");
@@ -78,6 +87,7 @@ public final class ExecutableScenarioPlan {
         this.expectedOutcome = Objects.requireNonNull(expectedOutcome, "expectedOutcome");
         this.jobCompletionTimeout = requirePositive(
                 jobCompletionTimeout, "jobCompletionTimeout");
+        this.allowStateResetMutant = allowStateResetMutant;
         if (job.parallelism() > (long) flink.taskmanagers()
                 * FlinkRuntimeTarget.TASK_SLOTS_PER_TASK_MANAGER) {
             throw new IllegalArgumentException("Job parallelism exceeds the provisioned task slots");
@@ -113,6 +123,8 @@ public final class ExecutableScenarioPlan {
             throw new IllegalArgumentException("Terminal validation must inspect the job sink");
         }
         boolean keyed = job.workloadConfiguration().behavior().isPresent();
+        if (allowStateResetMutant && !keyed)
+            throw new IllegalArgumentException("State-reset mutant opt-in requires keyed-prefix-v1");
         if (keyed != (terminalValidation instanceof KafkaStatePrefixValidation)) {
             throw new IllegalArgumentException("keyed-prefix-v1 requires kafka.state-prefix validation");
         }
@@ -226,6 +238,8 @@ public final class ExecutableScenarioPlan {
     public Duration jobCompletionTimeout() {
         return jobCompletionTimeout;
     }
+
+    public boolean allowStateResetMutant() { return allowStateResetMutant; }
 
     public record InvocationPolicy(int runs, int healthRetryLimit) {
         public InvocationPolicy {

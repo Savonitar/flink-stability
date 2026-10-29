@@ -72,6 +72,7 @@ final class SpecificationValidationService {
                 var mapper = new com.fasterxml.jackson.databind.ObjectMapper();
                 var rendered = mapper.createObjectNode();
                 rendered.put("scenario", scenarioName);
+                rendered.put("allowStateResetMutant", executable.allowStateResetMutant());
                 rendered.set("resolved", resolved.scenario().side(
                         org.savonitar.flink.stability.core.spec.resolution.ScenarioSide.SINGLE).document());
                 if (executable.kafka().runtimeTarget().customConfiguration()) {

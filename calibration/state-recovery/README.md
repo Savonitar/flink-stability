@@ -1,5 +1,12 @@
 # State recovery calibration
 
+New batches use `catalogContractVersion: 2`. Only mutant catalogs explicitly set
+`meta.allow_state_reset_mutant: true`; correct controls omit it. The checker
+requires both the observed `buildMode` and the explicit `allowStateResetMutant`
+report field. Older frozen batches predate this contract and remain historical
+qualification under their retained verifier; the current checker rejects them.
+Do not add fields to, regenerate, or relabel their retained receipts.
+
 This recipe qualifies the state oracle before storage fault experiments. It uses
 the released Flink 2.2.0 distribution, Kafka 4.0.0 and Kafka connector 5.0.0-2.2,
 with one input partition, one output partition, parallelism one, eight keys and

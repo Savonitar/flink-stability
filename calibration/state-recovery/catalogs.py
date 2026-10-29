@@ -12,10 +12,14 @@ RECIPE = Path(__file__).absolute().parent
 ROOT = RECIPE.parents[1]
 
 
-def render(template, restart_phase, workload_reference, execution, runtime_identity=None):
+def render(template, restart_phase, workload_reference, execution, runtime_identity=None, *, mode="correct"):
     require(template.count('"@WORKLOAD_JAR@"') == 1, "Workload placeholder changed")
     require(execution in EXECUTIONS, "Unknown execution arm")
+    require(mode in MODES, "Unknown workload arm")
     rendered = template.replace('"@WORKLOAD_JAR@"', json.dumps(workload_reference))
+    if mode == "mutant":
+        require(rendered.count("\nmeta:\n") == 1, "Metadata boundary changed")
+        rendered = rendered.replace("\nmeta:\n", "\nmeta:\n  allow_state_reset_mutant: true\n")
     if runtime_identity is not None:
         for component, indentation in (("kafka", "        "), ("flink", "    ")):
             reference, image_id = runtime_identity[component + "ImageReference"], runtime_identity[component + "ImageId"]
@@ -70,13 +74,13 @@ def freeze(build_path, reference_path, output, root=ROOT, recipe=RECIPE):
             name = mode + "-" + execution
             catalog = "catalogs/" + name
             artifact_reference = "./" + str((output / artifacts[mode]["path"]).relative_to(root))
-            scenario = render(template, restart_phase, artifact_reference, execution, identity)
+            scenario = render(template, restart_phase, artifact_reference, execution, identity, mode=mode)
             files[f"{catalog}/{SCENARIO}.yaml"] = scenario
             files[f"{catalog}/{SCENARIO}.expected.yaml"] = expected
             cells.append({"name": name, "mode": mode, "execution": execution, "scenario": SCENARIO,
                           "catalog": catalog, "scenarioSha256": digest(scenario), "expectedSha256": digest(expected),
                           "requiredOutcome": "pass", "attempts": [f"attempts/{name}/run-{number}" for number in range(1, 4)]})
-    manifest = {"formatVersion": 1, "kind": "state-recovery-calibration", "attemptsPerCell": 3,
+    manifest = {"formatVersion": 1, "catalogContractVersion": 2, "kind": "state-recovery-calibration", "attemptsPerCell": 3,
                 "workload": {"keyCount": 8, "totalRecords": 6000}, "artifacts": artifacts,
                 "buildEvidence": {"path": "evidence/build-evidence.json", "sha256": digest(build_bytes)},
                 "referenceResult": {"path": "evidence/reference-result.json", "sha256": digest(reference_bytes)},

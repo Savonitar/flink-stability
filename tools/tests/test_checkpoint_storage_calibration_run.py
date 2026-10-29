@@ -69,7 +69,9 @@ class FrozenFixture:
             outcome = "fail" if mode == "mutant" else "pass"
             result = {"status": outcome, "attempt": {"status": outcome}, "expectation": {"outcome": "pass"},
                       "identity": IDENTITY, "evidence": {
-                          "stateRecovery": {"workloadSha256": artifacts[mode]["sha256"], "confirmed": True},
+                          "stateRecovery": {"workloadSha256": artifacts[mode]["sha256"], "confirmed": True,
+                                            "allowStateResetMutant": mode == "mutant",
+                                            "buildMode": "reset-state-on-restore-v1" if mode == "mutant" else "correct"},
                           "checkpointStorage": {"helperManifestSha256": helper_hash},
                           "taskManagerRestarts": [] if execution == "healthy" else [{}],
                           "checkpointStorageFaults": [{}] if execution == "eio" else [],
@@ -109,6 +111,7 @@ class CheckpointStorageCatalogTest(unittest.TestCase):
                 self.assertEqual(cell["execution"] == "eio", "checkpoint_storage_fault:" in scenario)
                 self.assertEqual(cell["execution"] == "restart", "      - kill:" in scenario)
                 self.assertEqual("pass", cell["requiredOutcome"])
+                self.assertEqual("allow_state_reset_mutant: true" in scenario, cell["mode"] == "mutant")
             self.assertEqual("fail", manifest["cells"][-1]["expectedRawOutcome"])
             self.assertTrue((fixture.output / "evidence/build-sources/mutant/job/Main.java").is_file())
             self.assertTrue((fixture.output / "evidence/helper-sources/native/core.c").is_file())

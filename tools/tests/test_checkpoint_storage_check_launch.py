@@ -171,7 +171,7 @@ class IndependentScenarioContractTest(unittest.TestCase):
         for name, mode, execution in check.CELLS:
             cell = {"name": name, "mode": mode, "execution": execution}
             data = catalogs.render("./" + manifest["artifacts"][mode]["path"], "./artifacts/helper",
-                                   manifest["helperBundle"], manifest["runtimeIdentity"], execution)
+                                   manifest["helperBundle"], manifest["runtimeIdentity"], execution, mode=mode)
             check.scenario_contract(data, cell, manifest)
             for before, after in changes:
                 if before not in data: continue

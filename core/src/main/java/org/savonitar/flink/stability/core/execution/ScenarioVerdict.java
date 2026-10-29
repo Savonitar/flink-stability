@@ -53,7 +53,7 @@ public record ScenarioVerdict(Status status, String reason, String message, bool
                     return unconfirmed(CheckpointStorageFault.UNCONFIRMED, "Checkpoint storage proof is incomplete");
                 if (attempt.terminalValidation().filter(value -> value.validatorType().equals("kafka.state-prefix")).isPresent()
                         && attempt.stateRecovery().filter(StateRecoveryReport::confirmed).isEmpty())
-                    return unconfirmed(StateRecoveryReport.UNCONFIRMED,
+                    return unconfirmed(attempt.stateRecovery().map(StateRecoveryReport::reason).orElse(StateRecoveryReport.UNCONFIRMED),
                             "The state oracle passed without complete workload and recovery receipts");
                 ScenarioVerdict window = unconfirmedWindow(attempt);
                 if (window != null) return window;
@@ -93,12 +93,15 @@ public record ScenarioVerdict(Status status, String reason, String message, bool
 
     /** Keep the observed data failure, but do not bless an invalid negative control. */
     private static ScenarioVerdict matchingFailure(V1ScenarioExecutionResult attempt) {
+        if (attempt.stateRecovery().filter(value -> StateRecoveryReport.UNEXPECTED_BUILD_MODE.equals(value.reason())).isPresent())
+            return unconfirmed(StateRecoveryReport.UNEXPECTED_BUILD_MODE,
+                    "The observed reset-state workload lacks explicit scenario calibration permission");
         if (attempt.phaseEvidence().filter(value -> !value.storageConfirmed()).isPresent())
             return unconfirmed(CheckpointStorageFault.UNCONFIRMED,
                     "The expected data failure lacks complete checkpoint storage fault and final capture evidence");
         if (attempt.terminalValidation().filter(value -> value.validatorType().equals("kafka.state-prefix")).isPresent()
                 && attempt.stateRecovery().filter(StateRecoveryReport::confirmed).isEmpty())
-            return unconfirmed(StateRecoveryReport.UNCONFIRMED,
+            return unconfirmed(attempt.stateRecovery().map(StateRecoveryReport::reason).orElse(StateRecoveryReport.UNCONFIRMED),
                     "The expected state failure lacks complete workload and recovery receipts");
         if (attempt.flinkLogMarkers().filter(markers -> !markers.requiredConfirmed()).isPresent())
             return unconfirmed(FlinkLogMarkerEvidence.MISSING, "The expected data failure lacks required per-incarnation log markers");

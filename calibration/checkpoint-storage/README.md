@@ -1,5 +1,12 @@
 # Checkpoint-storage qualification
 
+New batches use `catalogContractVersion: 2`. Only mutant catalogs explicitly set
+`meta.allow_state_reset_mutant: true`. Reference pilots and live attempts must
+report the selected `buildMode` and matching `allowStateResetMutant` value.
+Older frozen batches remain historical qualification under their retained
+verifier. The current checker, including `--re-audit`, rejects their older
+contract rather than inferring consent from artifact names or changing receipts.
+
 This recipe freezes and runs PR5's twelve-attempt qualification matrix for the
 integrated FUSE checkpoint write-EIO experiment. It uses the correct and
 reset-on-restore workload JARs from the retained PR4 pilots. The

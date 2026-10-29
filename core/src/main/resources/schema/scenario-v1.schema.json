@@ -83,6 +83,10 @@
           "type": "string",
           "minLength": 1
         },
+        "allow_state_reset_mutant": {
+          "type": "boolean",
+          "description": "Explicit calibration-only permission for reset-state-on-restore-v1 workload receipts; omission is false."
+        },
         "campaign": {
           "type": "object",
           "additionalProperties": false,

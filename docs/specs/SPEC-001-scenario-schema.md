@@ -75,6 +75,13 @@ ordering properties are tested.
   that the scenario is a bug reproduction, negative control, or expected
   failure; that intent is expressed only by the expected-result sibling (R1.6,
   R3.5). Suite and expected-result metadata do not accept `tickets` in v1.
+- **R1.2b** `meta.allow_state_reset_mutant` is an optional boolean, false when
+  omitted. It explicitly permits the reset-state workload only for calibration
+  scenarios using `keyed-prefix-v1`; scenario names, artifact names and paths
+  never imply this permission. An observed mutant `START` without the opt-in
+  makes recovery evidence unconfirmed with `state-recovery.unexpected-build-mode`.
+  A passing data check cannot then become PASS, and an expected failure cannot
+  bless the unrequested mutation. An observed data failure remains visible.
 - **R1.3** A scenario's `meta.name` is stable forever once committed, is globally
   unique lower-kebab-case, and equals its filename basename without `.yaml`. It
   is the key used by suites and the run report. Expected-result names are derived
@@ -1513,6 +1520,12 @@ Connector pull-request gating is the same mechanism with one axis:
   activates it. The frozen build recipe records both artifact hashes, source
   copies and mutation scope, using isolated build outputs and a cloned/copied
   artifact cache without reading user Maven settings or credentials.
+  Its effective build directory must end in `state-reset-on-restore`; setting
+  `workload.build.mode` alone cannot generate a mutant in the ordinary target
+  directory. The build guard also preserves the existing configuration/mode
+  reuse checks. `evidence.stateRecovery` retains `allowStateResetMutant` and the
+  observed `buildMode` (null when START receipts do not establish one mode).
+  The latter is derived from receipts, not an author-provided verdict label.
 
   Bounded `STATE_PREFIX_START`, `SNAPSHOT`, `COMPLETED`, `ABORTED` and `PROGRESS`
   receipts identify JobID, operator UID, execution attempt, subtask and checkpoint.

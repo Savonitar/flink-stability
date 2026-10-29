@@ -196,6 +196,8 @@ def main():
     commands = {}
     for arm, mode in MODES.items():
         build = output / "build" / arm
+        if arm == "mutant":
+            build = build / "state-reset-on-restore"
         command = ["mvn", "-B", "-ntp", "-o", "-s", str(settings), "-gs", str(settings),
                    "-Dmaven.repo.local=" + str(repository), "-Dworkload.build.directory=" + str(build),
                    "-f", str(Path(snapshots[arm]["path"]) / MODULE / "pom.xml")]

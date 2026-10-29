@@ -95,6 +95,10 @@ public final class ExecutableScenarioPlanCompiler {
         validateSetup(source, document, issues);
         validateWorkload(source, document, issues);
         StatePrefixPlanCompiler.validate(source, document, issues);
+        if (document.at("/meta/allow_state_reset_mutant").asBoolean(false)
+                && !"keyed-prefix-v1".equals(document.at("/workload/jobs/0/behavior/type").asText()))
+            issues.add(issue(source, "runner.state-prefix.mutant-opt-in-requires-behavior",
+                    "$/meta/allow_state_reset_mutant", "State-reset mutant opt-in requires keyed-prefix-v1"));
         CheckpointStoragePlanCompiler.validate(source, document, issues);
         PhasePlanCompiler.validatePhases(source, document, issues);
         validateTerminalValidation(source, document, issues);
@@ -652,7 +656,7 @@ public final class ExecutableScenarioPlanCompiler {
                 phases,
                 validation,
                 ExpectationCompiler.map(sourcePlan),
-                completionTimeout);
+                completionTimeout, document.at("/meta/allow_state_reset_mutant").asBoolean(false));
     }
 
     private static ExecutableScenarioPlan.TopicReference topicReference(ObjectNode node) {

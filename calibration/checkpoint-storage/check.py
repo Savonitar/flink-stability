@@ -120,6 +120,8 @@ phases:
                      "@HELPER@": manifest["helperBundle"]["manifestSha256"], "@HELPER_IMAGE@": manifest["helperBundle"]["imageId"]}
     for token, value in substitutions.items():
         common = common.replace(token, json.dumps(value))
+    if cell["mode"] == "mutant":
+        common = common.replace("\nmeta:\n", "\nmeta:\n  allow_state_reset_mutant: true\n")
     if cell["execution"] == "eio":
         common += "      - checkpoint_storage_fault: { job: state-job, timeout: 90s, lease: 120s }\n"
     else:
@@ -151,7 +153,8 @@ def verify_recipe_identity(recipes, *, re_audit=False):
 
 def validate_manifest(batch, *, re_audit=False):
     manifest = parse(read(batch, "manifest.json"))
-    require(manifest["formatVersion"] == 1 and manifest["kind"] == "checkpoint-storage-calibration"
+    require(manifest["formatVersion"] == 1 and manifest.get("catalogContractVersion") == 2
+            and manifest["kind"] == "checkpoint-storage-calibration"
             and manifest["attemptsPerCell"] == 3 and manifest["automaticRetries"] == 0
             and manifest["workload"] == WORKLOAD, "Wrong fixed matrix contract")
     require(type(manifest["outerTimeoutSeconds"]) is int and 600 <= manifest["outerTimeoutSeconds"] <= 1200,
@@ -228,6 +231,8 @@ def validate_manifest(batch, *, re_audit=False):
         reference = parse(receipt(batch, manifest["references"][name]))
         require(state.runtime_identity(reference) == manifest["runtimeIdentity"]
                 and reference["evidence"]["stateRecovery"]["workloadSha256"] == manifest["artifacts"][mode]["sha256"]
+                and reference["evidence"]["stateRecovery"].get("allowStateResetMutant") is (mode == "mutant")
+                and reference["evidence"]["stateRecovery"].get("buildMode") == (state.MUTATION if mode == "mutant" else "correct")
                 and reference["status"] == ("fail" if mode == "mutant" else "pass"), "Reference runtime or raw outcome differs")
         reference_nonces.add(reference["attempt"]["nonce"])
     require(len(reference_nonces) == 4, "Reference pilots are not separate attempts")

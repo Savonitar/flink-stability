@@ -86,8 +86,10 @@ def relative(value):
     return value
 
 
-def render(workload_path, helper_path, helper, identity, execution):
+def render(workload_path, helper_path, helper, identity, execution, *, mode="correct"):
     require(execution in {"healthy", "restart", "eio"}, "Unknown calibration execution")
+    require(mode in {"correct", "mutant"}, "Unknown calibration workload arm")
+    opt_in = "  allow_state_reset_mutant: true\n" if mode == "mutant" else ""
     quote = json.dumps
     for key in ("flinkImageId", "kafkaImageId"):
         require(re.fullmatch(r"sha256:[0-9a-f]{64}", identity[key]), "Unpinned runtime image")
@@ -113,7 +115,7 @@ def render(workload_path, helper_path, helper, identity, execution):
     return f"""format: v1
 kind: scenario
 meta:
-  name: {SCENARIO}
+{opt_in}  name: {SCENARIO}
   description: Fixed checkpoint-storage qualification control.
 completion_timeout: 5m
 runs: 1
@@ -241,6 +243,8 @@ def freeze(parent_manifest, references, output, framework_inputs, *, root=ROOT, 
         proof = result["evidence"]
         require(proof["stateRecovery"]["workloadSha256"] == artifacts[mode]["sha256"]
                 and proof["stateRecovery"]["confirmed"] is True
+                and proof["stateRecovery"].get("allowStateResetMutant") is (mode == "mutant")
+                and proof["stateRecovery"].get("buildMode") == ("reset-state-on-restore-v1" if mode == "mutant" else "correct")
                 and proof["checkpointStorage"]["helperManifestSha256"] == helper["manifestSha256"], "Pilot artifact/state proof differs")
         require(len(proof.get("taskManagerRestarts", [])) == (0 if execution == "healthy" else 1), "Pilot restart control differs")
         require(len(proof.get("checkpointStorageFaults", [])) == (1 if execution == "eio" else 0), "Pilot fault control differs")
@@ -261,7 +265,7 @@ def freeze(parent_manifest, references, output, framework_inputs, *, root=ROOT, 
     cells = []
     for name, mode, execution in CELLS:
         catalog = "catalogs/" + name
-        scenario = render("./" + artifacts[mode]["path"], "./artifacts/helper", helper, identity, execution)
+        scenario = render("./" + artifacts[mode]["path"], "./artifacts/helper", helper, identity, execution, mode=mode)
         files[f"{catalog}/{SCENARIO}.yaml"] = scenario
         files[f"{catalog}/{SCENARIO}.expected.yaml"] = EXPECTED
         cells.append({"name": name, "mode": mode, "execution": execution, "scenario": SCENARIO, "catalog": catalog,
@@ -280,7 +284,7 @@ def freeze(parent_manifest, references, output, framework_inputs, *, root=ROOT, 
     framework = module("framework", recipe / "framework.py")
     framework.freeze_framework(output / "framework", source_root=root, **framework_inputs)
     framework_bytes = read(output / "framework/manifest.json", output)
-    manifest = {"formatVersion": 1, "kind": "checkpoint-storage-calibration", "attemptsPerCell": 3,
+    manifest = {"formatVersion": 1, "catalogContractVersion": 2, "kind": "checkpoint-storage-calibration", "attemptsPerCell": 3,
                 "automaticRetries": 0, "outerTimeoutSeconds": timeout_seconds, "workload": WORKLOAD,
                 "artifacts": artifacts, "helperBundle": helper, "runtimeIdentity": identity,
                 "buildEvidence": {"path": "evidence/workload-build-evidence.json", "sha256": digest(build_bytes)},
@@ -299,7 +303,8 @@ def freeze(parent_manifest, references, output, framework_inputs, *, root=ROOT, 
 def validate_frozen(batch):
     batch = guarded(batch, batch)
     manifest = load(batch / "manifest.json", batch)
-    require(manifest["formatVersion"] == 1 and manifest["kind"] == "checkpoint-storage-calibration"
+    require(manifest["formatVersion"] == 1 and manifest.get("catalogContractVersion") == 2
+            and manifest["kind"] == "checkpoint-storage-calibration"
             and manifest["attemptsPerCell"] == 3 and manifest["automaticRetries"] == 0
             and manifest["workload"] == WORKLOAD, "Unexpected fixed matrix contract")
     require(type(manifest["outerTimeoutSeconds"]) is int and 600 <= manifest["outerTimeoutSeconds"] <= 1200, "Invalid deadline")
@@ -314,7 +319,7 @@ def validate_frozen(batch):
                 "Attempt allocation differs")
         scenario = read(batch / cell["catalog"] / (SCENARIO + ".yaml"), batch, cell["scenarioSha256"])
         require(scenario == render("./" + manifest["artifacts"][mode]["path"], "./artifacts/helper",
-                                   manifest["helperBundle"], manifest["runtimeIdentity"], cell["execution"]), "Frozen scenario differs")
+                                   manifest["helperBundle"], manifest["runtimeIdentity"], cell["execution"], mode=mode), "Frozen scenario differs")
         require(read(batch / cell["catalog"] / (SCENARIO + ".expected.yaml"), batch, cell["expectedSha256"]) == EXPECTED,
                 "Catalog expectation must remain PASS")
     for name, value in manifest["frozenFiles"].items():

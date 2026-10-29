@@ -25,6 +25,26 @@ class ScenarioVerdictTest {
     private static final ExpectedOutcome EXPECT_DUPLICATES =
             ExpectedOutcome.failure("kafka.id-set", DUPLICATES);
 
+    @Test void unexpectedMutantCannotPassOrBlessAnExpectedFailureAndNeverErasesDataFailure() {
+        String job = "a".repeat(32);
+        var trace = StateRecoveryEvidence.parse(new StateRecoveryEvidence.ProcessIdentity(
+                "taskmanager-1", "tm", "taskmanager-1#1"),
+                "STATE_PREFIX_START version=1 jobId=" + job + " operatorUid=" + StateRecoveryEvidence.OPERATOR_UID
+                        + " attempt=0 subtask=0 checkpoint=-1 restoredCheckpoint=-1 buildMode=reset-state-on-restore-v1\n", job);
+        var report = StateRecoveryReport.evaluate(job, "b".repeat(64), 2, 20, 0, true,
+                trace, List.of(), List.of(), List.of());
+        var passed = attempt(V1ScenarioExecutionResult.Status.PASS, "validator.kafka.id-set.match").withStateRecovery(report);
+        assertEquals(V1ScenarioExecutionResult.Status.INCONCLUSIVE, passed.status());
+        assertEquals(StateRecoveryReport.UNEXPECTED_BUILD_MODE, passed.reason());
+        assertEquals(ScenarioVerdict.Status.INCONCLUSIVE, ScenarioVerdict.of(ExpectedOutcome.pass(), passed).status());
+        var failed = attempt(V1ScenarioExecutionResult.Status.FAIL, DUPLICATES).withStateRecovery(report);
+        assertEquals(V1ScenarioExecutionResult.Status.FAIL, failed.status());
+        assertEquals(DUPLICATES, failed.reason());
+        assertTrue(failed.diagnostics().contains(StateRecoveryReport.UNEXPECTED_BUILD_MODE));
+        assertEquals(ScenarioVerdict.Status.FAIL, ScenarioVerdict.of(ExpectedOutcome.pass(), failed).status());
+        assertEquals(StateRecoveryReport.UNEXPECTED_BUILD_MODE, ScenarioVerdict.of(EXPECT_DUPLICATES, failed).reason());
+    }
+
     @Test void requiredLogMarkersCannotHideDataFailuresOrBlessNegativeControls() {
         var marker = new org.savonitar.flink.stability.runtime.api.FlinkLogMarker("patched", "CUSTOM-FIX", "taskmanager", true);
         var missing = FlinkLogMarkerEvidence.collect(List.of(marker), List.of(), List.of(), true);

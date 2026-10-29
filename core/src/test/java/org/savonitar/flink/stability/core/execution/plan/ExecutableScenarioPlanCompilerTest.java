@@ -111,6 +111,31 @@ class ExecutableScenarioPlanCompilerTest {
         ((ObjectNode) document.at("/terminal_validations/0")).put("type", "kafka.state-prefix").put("job", "eos-job");
     }
 
+    @Test void resetMutantRequiresExplicitTypedOptInAndCannotBeInferredFromScenarioName() {
+        var base = loader.loadScenario(resource("minimal.yaml"));
+        var renamedDocument = base.document();
+        renamedDocument.put("health_retry_limit", 0);
+        keyedPrefix(renamedDocument);
+        ((ObjectNode) renamedDocument.path("meta")).put("name", "mutant-calibration");
+        var named = loader.validateScenarioDocument(base.source().resolveSibling("mutant-calibration.yaml"), renamedDocument);
+        var expectedBase = expected(value -> ((ObjectNode) value.path("meta"))
+                .put("name", "mutant-calibration.expected").put("scenario", "mutant-calibration"));
+        var namedExpected = loader.validateExpectedResultDocument(
+                expectedBase.source().resolveSibling("mutant-calibration.expected.yaml"), expectedBase.document());
+        var normal = compiler.compile(new ScenarioPlanResolver().resolve(
+                new ScenarioBundle(named, namedExpected), ResolutionRequest.none()));
+        assertFalse(normal.allowStateResetMutant());
+        var calibration = compiler.compile(resolved(document -> {
+            keyedPrefix(document);
+            ((ObjectNode) document.path("meta")).put("allow_state_reset_mutant", true);
+        }));
+        assertTrue(calibration.allowStateResetMutant());
+        var failure = assertThrows(SpecificationException.class, () -> compiler.compile(resolved(document ->
+                ((ObjectNode) document.path("meta")).put("allow_state_reset_mutant", true))));
+        assertEquals(Stage.RUNNER_CAPABILITY, failure.stage());
+        assertTrue(failure.diagnostics().stream().anyMatch(value -> value.code().equals("runner.state-prefix.mutant-opt-in-requires-behavior")));
+    }
+
     @Test void savepointRestoreRequiresOneFinalEosTransitionWithinCapacityAndSupportedStrategy() {
         for (String invalid : List.of("none", "capacity", "overflow", "reverse", "non-eos", "later", "loop", "wrong-job", "long-timeout")) {
             Runnable compile = () -> {

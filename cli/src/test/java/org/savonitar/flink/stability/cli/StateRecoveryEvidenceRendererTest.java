@@ -62,6 +62,9 @@ class StateRecoveryEvidenceRendererTest {
         JsonNode rendered = roundTrip(report);
         assertEquals(WORKLOAD_SHA, rendered.path("workloadSha256").textValue());
         assertEquals(JOB, rendered.path("jobId").textValue());
+        assertEquals(MUTANT, rendered.path("buildMode").textValue());
+        assertFalse(rendered.path("allowStateResetMutant").booleanValue());
+        assertEquals(StateRecoveryReport.UNEXPECTED_BUILD_MODE, rendered.path("reason").textValue());
         assertEquals(1, rendered.path("expectedRestarts").intValue());
         assertFalse(rendered.path("confirmed").booleanValue());
         assertEquals(9, rendered.at("/trace/markers").size());

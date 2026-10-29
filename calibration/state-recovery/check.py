@@ -391,6 +391,9 @@ def audit_attempt(result, exit_code, cell, manifest):
     require(evidence["sinkTransactions"]["status"] == "listed" and evidence["sinkTransactions"]["unresolved"] == [],
             "Sink transactions are unresolved")
     report = evidence["stateRecovery"]
+    require(report.get("allowStateResetMutant") is (mode == "mutant")
+            and report.get("buildMode") == (MUTATION if mode == "mutant" else "correct"),
+            "Explicit workload build mode or mutant opt-in is missing or differs")
     require(report["workloadSha256"] == manifest["artifacts"][mode]["sha256"] and report["keyCount"] == keys
             and report["totalRecords"] == total and report["physicalFenceConfirmed"] is True and report["confirmed"] is True,
             "Workload identity or state recovery proof is unconfirmed")
@@ -416,13 +419,15 @@ def audit_attempt(result, exit_code, cell, manifest):
         require(kills == restarts == report["recoveries"] == [] and evidence["flinkJob"]["restoredCheckpoints"] == 0,
                 "Uninterrupted control contains a recovery")
     return {"confirmed": True, "rawStatus": result["attempt"]["status"], "rawReason": result["attempt"]["reason"],
+            "buildMode": report["buildMode"], "allowStateResetMutant": report["allowStateResetMutant"],
             "terminalValidation": oracle, "componentErrors": evidence["componentErrors"],
             "flinkRest": evidence["flinkRest"], "stateRecovery": report}
 
 
 def validate_manifest(batch):
     manifest = load(batch / "manifest.json", batch)
-    require(manifest["formatVersion"] == 1 and manifest["kind"] == "state-recovery-calibration"
+    require(manifest["formatVersion"] == 1 and manifest.get("catalogContractVersion") == 2
+            and manifest["kind"] == "state-recovery-calibration"
             and manifest["attemptsPerCell"] == 3, "Unsupported calibration contract")
     require(manifest["workload"] == {"keyCount": 8, "totalRecords": 6000}, "Frozen workload differs from qualification recipe")
     build = json.loads(file_receipt(batch, manifest["buildEvidence"]), object_pairs_hook=unique_object)

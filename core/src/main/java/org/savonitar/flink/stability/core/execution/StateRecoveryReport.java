@@ -6,21 +6,36 @@ import org.savonitar.flink.stability.runtime.api.V1AttemptRuntime;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Optional;
 
 /** State progress proof is separate from, and can never erase, the independent data verdict. */
 public record StateRecoveryReport(String jobId, String workloadSha256, int keyCount, long totalRecords,
         int expectedRestarts, boolean physicalFenceConfirmed, StateRecoveryEvidence.Trace trace,
         List<StateRecoveryEvidence.Readiness> readinessAttempts,
         List<StateRecoveryEvidence.Recovery> recoveries, List<String> observationErrors,
-        boolean confirmed, String reason) {
+        boolean confirmed, String reason, boolean allowStateResetMutant, Optional<String> buildMode) {
     public static final String UNCONFIRMED = "state-recovery.evidence-unconfirmed";
+    public static final String UNEXPECTED_BUILD_MODE = "state-recovery.unexpected-build-mode";
+    private static final String MUTANT_MODE = "reset-state-on-restore-v1";
+
+    public StateRecoveryReport(String jobId, String workloadSha256, int keyCount, long totalRecords,
+            int expectedRestarts, boolean physicalFenceConfirmed, StateRecoveryEvidence.Trace trace,
+            List<StateRecoveryEvidence.Readiness> readinessAttempts,
+            List<StateRecoveryEvidence.Recovery> recoveries, List<String> observationErrors,
+            boolean confirmed, String reason) {
+        this(jobId, workloadSha256, keyCount, totalRecords, expectedRestarts, physicalFenceConfirmed, trace,
+                readinessAttempts, recoveries, observationErrors, confirmed, reason, false, observedBuildMode(trace));
+    }
 
     public StateRecoveryReport {
         readinessAttempts = List.copyOf(readinessAttempts);
         recoveries = List.copyOf(recoveries);
         observationErrors = List.copyOf(observationErrors);
+        if (!observedBuildMode(trace).equals(buildMode))
+            throw new IllegalArgumentException("Build-mode summary differs from workload START receipts");
+        if (unexpectedBuildMode(trace, allowStateResetMutant)) reason = UNEXPECTED_BUILD_MODE;
         if (confirmed && !proofConfirmed(jobId, keyCount, totalRecords, expectedRestarts,
-                physicalFenceConfirmed, trace, recoveries, observationErrors))
+                physicalFenceConfirmed, trace, recoveries, observationErrors, allowStateResetMutant))
             throw new IllegalArgumentException("Confirmed recovery requires complete window and restore proof");
     }
 
@@ -46,22 +61,34 @@ public record StateRecoveryReport(String jobId, String workloadSha256, int keyCo
             else recoveries.add(StateRecoveryEvidence.evaluate(effect.kill().stateReadiness().orElseThrow(), effect, trace));
         }
         return evaluate(jobId, prepared.workloadArtifact().sha256(), keys, plan.input().totalRecords(),
-                expected, fenced, trace, gate == null ? List.of() : gate.attempts(), recoveries, errors);
+                expected, fenced, trace, gate == null ? List.of() : gate.attempts(), recoveries, errors,
+                plan.allowStateResetMutant());
     }
 
     static StateRecoveryReport evaluate(String jobId, String workloadSha256, int keys, long totalRecords,
             int expected, boolean fenced, StateRecoveryEvidence.Trace trace,
             List<StateRecoveryEvidence.Readiness> readinessAttempts,
             List<StateRecoveryEvidence.Recovery> recoveries, List<String> errors) {
-        boolean confirmed = proofConfirmed(jobId, keys, totalRecords, expected, fenced, trace, recoveries, errors);
+        return evaluate(jobId, workloadSha256, keys, totalRecords, expected, fenced, trace, readinessAttempts,
+                recoveries, errors, false);
+    }
+
+    static StateRecoveryReport evaluate(String jobId, String workloadSha256, int keys, long totalRecords,
+            int expected, boolean fenced, StateRecoveryEvidence.Trace trace,
+            List<StateRecoveryEvidence.Readiness> readinessAttempts,
+            List<StateRecoveryEvidence.Recovery> recoveries, List<String> errors, boolean allowStateResetMutant) {
+        boolean confirmed = proofConfirmed(jobId, keys, totalRecords, expected, fenced, trace, recoveries, errors,
+                allowStateResetMutant);
         return new StateRecoveryReport(jobId, workloadSha256, keys, totalRecords,
                 expected, fenced, trace, readinessAttempts, recoveries, errors,
-                confirmed, confirmed ? "state-recovery.confirmed" : UNCONFIRMED);
+                confirmed, confirmed ? "state-recovery.confirmed" : UNCONFIRMED,
+                allowStateResetMutant, observedBuildMode(trace));
     }
 
     private static boolean proofConfirmed(String jobId, int keys, long totalRecords, int expected,
             boolean fenced, StateRecoveryEvidence.Trace trace,
-            List<StateRecoveryEvidence.Recovery> recoveries, List<String> errors) {
+            List<StateRecoveryEvidence.Recovery> recoveries, List<String> errors, boolean allowStateResetMutant) {
+        if (unexpectedBuildMode(trace, allowStateResetMutant)) return false;
         if (expected < 0 || keys < 1 || keys > 1024 || totalRecords < 1 || !fenced
                 || !trace.complete() || !errors.isEmpty() || recoveries.size() != expected
                 || recoveries.stream().anyMatch(value -> !value.confirmed())) return false;
@@ -89,6 +116,17 @@ public record StateRecoveryReport(String jobId, String workloadSha256, int keyCo
         boolean uninterruptedClean = expected != 0 || trace.markers().stream().noneMatch(marker ->
                 marker.event() == StateRecoveryEvidence.Event.MUTANT_RESET || marker.event() == StateRecoveryEvidence.Event.RESTORED_KEY);
         return startsBound && progress && uninterruptedClean;
+    }
+
+    private static boolean unexpectedBuildMode(StateRecoveryEvidence.Trace trace, boolean allowStateResetMutant) {
+        return !allowStateResetMutant && trace.markers().stream().anyMatch(marker ->
+                marker.event() == StateRecoveryEvidence.Event.START && marker.buildMode().filter(MUTANT_MODE::equals).isPresent());
+    }
+
+    private static Optional<String> observedBuildMode(StateRecoveryEvidence.Trace trace) {
+        var modes = trace.markers().stream().filter(marker -> marker.event() == StateRecoveryEvidence.Event.START)
+                .map(StateRecoveryEvidence.Marker::buildMode).distinct().toList();
+        return modes.size() == 1 ? modes.getFirst() : Optional.empty();
     }
 
     private static int countKills(List<ExecutableScenarioPlan.Step> steps) {

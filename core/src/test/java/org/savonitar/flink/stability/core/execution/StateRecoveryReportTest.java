@@ -16,10 +16,12 @@ class StateRecoveryReportTest {
     void bothUninterruptedBuildsRequireInitialStartAndObservedAllKeyProgress() {
         for (String mode : List.of("correct", "reset-state-on-restore-v1")) {
             var trace = trace(start(mode) + progress());
-            var report = report(trace, 0, true, List.of());
+            var report = StateRecoveryReport.evaluate(JOB, SHA, 2, 20, 0, true, trace,
+                    List.of(), List.of(), List.of(), mode.equals("reset-state-on-restore-v1"));
             assertTrue(report.confirmed(), report.reason());
             assertEquals(SHA, report.workloadSha256());
             assertEquals("state-recovery.confirmed", report.reason());
+            assertEquals(mode, report.buildMode().orElseThrow());
         }
     }
 
@@ -29,7 +31,7 @@ class StateRecoveryReportTest {
                 "keyCount=8 observedKeys=3 minimumObservedCount=1 processedThisAttempt=3 maximumInputId=2");
         for (String mode : List.of("correct", "reset-state-on-restore-v1")) {
             var report = StateRecoveryReport.evaluate(JOB, SHA, 8, 3, 0, true,
-                    trace(start(mode) + snapshot), List.of(), List.of(), List.of());
+                    trace(start(mode) + snapshot), List.of(), List.of(), List.of(), mode.equals("reset-state-on-restore-v1"));
             assertTrue(report.confirmed(), report.reason());
         }
         for (String incomplete : List.of(snapshot.replace("observedKeys=3", "observedKeys=2"),
@@ -99,6 +101,35 @@ class StateRecoveryReportTest {
                 1, true, valid, List.of(), List.of(), List.of(), true, "state-recovery.confirmed"));
         assertDoesNotThrow(() -> new StateRecoveryReport(JOB, SHA, 2, 20,
                 0, true, valid, List.of(), List.of(), List.of(), true, "state-recovery.confirmed"));
+    }
+
+    @Test
+    void ordinaryScenarioCannotConfirmMutantEvenWhenNoRestoreOccurs() {
+        var trace = trace(start("reset-state-on-restore-v1") + progress());
+        var ordinary = report(trace, 0, true, List.of());
+        assertFalse(ordinary.confirmed());
+        assertFalse(ordinary.allowStateResetMutant());
+        assertEquals("reset-state-on-restore-v1", ordinary.buildMode().orElseThrow());
+        assertEquals(StateRecoveryReport.UNEXPECTED_BUILD_MODE, ordinary.reason());
+        assertThrows(IllegalArgumentException.class, () -> new StateRecoveryReport(JOB, SHA, 2, 20,
+                0, true, trace, List.of(), List.of(), List.of(), true, "state-recovery.confirmed"));
+        var allowed = StateRecoveryReport.evaluate(JOB, SHA, 2, 20, 0, true, trace,
+                List.of(), List.of(), List.of(), true);
+        assertTrue(allowed.confirmed());
+        assertTrue(allowed.allowStateResetMutant());
+    }
+
+    @Test
+    void buildModeSummaryCannotBeForgedAndMixedModesRemainUnconfirmed() {
+        var correct = trace(start("correct") + progress());
+        assertThrows(IllegalArgumentException.class, () -> new StateRecoveryReport(JOB, SHA, 2, 20,
+                0, true, correct, List.of(), List.of(), List.of(), true, "state-recovery.confirmed", true,
+                java.util.Optional.of("reset-state-on-restore-v1")));
+        var mixed = StateRecoveryReport.evaluate(JOB, SHA, 2, 20, 0, true,
+                trace(start("correct") + start("reset-state-on-restore-v1") + progress()),
+                List.of(), List.of(), List.of(), true);
+        assertFalse(mixed.confirmed());
+        assertTrue(mixed.buildMode().isEmpty());
     }
 
     private static StateRecoveryReport report(StateRecoveryEvidence.Trace trace, int expected,

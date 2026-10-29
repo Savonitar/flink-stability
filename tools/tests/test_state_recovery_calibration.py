@@ -118,6 +118,8 @@ def fixture(mode="correct", execution="uninterrupted", nonce="00000001"):
                                                    for number in range(1, 3 if restart else 2)]},
                   "sinkTransactions": {"status": "listed", "unresolved": []},
                   "stateRecovery": {"jobId": "job-123", "workloadSha256": MUTANT if mode == "mutant" else CORRECT,
+                                    "allowStateResetMutant": mode == "mutant",
+                                    "buildMode": "reset-state-on-restore-v1" if mode == "mutant" else "correct",
                                     "keyCount": 8, "totalRecords": 6000, "physicalFenceConfirmed": True,
                                     "confirmed": True, "reason": "confirmed",
                                     "trace": {"markers": markers, "diagnostics": [], "complete": True}, "recoveries": recoveries},
@@ -172,7 +174,7 @@ def matrix_fixture(batch):
              "artifacts": artifacts, "changedEntries": ["META-INF/MANIFEST.MF", "META-INF/flink-stability/keyed-prefix-build.properties"],
              "recipeInputSha256": {"example.java": build_source["sha256"]}}
     reference = fixture()[0]
-    manifest = {"formatVersion": 1, "kind": "state-recovery-calibration", "attemptsPerCell": 3,
+    manifest = {"formatVersion": 1, "catalogContractVersion": 2, "kind": "state-recovery-calibration", "attemptsPerCell": 3,
                 "workload": {"keyCount": 8, "totalRecords": 6000}, "artifacts": artifacts,
                 "buildEvidence": put("evidence/build-evidence.json", build),
                 "referenceResult": put("evidence/reference-result.json", reference),
@@ -208,6 +210,20 @@ def matrix_fixture(batch):
 
 
 class StateRecoveryCheckerTest(unittest.TestCase):
+    def test_workload_opt_in_and_observed_mode_are_explicit(self):
+        for mode in ("correct", "mutant"):
+            args = fixture(mode, "uninterrupted")
+            row = check.audit_attempt(*args)
+            self.assertEqual(mode == "mutant", row["allowStateResetMutant"])
+            for field in ("buildMode", "allowStateResetMutant"):
+                missing = fixture(mode, "uninterrupted")
+                del missing[0]["evidence"]["stateRecovery"][field]
+                with self.assertRaisesRegex(ValueError, "opt-in"):
+                    check.audit_attempt(*missing)
+            args[0]["evidence"]["stateRecovery"]["allowStateResetMutant"] = mode != "mutant"
+            with self.assertRaisesRegex(ValueError, "opt-in"):
+                check.audit_attempt(*args)
+
     def test_runner_pins_both_docker_clients_without_shell_evaluation(self):
         spec = importlib.util.spec_from_file_location("state_recovery_runner", RECIPE / "run.py")
         runner = importlib.util.module_from_spec(spec)
@@ -445,6 +461,7 @@ class StateRecoveryCheckerTest(unittest.TestCase):
                 scenario = (output / cell["catalog"] / "state-recovery.yaml").read_text()
                 self.assertNotIn("@WORKLOAD_JAR@", scenario)
                 self.assertEqual("      - kill:" in scenario, cell["execution"] == "restart")
+                self.assertEqual("allow_state_reset_mutant: true" in scenario, cell["mode"] == "mutant")
                 self.assertIn("./jobs/qualification/artifacts/" + cell["mode"] + ".jar", scenario)
                 self.assertIn('image_id: "' + manifest["runtimeIdentity"]["flinkImageId"] + '"', scenario)
                 self.assertIn('image_id: "' + manifest["runtimeIdentity"]["kafkaImageId"] + '"', scenario)

@@ -247,7 +247,7 @@ class WorkloadBuildGuardTest(unittest.TestCase):
 
             for mode, other in [('correct', 'reset-state-on-restore-v1'),
                                 ('reset-state-on-restore-v1', 'correct')]:
-                target = root / mode
+                target = root / ("state-reset-on-restore" if mode != 'correct' else mode)
                 self.assertEqual(0, run(target, mode).returncode)
                 (target / 'classes').mkdir()
                 markers = {name: (target / name).read_bytes()

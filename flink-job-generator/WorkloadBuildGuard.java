@@ -40,6 +40,10 @@ class WorkloadBuildGuard {
                 || (compiled && !mutationExists && !mode.equals("correct"))) {
             throw new IllegalStateException("Workload output belongs to another mutation mode. Use a fresh output directory.");
         }
+        if (!mode.equals("correct") && !target.getFileName().toString().equals("state-reset-on-restore")) {
+            throw new IllegalStateException("A mutating workload requires an isolated state-reset-on-restore output directory. "
+                    + "Use the state-reset-on-restore build profile; changing workload.build.mode alone is forbidden.");
+        }
         if ((compiled && (!versionExists || !settingsExist))
                 || (versionExists && !Files.readString(version).equals(arguments[1] + "\n"))
                 || (settingsExist && !Files.readString(settings).equals(signature.toString()))) {
