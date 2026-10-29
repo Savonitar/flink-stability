@@ -54,9 +54,14 @@ static void json_string(char *target, size_t capacity, const char *source) {
     target[written] = '\0';
 }
 
-static const char *const counter_names[CF_COUNTER_COUNT] = {"read", "getattr", "readdir", "access", "flush", "release"};
+static const char *const counter_names[CF_COUNTER_COUNT] = {
+    "read", "getattr", "readdir", "access", "flush", "release", "fsync", "fdatasync"
+};
+/* Per entry: longest key, two maximum-width uint64 values and all JSON punctuation. */
+enum { CF_COUNTER_JSON_MAX = CF_COUNTER_COUNT * 80 + 1 };
 
-static int counter_index(const char *operation) {
+static int counter_index(const char *operation, int datasync) {
+    if (!strcmp(operation, "fsync")) return datasync ? 7 : 6;
     for (int i = 0; i < CF_COUNTER_COUNT; ++i) if (!strcmp(operation, counter_names[i])) return i;
     return -1;
 }
@@ -89,7 +94,7 @@ static int append_receipt(struct cf_state *s, const char *operation, const char 
                           const char *path, int64_t result, int error, uint64_t requested,
                           uint64_t returned, int datasync, const char *reason) {
     char encoded[CF_PATH_MAX * 6 + 1], fault[CF_ID_MAX + 3], fault_op[24], line[CF_RECEIPT_MAX];
-    char bounded_path[CF_PATH_MAX + 1], counters[512], extra[560] = "";
+    char bounded_path[CF_PATH_MAX + 1], counters[CF_COUNTER_JSON_MAX], extra[CF_COUNTER_JSON_MAX + 32] = "";
     bool truncated = path && strlen(path) > CF_PATH_MAX;
     snprintf(bounded_path, sizeof(bounded_path), "%.*s", CF_PATH_MAX, path ? path : ".");
     json_string(encoded, sizeof(encoded), bounded_path);
@@ -164,7 +169,8 @@ static int summary_locked(struct cf_state *s) {
 int cf_record_locked(struct cf_state *s, const char *operation, const char *fault_operation,
                      const char *path, int64_t result, int error, uint64_t requested,
                      uint64_t returned, int datasync, const char *reason) {
-    int counter = counter_index(operation);
+    if (path && strlen(path) > CF_PATH_MAX) { result = -1; error = ENAMETOOLONG; reason = "receipt-path-truncated"; }
+    int counter = counter_index(operation, datasync);
     if (counter >= 0 && result >= 0 && !error) {
         if (s->counts[counter] == INT64_MAX || (counter == 0 && returned > (uint64_t) INT64_MAX - s->read_bytes)) {
             fatal_locked(s, "counter-bound-exceeded"); return -EIO;
@@ -173,8 +179,9 @@ int cf_record_locked(struct cf_state *s, const char *operation, const char *faul
         if (counter == 0) s->read_bytes += returned;
         if (counter != 0 || !checkpoint_read(path)) return summary_locked(s);
     }
+    if (result >= 0 && !error && !fault_operation && !lifecycle(operation)
+            && (strcmp(operation, "read") || !checkpoint_read(path))) return 0;
     if (reserve_locked(s) != 0) return -EIO;
-    if (path && strlen(path) > CF_PATH_MAX) { result = -1; error = ENAMETOOLONG; reason = "receipt-path-truncated"; }
     if (append_receipt(s, operation, fault_operation, path, result, error, requested, returned, datasync, reason) != 0) {
         fatal_locked(s, "journal-write-failed");
         return -EIO;
@@ -253,7 +260,7 @@ void cf_shutdown(struct cf_state *s, const char *reason) {
 }
 
 static int response_locked(struct cf_state *s, bool ok, const char *error, char *response, size_t capacity) {
-    char fault[CF_ID_MAX + 3], encoded_error[96], counters[512];
+    char fault[CF_ID_MAX + 3], encoded_error[96], counters[CF_COUNTER_JSON_MAX];
     counters_json(s, counters, sizeof(counters));
     if (s->fault[0]) snprintf(fault, sizeof(fault), "\"%s\"", s->fault); else strcpy(fault, "null");
     if (error) snprintf(encoded_error, sizeof(encoded_error), "\"%s\"", error); else strcpy(encoded_error, "null");

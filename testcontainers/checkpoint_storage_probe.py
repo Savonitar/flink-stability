@@ -19,7 +19,7 @@ JAVA_MAIN = "org.savonitar.flink.stability.testcontainers.storage.CheckpointStor
 BASE = b"before-fault"
 AFTER = b"-after-heal"
 MAX_OUTPUT = 12 * 1024 * 1024
-IO_COUNTERS = frozenset(("read", "getattr", "readdir", "access", "flush", "release"))
+IO_COUNTERS = frozenset(("read", "getattr", "readdir", "access", "flush", "release", "fsync", "fdatasync"))
 
 
 def io_counters(value):
@@ -551,6 +551,10 @@ def qualify(report, output):
             operation = event["operation"]
             require(isinstance(operation, str) and operation and operation != "STATUS",
                     "STATUS must not consume the native journal budget")
+            if event["result"] >= 0 and event["errno"] == 0 and not operation[0].isupper():
+                require(operation in {"create", "write", "truncate", "open-trunc"}
+                        or operation == "read" and re.search(r"(?:^|/)chk-[1-9][0-9]*/", event["path"]),
+                        "Successful callback outside the individual receipt whitelist")
             if operation[0].isupper():
                 counters = io_counters(event.get("counters"))
                 require(not snapshots or counters_advance(snapshots[-1][1], counters), "Native counters moved backwards")
@@ -639,9 +643,10 @@ def qualify(report, output):
                        and (operation != "write" or event["requestedBytes"] == len(AFTER))
                        and response(name + ".arm")["sequence"] < event["sequence"] < response(name + ".heal")["sequence"]]
             require(len(matched) == 1, "Missing or ambiguous matching FUSE EIO: " + name + "/" + operation)
-        for datasync in (False, True):
-            require(any(e["operation"] == "fsync" and e["errno"] == 0 and e["datasync"] is datasync
-                        for e in journals[name]), "fsync/fdatasync was not forwarded")
+        observed_counters = [snapshot for unused, snapshot in journal_counters[name]] + [control_counters[name]]
+        require(max(value["fsync"]["count"] for value in observed_counters) >= 2
+                and max(value["fdatasync"]["count"] for value in observed_counters) >= 1,
+                "Successful backing fsync/fdatasync calls were not counted")
         other = "b" if name == "a" else "a"
         for suffix in ("peer-read", "healed-peer-read"):
             require(response(name + "." + suffix)["path"] == "held-" + other

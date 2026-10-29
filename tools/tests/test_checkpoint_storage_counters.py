@@ -11,16 +11,22 @@ audit = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(audit)
 
 
-def fixture(directory, change=None):
+def fixture(directory, change=None, schema=6):
     identity = dict(instanceId="mount", daemonPid=42, runtimeId="container", process="taskmanager-1#1",
                     logicalName="taskmanager-1", role="TASK_MANAGER")
     storage = dict(attemptId="attempt", storageId="storage", namespace="namespace", materializedFiles=[])
     zero = {op: {"count": 0, "bytes": 0} for op in ("read", "getattr", "readdir", "access", "flush", "release")}
+    if schema == 8:
+        zero.update(fsync=dict(count=0, bytes=0), fdatasync=dict(count=0, bytes=0))
     summary = deepcopy(zero)
     summary["read"] = dict(count=1, bytes=16)
     summary["getattr"]["count"] = 1000
+    if schema == 8:
+        summary["fsync"]["count"] = 3
+        summary["fdatasync"]["count"] = 2
     rows = []
-    for sequence, operation in enumerate(("START", "READY", "read", "SUMMARY"), 1):
+    operations = ("START", "READY", "read", "SUMMARY") if schema else ("START", "READY", "read")
+    for sequence, operation in enumerate(operations, 1):
         row = dict(version=1, sequence=sequence, timestampMs=sequence, monotonicNs=sequence,
                    attemptId="attempt", storageId="storage", namespace="namespace", instanceId="mount", daemonPid=42,
                    state="STARTING" if sequence == 1 else "HEALTHY", journalComplete=True,
@@ -29,11 +35,13 @@ def fixture(directory, change=None):
                    faultOperation=None, result=16 if operation == "read" else 0, errno=0,
                    requestedBytes=16 if operation == "read" else 0, returnedBytes=16 if operation == "read" else 0,
                    datasync=None, reason=audit.READY if operation == "READY" else "ok")
-        if operation != "read":
+        if schema and operation != "read":
             row["counters"] = deepcopy(summary if operation == "SUMMARY" else zero)
         rows.append(row)
     status = {key: rows[-1][key] for key in ("state", "faultId", "revision", "sequence", "leaseMs", "leaseDeadlineMonotonicNs", "journalComplete")}
-    status.update(stopping=False, counters=deepcopy(summary))
+    status.update(stopping=False)
+    if schema:
+        status["counters"] = deepcopy(summary)
     if change:
         change(rows, status)
     data = b"".join((json.dumps(row, sort_keys=True) + "\n").encode() for row in rows)
@@ -53,6 +61,118 @@ def fixture(directory, change=None):
 
 
 class AggregateCounterTest(unittest.TestCase):
+    def test_historical_absence_legacy_six_and_current_eight_are_distinct_valid_formats(self):
+        for schema in (0, 6, 8):
+            with self.subTest(schema=schema), tempfile.TemporaryDirectory() as tmp:
+                directory = Path(tmp).resolve()
+                instance, storage = fixture(directory, schema=schema)
+                data, rows = audit.RetainedEvidence(directory).journal(instance, storage)
+                self.assertEqual(schema, len(instance["status"].get("counters", {})))
+                if schema == 8:
+                    self.assertEqual({"count": 3, "bytes": 0}, instance["status"]["counters"]["fsync"])
+                    self.assertEqual({"count": 2, "bytes": 0}, instance["status"]["counters"]["fdatasync"])
+                    self.assertFalse(any(row["operation"] in {"fsync", "fdatasync"} for row in rows))
+
+    def test_partial_unknown_or_nonzero_sync_bytes_are_rejected(self):
+        changes = {
+            "only fsync": lambda rows, status: rows[-1]["counters"].pop("fdatasync"),
+            "unknown key": lambda rows, status: rows[-1]["counters"].update(fsyncdir=dict(count=1, bytes=0)),
+            "fsync bytes": lambda rows, status: rows[-1]["counters"]["fsync"].update(bytes=1),
+            "fdatasync bytes": lambda rows, status: rows[-1]["counters"]["fdatasync"].update(bytes=1),
+            "fsync count boolean": lambda rows, status: rows[-1]["counters"]["fsync"].update(count=True),
+            "fdatasync count negative": lambda rows, status: rows[-1]["counters"]["fdatasync"].update(count=-1),
+            "fsync status behind": lambda rows, status: status["counters"]["fsync"].update(count=2),
+            "fdatasync status behind": lambda rows, status: status["counters"]["fdatasync"].update(count=1),
+        }
+        for name, change in changes.items():
+            with self.subTest(name=name), tempfile.TemporaryDirectory() as tmp:
+                directory = Path(tmp).resolve()
+                instance, storage = fixture(directory, change, schema=8)
+                with self.assertRaises(ValueError):
+                    audit.RetainedEvidence(directory).journal(instance, storage)
+
+    def test_schema_cannot_change_between_start_lifecycle_io_or_status(self):
+        def counters(schema):
+            if schema == 0:
+                return None
+            keys = audit.LEGACY_IO_OPERATIONS if schema == 6 else audit.IO_OPERATIONS
+            return {key: dict(count=0, bytes=0) for key in keys}
+
+        for original in (0, 6, 8):
+            for replacement in (0, 6, 8):
+                if original == replacement:
+                    continue
+                for location in ("ready", "io", "status"):
+                    if location == "io" and replacement == 0:
+                        continue  # Individual I/O receipts deliberately omit aggregate counters.
+                    with self.subTest(original=original, replacement=replacement, location=location), tempfile.TemporaryDirectory() as tmp:
+                        def change(rows, status):
+                            target = status if location == "status" else rows[1 if location == "ready" else 2]
+                            value = counters(replacement)
+                            if value is None:
+                                target.pop("counters", None)
+                            else:
+                                target["counters"] = value
+                        directory = Path(tmp).resolve()
+                        instance, storage = fixture(directory, change, schema=original)
+                        with self.assertRaises(ValueError):
+                            audit.RetainedEvidence(directory).journal(instance, storage)
+
+    def test_fsync_and_fdatasync_counters_cannot_regress_in_later_summary(self):
+        for operation in ("fsync", "fdatasync"):
+            with self.subTest(operation=operation), tempfile.TemporaryDirectory() as tmp:
+                def change(rows, status):
+                    later = deepcopy(rows[-1])
+                    for key in ("sequence", "timestampMs", "monotonicNs"):
+                        later[key] += 1
+                    later["counters"][operation]["count"] -= 1
+                    rows.append(later)
+                    status.update(sequence=later["sequence"], counters=deepcopy(later["counters"]))
+                directory = Path(tmp).resolve()
+                instance, storage = fixture(directory, change, schema=8)
+                with self.assertRaisesRegex(ValueError, "counters moved backwards"):
+                    audit.RetainedEvidence(directory).journal(instance, storage)
+
+    def test_control_reply_and_status_preserve_exact_journal_counter_schema(self):
+        for schema in (0, 6, 8):
+            with self.subTest(schema=schema), tempfile.TemporaryDirectory() as tmp:
+                directory = Path(tmp).resolve()
+                instance, storage = fixture(directory, schema=schema)
+                rows = [json.loads(line) for line in (directory / "journal.jsonl").read_text().splitlines()]
+                native = deepcopy(rows[-1])
+                native.update(operation="ARM", state="ARMED", faultId="fault", revision=1,
+                              sequence=len(rows) + 1, monotonicNs=100, leaseMs=120000,
+                              leaseDeadlineMonotonicNs=120000000100, allowedOperations=["create", "write"],
+                              path=".", result=0, errno=0, reason="accepted")
+                rows.append(native)
+                status = {key: native[key] for key in ("state", "faultId", "revision", "sequence", "leaseMs",
+                                                       "leaseDeadlineMonotonicNs", "journalComplete")}
+                status["stopping"] = False
+                if schema:
+                    status["counters"] = deepcopy(native["counters"])
+                reply = dict(status, version=1, ok=True, error=None, allowedOperations=["create", "write"],
+                             **{key: storage[key] for key in ("attemptId", "storageId", "namespace")},
+                             **{key: instance["instance"][key] for key in ("instanceId", "daemonPid")})
+                ack = dict(confirmed=True, exitCode=0, stderr="", startedNanos=1, completedNanos=2,
+                           command="ARM", status=status, stdout=json.dumps(reply), instance=instance["instance"])
+                transition = dict(startedNanos=1, completedNanos=2, faultId="fault", revision=1)
+                self.assertEqual(native, audit.verify_ack(ack, transition, storage, rows))
+                for replacement in (0, 6, 8):
+                    if replacement == schema:
+                        continue
+                    for location in ("reply", "status"):
+                        with self.subTest(schema=schema, replacement=replacement, location=location):
+                            altered_ack, altered_reply = deepcopy(ack), deepcopy(reply)
+                            target = altered_reply if location == "reply" else altered_ack["status"]
+                            if replacement == 0:
+                                target.pop("counters", None)
+                            else:
+                                keys = audit.LEGACY_IO_OPERATIONS if replacement == 6 else audit.IO_OPERATIONS
+                                target["counters"] = {key: dict(count=0, bytes=0) for key in keys}
+                            altered_ack["stdout"] = json.dumps(altered_reply)
+                            with self.assertRaises(ValueError):
+                                audit.verify_ack(altered_ack, transition, storage, rows)
+
     def test_status_does_not_need_its_own_journal_record(self):
         with tempfile.TemporaryDirectory() as tmp:
             directory = Path(tmp).resolve()

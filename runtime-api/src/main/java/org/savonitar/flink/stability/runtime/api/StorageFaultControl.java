@@ -61,7 +61,9 @@ public interface StorageFaultControl {
 
     private static Map<String, IoCounter> ioCounters(Map<String, IoCounter> values) {
         Map<String, IoCounter> counters = Map.copyOf(values);
-        if (!counters.isEmpty() && !counters.keySet().equals(java.util.Set.of("read", "getattr", "readdir", "access", "flush", "release")))
+        if (!counters.isEmpty()
+                && !counters.keySet().equals(java.util.Set.of("read", "getattr", "readdir", "access", "flush", "release"))
+                && !counters.keySet().equals(java.util.Set.of("read", "getattr", "readdir", "access", "flush", "release", "fsync", "fdatasync")))
             throw new IllegalArgumentException("Incomplete IO counters");
         counters.forEach((name, value) -> {
             if (!name.equals("read") && value.bytes() != 0) throw new IllegalArgumentException("Non-read byte counter");

@@ -401,6 +401,7 @@ final class FuseCheckpointStorageRuntime implements StorageFaultControl, AutoClo
         Status observed = status(node);
         if (mount.status != null && !countersAdvance(mount.status.counters(), observed.counters()))
             throw new IllegalStateException("Storage status IO counters moved backwards or disappeared");
+        requireCounterSchema(observed, mount.operations);
         boolean accepted = result.exitCode == 0 && bool(node, "ok") && observed.revision() == revision
                 && observed.journalComplete() && (fault == null || fault.equals(observed.faultId()));
         if (operation.equals("ARM")) accepted &= observed.state() == State.ARMED && observed.leaseMs() == lease
@@ -439,6 +440,7 @@ final class FuseCheckpointStorageRuntime implements StorageFaultControl, AutoClo
             }
             mount.journalPath = retained.toString(); mount.journalSha256 = digest; mount.journalBytes = raw.length;
             List<Operation> parsed = parseJournal(raw, mount.instance, attemptId, storageId, namespace, quiescent);
+            if (mount.status != null) requireCounterSchema(mount.status, parsed);
             if (parsed.size() < mount.operations.size() || !parsed.subList(0, mount.operations.size()).equals(mount.operations))
                 throw new IllegalStateException("FUSE journal prefix changed or disappeared");
             mount.operations = parsed;
@@ -453,7 +455,7 @@ final class FuseCheckpointStorageRuntime implements StorageFaultControl, AutoClo
         int end = text.lastIndexOf('\n');
         if (end < 0) throw new IllegalStateException("FUSE journal has no complete record");
         List<Operation> records = new ArrayList<>();
-        Map<String, IoCounter> previousCounters = Map.of();
+        Map<String, IoCounter> previousCounters = null;
         for (String line : text.substring(0, end).split("\n", -1)) {
             if (records.size() == MAX_JOURNAL_RECORDS || line.length() > 8192) throw new IllegalStateException("FUSE journal exceeds record budget");
             JsonNode node = object(line);
@@ -469,10 +471,9 @@ final class FuseCheckpointStorageRuntime implements StorageFaultControl, AutoClo
             if (operation.equals("SUMMARY") && counters.isEmpty()) throw new IllegalStateException("SUMMARY has no IO counters");
             if ((operation.equals("START") || operation.equals("READY")) && counters.values().stream().anyMatch(value -> value.count() != 0))
                 throw new IllegalStateException("Startup record has nonzero IO counters");
-            if (!previousCounters.isEmpty() && !operation.isEmpty() && Character.isUpperCase(operation.charAt(0)) && counters.isEmpty())
-                throw new IllegalStateException("Lifecycle record lost IO counters");
-            if (!counters.isEmpty()) {
-                if (!countersAdvance(previousCounters, counters)) throw new IllegalStateException("Native IO counters moved backwards");
+            if (counterRecord(operation, counters)) {
+                if (previousCounters != null && !countersAdvance(previousCounters, counters))
+                    throw new IllegalStateException("Native IO counter schema changed or counters moved backwards");
                 if (operation.equals("SUMMARY") && counters.equals(previousCounters))
                     throw new IllegalStateException("Idle SUMMARY has no new IO counters");
                 previousCounters = counters;
@@ -593,9 +594,13 @@ final class FuseCheckpointStorageRuntime implements StorageFaultControl, AutoClo
     private static Map<String, IoCounter> counters(JsonNode node) {
         JsonNode value = node.get("counters");
         if (value == null) return Map.of();
-        if (!value.isObject() || value.size() != 6) throw new IllegalStateException("Invalid native IO counter inventory");
+        if (!value.isObject() || (value.size() != 6 && value.size() != 8))
+            throw new IllegalStateException("Invalid native IO counter inventory");
         Map<String, IoCounter> counters = new TreeMap<>();
-        for (String key : List.of("read", "getattr", "readdir", "access", "flush", "release")) {
+        List<String> keys = value.size() == 6
+                ? List.of("read", "getattr", "readdir", "access", "flush", "release")
+                : List.of("read", "getattr", "readdir", "access", "flush", "release", "fsync", "fdatasync");
+        for (String key : keys) {
             JsonNode counter = value.get(key);
             if (counter == null || !counter.isObject() || counter.size() != 2)
                 throw new IllegalStateException("Missing native IO counter " + key);
@@ -606,11 +611,20 @@ final class FuseCheckpointStorageRuntime implements StorageFaultControl, AutoClo
         }
         return Map.copyOf(counters);
     }
-    private static boolean countersAdvance(Map<String, IoCounter> previous, Map<String, IoCounter> current) {
-        if (previous.isEmpty()) return true;
+    static boolean countersAdvance(Map<String, IoCounter> previous, Map<String, IoCounter> current) {
         return previous.keySet().equals(current.keySet()) && previous.entrySet().stream().allMatch(entry ->
                 current.get(entry.getKey()).count() >= entry.getValue().count()
                         && current.get(entry.getKey()).bytes() >= entry.getValue().bytes());
+    }
+    private static boolean counterRecord(String operation, Map<String, IoCounter> counters) {
+        return !counters.isEmpty() || !operation.isEmpty() && Character.isUpperCase(operation.charAt(0));
+    }
+    static void requireCounterSchema(Status status, List<Operation> operations) {
+        for (Operation operation : operations) {
+            if (counterRecord(operation.operation(), operation.counters())
+                    && !status.counters().keySet().equals(operation.counters().keySet()))
+                throw new IllegalStateException("Storage status and journal IO counter schemas differ");
+        }
     }
     private static boolean denied(JsonNode node, String operation) {
         return operation.equals(text(node, "operation")) && "io-exception".equals(text(node, "status"))

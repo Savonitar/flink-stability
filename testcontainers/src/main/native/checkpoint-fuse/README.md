@@ -1,19 +1,22 @@
 # Native checkpoint filesystem helper
 
-The daemon keeps every mutation, fault-family operation (`create`, `write`,
-`truncate`, `open-trunc`), error and control/lifecycle receipt. Successful reads
+The daemon keeps individual receipts only for fault-family operations (`create`,
+`write`, `truncate`, `open-trunc`), errors and control/lifecycle events. Successful reads
 of files below a canonical `chk-<positive integer>/` component also remain
 individual receipts, including the metadata inspector and restored state reads.
 
-Successful `read`, `getattr`, `readdir`, `access`, `flush` and `release` calls
+Successful `read`, `getattr`, `readdir`, `access`, `flush`, `release`, `fsync` and `fdatasync` calls
 increment cumulative counters. Each counter has `count` and `bytes`; only the
 read counter has nonzero bytes. Checkpoint reads count once even though they also
 have individual receipts. STATUS replies and control/lifecycle records include
-the counters. SUMMARY records emit after 1,000 counted operations or one second
+the counters. The two sync counters increment only after the corresponding
+backing-file call succeeds; they replace individual successful sync receipts.
+Other successful callbacks, including open, directory changes, rename and unlink,
+do not add journal records. SUMMARY records emit after 1,000 counted operations or one second
 of pending activity; idle time and STATUS polling produce no journal entries.
 
 Journal writes use `fdatasync` for the create/write fault family and control or
-lifecycle acknowledgements. Other successful filesystem callbacks and SUMMARY
+lifecycle acknowledgements. Successful checkpoint-read receipts and SUMMARY
 records append without a journal sync on every callback. Filesystem `fsync` and
 `fdatasync` requests still perform the requested operation on the backing file.
 
@@ -36,7 +39,10 @@ remove only a control socket successfully bound by this process.
 Overlong paths return ENAMETOOLONG and record the bounded prefix with
 `pathTruncated=true`; this path error does not mark the whole journal incomplete.
 The parser preserves counters and the truncation flag, rejects malformed or
-regressing counters, and continues to read historical receipts without counters.
+regressing counters, and continues to read historical receipts with no counters
+or the earlier six-counter schema. A single instance cannot change schemas.
+New prototype qualification requires all eight counters and positive native
+fsync/fdatasync counts alongside the Java force responses.
 
 `selftest.c` exercises the state machine and path jail without a FUSE mount.
 Its fixed-clock aggregation case performs 100,000 successful metadata callbacks

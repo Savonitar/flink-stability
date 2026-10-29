@@ -116,11 +116,13 @@ def verify_operation_projection(instance, storage, rows):
             "Bound native operation subset differs from raw journal")
 
 
-IO_OPERATIONS = {"read", "getattr", "readdir", "access", "flush", "release"}
+LEGACY_IO_OPERATIONS = {"read", "getattr", "readdir", "access", "flush", "release"}
+IO_OPERATIONS = LEGACY_IO_OPERATIONS | {"fsync", "fdatasync"}
 
 
 def io_counters(value):
-    require(isinstance(value, dict) and set(value) == IO_OPERATIONS, "Incomplete native IO counters")
+    require(isinstance(value, dict) and set(value) in (LEGACY_IO_OPERATIONS, IO_OPERATIONS),
+            "Incomplete native IO counters")
     for operation, counter in value.items():
         require(isinstance(counter, dict) and set(counter) == {"count", "bytes"}
                 and all(integer(counter[key]) and counter[key] <= 2**63 - 1 for key in counter)
@@ -130,7 +132,7 @@ def io_counters(value):
 
 
 def counters_advance(previous, current):
-    return all(current[operation][key] >= previous[operation][key]
+    return (not previous or set(previous) == set(current)) and all(current[operation][key] >= previous[operation][key]
                for operation in previous for key in ("count", "bytes"))
 
 
@@ -204,6 +206,7 @@ class RetainedEvidence:
                 and sum(row["operation"] == "READY" for row in rows) == 1, "Native mount readiness/cache-policy receipt is missing")
         previous = 0
         previous_counters = {}
+        counter_schema = None
         counter_samples = []
         verify_operation_projection(instance, storage, rows)
         for sequence, row in enumerate(rows, 1):
@@ -212,6 +215,10 @@ class RetainedEvidence:
                     and integer(row["monotonicNs"], previous), "Invalid, expired, aborted or incomplete native journal")
             previous = row["monotonicNs"]
             counters = io_counters(row["counters"]) if "counters" in row else {}
+            if counter_schema is None:
+                counter_schema = frozenset(counters)
+            if counters or row["operation"][0].isupper():
+                require(frozenset(counters) == counter_schema, "Native IO counter schema changed within instance")
             if row["operation"] in {"START", "READY"} and counters:
                 require(all(value["count"] == 0 for value in counters.values()), "Startup IO counters are not zero")
             if previous_counters and row["operation"][0].isupper():
@@ -236,12 +243,13 @@ class RetainedEvidence:
         current = rows[status["sequence"] - 1]
         if counter_samples:
             observed = io_counters(status.get("counters"))
+            require(frozenset(observed) == counter_schema, "STATUS IO counter schema differs from journal")
             for sequence, counters in counter_samples:
                 require(counters_advance(counters, observed) if sequence <= status["sequence"]
                         else counters_advance(observed, counters), "STATUS counters conflict with journal capture")
-        elif status.get("counters"):
-            io_counters(status["counters"])
-            require(all(value["count"] == 0 for value in status["counters"].values()), "Legacy journal cannot prove IO counters")
+        else:
+            require(status.get("counters") is None or status["counters"] == {},
+                    "Legacy journal cannot acquire STATUS IO counters")
         require(all(status[key] == current[key] for key in ("state", "faultId", "revision", "leaseMs", "leaseDeadlineMonotonicNs", "journalComplete"))
                 and status["stopping"] is False, "Stage status differs from its native receipt")
         return data, rows
@@ -297,6 +305,10 @@ def verify_ack(ack, transition, final, rows):
     if "counters" in row:
         require(io_counters(reply.get("counters")) == io_counters(status.get("counters")) == row["counters"],
                 "Control counters differ from native receipt")
+    else:
+        require((reply.get("counters") is None or reply["counters"] == {})
+                and (status.get("counters") is None or status["counters"] == {}),
+                "Legacy control cannot acquire IO counters")
     require(row["faultId"] == transition["faultId"] and row["revision"] == transition["revision"]
             and row["leaseMs"] == 120000 and row["monotonicNs"] < row["leaseDeadlineMonotonicNs"]
             and reply["allowedOperations"] == ["create", "write"], "Fault rule or lease differs from frozen contract")

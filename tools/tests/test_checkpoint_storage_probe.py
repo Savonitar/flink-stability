@@ -44,7 +44,7 @@ class Evidence:
         self.fault = {name: None for name in "abcd"}
         self.requests = {name: 0 for name in "abcd"}
         self.counters = {name: {operation: {"count": 0, "bytes": 0}
-                               for operation in ("read", "getattr", "readdir", "access", "flush", "release")}
+                               for operation in ("read", "getattr", "readdir", "access", "flush", "release", "fsync", "fdatasync")}
                          for name in "abcd"}
         self.report = {"version": 1, "kind": "checkpoint-fuse-probe", "status": "observed",
                        "attemptId": ATTEMPT, "storageId": STORAGE, "namespace": NAMESPACE,
@@ -84,6 +84,9 @@ class Evidence:
 
     def event(self, name, operation, path=".", result=0, error=0, requested=0, returned=0,
               datasync=None, fault_operation=None, reason="forwarded"):
+        if operation == "fsync" and result >= 0 and error == 0:
+            self.counters[name]["fdatasync" if datasync else "fsync"]["count"] += 1
+            return None
         row = {"version": 1, "sequence": len(self.journals[name]) + 1,
                "timestampMs": 1_790_000_000_000 + self.clock // 1_000_000,
                "monotonicNs": self.tick(), "attemptId": ATTEMPT, "storageId": STORAGE,
@@ -456,10 +459,37 @@ class QualificationTest(unittest.TestCase):
         with self.assertRaises(ValueError):
             probe.qualify(self.evidence.report, self.output)
 
-    def test_both_fsync_modes_need_native_success_receipts(self):
+    def test_both_force_modes_need_positive_native_sync_counters(self):
+        for operation, count in (("fsync", 1), ("fdatasync", 0)):
+            with self.subTest(operation=operation):
+                self.evidence = Evidence()
+                for event in self.evidence.journals["a"]:
+                    if "counters" in event:
+                        event["counters"][operation]["count"] = min(event["counters"][operation]["count"], count)
+                for row in self.evidence.report["observations"]:
+                    if row["instance"] == "a" and row["kind"] == "control":
+                        counters = row["response"]["counters"]
+                        counters[operation]["count"] = min(counters[operation]["count"], count)
+                self.reject()
+
+    def test_successful_nonfamily_callbacks_do_not_have_individual_receipts(self):
+        for operation in ("fsync", "open", "opendir", "mkdir", "rename", "rename-target", "unlink", "rmdir"):
+            with self.subTest(operation=operation):
+                self.evidence = Evidence()
+                event = copy.deepcopy(self.evidence.journals["a"][-1])
+                event.update(operation=operation, sequence=len(self.evidence.journals["a"]) + 1,
+                             result=0, errno=0, path=NAMESPACE + "/ordinary")
+                event.pop("counters")
+                self.evidence.journals["a"].append(event)
+                self.reject()
+
+    def test_new_probe_requires_sync_counters_even_if_all_java_force_calls_succeed(self):
         for event in self.evidence.journals["a"]:
-            if event["operation"] == "fsync":
-                event["datasync"] = False
+            if "counters" in event:
+                event["counters"].pop("fsync"); event["counters"].pop("fdatasync")
+        for row in self.evidence.report["observations"]:
+            if row["instance"] == "a" and row["kind"] == "control":
+                row["response"]["counters"].pop("fsync"); row["response"]["counters"].pop("fdatasync")
         self.reject()
 
     def test_missing_or_unsafe_effective_cache_configuration_rejects(self):

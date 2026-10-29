@@ -51,6 +51,59 @@ class FuseCheckpointStorageRuntimeTest {
         assertThrows(IllegalStateException.class, () -> parse(counterLine(1, "READY", 1, 0, 1), true));
     }
 
+    @Test void syncCountersRetainExactCountsAndOnlyReadMayHaveBytes() {
+        String ready = syncCounterLine(1, "READY", 0, 0, 0, 0, 0);
+        String summary = syncCounterLine(3, "SUMMARY", 2, 1000, 16, 3, 4);
+        var operations = parse(ready + line(2, "fsync", "HEALTHY", -1, 5) + summary, true);
+        assertEquals(8, operations.getLast().counters().size());
+        assertEquals(new StorageFaultControl.IoCounter(3, 0), operations.getLast().counters().get("fsync"));
+        assertEquals(new StorageFaultControl.IoCounter(4, 0), operations.getLast().counters().get("fdatasync"));
+        assertEquals(new StorageFaultControl.IoCounter(2, 16), operations.getLast().counters().get("read"));
+        assertTrue(operations.get(1).counters().isEmpty(), "Individual operation errors need no cumulative counters");
+        assertEquals(5, operations.get(1).errno());
+        String next = syncCounterLine(4, "SUMMARY", 3, 1001, 24, 4, 5);
+        for (String invalid : new String[]{
+                next.replace("\"fsync\":{\"count\":4", "\"fsync\":{\"count\":2"),
+                next.replace("\"fdatasync\":{\"count\":5", "\"fdatasync\":{\"count\":3"),
+                next.replace("\"fsync\"", "\"unknown\""),
+                next.replace("\"fdatasync\":{\"count\":5,\"bytes\":0}", "\"fdatasync\":{\"count\":5,\"bytes\":1}"),
+                next.replace("\"fsync\":{\"count\":4", "\"fsync\":{\"count\":-1"),
+                next.replace("\"fsync\":{\"count\":4", "\"fsync\":{\"count\":4.0"),
+                next.replace("\"fsync\":{\"count\":4", "\"fsync\":{\"count\":true"),
+                next.replace("\"fsync\":{\"count\":4", "\"fsync\":{\"count\":9223372036854775808"),
+                next.replace("\"fdatasync\":{\"count\":5,\"bytes\":0},", "")})
+            assertThrows(IllegalStateException.class, () -> parse(ready + line(2, "read", "HEALTHY", 0, 0) + summary + invalid, true), invalid);
+        var maximum = parse(ready + syncCounterLine(2, "SUMMARY", 0, 0, 0, Long.MAX_VALUE, Long.MAX_VALUE), true);
+        assertEquals(Long.MAX_VALUE, maximum.getLast().counters().get("fdatasync").count());
+    }
+
+    @Test void historicalAbsentSixAndEightCounterSchemasCannotMixWithinOneInstance() {
+        for (int initial : new int[]{0, 6, 8}) {
+            String ready = schemaLine(1, "READY", initial);
+            var operations = parse(ready + schemaLine(2, "ARM", initial), true);
+            var counters = operations.getFirst().counters();
+            var status = new StorageFaultControl.Status(StorageFaultControl.State.HEALTHY,
+                    null, 0, 2, 0, 0, true, false, counters);
+            assertDoesNotThrow(() -> FuseCheckpointStorageRuntime.requireCounterSchema(status, operations));
+            assertTrue(FuseCheckpointStorageRuntime.countersAdvance(counters, counters));
+            for (int changed : new int[]{0, 6, 8}) {
+                if (initial == changed) continue;
+                assertThrows(IllegalStateException.class, () -> parse(ready + schemaLine(2, "ARM", changed), true),
+                        "Control receipt schema changed from " + initial + " to " + changed);
+                var otherOperations = parse(schemaLine(1, "READY", changed), true);
+                assertThrows(IllegalStateException.class,
+                        () -> FuseCheckpointStorageRuntime.requireCounterSchema(status, otherOperations),
+                        "STATUS and captured journal must use the same schema");
+                assertFalse(FuseCheckpointStorageRuntime.countersAdvance(counters, otherOperations.getFirst().counters()),
+                        "Successive STATUS snapshots must preserve their schema");
+            }
+        }
+        assertThrows(IllegalStateException.class, () -> parse(counterLine(1, "READY", 0, 0, 0)
+                + syncCounterLine(2, "SUMMARY", 1, 0, 8, 1, 1), true));
+        assertThrows(IllegalStateException.class, () -> parse(syncCounterLine(1, "READY", 0, 0, 0, 0, 0)
+                + counterLine(2, "SUMMARY", 1, 0, 8), true));
+    }
+
     @Test void overlongPathReceiptIsAnExplicitOperationErrorWithoutInventingJournalFailure() {
         String receipt = line(1, "getattr", "HEALTHY", -1, 36)
                 .replace("\"reason\":\"test\"", "\"reason\":\"receipt-path-truncated\",\"pathTruncated\":true");
@@ -132,6 +185,20 @@ class FuseCheckpointStorageRuntimeTest {
                         + ",\"bytes\":" + (name.equals("read") ? bytes : 0) + "}")
                 .collect(java.util.stream.Collectors.joining(","));
         return line(sequence, operation, "HEALTHY", 0, 0).replace("\"reason\":\"test\"", "\"reason\":\"test\",\"counters\":{" + counters + "}");
+    }
+    private static String syncCounterLine(int sequence, String operation, long reads, long metadata, long bytes,
+                                         long fsyncs, long fdatasyncs) {
+        return counterLine(sequence, operation, reads, metadata, bytes).replace("\"counters\":{",
+                "\"counters\":{\"fsync\":{\"count\":" + fsyncs + ",\"bytes\":0},"
+                        + "\"fdatasync\":{\"count\":" + fdatasyncs + ",\"bytes\":0},");
+    }
+    private static String schemaLine(int sequence, String operation, int schema) {
+        return switch (schema) {
+            case 0 -> line(sequence, operation, "HEALTHY", 0, 0);
+            case 6 -> counterLine(sequence, operation, 0, 0, 0);
+            case 8 -> syncCounterLine(sequence, operation, 0, 0, 0, 0, 0);
+            default -> throw new AssertionError("Unknown test counter schema");
+        };
     }
     private static String line(int sequence, String operation, String state, long result, int errno) {
         return "{\"version\":1,\"sequence\":" + sequence + ",\"timestampMs\":100,\"monotonicNs\":200,\"daemonPid\":25,"

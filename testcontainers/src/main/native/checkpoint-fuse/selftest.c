@@ -133,8 +133,8 @@ static void abort_and_bounds(void) {
     while (state.sequence < 8)
         CHECK(cf_record_locked(&state, "write", "write", "job/file", 0, 0, 0, 0, -1, "success") == 0);
     CHECK(cf_begin_locked(&state, NULL) == 0);
-    CHECK(cf_record_locked(&state, "rename-target", NULL, "job/new", 0, 0, 0, 0, -1, "success") == 0);
-    CHECK(cf_record_locked(&state, "rename", NULL, "job/old", 0, 0, 0, 0, -1, "success") == -EIO);
+    CHECK(cf_record_locked(&state, "rename-target", NULL, "job/new", -1, EPERM, 0, 0, -1, "backing-or-path-error") == 0);
+    CHECK(cf_record_locked(&state, "rename", NULL, "job/old", -1, EPERM, 0, 0, -1, "backing-or-path-error") == -EIO);
     CHECK(state.mode == CF_FATAL && !state.journal_complete && state.sequence == 10);
     pthread_mutex_unlock(&state.mutex);
     size = pread(fd, text, sizeof(text) - 1, 0); CHECK(size > 0); text[size] = '\0';
@@ -204,6 +204,60 @@ static void aggregate_reads_and_durability(void) {
     CHECK(size > 0); text[size] = '\0';
     CHECK(strstr(text, "\"sequence\":3,") != NULL && strstr(text, "\"sequence\":4,") != NULL && strstr(text, "\"sequence\":5,") != NULL);
     close(pipes[0]); close(fd); cf_destroy(&state); CHECK(unlink(path) == 0);
+}
+
+static void strict_receipts_and_sync_counters(void) {
+    struct cf_state state; struct time_source clock = {.now = UINT64_C(1000000000)};
+    char path[PATH_MAX]; int fd = new_state(&state, &clock, 10000, path);
+    const char *unrecorded[] = {"open", "opendir", "fsyncdir", "mkdir", "rmdir", "unlink",
+                                "rename", "rename-target", "chmod", "chown", "utimens", "statfs"};
+    pthread_mutex_lock(&state.mutex);
+    uint64_t before = state.sequence;
+    for (size_t index = 0; index < sizeof(unrecorded) / sizeof(unrecorded[0]); ++index) {
+        CHECK(cf_record_locked(&state, unrecorded[index], NULL, "job/id/chk-7/file", 0, 0, 0, 0, -1, "success") == 0);
+        CHECK(state.sequence == before);
+    }
+    CHECK(cf_record_locked(&state, "fsync", NULL, "job/file", 0, 0, 0, 0, 0, "success") == 0);
+    CHECK(cf_record_locked(&state, "fsync", NULL, "job/file", 0, 0, 0, 0, 1, "success") == 0);
+    CHECK(state.sequence == before && state.counts[6] == 1 && state.counts[7] == 1);
+    for (size_t index = 0; index < sizeof(unrecorded) / sizeof(unrecorded[0]); ++index) {
+        CHECK(cf_record_locked(&state, unrecorded[index], NULL, "job/file", -1, EPERM, 0, 0, -1, "backing-or-path-error") == 0);
+        CHECK(state.sequence == ++before);
+    }
+    CHECK(cf_record_locked(&state, "fsync", NULL, "job/file", -1, EIO, 0, 0, 1, "backing-or-path-error") == 0);
+    CHECK(state.sequence == ++before && state.counts[6] == 1 && state.counts[7] == 1);
+    const char *fault_operations[] = {"create", "write", "truncate", "open-trunc"};
+    for (size_t index = 0; index < sizeof(fault_operations) / sizeof(fault_operations[0]); ++index) {
+        CHECK(cf_record_locked(&state, fault_operations[index], index ? "write" : "create", "job/file", 0, 0, 0, 0, -1, "success") == 0);
+        CHECK(state.sequence == ++before);
+    }
+    pthread_mutex_unlock(&state.mutex);
+    clock.now += CF_SUMMARY_NS; cf_watchdog(&state);
+    CHECK(state.sequence == before + 1 && state.journal_complete);
+    CHECK(control(&state, "STATUS attempt storage instance 0", "\"fsync\":{\"count\":1,\"bytes\":0}") == 0);
+    CHECK(control(&state, "STATUS attempt storage instance 0", "\"fdatasync\":{\"count\":1,\"bytes\":0}") == 0);
+
+    /* All eight maximum counters must fit both lifecycle JSON and a maximal-ID STATUS. */
+    for (int index = 0; index < CF_COUNTER_COUNT; ++index) state.counts[index] = INT64_MAX;
+    state.read_bytes = INT64_MAX;
+    pthread_mutex_lock(&state.mutex);
+    CHECK(cf_record_locked(&state, "REJECT", NULL, ".", -1, EINVAL, 0, 0, -1, "fixture-rejection") == 0);
+    pthread_mutex_unlock(&state.mutex);
+    memset(state.attempt, 'a', CF_ID_MAX); state.attempt[CF_ID_MAX] = '\0';
+    memset(state.storage, 's', CF_ID_MAX); state.storage[CF_ID_MAX] = '\0';
+    memset(state.instance, 'i', CF_ID_MAX); state.instance[CF_ID_MAX] = '\0';
+    memset(state.namespace_name, 'n', CF_ID_MAX); state.namespace_name[CF_ID_MAX] = '\0';
+    memset(state.fault, 'f', CF_ID_MAX); state.fault[CF_ID_MAX] = '\0';
+    char command[CF_COMMAND_MAX], response[CF_RESPONSE_MAX];
+    snprintf(command, sizeof(command), "STATUS %s %s %s 0", state.attempt, state.storage, state.instance);
+    CHECK(cf_control(&state, command, response, sizeof(response)) == 0);
+    CHECK(strstr(response, "\"fdatasync\":{\"count\":9223372036854775807,\"bytes\":0}") != NULL);
+    CHECK(strstr(response, "\"read\":{\"count\":9223372036854775807,\"bytes\":9223372036854775807}") != NULL);
+    CHECK(response[strlen(response) - 1] == '\n' && strlen(response) < CF_RESPONSE_MAX);
+    char journal[CF_RECEIPT_MAX * 2]; ssize_t size = pread(fd, journal, sizeof(journal) - 1, 0);
+    CHECK(size > 0); journal[size] = '\0';
+    CHECK(strstr(journal, "\"fdatasync\":{\"count\":9223372036854775807,\"bytes\":0}") != NULL);
+    close(fd); cf_destroy(&state); CHECK(unlink(path) == 0);
 }
 
 static void lost_control_responses(void) {
@@ -310,7 +364,7 @@ int main(void) {
     CHECK(cf_identifier("attempt-01")); CHECK(!cf_identifier("../escape")); CHECK(!cf_identifier(""));
     uint64_t value; CHECK(cf_uint("0", &value) && value == 0); CHECK(!cf_uint("01", &value));
     CHECK(!cf_uint("18446744073709551616", &value)); CHECK(!cf_uint("-1", &value));
-    control_and_held_descriptor(); abort_and_bounds(); aggregate_reads_and_durability(); lost_control_responses(); jail_checks();
+    control_and_held_descriptor(); abort_and_bounds(); aggregate_reads_and_durability(); strict_receipts_and_sync_counters(); lost_control_responses(); jail_checks();
     CHECK(rmdir(temporary) == 0);
     printf("{\"status\":\"pass\",\"tests\":%u,\"scope\":\"native-core-and-jail-no-fuse-mount\"}\n", checks);
     return 0;
