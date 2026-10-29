@@ -1,0 +1,3377 @@
+{
+  "scenario": "checkpoint-storage-correct-eio",
+  "attempt": {
+    "ordinal": 1,
+    "nonce": "25eaf10d",
+    "checkpointRoot": "<workspace>/checkpoints/attempt-1-25eaf10d",
+    "status": "pass",
+    "reason": "validator.kafka.state-prefix.match",
+    "message": "The terminal oracle passed and every injected fault had a confirmed effect"
+  },
+  "status": "pass",
+  "reason": "validator.kafka.state-prefix.match",
+  "message": "The terminal oracle passed and every injected fault had a confirmed effect",
+  "expectation": {
+    "outcome": "pass",
+    "matched": true
+  },
+  "diagnostics": [],
+  "evidence": {
+    "customRuntimeSubject": {
+      "compatibilityAssertions": {
+        "kafka": "author-assertion"
+      },
+      "workload": {
+        "artifact": "./jobs/checkpoint-storage-integration-pilots-20261027-02/artifacts/correct.jar",
+        "sha256": "4c8ca4211b01d26ba0c49a2060259c117b95016fef798b4a0c187a332edd9711"
+      },
+      "transactionIdNamingStrategy": "INCREMENTING",
+      "jobFlinkConfiguration": {
+        "execution.checkpointing.data-inline-threshold": "0 bytes",
+        "execution.checkpointing.interval": "10000",
+        "execution.checkpointing.max-concurrent-checkpoints": "1",
+        "execution.checkpointing.mode": "EXACTLY_ONCE",
+        "execution.checkpointing.storage": "filesystem",
+        "execution.checkpointing.tolerable-failed-checkpoints": "10",
+        "parallelism.default": "1",
+        "state.backend.type": "hashmap"
+      }
+    },
+    "connectorPrimaries": [
+      {
+        "side": "single",
+        "alias": "kafka",
+        "artifact": "maven:org.apache.flink:flink-connector-kafka:5.0.0-2.2",
+        "observedSha256": "6bb63f7b09930d99745325393b481c092b0c26d626e738b7a1fd6fd8d7d4f1da"
+      }
+    ],
+    "kafka": {
+      "clusterAlias": "main",
+      "imageReference": "apache/kafka:4.0.0",
+      "imageId": "sha256:2cecec9e3ea2d63fd5d1da1ab95e6bb7c33a7ff81053c4eb46f4176cd0bad8c9",
+      "compatibilityBasis": "author-assertion",
+      "launchType": "apache-kafka",
+      "brokerConfig": {},
+      "containers": [
+        {
+          "brokerAlias": "kafka-main",
+          "containerId": "3d0404ef7e739a00fd698a86acb4efadba7ffcb538186e80ede6470209647259",
+          "imageId": "sha256:2cecec9e3ea2d63fd5d1da1ab95e6bb7c33a7ff81053c4eb46f4176cd0bad8c9",
+          "environment": {
+            "CLUSTER_ID": "4L6g3nShT-eMCtK--X86sw",
+            "KAFKA_LOG_DIRS": "/tmp/kafka-logs",
+            "KAFKA_NODE_ID": "1",
+            "KAFKA_AUTO_CREATE_TOPICS_ENABLE": "false",
+            "KAFKA_OFFSETS_TOPIC_NUM_PARTITIONS": "1",
+            "KAFKA_LISTENER_SECURITY_PROTOCOL_MAP": "BROKER:PLAINTEXT,PLAINTEXT:PLAINTEXT,TC-0:PLAINTEXT,CONTROLLER:PLAINTEXT",
+            "KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR": "1",
+            "KAFKA_PROCESS_ROLES": "broker,controller",
+            "KAFKA_INTER_BROKER_LISTENER_NAME": "BROKER",
+            "KAFKA_TRANSACTION_MAX_TIMEOUT_MS": "7200000",
+            "KAFKA_LISTENERS": "PLAINTEXT://0.0.0.0:9092,CONTROLLER://0.0.0.0:9094,TC-0://kafka-main:19092,BROKER://0.0.0.0:9093",
+            "KAFKA_CONTROLLER_QUORUM_VOTERS": "1@localhost:9094",
+            "KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR": "1",
+            "KAFKA_LOG_FLUSH_INTERVAL_MESSAGES": "9223372036854775807",
+            "KAFKA_TRANSACTION_STATE_LOG_MIN_ISR": "1",
+            "KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS": "0",
+            "KAFKA_CONTROLLER_LISTENER_NAMES": "CONTROLLER"
+          },
+          "command": [
+            "sh",
+            "-c",
+            "while [ ! -f /tmp/testcontainers_start.sh ]; do sleep 0.1; done; exec /tmp/testcontainers_start.sh"
+          ],
+          "logDirectory": "/tmp/kafka-logs",
+          "imageVerified": true,
+          "ready": true,
+          "startupScript": "#!/bin/bash\nexport KAFKA_ADVERTISED_LISTENERS=PLAINTEXT://localhost:58244,BROKER://3d0404ef7e73:9093,TC-0://kafka-main:19092\nexec /etc/kafka/docker/run \n",
+          "readinessCommand": null
+        }
+      ]
+    },
+    "componentErrors": {
+      "eventCount": 2,
+      "coverage": "captured-prefix",
+      "events": [
+        {
+          "process": "taskmanager-1#2",
+          "timestamp": "2026-10-27 09:47:42,597",
+          "level": "INFO",
+          "logger": "org.apache.kafka.clients.producer.internals.TransactionManager",
+          "transactionalId": "keyed-prefix-0-1",
+          "kinds": [
+            "producer-fenced"
+          ],
+          "message": "[Producer clientId=producer-keyed-prefix-0-1, transactionalId=keyed-prefix-0-1] Transiting to fatal error state due to org.apache.kafka.common.errors.ProducerFencedException: There is a newer producer with the same transactionalId which fences the current one."
+        },
+        {
+          "process": "taskmanager-1#2",
+          "timestamp": "2026-10-27 09:47:42,599",
+          "level": "ERROR",
+          "logger": "org.apache.flink.connector.kafka.sink.internal.KafkaCommitter",
+          "producerId": "1",
+          "epoch": "1",
+          "transactionalId": "keyed-prefix-0-1",
+          "kinds": [
+            "producer-fenced"
+          ],
+          "message": "Unable to commit transaction (CommitRequestImpl{state=RECEIVED, numRetries=0, committable=KafkaCommittable{producerId=1, epoch=1, transactionalId='keyed-prefix-0-1', producer=null}}) because its producer is already fenced. This means that you either have a different producer with the same 'transactional.id' (this is unlikely with the 'KafkaSink' as all generated ids are unique and shouldn't be reused) or recovery took longer than 'transaction.timeout.ms' (7200000ms). In both cases this most likely signals data loss, please consult the Flink documentation for more details."
+        }
+      ],
+      "diagnostics": []
+    },
+    "flinkRest": {
+      "errorCount": 0,
+      "errors": []
+    },
+    "input": {
+      "status": "complete",
+      "complete": true,
+      "reconciliationComplete": true,
+      "cluster": "main",
+      "topic": "input",
+      "records": 30000,
+      "partitions": 1,
+      "observed": 30000
+    },
+    "phases": {
+      "status": "complete",
+      "completed": true,
+      "steps": 2,
+      "succeeded": 2,
+      "failed": 0
+    },
+    "writeFence": {
+      "status": "complete",
+      "completed": true,
+      "finalState": "FINISHED"
+    },
+    "flinkJob": {
+      "status": "observed",
+      "state": "FINISHED",
+      "completedCheckpoints": 22,
+      "restoredCheckpoints": 1,
+      "latestRestoredCheckpoint": 1,
+      "failures": 1,
+      "latestFailure": "org.apache.flink.runtime.jobmaster.JobMasterException: TaskManager with id flink-stability-taskmanager-1-1-0e16beed-04b5-423c-be86-11749a54d2aa is no longer reachable."
+    },
+    "taskManagerKills": [
+      {
+        "path": "$/phases/0/steps/1",
+        "loopIterations": [],
+        "target": "taskmanager-1",
+        "identity": {
+          "logicalName": "taskmanager-1",
+          "runtimeId": "c46d3ab92aa3c094c1956a35ff650f9b33ba76e05c9f819fd721b18afe1639cb",
+          "resourceId": "flink-stability-taskmanager-1-1-0e16beed-04b5-423c-be86-11749a54d2aa"
+        },
+        "identityFailure": null,
+        "outcome": "checkpoint-restored",
+        "confirmed": true,
+        "subtasksBeforeKill": [
+          {
+            "vertexName": "Source: Kafka Source -> Source Throttle",
+            "index": 0,
+            "attempt": 0,
+            "status": "RUNNING",
+            "taskManagerId": "flink-stability-taskmanager-1-1-0e16beed-04b5-423c-be86-11749a54d2aa"
+          },
+          {
+            "vertexName": "Keyed Prefix v1 -> Kafka Sink: Writer -> Kafka Sink: Committer",
+            "index": 0,
+            "attempt": 0,
+            "status": "RUNNING",
+            "taskManagerId": "flink-stability-taskmanager-1-1-0e16beed-04b5-423c-be86-11749a54d2aa"
+          }
+        ],
+        "targetedRunningSubtasksBeforeKill": [
+          {
+            "vertexName": "Source: Kafka Source -> Source Throttle",
+            "index": 0,
+            "attempt": 0,
+            "status": "RUNNING",
+            "taskManagerId": "flink-stability-taskmanager-1-1-0e16beed-04b5-423c-be86-11749a54d2aa"
+          },
+          {
+            "vertexName": "Keyed Prefix v1 -> Kafka Sink: Writer -> Kafka Sink: Committer",
+            "index": 0,
+            "attempt": 0,
+            "status": "RUNNING",
+            "taskManagerId": "flink-stability-taskmanager-1-1-0e16beed-04b5-423c-be86-11749a54d2aa"
+          }
+        ],
+        "qualifyingTargetFailures": [
+          {
+            "taskManagerId": "flink-stability-taskmanager-1-1-0e16beed-04b5-423c-be86-11749a54d2aa",
+            "targetResourceId": "flink-stability-taskmanager-1-1-0e16beed-04b5-423c-be86-11749a54d2aa",
+            "attribution": "reporter",
+            "timestampMillis": 1793094456725,
+            "exceptionName": "org.apache.flink.runtime.jobmaster.JobMasterException",
+            "rootCause": "org.apache.flink.runtime.jobmaster.JobMasterException: TaskManager with id flink-stability-taskmanager-1-1-0e16beed-04b5-423c-be86-11749a54d2aa is no longer reachable."
+          }
+        ],
+        "jobStateBeforeKill": "RUNNING",
+        "completedCheckpointsBeforeKill": 1,
+        "activeSubtasksBeforeKill": 2,
+        "restoredCheckpoint": 1,
+        "restoredAtMillis": 1793094457741,
+        "restoredAfterPreInjectionMs": 24657,
+        "restoredAfterKillObservationMs": 24474,
+        "jobManagerTimeBeforeKill": 1793094433084,
+        "jobManagerTimeAfterKill": 1793094433267,
+        "failuresAfterKill": 1,
+        "firstFailureAfterKill": "org.apache.flink.runtime.jobmaster.JobMasterException: TaskManager with id flink-stability-taskmanager-1-1-0e16beed-04b5-423c-be86-11749a54d2aa is no longer reachable.",
+        "detail": "Flink restored checkpoint 1 24657 ms after the fresh pre-injection clock sample"
+      }
+    ],
+    "taskManagerRestarts": [
+      {
+        "path": "$/phases/0/steps/1",
+        "loopIterations": [],
+        "target": "taskmanager-1",
+        "previousIdentity": {
+          "logicalName": "taskmanager-1",
+          "runtimeId": "c46d3ab92aa3c094c1956a35ff650f9b33ba76e05c9f819fd721b18afe1639cb",
+          "resourceId": "flink-stability-taskmanager-1-1-0e16beed-04b5-423c-be86-11749a54d2aa"
+        },
+        "replacementIdentity": {
+          "logicalName": "taskmanager-1",
+          "runtimeId": "c8ba373fb4a38dbf36e148a6fbf64f8f3cf6e9fdb0114ae8d315926f163d1e3a",
+          "resourceId": "flink-stability-taskmanager-1-2-cf492b24-ce09-4bd5-8bbe-2df7fe949e57"
+        },
+        "previousIdentityFailure": null,
+        "replacementIdentityFailure": null
+      }
+    ],
+    "processFence": {
+      "status": "complete",
+      "completed": true,
+      "processes": 2,
+      "components": [
+        {
+          "logicalName": "taskmanager-1",
+          "role": "task-manager",
+          "runtimeId": "c8ba373fb4a38dbf36e148a6fbf64f8f3cf6e9fdb0114ae8d315926f163d1e3a",
+          "outcome": "sigkilled"
+        },
+        {
+          "logicalName": "jobmanager-1",
+          "role": "job-manager",
+          "runtimeId": "9fb54a11520838f3c68ca834f8d1f2d3766fa4062ac112d45631d147e140a1b8",
+          "outcome": "sigkilled"
+        }
+      ],
+      "observations": [
+        {
+          "logicalName": "taskmanager-1",
+          "role": "task-manager",
+          "runtimeId": "c46d3ab92aa3c094c1956a35ff650f9b33ba76e05c9f819fd721b18afe1639cb",
+          "moment": "after-declared-kill",
+          "observedAt": "2026-10-27T09:47:13.239047Z",
+          "missing": false,
+          "diagnostic": null,
+          "state": {
+            "runtimeId": "c46d3ab92aa3c094c1956a35ff650f9b33ba76e05c9f819fd721b18afe1639cb",
+            "running": false,
+            "paused": false,
+            "exitCode": 137,
+            "oomKilled": false,
+            "finishedAt": "2026-10-27T09:47:13.115646677Z"
+          }
+        },
+        {
+          "logicalName": "taskmanager-1",
+          "role": "task-manager",
+          "runtimeId": "c8ba373fb4a38dbf36e148a6fbf64f8f3cf6e9fdb0114ae8d315926f163d1e3a",
+          "moment": "before-fence",
+          "observedAt": "2026-10-27T09:50:57.955024Z",
+          "missing": false,
+          "diagnostic": null,
+          "state": {
+            "runtimeId": "c8ba373fb4a38dbf36e148a6fbf64f8f3cf6e9fdb0114ae8d315926f163d1e3a",
+            "running": true,
+            "paused": false,
+            "oomKilled": false
+          }
+        },
+        {
+          "logicalName": "jobmanager-1",
+          "role": "job-manager",
+          "runtimeId": "9fb54a11520838f3c68ca834f8d1f2d3766fa4062ac112d45631d147e140a1b8",
+          "moment": "before-fence",
+          "observedAt": "2026-10-27T09:50:57.958741Z",
+          "missing": false,
+          "diagnostic": null,
+          "state": {
+            "runtimeId": "9fb54a11520838f3c68ca834f8d1f2d3766fa4062ac112d45631d147e140a1b8",
+            "running": true,
+            "paused": false,
+            "oomKilled": false
+          }
+        },
+        {
+          "logicalName": "taskmanager-1",
+          "role": "task-manager",
+          "runtimeId": "c8ba373fb4a38dbf36e148a6fbf64f8f3cf6e9fdb0114ae8d315926f163d1e3a",
+          "moment": "after-fence-kill",
+          "observedAt": "2026-10-27T09:50:58.175373Z",
+          "missing": false,
+          "diagnostic": null,
+          "state": {
+            "runtimeId": "c8ba373fb4a38dbf36e148a6fbf64f8f3cf6e9fdb0114ae8d315926f163d1e3a",
+            "running": false,
+            "paused": false,
+            "exitCode": 137,
+            "oomKilled": false,
+            "finishedAt": "2026-10-27T09:50:57.999085211Z"
+          }
+        },
+        {
+          "logicalName": "jobmanager-1",
+          "role": "job-manager",
+          "runtimeId": "9fb54a11520838f3c68ca834f8d1f2d3766fa4062ac112d45631d147e140a1b8",
+          "moment": "after-fence-kill",
+          "observedAt": "2026-10-27T09:50:58.521846Z",
+          "missing": false,
+          "diagnostic": null,
+          "state": {
+            "runtimeId": "9fb54a11520838f3c68ca834f8d1f2d3766fa4062ac112d45631d147e140a1b8",
+            "running": false,
+            "paused": false,
+            "exitCode": 137,
+            "oomKilled": false,
+            "finishedAt": "2026-10-27T09:50:58.22310642Z"
+          }
+        }
+      ],
+      "observationOverflow": false,
+      "health": {
+        "outcome": "healthy",
+        "reason": "flink.process.healthy",
+        "detail": "Every fenced process was observed live before the fence or has an exact declared-kill observation"
+      },
+      "completedAt": "2026-10-27T09:50:58.527875Z"
+    },
+    "terminalValidation": {
+      "status": "pass",
+      "completed": true,
+      "snapshotComplete": true,
+      "reason": "validator.kafka.state-prefix.match",
+      "mode": "exactly-once",
+      "expected": 30000,
+      "observed": 30000,
+      "type": "kafka.state-prefix",
+      "statePrefix": {
+        "keyCount": 8,
+        "mismatches": 0,
+        "mismatchSamples": []
+      },
+      "missingSamples": [],
+      "distinctExpected": 30000,
+      "malformed": 0,
+      "unexpected": 0,
+      "duplicates": 0,
+      "missing": 0
+    },
+    "stateRecovery": {
+      "jobId": "26bbf6e12a5b38105783428ea6f8591d",
+      "workloadSha256": "4c8ca4211b01d26ba0c49a2060259c117b95016fef798b4a0c187a332edd9711",
+      "keyCount": 8,
+      "totalRecords": 30000,
+      "expectedRestarts": 1,
+      "physicalFenceConfirmed": true,
+      "trace": {
+        "markersPublicationSummary": {
+          "omitted": true,
+          "items": 58,
+          "kinds": {
+            "unknown": 58
+          }
+        },
+        "diagnostics": [],
+        "complete": true
+      },
+      "readinessAttemptsPublicationSummary": [
+        {
+          "ready": true,
+          "reason": "state-recovery.ready",
+          "jobId": "26bbf6e12a5b38105783428ea6f8591d",
+          "keyCount": 8,
+          "totalRecords": 30000
+        }
+      ],
+      "recoveries": [
+        {
+          "confirmed": true,
+          "reason": "state-recovery.confirmed",
+          "restoredCheckpointId": 1,
+          "restoredStart": {
+            "process": {
+              "logicalName": "taskmanager-1",
+              "runtimeId": "c8ba373fb4a38dbf36e148a6fbf64f8f3cf6e9fdb0114ae8d315926f163d1e3a",
+              "process": "taskmanager-1#2"
+            },
+            "event": "START",
+            "jobId": "26bbf6e12a5b38105783428ea6f8591d",
+            "operatorUid": "flink-stability-keyed-prefix-v1",
+            "executionAttempt": 1,
+            "subtask": 0,
+            "checkpointId": 1,
+            "restoredCheckpointId": 1,
+            "lineNumber": 677,
+            "progress": null,
+            "keyProgress": null,
+            "buildMode": "correct"
+          },
+          "postRestoreProgress": {
+            "process": {
+              "logicalName": "taskmanager-1",
+              "runtimeId": "c8ba373fb4a38dbf36e148a6fbf64f8f3cf6e9fdb0114ae8d315926f163d1e3a",
+              "process": "taskmanager-1#2"
+            },
+            "event": "PROGRESS",
+            "jobId": "26bbf6e12a5b38105783428ea6f8591d",
+            "operatorUid": "flink-stability-keyed-prefix-v1",
+            "executionAttempt": 1,
+            "subtask": 0,
+            "checkpointId": 1,
+            "restoredCheckpointId": 1,
+            "lineNumber": 687,
+            "progress": {
+              "keyCount": 8,
+              "observedKeys": 8,
+              "minimumObservedCount": 29,
+              "processedThisAttempt": 8,
+              "maximumInputId": 238
+            },
+            "keyProgress": null,
+            "buildMode": null
+          },
+          "restoredKeys": [
+            {
+              "process": {
+                "logicalName": "taskmanager-1",
+                "runtimeId": "c8ba373fb4a38dbf36e148a6fbf64f8f3cf6e9fdb0114ae8d315926f163d1e3a",
+                "process": "taskmanager-1#2"
+              },
+              "event": "RESTORED_KEY",
+              "jobId": "26bbf6e12a5b38105783428ea6f8591d",
+              "operatorUid": "flink-stability-keyed-prefix-v1",
+              "executionAttempt": 1,
+              "subtask": 0,
+              "checkpointId": 1,
+              "restoredCheckpointId": 1,
+              "lineNumber": 680,
+              "progress": null,
+              "keyProgress": {
+                "keyCount": 8,
+                "key": 0,
+                "inputId": 232,
+                "previousCount": 29,
+                "previousSum": 3277,
+                "newCount": 30,
+                "newSum": 3510
+              },
+              "buildMode": null
+            },
+            {
+              "process": {
+                "logicalName": "taskmanager-1",
+                "runtimeId": "c8ba373fb4a38dbf36e148a6fbf64f8f3cf6e9fdb0114ae8d315926f163d1e3a",
+                "process": "taskmanager-1#2"
+              },
+              "event": "RESTORED_KEY",
+              "jobId": "26bbf6e12a5b38105783428ea6f8591d",
+              "operatorUid": "flink-stability-keyed-prefix-v1",
+              "executionAttempt": 1,
+              "subtask": 0,
+              "checkpointId": 1,
+              "restoredCheckpointId": 1,
+              "lineNumber": 681,
+              "progress": null,
+              "keyProgress": {
+                "keyCount": 8,
+                "key": 1,
+                "inputId": 233,
+                "previousCount": 29,
+                "previousSum": 3306,
+                "newCount": 30,
+                "newSum": 3540
+              },
+              "buildMode": null
+            },
+            {
+              "process": {
+                "logicalName": "taskmanager-1",
+                "runtimeId": "c8ba373fb4a38dbf36e148a6fbf64f8f3cf6e9fdb0114ae8d315926f163d1e3a",
+                "process": "taskmanager-1#2"
+              },
+              "event": "RESTORED_KEY",
+              "jobId": "26bbf6e12a5b38105783428ea6f8591d",
+              "operatorUid": "flink-stability-keyed-prefix-v1",
+              "executionAttempt": 1,
+              "subtask": 0,
+              "checkpointId": 1,
+              "restoredCheckpointId": 1,
+              "lineNumber": 682,
+              "progress": null,
+              "keyProgress": {
+                "keyCount": 8,
+                "key": 2,
+                "inputId": 234,
+                "previousCount": 29,
+                "previousSum": 3335,
+                "newCount": 30,
+                "newSum": 3570
+              },
+              "buildMode": null
+            },
+            {
+              "process": {
+                "logicalName": "taskmanager-1",
+                "runtimeId": "c8ba373fb4a38dbf36e148a6fbf64f8f3cf6e9fdb0114ae8d315926f163d1e3a",
+                "process": "taskmanager-1#2"
+              },
+              "event": "RESTORED_KEY",
+              "jobId": "26bbf6e12a5b38105783428ea6f8591d",
+              "operatorUid": "flink-stability-keyed-prefix-v1",
+              "executionAttempt": 1,
+              "subtask": 0,
+              "checkpointId": 1,
+              "restoredCheckpointId": 1,
+              "lineNumber": 683,
+              "progress": null,
+              "keyProgress": {
+                "keyCount": 8,
+                "key": 3,
+                "inputId": 235,
+                "previousCount": 29,
+                "previousSum": 3364,
+                "newCount": 30,
+                "newSum": 3600
+              },
+              "buildMode": null
+            },
+            {
+              "process": {
+                "logicalName": "taskmanager-1",
+                "runtimeId": "c8ba373fb4a38dbf36e148a6fbf64f8f3cf6e9fdb0114ae8d315926f163d1e3a",
+                "process": "taskmanager-1#2"
+              },
+              "event": "RESTORED_KEY",
+              "jobId": "26bbf6e12a5b38105783428ea6f8591d",
+              "operatorUid": "flink-stability-keyed-prefix-v1",
+              "executionAttempt": 1,
+              "subtask": 0,
+              "checkpointId": 1,
+              "restoredCheckpointId": 1,
+              "lineNumber": 684,
+              "progress": null,
+              "keyProgress": {
+                "keyCount": 8,
+                "key": 4,
+                "inputId": 236,
+                "previousCount": 29,
+                "previousSum": 3393,
+                "newCount": 30,
+                "newSum": 3630
+              },
+              "buildMode": null
+            },
+            {
+              "process": {
+                "logicalName": "taskmanager-1",
+                "runtimeId": "c8ba373fb4a38dbf36e148a6fbf64f8f3cf6e9fdb0114ae8d315926f163d1e3a",
+                "process": "taskmanager-1#2"
+              },
+              "event": "RESTORED_KEY",
+              "jobId": "26bbf6e12a5b38105783428ea6f8591d",
+              "operatorUid": "flink-stability-keyed-prefix-v1",
+              "executionAttempt": 1,
+              "subtask": 0,
+              "checkpointId": 1,
+              "restoredCheckpointId": 1,
+              "lineNumber": 685,
+              "progress": null,
+              "keyProgress": {
+                "keyCount": 8,
+                "key": 5,
+                "inputId": 237,
+                "previousCount": 29,
+                "previousSum": 3422,
+                "newCount": 30,
+                "newSum": 3660
+              },
+              "buildMode": null
+            },
+            {
+              "process": {
+                "logicalName": "taskmanager-1",
+                "runtimeId": "c8ba373fb4a38dbf36e148a6fbf64f8f3cf6e9fdb0114ae8d315926f163d1e3a",
+                "process": "taskmanager-1#2"
+              },
+              "event": "RESTORED_KEY",
+              "jobId": "26bbf6e12a5b38105783428ea6f8591d",
+              "operatorUid": "flink-stability-keyed-prefix-v1",
+              "executionAttempt": 1,
+              "subtask": 0,
+              "checkpointId": 1,
+              "restoredCheckpointId": 1,
+              "lineNumber": 686,
+              "progress": null,
+              "keyProgress": {
+                "keyCount": 8,
+                "key": 6,
+                "inputId": 238,
+                "previousCount": 29,
+                "previousSum": 3451,
+                "newCount": 30,
+                "newSum": 3690
+              },
+              "buildMode": null
+            },
+            {
+              "process": {
+                "logicalName": "taskmanager-1",
+                "runtimeId": "c8ba373fb4a38dbf36e148a6fbf64f8f3cf6e9fdb0114ae8d315926f163d1e3a",
+                "process": "taskmanager-1#2"
+              },
+              "event": "RESTORED_KEY",
+              "jobId": "26bbf6e12a5b38105783428ea6f8591d",
+              "operatorUid": "flink-stability-keyed-prefix-v1",
+              "executionAttempt": 1,
+              "subtask": 0,
+              "checkpointId": 1,
+              "restoredCheckpointId": 1,
+              "lineNumber": 679,
+              "progress": null,
+              "keyProgress": {
+                "keyCount": 8,
+                "key": 7,
+                "inputId": 231,
+                "previousCount": 28,
+                "previousSum": 3248,
+                "newCount": 29,
+                "newSum": 3480
+              },
+              "buildMode": null
+            }
+          ],
+          "mutantResets": [],
+          "readinessPublicationSummary": {
+            "ready": true,
+            "reason": "state-recovery.ready",
+            "jobId": "26bbf6e12a5b38105783428ea6f8591d",
+            "keyCount": 8,
+            "totalRecords": 30000
+          }
+        }
+      ],
+      "observationErrors": [],
+      "confirmed": true,
+      "reason": "state-recovery.confirmed"
+    },
+    "checkpointStorage": {
+      "attemptId": "attempt-46225f01-bb80-4d5e-a5be-a456719ac1ab",
+      "storageId": "storage-84151b56-49c6-46a7-971e-55a0215fe91b",
+      "namespace": "job_751fc4bc11f94391b5453c6cee3972e4",
+      "checkpointUri": "file:///flink/checkpoints/job_751fc4bc11f94391b5453c6cee3972e4",
+      "helperManifestSha256": "9ab2001ccc55e700a76c12d0ba64d4824d1089d21e85adffa5216d75d8582ecf",
+      "instances": [
+        {
+          "instance": {
+            "logicalName": "jobmanager-1",
+            "process": "jobmanager-1#1",
+            "runtimeId": "9fb54a11520838f3c68ca834f8d1f2d3766fa4062ac112d45631d147e140a1b8",
+            "instanceId": "instance-1882e268-8829-46e8-8f08-c4d2c48add81",
+            "role": "JOB_MANAGER",
+            "daemonPid": 22
+          },
+          "verification": {
+            "imageId": "sha256:2e93ded2cb7bf1a50f71b663d5e3ea01420bcc4e549cbf666d05120f939713c7",
+            "helperSha256": "49d01b4f62b6a7bd8256779777cf1e6d193d2e1d7365796c115f4ffb66c85f66",
+            "probeSha256": "2fd880248a7515b08ee419e1ff875cc1edff8e0f784878aa55a0aaa0a1780983",
+            "mountInfo": "123 183 0:56 / /flink/checkpoints rw,nosuid,nodev,relatime - fuse /dev/fuse rw,user_id=0,group_id=0,default_permissions,allow_other",
+            "uid": [
+              9999,
+              9999,
+              9999,
+              9999
+            ],
+            "gid": [
+              9999,
+              9999,
+              9999,
+              9999
+            ],
+            "capabilities": "0000000000000000",
+            "jvmPid": 69,
+            "jvmCommand": "/opt/java/openjdk/bin/java -Xmx1073741824 -Xms1073741824 -XX:MaxMetaspaceSize=268435456 -XX:+IgnoreUnrecognizedVMOptions --add-exports=java.rmi/sun.rmi.registry=ALL-UNNAMED --add-exports=jdk.compiler/com.sun.tools.javac.api=ALL-UNNAMED --add-exports=jdk.compiler/com.sun.tools.javac.file=ALL-UNNAMED --add-exports=jdk.compiler/com.sun.tools.javac.parser=ALL-UNNAMED --add-exports=jdk.compiler/com.sun.tools.javac.tree=ALL-UNNAMED --add-exports=jdk.compiler/com.sun.tools.javac.util=ALL-UNNAMED --add-exports=java.security.jgss/sun.security.krb5=ALL-UNNAMED --add-opens=java.base/java.lang=ALL-UNNAMED --add-opens=java.base/java.net=ALL-UNNAMED --add-opens=java.base/java.io=ALL-UNNAMED --add-opens=java.base/java.nio=ALL-UNNAMED --add-opens=java.base/sun.nio.ch=ALL-UNNAMED --add-opens=java.base/java.lang.reflect=ALL-UNNAMED --add-opens=java.base/java.text=ALL-UNNAMED --add-opens=java.base/java.time=ALL-UNNAMED --add-opens=java.base/java.util=ALL-UNNAMED --add-opens=java.base/java.util.concurrent=ALL-UNNAMED --add-opens=java.base/java.util.concurrent.atomic=ALL-UNNAMED --add-opens=java.base/java.util.concurrent.locks=ALL-UNNAMED -Xlog:class+load=info:file=/flink/evidence/flink-stability-class-load-jobmanager-1-1.log::filecount=0 -Dlog.file=/opt/flink/log/flink--standalonesession-0-9fb54a115208.log -Dlog4j.configuration=file:/opt/flink/conf/log4j-console.properties -Dlog4j.configurationFile=file:/opt/flink/conf/log4j-console.properties -Dlogback.configurationFile=file:/opt/flink/conf/logback-console.xml -classpath /opt/flink/lib/flink-cep-2.2.0.jar:/opt/flink/lib/flink-connector-files-2.2.0.jar:/opt/flink/lib/flink-csv-2.2.0.jar:/opt/flink/lib/flink-json-2.2.0.jar:/opt/flink/lib/flink-scala_2.12-2.2.0.jar:/opt/flink/lib/flink-stability-connector-00000000-6bb63f7b09930d99745325393b481c092b0c26d626e738b7a1fd6fd8d7d4f1da.jar:/opt/flink/lib/flink-stability-connector-00000001-4eeeae8d20c078abb64b015ec158add383ac581571cddc45c68f0c9ae0230720.jar:/opt/flink/lib/flink-stability-connector-00000002-d8054ae7c0d1c2d2f55d28e46026ebe5892881f3fab5f439233184381c3b4a1f.jar:/opt/flink/lib/flink-stability-connector-00000003-4b364e6850dc89172fcf1d4dd26b8ff5488eda44ff4657e22dd265203dd5ab3c.jar:/opt/flink/lib/flink-stability-connector-00000004-e2d202d4606e23aeaf8a5a9632db06f5fefd5b63d251c3f503f9faaa78530e5c.jar:/opt/flink/lib/flink-stability-connector-00000005-f30d77f5826b9e9813342e84ab412095ed4ed5cf4fef6f93cebb848cb0fd0294.jar:/opt/flink/lib/flink-stability-connector-00000006-bcf39f152c5553c2501a491fc4a73c5b0330741e8eed96a481323b8ee89738af.jar:/opt/flink/lib/flink-stability-connector-00000007-581bd61000ef7648943f781ca05689e56d03f6052748365a8e2b3a9b5d3fa32f.jar:/opt/flink/lib/flink-stability-connector-00000008-b6c3237e24b8252a5a9c3a0e1ae30ef8f323412e74bd358548b7a9e527d676df.jar:/opt/flink/lib/flink-stability-connector-00000009-a58a84c4271e50df4c96ed916ccb7e48a869f8ed9cdcda1ad5d3d4c33b0214a3.jar:/opt/flink/lib/flink-stability-connector-00000010-4c766cb3f855415ee734b2392949a0b6f12a60879334a74518deaf6270d32e36.jar:/opt/flink/lib/flink-stability-connector-00000011-d3ef575e3e4979678dc01bf1dcce51021493b4d11fb7f1be8ad982877c16a1c0.jar:/opt/flink/lib/flink-table-api-java-uber-2.2.0.jar:/opt/flink/lib/flink-table-planner-loader-2.2.0.jar:/opt/flink/lib/flink-table-runtime-2.2.0.jar:/opt/flink/lib/log4j-1.2-api-2.24.3.jar:/opt/flink/lib/log4j-api-2.24.3.jar:/opt/flink/lib/log4j-core-2.24.3.jar:/opt/flink/lib/log4j-layout-template-json-2.24.3.jar:/opt/flink/lib/log4j-slf4j-impl-2.24.3.jar:/opt/flink/lib/flink-dist-2.2.0.jar:::: org.apache.flink.runtime.entrypoint.StandaloneSessionClusterEntrypoint -D jobmanager.memory.off-heap.size=134217728b -D jobmanager.memory.jvm-overhead.min=201326592b -D jobmanager.memory.jvm-metaspace.size=268435456b -D jobmanager.memory.heap.size=1073741824b -D jobmanager.memory.jvm-overhead.max=201326592b --configDir /opt/flink/conf ",
+            "rawReadDenied": true,
+            "rawWriteDenied": true,
+            "complete": true,
+            "diagnostics": []
+          },
+          "status": {
+            "state": "HEALTHY",
+            "faultId": "c70af4b0074542829424437478b2129c",
+            "revision": 2,
+            "sequence": 1418,
+            "leaseMs": 120000,
+            "leaseDeadlineMonotonicNs": 98089885970418,
+            "journalComplete": true,
+            "stopping": false
+          },
+          "processDead": true,
+          "journalComplete": true,
+          "journalPath": "<workspace>/checkpoints/attempt-1-25eaf10d/checkpoint-storage-journals/instance-1882e268-8829-46e8-8f08-c4d2c48add81-e327304d27e60060431de78ae9ed1e81e7a7c839e94d66ab7877de4c2a891059.jsonl",
+          "journalSha256": "e327304d27e60060431de78ae9ed1e81e7a7c839e94d66ab7877de4c2a891059",
+          "journalBytes": 9172904,
+          "lastSequence": 11932,
+          "operationsPublicationSummary": {
+            "omitted": true,
+            "items": 11932
+          },
+          "commandsPublicationSummary": {
+            "omitted": true,
+            "items": 10
+          },
+          "diagnostics": []
+        },
+        {
+          "instance": {
+            "logicalName": "taskmanager-1",
+            "process": "taskmanager-1#1",
+            "runtimeId": "c46d3ab92aa3c094c1956a35ff650f9b33ba76e05c9f819fd721b18afe1639cb",
+            "instanceId": "instance-c9725659-e0c2-460b-beb4-8e939bb1b779",
+            "role": "TASK_MANAGER",
+            "daemonPid": 22
+          },
+          "verification": {
+            "imageId": "sha256:2e93ded2cb7bf1a50f71b663d5e3ea01420bcc4e549cbf666d05120f939713c7",
+            "helperSha256": "49d01b4f62b6a7bd8256779777cf1e6d193d2e1d7365796c115f4ffb66c85f66",
+            "probeSha256": "2fd880248a7515b08ee419e1ff875cc1edff8e0f784878aa55a0aaa0a1780983",
+            "mountInfo": "165 226 0:66 / /flink/checkpoints rw,nosuid,nodev,relatime - fuse /dev/fuse rw,user_id=0,group_id=0,default_permissions,allow_other",
+            "uid": [
+              9999,
+              9999,
+              9999,
+              9999
+            ],
+            "gid": [
+              9999,
+              9999,
+              9999,
+              9999
+            ],
+            "capabilities": "0000000000000000",
+            "jvmPid": 69,
+            "jvmCommand": {
+              "publicationTextExcerpt": "/opt/java/openjdk/bin/java -Xmx536870902 -Xms536870902 -XX:MaxDirectMemorySize=268435458 -XX:MaxMetaspaceSize=268435456 -XX:+IgnoreUnrecognizedVMOptions --add-exports=java.rmi/sun.rmi.registry=ALL-UNNAMED --add-exports=jdk.compiler/com.sun.tools.javac.api=ALL-UNNAMED --add-exports=jdk.compiler/com.sun.tools.javac.file=ALL-UNNAMED --add-exports=jdk.compiler/com.sun.tools.javac.parser=ALL-UNNAMED --add-exports=jdk.compiler/com.sun.tools.javac.tree=ALL-UNNAMED --add-exports=jdk.compiler/com.sun.tools.javac.util=ALL-UNNAMED --add-exports=java.security.jgss/sun.security.krb5=ALL-UNNAMED --add-opens=java.base/java.lang=ALL-UNNAMED --add-opens=java.base/java.net=ALL-UNNAMED --add-opens=java.base/java.io=ALL-UNNAMED --add-opens=java.base/java.nio=ALL-UNNAMED --add-opens=java.base/sun.nio.ch=ALL-UNNAMED --add-opens=java.base/java.lang.reflect=ALL-UNNAMED --add-opens=java.base/java.text=ALL-UNNAMED --add-opens=java.base/java.time=ALL-UNNAMED --add-opens=java.base/java.util=ALL-UNNAMED --add-opens=java.base/java.util.concurrent=ALL-UNNAMED --add-opens=java.base/java.util.concurrent.atomic=ALL-UNNAMED --add-opens=java.base/java.util.concurrent.locks=ALL-UNNAMED -Xlog:class+load=info:file=/flink/evidence/flink-stability-class-load-taskmanager-1-1.log::filecount=0 -Dlog.file=/opt/flink/log/flink--taskexecutor-0-c46d3ab92aa3.log -Dlog4j.configuration=file:/opt/flink/conf/log4j-console.properties -Dlog4j.configurationFile=file:/opt/flink/conf/log4j-console.properties -Dlogback.configurationFile=file:/opt/flink/conf/logback-console.xml -classpath /opt/flink/lib/flink-cep-2.2.0.jar:/opt/flink/lib/flink-connector-files-2.2.0.jar:/opt/flink/lib/flink-csv-2.2.0.jar:/opt/flink/lib/flink-json-2.2.0.jar:/opt/flink/lib/flink-scala_2.12-2.2.0.jar:/opt/flink/lib/flink-stability-connector-00000000-6bb63f7b09930d99745325393b481c092b0c26d626e738b7a1fd6fd8d7d4f1da.jar:/opt/flink/lib/flink-stability-connector-00000001-4eeeae8d20c078abb64b015ec158add383ac581571cddc45c68f0c9ae0230720.jar:/opt/flink/lib/flink-stability-connector-00000002-d8054ae7c",
+              "omittedCharacters": 2193,
+              "originalTextSha256AfterPathSanitization": "fa62d6d5a50c15db26d92260c26b374e947f7eed0eb54a24b8e8408ddbd4abaf",
+              "scope": "Excerpt only; complete failure/text remains in the original receipt identified by originalSha256."
+            },
+            "rawReadDenied": true,
+            "rawWriteDenied": true,
+            "complete": true,
+            "diagnostics": []
+          },
+          "status": {
+            "state": "ARMED",
+            "faultId": "c70af4b0074542829424437478b2129c",
+            "revision": 1,
+            "sequence": 647,
+            "leaseMs": 120000,
+            "leaseDeadlineMonotonicNs": 98089901708668,
+            "journalComplete": true,
+            "stopping": false
+          },
+          "processDead": true,
+          "journalComplete": true,
+          "journalPath": "<workspace>/checkpoints/attempt-1-25eaf10d/checkpoint-storage-journals/instance-c9725659-e0c2-460b-beb4-8e939bb1b779-d0b80fbc5c080563bbc4762697a3fc6da717bb00a921a138195b621a0c5f7b84.jsonl",
+          "journalSha256": "d0b80fbc5c080563bbc4762697a3fc6da717bb00a921a138195b621a0c5f7b84",
+          "journalBytes": 466910,
+          "lastSequence": 647,
+          "operationsPublicationSummary": {
+            "omitted": true,
+            "items": 647
+          },
+          "commandsPublicationSummary": {
+            "omitted": true,
+            "items": 6
+          },
+          "diagnostics": []
+        },
+        {
+          "instance": {
+            "logicalName": "taskmanager-1",
+            "process": "taskmanager-1#2",
+            "runtimeId": "c8ba373fb4a38dbf36e148a6fbf64f8f3cf6e9fdb0114ae8d315926f163d1e3a",
+            "instanceId": "instance-e2738572-2e2d-439f-9906-a4fbbf8307a1",
+            "role": "TASK_MANAGER",
+            "daemonPid": 22
+          },
+          "verification": {
+            "imageId": "sha256:2e93ded2cb7bf1a50f71b663d5e3ea01420bcc4e549cbf666d05120f939713c7",
+            "helperSha256": "49d01b4f62b6a7bd8256779777cf1e6d193d2e1d7365796c115f4ffb66c85f66",
+            "probeSha256": "2fd880248a7515b08ee419e1ff875cc1edff8e0f784878aa55a0aaa0a1780983",
+            "mountInfo": "165 226 0:66 / /flink/checkpoints rw,nosuid,nodev,relatime - fuse /dev/fuse rw,user_id=0,group_id=0,default_permissions,allow_other",
+            "uid": [
+              9999,
+              9999,
+              9999,
+              9999
+            ],
+            "gid": [
+              9999,
+              9999,
+              9999,
+              9999
+            ],
+            "capabilities": "0000000000000000",
+            "jvmPid": 69,
+            "jvmCommand": {
+              "publicationTextExcerpt": "/opt/java/openjdk/bin/java -Xmx536870902 -Xms536870902 -XX:MaxDirectMemorySize=268435458 -XX:MaxMetaspaceSize=268435456 -XX:+IgnoreUnrecognizedVMOptions --add-exports=java.rmi/sun.rmi.registry=ALL-UNNAMED --add-exports=jdk.compiler/com.sun.tools.javac.api=ALL-UNNAMED --add-exports=jdk.compiler/com.sun.tools.javac.file=ALL-UNNAMED --add-exports=jdk.compiler/com.sun.tools.javac.parser=ALL-UNNAMED --add-exports=jdk.compiler/com.sun.tools.javac.tree=ALL-UNNAMED --add-exports=jdk.compiler/com.sun.tools.javac.util=ALL-UNNAMED --add-exports=java.security.jgss/sun.security.krb5=ALL-UNNAMED --add-opens=java.base/java.lang=ALL-UNNAMED --add-opens=java.base/java.net=ALL-UNNAMED --add-opens=java.base/java.io=ALL-UNNAMED --add-opens=java.base/java.nio=ALL-UNNAMED --add-opens=java.base/sun.nio.ch=ALL-UNNAMED --add-opens=java.base/java.lang.reflect=ALL-UNNAMED --add-opens=java.base/java.text=ALL-UNNAMED --add-opens=java.base/java.time=ALL-UNNAMED --add-opens=java.base/java.util=ALL-UNNAMED --add-opens=java.base/java.util.concurrent=ALL-UNNAMED --add-opens=java.base/java.util.concurrent.atomic=ALL-UNNAMED --add-opens=java.base/java.util.concurrent.locks=ALL-UNNAMED -Xlog:class+load=info:file=/flink/evidence/flink-stability-class-load-taskmanager-1-2.log::filecount=0 -Dlog.file=/opt/flink/log/flink--taskexecutor-0-c8ba373fb4a3.log -Dlog4j.configuration=file:/opt/flink/conf/log4j-console.properties -Dlog4j.configurationFile=file:/opt/flink/conf/log4j-console.properties -Dlogback.configurationFile=file:/opt/flink/conf/logback-console.xml -classpath /opt/flink/lib/flink-cep-2.2.0.jar:/opt/flink/lib/flink-connector-files-2.2.0.jar:/opt/flink/lib/flink-csv-2.2.0.jar:/opt/flink/lib/flink-json-2.2.0.jar:/opt/flink/lib/flink-scala_2.12-2.2.0.jar:/opt/flink/lib/flink-stability-connector-00000000-6bb63f7b09930d99745325393b481c092b0c26d626e738b7a1fd6fd8d7d4f1da.jar:/opt/flink/lib/flink-stability-connector-00000001-4eeeae8d20c078abb64b015ec158add383ac581571cddc45c68f0c9ae0230720.jar:/opt/flink/lib/flink-stability-connector-00000002-d8054ae7c",
+              "omittedCharacters": 2193,
+              "originalTextSha256AfterPathSanitization": "2faae12867e21beaea361ed72dd8b5913d4df1c5008b27dad68560f98fab7a64",
+              "scope": "Excerpt only; complete failure/text remains in the original receipt identified by originalSha256."
+            },
+            "rawReadDenied": true,
+            "rawWriteDenied": true,
+            "complete": true,
+            "diagnostics": []
+          },
+          "status": {
+            "state": "HEALTHY",
+            "faultId": null,
+            "revision": 0,
+            "sequence": 1993,
+            "leaseMs": 0,
+            "leaseDeadlineMonotonicNs": 0,
+            "journalComplete": true,
+            "stopping": false
+          },
+          "processDead": true,
+          "journalComplete": true,
+          "journalPath": "<workspace>/checkpoints/attempt-1-25eaf10d/checkpoint-storage-journals/instance-e2738572-2e2d-439f-9906-a4fbbf8307a1-4ae8d65a42330214ce3dc7c6f1c254770828afaeb9e491825ca03ef5a701d057.jsonl",
+          "journalSha256": "4ae8d65a42330214ce3dc7c6f1c254770828afaeb9e491825ca03ef5a701d057",
+          "journalBytes": 3224894,
+          "lastSequence": 4612,
+          "operationsPublicationSummary": {
+            "omitted": true,
+            "items": 4612
+          },
+          "commandsPublicationSummary": {
+            "omitted": true,
+            "items": 1
+          },
+          "diagnostics": []
+        }
+      ],
+      "materializedFiles": [
+        {
+          "path": "/flink/checkpoints/job_751fc4bc11f94391b5453c6cee3972e4/26bbf6e12a5b38105783428ea6f8591d/chk-1/_metadata",
+          "size": 2638,
+          "regularFile": true,
+          "sha256": "c2f4be763bb05876ec1c0c9ae2dd71aeba7d4281629c9bd372f1abea79aedd85",
+          "observedNanos": 4677690469225333
+        },
+        {
+          "path": "/flink/checkpoints/job_751fc4bc11f94391b5453c6cee3972e4/26bbf6e12a5b38105783428ea6f8591d/chk-1/9f4118e4-bdac-4c31-8761-951d5ef040ae",
+          "size": 2068,
+          "regularFile": true,
+          "sha256": "c49eeaab28b195073e3ef075d8c6909dd1a1ecb228db3b532d560718b7217d2d",
+          "observedNanos": 4677690469327958
+        }
+      ],
+      "complete": true,
+      "quiescent": true,
+      "diagnostics": []
+    },
+    "checkpointStorageFaults": [
+      {
+        "path": "$/phases/0/steps/1",
+        "jobId": "26bbf6e12a5b38105783428ea6f8591d",
+        "triggerId": "c70af4b0074542829424437478b2129c",
+        "timeoutMillis": 90000,
+        "checkpointId": 1,
+        "failedCheckpointId": 2,
+        "configuration": {
+          "jobId": "26bbf6e12a5b38105783428ea6f8591d",
+          "mode": "exactly_once",
+          "intervalMillis": 10000,
+          "timeoutMillis": 600000,
+          "minPauseMillis": 0,
+          "maxConcurrent": 1,
+          "tolerableFailedCheckpoints": 10,
+          "stateBackend": "HashMapStateBackend",
+          "checkpointStorage": "FileSystemCheckpointStorage",
+          "unalignedCheckpoints": false,
+          "stateChangelogEnabled": false,
+          "externalized": false,
+          "deleteOnCancellation": true
+        },
+        "readiness": {
+          "ready": true,
+          "reason": "state-recovery.ready",
+          "jobId": "26bbf6e12a5b38105783428ea6f8591d",
+          "keyCount": 8,
+          "totalRecords": 30000,
+          "target": {
+            "logicalName": "taskmanager-1",
+            "runtimeId": "c46d3ab92aa3c094c1956a35ff650f9b33ba76e05c9f819fd721b18afe1639cb",
+            "resourceId": "flink-stability-taskmanager-1-1-0e16beed-04b5-423c-be86-11749a54d2aa"
+          },
+          "executionAttempt": 0,
+          "jobObservation": {
+            "jobManagerTimeMillis": 1793094430117,
+            "state": "RUNNING",
+            "completedCheckpoints": 1,
+            "restoredCheckpoints": 0,
+            "latestRestore": null,
+            "failures": [],
+            "subtasks": [
+              {
+                "vertexName": "Source: Kafka Source -> Source Throttle",
+                "index": 0,
+                "attempt": 0,
+                "status": "RUNNING",
+                "taskManagerId": "flink-stability-taskmanager-1-1-0e16beed-04b5-423c-be86-11749a54d2aa"
+              },
+              {
+                "vertexName": "Keyed Prefix v1 -> Kafka Sink: Writer -> Kafka Sink: Committer",
+                "index": 0,
+                "attempt": 0,
+                "status": "RUNNING",
+                "taskManagerId": "flink-stability-taskmanager-1-1-0e16beed-04b5-423c-be86-11749a54d2aa"
+              }
+            ]
+          },
+          "completedSnapshots": {
+            "1": {
+              "checkpointId": 1,
+              "acknowledgedAtMillis": 1793094428922,
+              "snapshot": {
+                "process": {
+                  "logicalName": "taskmanager-1",
+                  "runtimeId": "c46d3ab92aa3c094c1956a35ff650f9b33ba76e05c9f819fd721b18afe1639cb",
+                  "process": "taskmanager-1#1"
+                },
+                "event": "SNAPSHOT",
+                "jobId": "26bbf6e12a5b38105783428ea6f8591d",
+                "operatorUid": "flink-stability-keyed-prefix-v1",
+                "executionAttempt": 0,
+                "subtask": 0,
+                "checkpointId": 1,
+                "restoredCheckpointId": -1,
+                "lineNumber": 665,
+                "progress": {
+                  "keyCount": 8,
+                  "observedKeys": 8,
+                  "minimumObservedCount": 28,
+                  "processedThisAttempt": 231,
+                  "maximumInputId": 230
+                },
+                "keyProgress": null,
+                "buildMode": null
+              },
+              "completion": {
+                "process": {
+                  "logicalName": "taskmanager-1",
+                  "runtimeId": "c46d3ab92aa3c094c1956a35ff650f9b33ba76e05c9f819fd721b18afe1639cb",
+                  "process": "taskmanager-1#1"
+                },
+                "event": "COMPLETED",
+                "jobId": "26bbf6e12a5b38105783428ea6f8591d",
+                "operatorUid": "flink-stability-keyed-prefix-v1",
+                "executionAttempt": 0,
+                "subtask": 0,
+                "checkpointId": 1,
+                "restoredCheckpointId": -1,
+                "lineNumber": 666,
+                "progress": null,
+                "keyProgress": null,
+                "buildMode": null
+              }
+            }
+          },
+          "committedPrefix": {
+            "snapshotComplete": true,
+            "validStatePrefix": true,
+            "observedRecords": 42,
+            "maximumId": 41,
+            "perKeyCounts": {
+              "7": 5,
+              "6": 5,
+              "5": 5,
+              "4": 5,
+              "3": 5,
+              "2": 5,
+              "1": 6,
+              "0": 6
+            },
+            "beginningOffsets": {
+              "0": 0
+            },
+            "endOffsets": {
+              "0": 42
+            }
+          }
+        },
+        "materialization": {
+          "instance": {
+            "logicalName": "jobmanager-1",
+            "process": "jobmanager-1#1",
+            "runtimeId": "9fb54a11520838f3c68ca834f8d1f2d3766fa4062ac112d45631d147e140a1b8",
+            "instanceId": "instance-1882e268-8829-46e8-8f08-c4d2c48add81",
+            "role": "JOB_MANAGER",
+            "daemonPid": 22
+          },
+          "jobId": "26bbf6e12a5b38105783428ea6f8591d",
+          "checkpointId": 1,
+          "operatorUid": "flink-stability-keyed-prefix-v1",
+          "metadata": {
+            "path": "/flink/checkpoints/job_751fc4bc11f94391b5453c6cee3972e4/26bbf6e12a5b38105783428ea6f8591d/chk-1/_metadata",
+            "size": 2638,
+            "regularFile": true,
+            "sha256": "c2f4be763bb05876ec1c0c9ae2dd71aeba7d4281629c9bd372f1abea79aedd85",
+            "observedNanos": 4677690469225333
+          },
+          "files": [
+            {
+              "path": "/flink/checkpoints/job_751fc4bc11f94391b5453c6cee3972e4/26bbf6e12a5b38105783428ea6f8591d/chk-1/9f4118e4-bdac-4c31-8761-951d5ef040ae",
+              "size": 2068,
+              "regularFile": true,
+              "sha256": "c49eeaab28b195073e3ef075d8c6909dd1a1ecb228db3b532d560718b7217d2d",
+              "observedNanos": 4677690469327958
+            }
+          ],
+          "complete": true,
+          "diagnostics": []
+        },
+        "triggerResult": {
+          "state": "COMPLETED",
+          "checkpointId": null,
+          "failure": {
+            "publicationTextExcerpt": "{\"class\":\"java.util.concurrent.CompletionException\",\"stack-trace\":\"java.util.concurrent.CompletionException: org.apache.flink.runtime.checkpoint.CheckpointException: Asynchronous task checkpoint failed.\\n\\tat java.base/java.util.concurrent.CompletableFuture.encodeThrowable(Unknown Source)\\n\\tat java.base/java.util.concurrent.CompletableFuture.completeThrowable(Unknown Source)\\n\\tat java.base/java.util.concurrent.CompletableFuture$UniApply.tryFire(Unknown Source)\\n\\tat java.base/java.util.concurrent.CompletableFuture.postComplete(Unknown Source)\\n\\tat java.base/java.util.concurrent.CompletableFuture.completeExceptionally(Unknown Source)\\n\\tat org.apache.flink.runtime.rpc.pekko.PekkoInvocationHandler.lambda$invokeRpc$1(PekkoInvocationHandler.java:261)\\n\\tat java.base/java.util.concurrent.CompletableFuture.uniWhenComplete(Unknown Source)\\n\\tat java.base/java.util.concurrent.CompletableFuture$UniWhenComplete.tryFire(Unknown Source)\\n\\tat java.base/java.util.concurrent.CompletableFuture.postComplete(Unknown Source)\\n\\tat java.base/java.util.concurrent.CompletableFuture.completeExceptionally(Unknown Source)\\n\\tat org.apache.flink.util.concurrent.FutureUtils.doForward(FutureUtils.java:1315)\\n\\tat org.apache.flink.runtime.concurrent.ClassLoadingUtils.lambda$guardCompletionWithContextClassLoader$1(ClassLoadingUtils.java:93)\\n\\tat org.apache.flink.runtime.concurrent.ClassLoadingUtils.runWithContextClassLoader(ClassLoadingUtils.java:68)\\n\\tat org.apache.flink.runtime.concurrent.ClassLoadingUtils.lambda$guardCompletionWithContextClassLoader$2(ClassLoadingUtils.java:92)\\n\\tat java.base/java.util.concurrent.CompletableFuture.uniWhenComplete(Unknown Source)\\n\\tat java.base/java.util.concurrent.CompletableFuture$UniWhenComplete.tryFire(Unknown Source)\\n\\tat java.base/java.util.concurrent.CompletableFuture.postComplete(Unknown Source)\\n\\tat java.base/java.util.concurrent.CompletableFuture.completeExceptionally(Unknown Source)\\n\\tat org.apache.flink.runtime.concurrent.pekko.ScalaFutureUtils$1.onComplete(ScalaFutureUtils.java:45)\\n",
+            "omittedCharacters": 218405,
+            "originalTextSha256AfterPathSanitization": "b7185d7a1339744faffccca0a8bc4957a994ed353ff9b03bd0d8c6b74e7ef0fd",
+            "scope": "Excerpt only; complete failure/text remains in the original receipt identified by originalSha256."
+          }
+        },
+        "failedCheckpoint": {
+          "id": 2,
+          "status": "FAILED",
+          "savepoint": false,
+          "checkpointType": "CHECKPOINT",
+          "triggerTimestamp": 1793094430771,
+          "latestAckTimestamp": -1,
+          "checkpointedSize": 0,
+          "stateSize": 0,
+          "numSubtasks": 2,
+          "numAcknowledgedSubtasks": 0,
+          "failureTimestamp": 1793094431026,
+          "failureMessage": "Asynchronous task checkpoint failed.",
+          "externalPath": null,
+          "discarded": null
+        },
+        "failureTrace": {
+          "markersPublicationSummary": {
+            "omitted": true,
+            "items": 6,
+            "kinds": {
+              "unknown": 6
+            }
+          },
+          "diagnostics": [],
+          "complete": true
+        },
+        "recoveryTrace": {
+          "markersPublicationSummary": {
+            "omitted": true,
+            "items": 18,
+            "kinds": {
+              "unknown": 18
+            }
+          },
+          "diagnostics": [],
+          "complete": true
+        },
+        "samples": [
+          {
+            "stage": "BEFORE_ARM",
+            "sequence": 1,
+            "elapsedNanos": 3895709750,
+            "storage": {
+              "attemptId": "attempt-46225f01-bb80-4d5e-a5be-a456719ac1ab",
+              "storageId": "storage-84151b56-49c6-46a7-971e-55a0215fe91b",
+              "namespace": "job_751fc4bc11f94391b5453c6cee3972e4",
+              "checkpointUri": "file:///flink/checkpoints/job_751fc4bc11f94391b5453c6cee3972e4",
+              "helperManifestSha256": "9ab2001ccc55e700a76c12d0ba64d4824d1089d21e85adffa5216d75d8582ecf",
+              "complete": true,
+              "quiescent": false,
+              "diagnostics": [],
+              "instances": [
+                {
+                  "instance": {
+                    "logicalName": "jobmanager-1",
+                    "process": "jobmanager-1#1",
+                    "runtimeId": "9fb54a11520838f3c68ca834f8d1f2d3766fa4062ac112d45631d147e140a1b8",
+                    "instanceId": "instance-1882e268-8829-46e8-8f08-c4d2c48add81",
+                    "role": "JOB_MANAGER",
+                    "daemonPid": 22
+                  },
+                  "status": {
+                    "state": "HEALTHY",
+                    "faultId": null,
+                    "revision": 0,
+                    "sequence": 691,
+                    "leaseMs": 0,
+                    "leaseDeadlineMonotonicNs": 0,
+                    "journalComplete": true,
+                    "stopping": false
+                  },
+                  "processDead": false,
+                  "journalComplete": true,
+                  "journalSha256": "6c3f5f3979337127dfe3a6a559fc125c6892dbd1e597c12fdea1fbcb939b7d43",
+                  "journalBytes": 480039,
+                  "lastSequence": 691,
+                  "diagnostics": []
+                },
+                {
+                  "instance": {
+                    "logicalName": "taskmanager-1",
+                    "process": "taskmanager-1#1",
+                    "runtimeId": "c46d3ab92aa3c094c1956a35ff650f9b33ba76e05c9f819fd721b18afe1639cb",
+                    "instanceId": "instance-c9725659-e0c2-460b-beb4-8e939bb1b779",
+                    "role": "TASK_MANAGER",
+                    "daemonPid": 22
+                  },
+                  "status": {
+                    "state": "HEALTHY",
+                    "faultId": null,
+                    "revision": 0,
+                    "sequence": 143,
+                    "leaseMs": 0,
+                    "leaseDeadlineMonotonicNs": 0,
+                    "journalComplete": true,
+                    "stopping": false
+                  },
+                  "processDead": false,
+                  "journalComplete": true,
+                  "journalSha256": "0c26edb5099fd2d74ddd7ba50d28e6e92c2b1683e498aa52fcd35373a0ae1805",
+                  "journalBytes": 97137,
+                  "lastSequence": 143,
+                  "diagnostics": []
+                }
+              ]
+            },
+            "checkpoints": {
+              "jobId": "26bbf6e12a5b38105783428ea6f8591d",
+              "counts": {
+                "total": 1,
+                "inProgress": 0,
+                "completed": 1,
+                "failed": 0,
+                "restored": 0
+              },
+              "retained": [
+                {
+                  "id": 1,
+                  "status": "COMPLETED",
+                  "savepoint": false,
+                  "checkpointType": "CHECKPOINT",
+                  "triggerTimestamp": 1793094428692,
+                  "latestAckTimestamp": 1793094428922,
+                  "checkpointedSize": 3010,
+                  "stateSize": 3010,
+                  "numSubtasks": 2,
+                  "numAcknowledgedSubtasks": 2,
+                  "failureTimestamp": null,
+                  "failureMessage": null,
+                  "externalPath": "file:/flink/checkpoints/job_751fc4bc11f94391b5453c6cee3972e4/26bbf6e12a5b38105783428ea6f8591d/chk-1",
+                  "discarded": false
+                }
+              ],
+              "latestCompleted": {
+                "id": 1,
+                "status": "COMPLETED",
+                "savepoint": false,
+                "checkpointType": "CHECKPOINT",
+                "triggerTimestamp": 1793094428692,
+                "latestAckTimestamp": 1793094428922,
+                "checkpointedSize": 3010,
+                "stateSize": 3010,
+                "numSubtasks": 2,
+                "numAcknowledgedSubtasks": 2,
+                "failureTimestamp": null,
+                "failureMessage": null,
+                "externalPath": "file:/flink/checkpoints/job_751fc4bc11f94391b5453c6cee3972e4/26bbf6e12a5b38105783428ea6f8591d/chk-1",
+                "discarded": false
+              },
+              "latestFailed": null,
+              "latestSavepoint": null,
+              "latestRestored": null
+            },
+            "job": {
+              "jobManagerTimeMillis": 1793094430513,
+              "state": "RUNNING",
+              "completedCheckpoints": 1,
+              "restoredCheckpoints": 0,
+              "latestRestore": null,
+              "failures": [],
+              "subtasks": [
+                {
+                  "vertexName": "Source: Kafka Source -> Source Throttle",
+                  "index": 0,
+                  "attempt": 0,
+                  "status": "RUNNING",
+                  "taskManagerId": "flink-stability-taskmanager-1-1-0e16beed-04b5-423c-be86-11749a54d2aa"
+                },
+                {
+                  "vertexName": "Keyed Prefix v1 -> Kafka Sink: Writer -> Kafka Sink: Committer",
+                  "index": 0,
+                  "attempt": 0,
+                  "status": "RUNNING",
+                  "taskManagerId": "flink-stability-taskmanager-1-1-0e16beed-04b5-423c-be86-11749a54d2aa"
+                }
+              ]
+            }
+          },
+          {
+            "stage": "ARMED",
+            "sequence": 2,
+            "elapsedNanos": 4044208250,
+            "storage": {
+              "attemptId": "attempt-46225f01-bb80-4d5e-a5be-a456719ac1ab",
+              "storageId": "storage-84151b56-49c6-46a7-971e-55a0215fe91b",
+              "namespace": "job_751fc4bc11f94391b5453c6cee3972e4",
+              "checkpointUri": "file:///flink/checkpoints/job_751fc4bc11f94391b5453c6cee3972e4",
+              "helperManifestSha256": "9ab2001ccc55e700a76c12d0ba64d4824d1089d21e85adffa5216d75d8582ecf",
+              "complete": true,
+              "quiescent": false,
+              "diagnostics": [],
+              "instances": [
+                {
+                  "instance": {
+                    "logicalName": "jobmanager-1",
+                    "process": "jobmanager-1#1",
+                    "runtimeId": "9fb54a11520838f3c68ca834f8d1f2d3766fa4062ac112d45631d147e140a1b8",
+                    "instanceId": "instance-1882e268-8829-46e8-8f08-c4d2c48add81",
+                    "role": "JOB_MANAGER",
+                    "daemonPid": 22
+                  },
+                  "status": {
+                    "state": "ARMED",
+                    "faultId": "c70af4b0074542829424437478b2129c",
+                    "revision": 1,
+                    "sequence": 693,
+                    "leaseMs": 120000,
+                    "leaseDeadlineMonotonicNs": 98089885970418,
+                    "journalComplete": true,
+                    "stopping": false
+                  },
+                  "processDead": false,
+                  "journalComplete": true,
+                  "journalSha256": "d5611e5fa5296fff5848e4bf96f1dc8209eff21f6a9c790361ae127f28a6f18f",
+                  "journalBytes": 481384,
+                  "lastSequence": 693,
+                  "diagnostics": []
+                },
+                {
+                  "instance": {
+                    "logicalName": "taskmanager-1",
+                    "process": "taskmanager-1#1",
+                    "runtimeId": "c46d3ab92aa3c094c1956a35ff650f9b33ba76e05c9f819fd721b18afe1639cb",
+                    "instanceId": "instance-c9725659-e0c2-460b-beb4-8e939bb1b779",
+                    "role": "TASK_MANAGER",
+                    "daemonPid": 22
+                  },
+                  "status": {
+                    "state": "ARMED",
+                    "faultId": "c70af4b0074542829424437478b2129c",
+                    "revision": 1,
+                    "sequence": 145,
+                    "leaseMs": 120000,
+                    "leaseDeadlineMonotonicNs": 98089901708668,
+                    "journalComplete": true,
+                    "stopping": false
+                  },
+                  "processDead": false,
+                  "journalComplete": true,
+                  "journalSha256": "ca20c68ee53bb6d76fe4419e0bd6ff47a9f8ddd91c422405976a9c04ecb668af",
+                  "journalBytes": 98482,
+                  "lastSequence": 145,
+                  "diagnostics": []
+                }
+              ]
+            },
+            "checkpoints": {
+              "jobId": "26bbf6e12a5b38105783428ea6f8591d",
+              "counts": {
+                "total": 1,
+                "inProgress": 0,
+                "completed": 1,
+                "failed": 0,
+                "restored": 0
+              },
+              "retained": [
+                {
+                  "id": 1,
+                  "status": "COMPLETED",
+                  "savepoint": false,
+                  "checkpointType": "CHECKPOINT",
+                  "triggerTimestamp": 1793094428692,
+                  "latestAckTimestamp": 1793094428922,
+                  "checkpointedSize": 3010,
+                  "stateSize": 3010,
+                  "numSubtasks": 2,
+                  "numAcknowledgedSubtasks": 2,
+                  "failureTimestamp": null,
+                  "failureMessage": null,
+                  "externalPath": "file:/flink/checkpoints/job_751fc4bc11f94391b5453c6cee3972e4/26bbf6e12a5b38105783428ea6f8591d/chk-1",
+                  "discarded": false
+                }
+              ],
+              "latestCompleted": {
+                "id": 1,
+                "status": "COMPLETED",
+                "savepoint": false,
+                "checkpointType": "CHECKPOINT",
+                "triggerTimestamp": 1793094428692,
+                "latestAckTimestamp": 1793094428922,
+                "checkpointedSize": 3010,
+                "stateSize": 3010,
+                "numSubtasks": 2,
+                "numAcknowledgedSubtasks": 2,
+                "failureTimestamp": null,
+                "failureMessage": null,
+                "externalPath": "file:/flink/checkpoints/job_751fc4bc11f94391b5453c6cee3972e4/26bbf6e12a5b38105783428ea6f8591d/chk-1",
+                "discarded": false
+              },
+              "latestFailed": null,
+              "latestSavepoint": null,
+              "latestRestored": null
+            },
+            "job": {
+              "jobManagerTimeMillis": 1793094430654,
+              "state": "RUNNING",
+              "completedCheckpoints": 1,
+              "restoredCheckpoints": 0,
+              "latestRestore": null,
+              "failures": [],
+              "subtasks": [
+                {
+                  "vertexName": "Source: Kafka Source -> Source Throttle",
+                  "index": 0,
+                  "attempt": 0,
+                  "status": "RUNNING",
+                  "taskManagerId": "flink-stability-taskmanager-1-1-0e16beed-04b5-423c-be86-11749a54d2aa"
+                },
+                {
+                  "vertexName": "Keyed Prefix v1 -> Kafka Sink: Writer -> Kafka Sink: Committer",
+                  "index": 0,
+                  "attempt": 0,
+                  "status": "RUNNING",
+                  "taskManagerId": "flink-stability-taskmanager-1-1-0e16beed-04b5-423c-be86-11749a54d2aa"
+                }
+              ]
+            }
+          },
+          {
+            "stage": "FAILED_CHECKPOINT",
+            "sequence": 3,
+            "elapsedNanos": 6361375834,
+            "storage": {
+              "attemptId": "attempt-46225f01-bb80-4d5e-a5be-a456719ac1ab",
+              "storageId": "storage-84151b56-49c6-46a7-971e-55a0215fe91b",
+              "namespace": "job_751fc4bc11f94391b5453c6cee3972e4",
+              "checkpointUri": "file:///flink/checkpoints/job_751fc4bc11f94391b5453c6cee3972e4",
+              "helperManifestSha256": "9ab2001ccc55e700a76c12d0ba64d4824d1089d21e85adffa5216d75d8582ecf",
+              "complete": true,
+              "quiescent": false,
+              "diagnostics": [],
+              "instances": [
+                {
+                  "instance": {
+                    "logicalName": "jobmanager-1",
+                    "process": "jobmanager-1#1",
+                    "runtimeId": "9fb54a11520838f3c68ca834f8d1f2d3766fa4062ac112d45631d147e140a1b8",
+                    "instanceId": "instance-1882e268-8829-46e8-8f08-c4d2c48add81",
+                    "role": "JOB_MANAGER",
+                    "daemonPid": 22
+                  },
+                  "status": {
+                    "state": "ARMED",
+                    "faultId": "c70af4b0074542829424437478b2129c",
+                    "revision": 1,
+                    "sequence": 762,
+                    "leaseMs": 120000,
+                    "leaseDeadlineMonotonicNs": 98089885970418,
+                    "journalComplete": true,
+                    "stopping": false
+                  },
+                  "processDead": false,
+                  "journalComplete": true,
+                  "journalSha256": "b72bf4af2da93aa6a0a77dc1673e7681d223c27377e9ab0bfb3a7be0fb8bc7e3",
+                  "journalBytes": 531395,
+                  "lastSequence": 762,
+                  "diagnostics": []
+                },
+                {
+                  "instance": {
+                    "logicalName": "taskmanager-1",
+                    "process": "taskmanager-1#1",
+                    "runtimeId": "c46d3ab92aa3c094c1956a35ff650f9b33ba76e05c9f819fd721b18afe1639cb",
+                    "instanceId": "instance-c9725659-e0c2-460b-beb4-8e939bb1b779",
+                    "role": "TASK_MANAGER",
+                    "daemonPid": 22
+                  },
+                  "status": {
+                    "state": "ARMED",
+                    "faultId": "c70af4b0074542829424437478b2129c",
+                    "revision": 1,
+                    "sequence": 647,
+                    "leaseMs": 120000,
+                    "leaseDeadlineMonotonicNs": 98089901708668,
+                    "journalComplete": true,
+                    "stopping": false
+                  },
+                  "processDead": false,
+                  "journalComplete": true,
+                  "journalSha256": "d0b80fbc5c080563bbc4762697a3fc6da717bb00a921a138195b621a0c5f7b84",
+                  "journalBytes": 466910,
+                  "lastSequence": 647,
+                  "diagnostics": []
+                }
+              ]
+            },
+            "checkpoints": {
+              "jobId": "26bbf6e12a5b38105783428ea6f8591d",
+              "counts": {
+                "total": 2,
+                "inProgress": 0,
+                "completed": 1,
+                "failed": 1,
+                "restored": 0
+              },
+              "retained": [
+                {
+                  "id": 2,
+                  "status": "FAILED",
+                  "savepoint": false,
+                  "checkpointType": "CHECKPOINT",
+                  "triggerTimestamp": 1793094430771,
+                  "latestAckTimestamp": -1,
+                  "checkpointedSize": 0,
+                  "stateSize": 0,
+                  "numSubtasks": 2,
+                  "numAcknowledgedSubtasks": 0,
+                  "failureTimestamp": 1793094431026,
+                  "failureMessage": "Asynchronous task checkpoint failed.",
+                  "externalPath": null,
+                  "discarded": null
+                },
+                {
+                  "id": 1,
+                  "status": "COMPLETED",
+                  "savepoint": false,
+                  "checkpointType": "CHECKPOINT",
+                  "triggerTimestamp": 1793094428692,
+                  "latestAckTimestamp": 1793094428922,
+                  "checkpointedSize": 3010,
+                  "stateSize": 3010,
+                  "numSubtasks": 2,
+                  "numAcknowledgedSubtasks": 2,
+                  "failureTimestamp": null,
+                  "failureMessage": null,
+                  "externalPath": "file:/flink/checkpoints/job_751fc4bc11f94391b5453c6cee3972e4/26bbf6e12a5b38105783428ea6f8591d/chk-1",
+                  "discarded": false
+                }
+              ],
+              "latestCompleted": {
+                "id": 1,
+                "status": "COMPLETED",
+                "savepoint": false,
+                "checkpointType": "CHECKPOINT",
+                "triggerTimestamp": 1793094428692,
+                "latestAckTimestamp": 1793094428922,
+                "checkpointedSize": 3010,
+                "stateSize": 3010,
+                "numSubtasks": 2,
+                "numAcknowledgedSubtasks": 2,
+                "failureTimestamp": null,
+                "failureMessage": null,
+                "externalPath": "file:/flink/checkpoints/job_751fc4bc11f94391b5453c6cee3972e4/26bbf6e12a5b38105783428ea6f8591d/chk-1",
+                "discarded": false
+              },
+              "latestFailed": {
+                "id": 2,
+                "status": "FAILED",
+                "savepoint": false,
+                "checkpointType": "CHECKPOINT",
+                "triggerTimestamp": 1793094430771,
+                "latestAckTimestamp": -1,
+                "checkpointedSize": 0,
+                "stateSize": 0,
+                "numSubtasks": 2,
+                "numAcknowledgedSubtasks": 0,
+                "failureTimestamp": 1793094431026,
+                "failureMessage": "Asynchronous task checkpoint failed.",
+                "externalPath": null,
+                "discarded": null
+              },
+              "latestSavepoint": null,
+              "latestRestored": null
+            },
+            "job": {
+              "jobManagerTimeMillis": 1793094432980,
+              "state": "RUNNING",
+              "completedCheckpoints": 1,
+              "restoredCheckpoints": 0,
+              "latestRestore": null,
+              "failures": [],
+              "subtasks": [
+                {
+                  "vertexName": "Source: Kafka Source -> Source Throttle",
+                  "index": 0,
+                  "attempt": 0,
+                  "status": "RUNNING",
+                  "taskManagerId": "flink-stability-taskmanager-1-1-0e16beed-04b5-423c-be86-11749a54d2aa"
+                },
+                {
+                  "vertexName": "Keyed Prefix v1 -> Kafka Sink: Writer -> Kafka Sink: Committer",
+                  "index": 0,
+                  "attempt": 0,
+                  "status": "RUNNING",
+                  "taskManagerId": "flink-stability-taskmanager-1-1-0e16beed-04b5-423c-be86-11749a54d2aa"
+                }
+              ]
+            }
+          },
+          {
+            "stage": "STOPPED",
+            "sequence": 4,
+            "elapsedNanos": 30649369792,
+            "storage": {
+              "attemptId": "attempt-46225f01-bb80-4d5e-a5be-a456719ac1ab",
+              "storageId": "storage-84151b56-49c6-46a7-971e-55a0215fe91b",
+              "namespace": "job_751fc4bc11f94391b5453c6cee3972e4",
+              "checkpointUri": "file:///flink/checkpoints/job_751fc4bc11f94391b5453c6cee3972e4",
+              "helperManifestSha256": "9ab2001ccc55e700a76c12d0ba64d4824d1089d21e85adffa5216d75d8582ecf",
+              "complete": true,
+              "quiescent": false,
+              "diagnostics": [],
+              "instances": [
+                {
+                  "instance": {
+                    "logicalName": "jobmanager-1",
+                    "process": "jobmanager-1#1",
+                    "runtimeId": "9fb54a11520838f3c68ca834f8d1f2d3766fa4062ac112d45631d147e140a1b8",
+                    "instanceId": "instance-1882e268-8829-46e8-8f08-c4d2c48add81",
+                    "role": "JOB_MANAGER",
+                    "daemonPid": 22
+                  },
+                  "status": {
+                    "state": "ARMED",
+                    "faultId": "c70af4b0074542829424437478b2129c",
+                    "revision": 1,
+                    "sequence": 897,
+                    "leaseMs": 120000,
+                    "leaseDeadlineMonotonicNs": 98089885970418,
+                    "journalComplete": true,
+                    "stopping": false
+                  },
+                  "processDead": false,
+                  "journalComplete": true,
+                  "journalSha256": "f67a3e31b7bf747243e8d2a376497873f5625383240d9c6132bf5fdfb08e4c78",
+                  "journalBytes": 629395,
+                  "lastSequence": 897,
+                  "diagnostics": []
+                },
+                {
+                  "instance": {
+                    "logicalName": "taskmanager-1",
+                    "process": "taskmanager-1#1",
+                    "runtimeId": "c46d3ab92aa3c094c1956a35ff650f9b33ba76e05c9f819fd721b18afe1639cb",
+                    "instanceId": "instance-c9725659-e0c2-460b-beb4-8e939bb1b779",
+                    "role": "TASK_MANAGER",
+                    "daemonPid": 22
+                  },
+                  "status": {
+                    "state": "ARMED",
+                    "faultId": "c70af4b0074542829424437478b2129c",
+                    "revision": 1,
+                    "sequence": 647,
+                    "leaseMs": 120000,
+                    "leaseDeadlineMonotonicNs": 98089901708668,
+                    "journalComplete": true,
+                    "stopping": false
+                  },
+                  "processDead": true,
+                  "journalComplete": true,
+                  "journalSha256": "d0b80fbc5c080563bbc4762697a3fc6da717bb00a921a138195b621a0c5f7b84",
+                  "journalBytes": 466910,
+                  "lastSequence": 647,
+                  "diagnostics": []
+                }
+              ]
+            },
+            "checkpoints": {
+              "jobId": "26bbf6e12a5b38105783428ea6f8591d",
+              "counts": {
+                "total": 4,
+                "inProgress": 0,
+                "completed": 1,
+                "failed": 3,
+                "restored": 0
+              },
+              "retained": [
+                {
+                  "id": 4,
+                  "status": "FAILED",
+                  "savepoint": false,
+                  "checkpointType": "CHECKPOINT",
+                  "triggerTimestamp": 1793094448736,
+                  "latestAckTimestamp": -1,
+                  "checkpointedSize": 0,
+                  "stateSize": 0,
+                  "numSubtasks": 2,
+                  "numAcknowledgedSubtasks": 0,
+                  "failureTimestamp": 1793094456711,
+                  "failureMessage": "Trigger checkpoint failure.",
+                  "externalPath": null,
+                  "discarded": null
+                },
+                {
+                  "id": 3,
+                  "status": "FAILED",
+                  "savepoint": false,
+                  "checkpointType": "CHECKPOINT",
+                  "triggerTimestamp": 1793094438690,
+                  "latestAckTimestamp": -1,
+                  "checkpointedSize": 0,
+                  "stateSize": 0,
+                  "numSubtasks": 2,
+                  "numAcknowledgedSubtasks": 0,
+                  "failureTimestamp": 1793094448725,
+                  "failureMessage": "Trigger checkpoint failure.",
+                  "externalPath": null,
+                  "discarded": null
+                },
+                {
+                  "id": 2,
+                  "status": "FAILED",
+                  "savepoint": false,
+                  "checkpointType": "CHECKPOINT",
+                  "triggerTimestamp": 1793094430771,
+                  "latestAckTimestamp": -1,
+                  "checkpointedSize": 0,
+                  "stateSize": 0,
+                  "numSubtasks": 2,
+                  "numAcknowledgedSubtasks": 0,
+                  "failureTimestamp": 1793094431026,
+                  "failureMessage": "Asynchronous task checkpoint failed.",
+                  "externalPath": null,
+                  "discarded": null
+                },
+                {
+                  "id": 1,
+                  "status": "COMPLETED",
+                  "savepoint": false,
+                  "checkpointType": "CHECKPOINT",
+                  "triggerTimestamp": 1793094428692,
+                  "latestAckTimestamp": 1793094428922,
+                  "checkpointedSize": 3010,
+                  "stateSize": 3010,
+                  "numSubtasks": 2,
+                  "numAcknowledgedSubtasks": 2,
+                  "failureTimestamp": null,
+                  "failureMessage": null,
+                  "externalPath": "file:/flink/checkpoints/job_751fc4bc11f94391b5453c6cee3972e4/26bbf6e12a5b38105783428ea6f8591d/chk-1",
+                  "discarded": false
+                }
+              ],
+              "latestCompleted": {
+                "id": 1,
+                "status": "COMPLETED",
+                "savepoint": false,
+                "checkpointType": "CHECKPOINT",
+                "triggerTimestamp": 1793094428692,
+                "latestAckTimestamp": 1793094428922,
+                "checkpointedSize": 3010,
+                "stateSize": 3010,
+                "numSubtasks": 2,
+                "numAcknowledgedSubtasks": 2,
+                "failureTimestamp": null,
+                "failureMessage": null,
+                "externalPath": "file:/flink/checkpoints/job_751fc4bc11f94391b5453c6cee3972e4/26bbf6e12a5b38105783428ea6f8591d/chk-1",
+                "discarded": false
+              },
+              "latestFailed": {
+                "id": 4,
+                "status": "FAILED",
+                "savepoint": false,
+                "checkpointType": "CHECKPOINT",
+                "triggerTimestamp": 1793094448736,
+                "latestAckTimestamp": -1,
+                "checkpointedSize": 0,
+                "stateSize": 0,
+                "numSubtasks": 2,
+                "numAcknowledgedSubtasks": 0,
+                "failureTimestamp": 1793094456711,
+                "failureMessage": "Trigger checkpoint failure.",
+                "externalPath": null,
+                "discarded": null
+              },
+              "latestSavepoint": null,
+              "latestRestored": null
+            },
+            "job": {
+              "jobManagerTimeMillis": 1793094457270,
+              "state": "RESTARTING",
+              "completedCheckpoints": 1,
+              "restoredCheckpoints": 0,
+              "latestRestore": null,
+              "failures": [
+                {
+                  "timestampMillis": 1793094456725,
+                  "exceptionName": "org.apache.flink.runtime.jobmaster.JobMasterException",
+                  "rootCause": "org.apache.flink.runtime.jobmaster.JobMasterException: TaskManager with id flink-stability-taskmanager-1-1-0e16beed-04b5-423c-be86-11749a54d2aa is no longer reachable.",
+                  "taskManagerId": "flink-stability-taskmanager-1-1-0e16beed-04b5-423c-be86-11749a54d2aa"
+                }
+              ],
+              "subtasks": [
+                {
+                  "vertexName": "Source: Kafka Source -> Source Throttle",
+                  "index": 0,
+                  "attempt": 0,
+                  "status": "CANCELED",
+                  "taskManagerId": "flink-stability-taskmanager-1-1-0e16beed-04b5-423c-be86-11749a54d2aa"
+                },
+                {
+                  "vertexName": "Keyed Prefix v1 -> Kafka Sink: Writer -> Kafka Sink: Committer",
+                  "index": 0,
+                  "attempt": 0,
+                  "status": "FAILED",
+                  "taskManagerId": "flink-stability-taskmanager-1-1-0e16beed-04b5-423c-be86-11749a54d2aa"
+                }
+              ]
+            }
+          },
+          {
+            "stage": "HEALED",
+            "sequence": 5,
+            "elapsedNanos": 30739992542,
+            "storage": {
+              "attemptId": "attempt-46225f01-bb80-4d5e-a5be-a456719ac1ab",
+              "storageId": "storage-84151b56-49c6-46a7-971e-55a0215fe91b",
+              "namespace": "job_751fc4bc11f94391b5453c6cee3972e4",
+              "checkpointUri": "file:///flink/checkpoints/job_751fc4bc11f94391b5453c6cee3972e4",
+              "helperManifestSha256": "9ab2001ccc55e700a76c12d0ba64d4824d1089d21e85adffa5216d75d8582ecf",
+              "complete": true,
+              "quiescent": false,
+              "diagnostics": [],
+              "instances": [
+                {
+                  "instance": {
+                    "logicalName": "jobmanager-1",
+                    "process": "jobmanager-1#1",
+                    "runtimeId": "9fb54a11520838f3c68ca834f8d1f2d3766fa4062ac112d45631d147e140a1b8",
+                    "instanceId": "instance-1882e268-8829-46e8-8f08-c4d2c48add81",
+                    "role": "JOB_MANAGER",
+                    "daemonPid": 22
+                  },
+                  "status": {
+                    "state": "HEALTHY",
+                    "faultId": "c70af4b0074542829424437478b2129c",
+                    "revision": 2,
+                    "sequence": 899,
+                    "leaseMs": 120000,
+                    "leaseDeadlineMonotonicNs": 98089885970418,
+                    "journalComplete": true,
+                    "stopping": false
+                  },
+                  "processDead": false,
+                  "journalComplete": true,
+                  "journalSha256": "70f5fb9abfdb53d9fa5a7c8a10d9621033dcd72190ac8578af9f3aabe980d797",
+                  "journalBytes": 630745,
+                  "lastSequence": 899,
+                  "diagnostics": []
+                },
+                {
+                  "instance": {
+                    "logicalName": "taskmanager-1",
+                    "process": "taskmanager-1#1",
+                    "runtimeId": "c46d3ab92aa3c094c1956a35ff650f9b33ba76e05c9f819fd721b18afe1639cb",
+                    "instanceId": "instance-c9725659-e0c2-460b-beb4-8e939bb1b779",
+                    "role": "TASK_MANAGER",
+                    "daemonPid": 22
+                  },
+                  "status": {
+                    "state": "ARMED",
+                    "faultId": "c70af4b0074542829424437478b2129c",
+                    "revision": 1,
+                    "sequence": 647,
+                    "leaseMs": 120000,
+                    "leaseDeadlineMonotonicNs": 98089901708668,
+                    "journalComplete": true,
+                    "stopping": false
+                  },
+                  "processDead": true,
+                  "journalComplete": true,
+                  "journalSha256": "d0b80fbc5c080563bbc4762697a3fc6da717bb00a921a138195b621a0c5f7b84",
+                  "journalBytes": 466910,
+                  "lastSequence": 647,
+                  "diagnostics": []
+                }
+              ]
+            },
+            "checkpoints": {
+              "jobId": "26bbf6e12a5b38105783428ea6f8591d",
+              "counts": {
+                "total": 4,
+                "inProgress": 0,
+                "completed": 1,
+                "failed": 3,
+                "restored": 0
+              },
+              "retained": [
+                {
+                  "id": 4,
+                  "status": "FAILED",
+                  "savepoint": false,
+                  "checkpointType": "CHECKPOINT",
+                  "triggerTimestamp": 1793094448736,
+                  "latestAckTimestamp": -1,
+                  "checkpointedSize": 0,
+                  "stateSize": 0,
+                  "numSubtasks": 2,
+                  "numAcknowledgedSubtasks": 0,
+                  "failureTimestamp": 1793094456711,
+                  "failureMessage": "Trigger checkpoint failure.",
+                  "externalPath": null,
+                  "discarded": null
+                },
+                {
+                  "id": 3,
+                  "status": "FAILED",
+                  "savepoint": false,
+                  "checkpointType": "CHECKPOINT",
+                  "triggerTimestamp": 1793094438690,
+                  "latestAckTimestamp": -1,
+                  "checkpointedSize": 0,
+                  "stateSize": 0,
+                  "numSubtasks": 2,
+                  "numAcknowledgedSubtasks": 0,
+                  "failureTimestamp": 1793094448725,
+                  "failureMessage": "Trigger checkpoint failure.",
+                  "externalPath": null,
+                  "discarded": null
+                },
+                {
+                  "id": 2,
+                  "status": "FAILED",
+                  "savepoint": false,
+                  "checkpointType": "CHECKPOINT",
+                  "triggerTimestamp": 1793094430771,
+                  "latestAckTimestamp": -1,
+                  "checkpointedSize": 0,
+                  "stateSize": 0,
+                  "numSubtasks": 2,
+                  "numAcknowledgedSubtasks": 0,
+                  "failureTimestamp": 1793094431026,
+                  "failureMessage": "Asynchronous task checkpoint failed.",
+                  "externalPath": null,
+                  "discarded": null
+                },
+                {
+                  "id": 1,
+                  "status": "COMPLETED",
+                  "savepoint": false,
+                  "checkpointType": "CHECKPOINT",
+                  "triggerTimestamp": 1793094428692,
+                  "latestAckTimestamp": 1793094428922,
+                  "checkpointedSize": 3010,
+                  "stateSize": 3010,
+                  "numSubtasks": 2,
+                  "numAcknowledgedSubtasks": 2,
+                  "failureTimestamp": null,
+                  "failureMessage": null,
+                  "externalPath": "file:/flink/checkpoints/job_751fc4bc11f94391b5453c6cee3972e4/26bbf6e12a5b38105783428ea6f8591d/chk-1",
+                  "discarded": false
+                }
+              ],
+              "latestCompleted": {
+                "id": 1,
+                "status": "COMPLETED",
+                "savepoint": false,
+                "checkpointType": "CHECKPOINT",
+                "triggerTimestamp": 1793094428692,
+                "latestAckTimestamp": 1793094428922,
+                "checkpointedSize": 3010,
+                "stateSize": 3010,
+                "numSubtasks": 2,
+                "numAcknowledgedSubtasks": 2,
+                "failureTimestamp": null,
+                "failureMessage": null,
+                "externalPath": "file:/flink/checkpoints/job_751fc4bc11f94391b5453c6cee3972e4/26bbf6e12a5b38105783428ea6f8591d/chk-1",
+                "discarded": false
+              },
+              "latestFailed": {
+                "id": 4,
+                "status": "FAILED",
+                "savepoint": false,
+                "checkpointType": "CHECKPOINT",
+                "triggerTimestamp": 1793094448736,
+                "latestAckTimestamp": -1,
+                "checkpointedSize": 0,
+                "stateSize": 0,
+                "numSubtasks": 2,
+                "numAcknowledgedSubtasks": 0,
+                "failureTimestamp": 1793094456711,
+                "failureMessage": "Trigger checkpoint failure.",
+                "externalPath": null,
+                "discarded": null
+              },
+              "latestSavepoint": null,
+              "latestRestored": null
+            },
+            "job": {
+              "jobManagerTimeMillis": 1793094457427,
+              "state": "RESTARTING",
+              "completedCheckpoints": 1,
+              "restoredCheckpoints": 0,
+              "latestRestore": null,
+              "failures": [
+                {
+                  "timestampMillis": 1793094456725,
+                  "exceptionName": "org.apache.flink.runtime.jobmaster.JobMasterException",
+                  "rootCause": "org.apache.flink.runtime.jobmaster.JobMasterException: TaskManager with id flink-stability-taskmanager-1-1-0e16beed-04b5-423c-be86-11749a54d2aa is no longer reachable.",
+                  "taskManagerId": "flink-stability-taskmanager-1-1-0e16beed-04b5-423c-be86-11749a54d2aa"
+                }
+              ],
+              "subtasks": [
+                {
+                  "vertexName": "Source: Kafka Source -> Source Throttle",
+                  "index": 0,
+                  "attempt": 0,
+                  "status": "CANCELED",
+                  "taskManagerId": "flink-stability-taskmanager-1-1-0e16beed-04b5-423c-be86-11749a54d2aa"
+                },
+                {
+                  "vertexName": "Keyed Prefix v1 -> Kafka Sink: Writer -> Kafka Sink: Committer",
+                  "index": 0,
+                  "attempt": 0,
+                  "status": "FAILED",
+                  "taskManagerId": "flink-stability-taskmanager-1-1-0e16beed-04b5-423c-be86-11749a54d2aa"
+                }
+              ]
+            }
+          },
+          {
+            "stage": "RECOVERED",
+            "sequence": 6,
+            "elapsedNanos": 39341992834,
+            "storage": {
+              "attemptId": "attempt-46225f01-bb80-4d5e-a5be-a456719ac1ab",
+              "storageId": "storage-84151b56-49c6-46a7-971e-55a0215fe91b",
+              "namespace": "job_751fc4bc11f94391b5453c6cee3972e4",
+              "checkpointUri": "file:///flink/checkpoints/job_751fc4bc11f94391b5453c6cee3972e4",
+              "helperManifestSha256": "9ab2001ccc55e700a76c12d0ba64d4824d1089d21e85adffa5216d75d8582ecf",
+              "complete": true,
+              "quiescent": false,
+              "diagnostics": [],
+              "instances": [
+                {
+                  "instance": {
+                    "logicalName": "jobmanager-1",
+                    "process": "jobmanager-1#1",
+                    "runtimeId": "9fb54a11520838f3c68ca834f8d1f2d3766fa4062ac112d45631d147e140a1b8",
+                    "instanceId": "instance-1882e268-8829-46e8-8f08-c4d2c48add81",
+                    "role": "JOB_MANAGER",
+                    "daemonPid": 22
+                  },
+                  "status": {
+                    "state": "HEALTHY",
+                    "faultId": "c70af4b0074542829424437478b2129c",
+                    "revision": 2,
+                    "sequence": 1418,
+                    "leaseMs": 120000,
+                    "leaseDeadlineMonotonicNs": 98089885970418,
+                    "journalComplete": true,
+                    "stopping": false
+                  },
+                  "processDead": false,
+                  "journalComplete": true,
+                  "journalSha256": "0961ae67a7eda99ba176718a079796a9aa02a477d373d1783321118a93e08648",
+                  "journalBytes": 1032293,
+                  "lastSequence": 1418,
+                  "diagnostics": []
+                },
+                {
+                  "instance": {
+                    "logicalName": "taskmanager-1",
+                    "process": "taskmanager-1#1",
+                    "runtimeId": "c46d3ab92aa3c094c1956a35ff650f9b33ba76e05c9f819fd721b18afe1639cb",
+                    "instanceId": "instance-c9725659-e0c2-460b-beb4-8e939bb1b779",
+                    "role": "TASK_MANAGER",
+                    "daemonPid": 22
+                  },
+                  "status": {
+                    "state": "ARMED",
+                    "faultId": "c70af4b0074542829424437478b2129c",
+                    "revision": 1,
+                    "sequence": 647,
+                    "leaseMs": 120000,
+                    "leaseDeadlineMonotonicNs": 98089901708668,
+                    "journalComplete": true,
+                    "stopping": false
+                  },
+                  "processDead": true,
+                  "journalComplete": true,
+                  "journalSha256": "d0b80fbc5c080563bbc4762697a3fc6da717bb00a921a138195b621a0c5f7b84",
+                  "journalBytes": 466910,
+                  "lastSequence": 647,
+                  "diagnostics": []
+                },
+                {
+                  "instance": {
+                    "logicalName": "taskmanager-1",
+                    "process": "taskmanager-1#2",
+                    "runtimeId": "c8ba373fb4a38dbf36e148a6fbf64f8f3cf6e9fdb0114ae8d315926f163d1e3a",
+                    "instanceId": "instance-e2738572-2e2d-439f-9906-a4fbbf8307a1",
+                    "role": "TASK_MANAGER",
+                    "daemonPid": 22
+                  },
+                  "status": {
+                    "state": "HEALTHY",
+                    "faultId": null,
+                    "revision": 0,
+                    "sequence": 1993,
+                    "leaseMs": 0,
+                    "leaseDeadlineMonotonicNs": 0,
+                    "journalComplete": true,
+                    "stopping": false
+                  },
+                  "processDead": false,
+                  "journalComplete": true,
+                  "journalSha256": "283e04e7090abe48637d6f8420a55057868e041f8cec7779613e1a65339a280a",
+                  "journalBytes": 1428767,
+                  "lastSequence": 1993,
+                  "diagnostics": []
+                }
+              ]
+            },
+            "checkpoints": {
+              "jobId": "26bbf6e12a5b38105783428ea6f8591d",
+              "counts": {
+                "total": 5,
+                "inProgress": 0,
+                "completed": 2,
+                "failed": 3,
+                "restored": 1
+              },
+              "retained": [
+                {
+                  "id": 5,
+                  "status": "COMPLETED",
+                  "savepoint": false,
+                  "checkpointType": "CHECKPOINT",
+                  "triggerTimestamp": 1793094463697,
+                  "latestAckTimestamp": 1793094463882,
+                  "checkpointedSize": 3248,
+                  "stateSize": 3248,
+                  "numSubtasks": 2,
+                  "numAcknowledgedSubtasks": 2,
+                  "failureTimestamp": null,
+                  "failureMessage": null,
+                  "externalPath": "file:/flink/checkpoints/job_751fc4bc11f94391b5453c6cee3972e4/26bbf6e12a5b38105783428ea6f8591d/chk-5",
+                  "discarded": false
+                },
+                {
+                  "id": 4,
+                  "status": "FAILED",
+                  "savepoint": false,
+                  "checkpointType": "CHECKPOINT",
+                  "triggerTimestamp": 1793094448736,
+                  "latestAckTimestamp": -1,
+                  "checkpointedSize": 0,
+                  "stateSize": 0,
+                  "numSubtasks": 2,
+                  "numAcknowledgedSubtasks": 0,
+                  "failureTimestamp": 1793094456711,
+                  "failureMessage": "Trigger checkpoint failure.",
+                  "externalPath": null,
+                  "discarded": null
+                },
+                {
+                  "id": 3,
+                  "status": "FAILED",
+                  "savepoint": false,
+                  "checkpointType": "CHECKPOINT",
+                  "triggerTimestamp": 1793094438690,
+                  "latestAckTimestamp": -1,
+                  "checkpointedSize": 0,
+                  "stateSize": 0,
+                  "numSubtasks": 2,
+                  "numAcknowledgedSubtasks": 0,
+                  "failureTimestamp": 1793094448725,
+                  "failureMessage": "Trigger checkpoint failure.",
+                  "externalPath": null,
+                  "discarded": null
+                },
+                {
+                  "id": 2,
+                  "status": "FAILED",
+                  "savepoint": false,
+                  "checkpointType": "CHECKPOINT",
+                  "triggerTimestamp": 1793094430771,
+                  "latestAckTimestamp": -1,
+                  "checkpointedSize": 0,
+                  "stateSize": 0,
+                  "numSubtasks": 2,
+                  "numAcknowledgedSubtasks": 0,
+                  "failureTimestamp": 1793094431026,
+                  "failureMessage": "Asynchronous task checkpoint failed.",
+                  "externalPath": null,
+                  "discarded": null
+                },
+                {
+                  "id": 1,
+                  "status": "COMPLETED",
+                  "savepoint": false,
+                  "checkpointType": "CHECKPOINT",
+                  "triggerTimestamp": 1793094428692,
+                  "latestAckTimestamp": 1793094428922,
+                  "checkpointedSize": 3010,
+                  "stateSize": 3010,
+                  "numSubtasks": 2,
+                  "numAcknowledgedSubtasks": 2,
+                  "failureTimestamp": null,
+                  "failureMessage": null,
+                  "externalPath": "file:/flink/checkpoints/job_751fc4bc11f94391b5453c6cee3972e4/26bbf6e12a5b38105783428ea6f8591d/chk-1",
+                  "discarded": true
+                }
+              ],
+              "latestCompleted": {
+                "id": 5,
+                "status": "COMPLETED",
+                "savepoint": false,
+                "checkpointType": "CHECKPOINT",
+                "triggerTimestamp": 1793094463697,
+                "latestAckTimestamp": 1793094463882,
+                "checkpointedSize": 3248,
+                "stateSize": 3248,
+                "numSubtasks": 2,
+                "numAcknowledgedSubtasks": 2,
+                "failureTimestamp": null,
+                "failureMessage": null,
+                "externalPath": "file:/flink/checkpoints/job_751fc4bc11f94391b5453c6cee3972e4/26bbf6e12a5b38105783428ea6f8591d/chk-5",
+                "discarded": false
+              },
+              "latestFailed": {
+                "id": 4,
+                "status": "FAILED",
+                "savepoint": false,
+                "checkpointType": "CHECKPOINT",
+                "triggerTimestamp": 1793094448736,
+                "latestAckTimestamp": -1,
+                "checkpointedSize": 0,
+                "stateSize": 0,
+                "numSubtasks": 2,
+                "numAcknowledgedSubtasks": 0,
+                "failureTimestamp": 1793094456711,
+                "failureMessage": "Trigger checkpoint failure.",
+                "externalPath": null,
+                "discarded": null
+              },
+              "latestSavepoint": null,
+              "latestRestored": {
+                "id": 1,
+                "restoreTimestamp": 1793094457741,
+                "savepoint": false,
+                "externalPath": "file:/flink/checkpoints/job_751fc4bc11f94391b5453c6cee3972e4/26bbf6e12a5b38105783428ea6f8591d/chk-1"
+              }
+            },
+            "job": {
+              "jobManagerTimeMillis": 1793094466052,
+              "state": "RUNNING",
+              "completedCheckpoints": 2,
+              "restoredCheckpoints": 1,
+              "latestRestore": {
+                "checkpointId": 1,
+                "restoredAtMillis": 1793094457741
+              },
+              "failures": [
+                {
+                  "timestampMillis": 1793094456725,
+                  "exceptionName": "org.apache.flink.runtime.jobmaster.JobMasterException",
+                  "rootCause": "org.apache.flink.runtime.jobmaster.JobMasterException: TaskManager with id flink-stability-taskmanager-1-1-0e16beed-04b5-423c-be86-11749a54d2aa is no longer reachable.",
+                  "taskManagerId": "flink-stability-taskmanager-1-1-0e16beed-04b5-423c-be86-11749a54d2aa"
+                }
+              ],
+              "subtasks": [
+                {
+                  "vertexName": "Source: Kafka Source -> Source Throttle",
+                  "index": 0,
+                  "attempt": 1,
+                  "status": "RUNNING",
+                  "taskManagerId": "flink-stability-taskmanager-1-2-cf492b24-ce09-4bd5-8bbe-2df7fe949e57"
+                },
+                {
+                  "vertexName": "Keyed Prefix v1 -> Kafka Sink: Writer -> Kafka Sink: Committer",
+                  "index": 0,
+                  "attempt": 1,
+                  "status": "RUNNING",
+                  "taskManagerId": "flink-stability-taskmanager-1-2-cf492b24-ce09-4bd5-8bbe-2df7fe949e57"
+                }
+              ]
+            }
+          }
+        ],
+        "transitions": [
+          {
+            "faultId": "c70af4b0074542829424437478b2129c",
+            "revision": 1,
+            "startedNanos": 4677690598364625,
+            "completedNanos": 4677690633495041,
+            "acknowledgements": [
+              {
+                "instance": {
+                  "logicalName": "jobmanager-1",
+                  "process": "jobmanager-1#1",
+                  "runtimeId": "9fb54a11520838f3c68ca834f8d1f2d3766fa4062ac112d45631d147e140a1b8",
+                  "instanceId": "instance-1882e268-8829-46e8-8f08-c4d2c48add81",
+                  "role": "JOB_MANAGER",
+                  "daemonPid": 22
+                },
+                "command": "ARM",
+                "startedNanos": 4677690598368083,
+                "completedNanos": 4677690617642291,
+                "exitCode": 0,
+                "status": {
+                  "state": "ARMED",
+                  "faultId": "c70af4b0074542829424437478b2129c",
+                  "revision": 1,
+                  "sequence": 692,
+                  "leaseMs": 120000,
+                  "leaseDeadlineMonotonicNs": 98089885970418,
+                  "journalComplete": true,
+                  "stopping": false
+                },
+                "stdout": "{\"version\":1,\"ok\":true,\"error\":null,\"state\":\"ARMED\",\"attemptId\":\"attempt-46225f01-bb80-4d5e-a5be-a456719ac1ab\",\"storageId\":\"storage-84151b56-49c6-46a7-971e-55a0215fe91b\",\"instanceId\":\"instance-1882e268-8829-46e8-8f08-c4d2c48add81\",\"namespace\":\"job_751fc4bc11f94391b5453c6cee3972e4\",\"faultId\":\"c70af4b0074542829424437478b2129c\",\"revision\":1,\"sequence\":692,\"journalComplete\":true,\"daemonPid\":22,\"leaseRemainingMs\":120000,\"leaseMs\":120000,\"leaseDeadlineMonotonicNs\":98089885970418,\"allowedOperations\":[\"create\",\"write\"],\"stopping\":false}\n",
+                "stderr": "",
+                "confirmed": true
+              },
+              {
+                "instance": {
+                  "logicalName": "taskmanager-1",
+                  "process": "taskmanager-1#1",
+                  "runtimeId": "c46d3ab92aa3c094c1956a35ff650f9b33ba76e05c9f819fd721b18afe1639cb",
+                  "instanceId": "instance-c9725659-e0c2-460b-beb4-8e939bb1b779",
+                  "role": "TASK_MANAGER",
+                  "daemonPid": 22
+                },
+                "command": "ARM",
+                "startedNanos": 4677690617644166,
+                "completedNanos": 4677690633268833,
+                "exitCode": 0,
+                "status": {
+                  "state": "ARMED",
+                  "faultId": "c70af4b0074542829424437478b2129c",
+                  "revision": 1,
+                  "sequence": 144,
+                  "leaseMs": 120000,
+                  "leaseDeadlineMonotonicNs": 98089901708668,
+                  "journalComplete": true,
+                  "stopping": false
+                },
+                "stdout": "{\"version\":1,\"ok\":true,\"error\":null,\"state\":\"ARMED\",\"attemptId\":\"attempt-46225f01-bb80-4d5e-a5be-a456719ac1ab\",\"storageId\":\"storage-84151b56-49c6-46a7-971e-55a0215fe91b\",\"instanceId\":\"instance-c9725659-e0c2-460b-beb4-8e939bb1b779\",\"namespace\":\"job_751fc4bc11f94391b5453c6cee3972e4\",\"faultId\":\"c70af4b0074542829424437478b2129c\",\"revision\":1,\"sequence\":144,\"journalComplete\":true,\"daemonPid\":22,\"leaseRemainingMs\":120000,\"leaseMs\":120000,\"leaseDeadlineMonotonicNs\":98089901708668,\"allowedOperations\":[\"create\",\"write\"],\"stopping\":false}\n",
+                "stderr": "",
+                "confirmed": true
+              }
+            ],
+            "deadInstances": [],
+            "confirmed": true,
+            "diagnostics": []
+          },
+          {
+            "faultId": "c70af4b0074542829424437478b2129c",
+            "revision": 2,
+            "startedNanos": 4677717351983416,
+            "completedNanos": 4677717406259875,
+            "acknowledgements": [
+              {
+                "instance": {
+                  "logicalName": "jobmanager-1",
+                  "process": "jobmanager-1#1",
+                  "runtimeId": "9fb54a11520838f3c68ca834f8d1f2d3766fa4062ac112d45631d147e140a1b8",
+                  "instanceId": "instance-1882e268-8829-46e8-8f08-c4d2c48add81",
+                  "role": "JOB_MANAGER",
+                  "daemonPid": 22
+                },
+                "command": "HEAL",
+                "startedNanos": 4677717351987583,
+                "completedNanos": 4677717406256625,
+                "exitCode": 0,
+                "status": {
+                  "state": "HEALTHY",
+                  "faultId": "c70af4b0074542829424437478b2129c",
+                  "revision": 2,
+                  "sequence": 898,
+                  "leaseMs": 120000,
+                  "leaseDeadlineMonotonicNs": 98089885970418,
+                  "journalComplete": true,
+                  "stopping": false
+                },
+                "stdout": "{\"version\":1,\"ok\":true,\"error\":null,\"state\":\"HEALTHY\",\"attemptId\":\"attempt-46225f01-bb80-4d5e-a5be-a456719ac1ab\",\"storageId\":\"storage-84151b56-49c6-46a7-971e-55a0215fe91b\",\"instanceId\":\"instance-1882e268-8829-46e8-8f08-c4d2c48add81\",\"namespace\":\"job_751fc4bc11f94391b5453c6cee3972e4\",\"faultId\":\"c70af4b0074542829424437478b2129c\",\"revision\":2,\"sequence\":898,\"journalComplete\":true,\"daemonPid\":22,\"leaseRemainingMs\":0,\"leaseMs\":120000,\"leaseDeadlineMonotonicNs\":98089885970418,\"allowedOperations\":[\"create\",\"write\"],\"stopping\":false}\n",
+                "stderr": "",
+                "confirmed": true
+              }
+            ],
+            "deadInstances": [
+              {
+                "logicalName": "taskmanager-1",
+                "process": "taskmanager-1#1",
+                "runtimeId": "c46d3ab92aa3c094c1956a35ff650f9b33ba76e05c9f819fd721b18afe1639cb",
+                "instanceId": "instance-c9725659-e0c2-460b-beb4-8e939bb1b779",
+                "role": "TASK_MANAGER",
+                "daemonPid": 22
+              }
+            ],
+            "confirmed": true,
+            "diagnostics": []
+          }
+        ],
+        "kill": {
+          "path": "$/phases/0/steps/1",
+          "loopIterations": [],
+          "target": "taskmanager-1",
+          "jobBeforeKill": {
+            "observation": {
+              "jobManagerTimeMillis": 1793094432980,
+              "state": "RUNNING",
+              "completedCheckpoints": 1,
+              "restoredCheckpoints": 0,
+              "latestRestore": null,
+              "failures": [],
+              "subtasks": [
+                {
+                  "vertexName": "Source: Kafka Source -> Source Throttle",
+                  "index": 0,
+                  "attempt": 0,
+                  "status": "RUNNING",
+                  "taskManagerId": "flink-stability-taskmanager-1-1-0e16beed-04b5-423c-be86-11749a54d2aa"
+                },
+                {
+                  "vertexName": "Keyed Prefix v1 -> Kafka Sink: Writer -> Kafka Sink: Committer",
+                  "index": 0,
+                  "attempt": 0,
+                  "status": "RUNNING",
+                  "taskManagerId": "flink-stability-taskmanager-1-1-0e16beed-04b5-423c-be86-11749a54d2aa"
+                }
+              ]
+            },
+            "failure": null
+          },
+          "jobManagerTimeBeforeKill": 1793094433084,
+          "jobManagerTimeAfterKill": 1793094433267,
+          "identity": {
+            "logicalName": "taskmanager-1",
+            "runtimeId": "c46d3ab92aa3c094c1956a35ff650f9b33ba76e05c9f819fd721b18afe1639cb",
+            "resourceId": "flink-stability-taskmanager-1-1-0e16beed-04b5-423c-be86-11749a54d2aa"
+          },
+          "identityFailure": null,
+          "checkpointWindow": null,
+          "stateReadiness": {
+            "ready": true,
+            "reason": "state-recovery.ready",
+            "jobId": "26bbf6e12a5b38105783428ea6f8591d",
+            "keyCount": 8,
+            "totalRecords": 30000,
+            "target": {
+              "logicalName": "taskmanager-1",
+              "runtimeId": "c46d3ab92aa3c094c1956a35ff650f9b33ba76e05c9f819fd721b18afe1639cb",
+              "resourceId": "flink-stability-taskmanager-1-1-0e16beed-04b5-423c-be86-11749a54d2aa"
+            },
+            "executionAttempt": 0,
+            "jobObservation": {
+              "jobManagerTimeMillis": 1793094430117,
+              "state": "RUNNING",
+              "completedCheckpoints": 1,
+              "restoredCheckpoints": 0,
+              "latestRestore": null,
+              "failures": [],
+              "subtasks": [
+                {
+                  "vertexName": "Source: Kafka Source -> Source Throttle",
+                  "index": 0,
+                  "attempt": 0,
+                  "status": "RUNNING",
+                  "taskManagerId": "flink-stability-taskmanager-1-1-0e16beed-04b5-423c-be86-11749a54d2aa"
+                },
+                {
+                  "vertexName": "Keyed Prefix v1 -> Kafka Sink: Writer -> Kafka Sink: Committer",
+                  "index": 0,
+                  "attempt": 0,
+                  "status": "RUNNING",
+                  "taskManagerId": "flink-stability-taskmanager-1-1-0e16beed-04b5-423c-be86-11749a54d2aa"
+                }
+              ]
+            },
+            "completedSnapshots": {
+              "1": {
+                "checkpointId": 1,
+                "acknowledgedAtMillis": 1793094428922,
+                "snapshot": {
+                  "process": {
+                    "logicalName": "taskmanager-1",
+                    "runtimeId": "c46d3ab92aa3c094c1956a35ff650f9b33ba76e05c9f819fd721b18afe1639cb",
+                    "process": "taskmanager-1#1"
+                  },
+                  "event": "SNAPSHOT",
+                  "jobId": "26bbf6e12a5b38105783428ea6f8591d",
+                  "operatorUid": "flink-stability-keyed-prefix-v1",
+                  "executionAttempt": 0,
+                  "subtask": 0,
+                  "checkpointId": 1,
+                  "restoredCheckpointId": -1,
+                  "lineNumber": 665,
+                  "progress": {
+                    "keyCount": 8,
+                    "observedKeys": 8,
+                    "minimumObservedCount": 28,
+                    "processedThisAttempt": 231,
+                    "maximumInputId": 230
+                  },
+                  "keyProgress": null,
+                  "buildMode": null
+                },
+                "completion": {
+                  "process": {
+                    "logicalName": "taskmanager-1",
+                    "runtimeId": "c46d3ab92aa3c094c1956a35ff650f9b33ba76e05c9f819fd721b18afe1639cb",
+                    "process": "taskmanager-1#1"
+                  },
+                  "event": "COMPLETED",
+                  "jobId": "26bbf6e12a5b38105783428ea6f8591d",
+                  "operatorUid": "flink-stability-keyed-prefix-v1",
+                  "executionAttempt": 0,
+                  "subtask": 0,
+                  "checkpointId": 1,
+                  "restoredCheckpointId": -1,
+                  "lineNumber": 666,
+                  "progress": null,
+                  "keyProgress": null,
+                  "buildMode": null
+                }
+              }
+            },
+            "committedPrefix": {
+              "snapshotComplete": true,
+              "validStatePrefix": true,
+              "observedRecords": 42,
+              "maximumId": 41,
+              "perKeyCounts": {
+                "7": 5,
+                "6": 5,
+                "5": 5,
+                "4": 5,
+                "3": 5,
+                "2": 5,
+                "1": 6,
+                "0": 6
+              },
+              "beginningOffsets": {
+                "0": 0
+              },
+              "endOffsets": {
+                "0": 42
+              }
+            }
+          }
+        },
+        "restart": {
+          "path": "$/phases/0/steps/1",
+          "loopIterations": [],
+          "target": "taskmanager-1",
+          "previousIdentity": {
+            "logicalName": "taskmanager-1",
+            "runtimeId": "c46d3ab92aa3c094c1956a35ff650f9b33ba76e05c9f819fd721b18afe1639cb",
+            "resourceId": "flink-stability-taskmanager-1-1-0e16beed-04b5-423c-be86-11749a54d2aa"
+          },
+          "replacementIdentity": {
+            "logicalName": "taskmanager-1",
+            "runtimeId": "c8ba373fb4a38dbf36e148a6fbf64f8f3cf6e9fdb0114ae8d315926f163d1e3a",
+            "resourceId": "flink-stability-taskmanager-1-2-cf492b24-ce09-4bd5-8bbe-2df7fe949e57"
+          },
+          "previousIdentityFailure": null,
+          "replacementIdentityFailure": null
+        },
+        "recovery": {
+          "confirmed": true,
+          "reason": "state-recovery.confirmed",
+          "readiness": {
+            "ready": true,
+            "reason": "state-recovery.ready",
+            "jobId": "26bbf6e12a5b38105783428ea6f8591d",
+            "keyCount": 8,
+            "totalRecords": 30000,
+            "target": {
+              "logicalName": "taskmanager-1",
+              "runtimeId": "c46d3ab92aa3c094c1956a35ff650f9b33ba76e05c9f819fd721b18afe1639cb",
+              "resourceId": "flink-stability-taskmanager-1-1-0e16beed-04b5-423c-be86-11749a54d2aa"
+            },
+            "executionAttempt": 0,
+            "jobObservation": {
+              "jobManagerTimeMillis": 1793094430117,
+              "state": "RUNNING",
+              "completedCheckpoints": 1,
+              "restoredCheckpoints": 0,
+              "latestRestore": null,
+              "failures": [],
+              "subtasks": [
+                {
+                  "vertexName": "Source: Kafka Source -> Source Throttle",
+                  "index": 0,
+                  "attempt": 0,
+                  "status": "RUNNING",
+                  "taskManagerId": "flink-stability-taskmanager-1-1-0e16beed-04b5-423c-be86-11749a54d2aa"
+                },
+                {
+                  "vertexName": "Keyed Prefix v1 -> Kafka Sink: Writer -> Kafka Sink: Committer",
+                  "index": 0,
+                  "attempt": 0,
+                  "status": "RUNNING",
+                  "taskManagerId": "flink-stability-taskmanager-1-1-0e16beed-04b5-423c-be86-11749a54d2aa"
+                }
+              ]
+            },
+            "completedSnapshots": {
+              "1": {
+                "checkpointId": 1,
+                "acknowledgedAtMillis": 1793094428922,
+                "snapshot": {
+                  "process": {
+                    "logicalName": "taskmanager-1",
+                    "runtimeId": "c46d3ab92aa3c094c1956a35ff650f9b33ba76e05c9f819fd721b18afe1639cb",
+                    "process": "taskmanager-1#1"
+                  },
+                  "event": "SNAPSHOT",
+                  "jobId": "26bbf6e12a5b38105783428ea6f8591d",
+                  "operatorUid": "flink-stability-keyed-prefix-v1",
+                  "executionAttempt": 0,
+                  "subtask": 0,
+                  "checkpointId": 1,
+                  "restoredCheckpointId": -1,
+                  "lineNumber": 665,
+                  "progress": {
+                    "keyCount": 8,
+                    "observedKeys": 8,
+                    "minimumObservedCount": 28,
+                    "processedThisAttempt": 231,
+                    "maximumInputId": 230
+                  },
+                  "keyProgress": null,
+                  "buildMode": null
+                },
+                "completion": {
+                  "process": {
+                    "logicalName": "taskmanager-1",
+                    "runtimeId": "c46d3ab92aa3c094c1956a35ff650f9b33ba76e05c9f819fd721b18afe1639cb",
+                    "process": "taskmanager-1#1"
+                  },
+                  "event": "COMPLETED",
+                  "jobId": "26bbf6e12a5b38105783428ea6f8591d",
+                  "operatorUid": "flink-stability-keyed-prefix-v1",
+                  "executionAttempt": 0,
+                  "subtask": 0,
+                  "checkpointId": 1,
+                  "restoredCheckpointId": -1,
+                  "lineNumber": 666,
+                  "progress": null,
+                  "keyProgress": null,
+                  "buildMode": null
+                }
+              }
+            },
+            "committedPrefix": {
+              "snapshotComplete": true,
+              "validStatePrefix": true,
+              "observedRecords": 42,
+              "maximumId": 41,
+              "perKeyCounts": {
+                "7": 5,
+                "6": 5,
+                "5": 5,
+                "4": 5,
+                "3": 5,
+                "2": 5,
+                "1": 6,
+                "0": 6
+              },
+              "beginningOffsets": {
+                "0": 0
+              },
+              "endOffsets": {
+                "0": 42
+              }
+            }
+          },
+          "restoredCheckpointId": 1,
+          "restoredStart": {
+            "process": {
+              "logicalName": "taskmanager-1",
+              "runtimeId": "c8ba373fb4a38dbf36e148a6fbf64f8f3cf6e9fdb0114ae8d315926f163d1e3a",
+              "process": "taskmanager-1#2"
+            },
+            "event": "START",
+            "jobId": "26bbf6e12a5b38105783428ea6f8591d",
+            "operatorUid": "flink-stability-keyed-prefix-v1",
+            "executionAttempt": 1,
+            "subtask": 0,
+            "checkpointId": 1,
+            "restoredCheckpointId": 1,
+            "lineNumber": 677,
+            "progress": null,
+            "keyProgress": null,
+            "buildMode": "correct"
+          },
+          "postRestoreProgress": {
+            "process": {
+              "logicalName": "taskmanager-1",
+              "runtimeId": "c8ba373fb4a38dbf36e148a6fbf64f8f3cf6e9fdb0114ae8d315926f163d1e3a",
+              "process": "taskmanager-1#2"
+            },
+            "event": "PROGRESS",
+            "jobId": "26bbf6e12a5b38105783428ea6f8591d",
+            "operatorUid": "flink-stability-keyed-prefix-v1",
+            "executionAttempt": 1,
+            "subtask": 0,
+            "checkpointId": 1,
+            "restoredCheckpointId": 1,
+            "lineNumber": 687,
+            "progress": {
+              "keyCount": 8,
+              "observedKeys": 8,
+              "minimumObservedCount": 29,
+              "processedThisAttempt": 8,
+              "maximumInputId": 238
+            },
+            "keyProgress": null,
+            "buildMode": null
+          },
+          "restoredKeys": [
+            {
+              "process": {
+                "logicalName": "taskmanager-1",
+                "runtimeId": "c8ba373fb4a38dbf36e148a6fbf64f8f3cf6e9fdb0114ae8d315926f163d1e3a",
+                "process": "taskmanager-1#2"
+              },
+              "event": "RESTORED_KEY",
+              "jobId": "26bbf6e12a5b38105783428ea6f8591d",
+              "operatorUid": "flink-stability-keyed-prefix-v1",
+              "executionAttempt": 1,
+              "subtask": 0,
+              "checkpointId": 1,
+              "restoredCheckpointId": 1,
+              "lineNumber": 680,
+              "progress": null,
+              "keyProgress": {
+                "keyCount": 8,
+                "key": 0,
+                "inputId": 232,
+                "previousCount": 29,
+                "previousSum": 3277,
+                "newCount": 30,
+                "newSum": 3510
+              },
+              "buildMode": null
+            },
+            {
+              "process": {
+                "logicalName": "taskmanager-1",
+                "runtimeId": "c8ba373fb4a38dbf36e148a6fbf64f8f3cf6e9fdb0114ae8d315926f163d1e3a",
+                "process": "taskmanager-1#2"
+              },
+              "event": "RESTORED_KEY",
+              "jobId": "26bbf6e12a5b38105783428ea6f8591d",
+              "operatorUid": "flink-stability-keyed-prefix-v1",
+              "executionAttempt": 1,
+              "subtask": 0,
+              "checkpointId": 1,
+              "restoredCheckpointId": 1,
+              "lineNumber": 681,
+              "progress": null,
+              "keyProgress": {
+                "keyCount": 8,
+                "key": 1,
+                "inputId": 233,
+                "previousCount": 29,
+                "previousSum": 3306,
+                "newCount": 30,
+                "newSum": 3540
+              },
+              "buildMode": null
+            },
+            {
+              "process": {
+                "logicalName": "taskmanager-1",
+                "runtimeId": "c8ba373fb4a38dbf36e148a6fbf64f8f3cf6e9fdb0114ae8d315926f163d1e3a",
+                "process": "taskmanager-1#2"
+              },
+              "event": "RESTORED_KEY",
+              "jobId": "26bbf6e12a5b38105783428ea6f8591d",
+              "operatorUid": "flink-stability-keyed-prefix-v1",
+              "executionAttempt": 1,
+              "subtask": 0,
+              "checkpointId": 1,
+              "restoredCheckpointId": 1,
+              "lineNumber": 682,
+              "progress": null,
+              "keyProgress": {
+                "keyCount": 8,
+                "key": 2,
+                "inputId": 234,
+                "previousCount": 29,
+                "previousSum": 3335,
+                "newCount": 30,
+                "newSum": 3570
+              },
+              "buildMode": null
+            },
+            {
+              "process": {
+                "logicalName": "taskmanager-1",
+                "runtimeId": "c8ba373fb4a38dbf36e148a6fbf64f8f3cf6e9fdb0114ae8d315926f163d1e3a",
+                "process": "taskmanager-1#2"
+              },
+              "event": "RESTORED_KEY",
+              "jobId": "26bbf6e12a5b38105783428ea6f8591d",
+              "operatorUid": "flink-stability-keyed-prefix-v1",
+              "executionAttempt": 1,
+              "subtask": 0,
+              "checkpointId": 1,
+              "restoredCheckpointId": 1,
+              "lineNumber": 683,
+              "progress": null,
+              "keyProgress": {
+                "keyCount": 8,
+                "key": 3,
+                "inputId": 235,
+                "previousCount": 29,
+                "previousSum": 3364,
+                "newCount": 30,
+                "newSum": 3600
+              },
+              "buildMode": null
+            },
+            {
+              "process": {
+                "logicalName": "taskmanager-1",
+                "runtimeId": "c8ba373fb4a38dbf36e148a6fbf64f8f3cf6e9fdb0114ae8d315926f163d1e3a",
+                "process": "taskmanager-1#2"
+              },
+              "event": "RESTORED_KEY",
+              "jobId": "26bbf6e12a5b38105783428ea6f8591d",
+              "operatorUid": "flink-stability-keyed-prefix-v1",
+              "executionAttempt": 1,
+              "subtask": 0,
+              "checkpointId": 1,
+              "restoredCheckpointId": 1,
+              "lineNumber": 684,
+              "progress": null,
+              "keyProgress": {
+                "keyCount": 8,
+                "key": 4,
+                "inputId": 236,
+                "previousCount": 29,
+                "previousSum": 3393,
+                "newCount": 30,
+                "newSum": 3630
+              },
+              "buildMode": null
+            },
+            {
+              "process": {
+                "logicalName": "taskmanager-1",
+                "runtimeId": "c8ba373fb4a38dbf36e148a6fbf64f8f3cf6e9fdb0114ae8d315926f163d1e3a",
+                "process": "taskmanager-1#2"
+              },
+              "event": "RESTORED_KEY",
+              "jobId": "26bbf6e12a5b38105783428ea6f8591d",
+              "operatorUid": "flink-stability-keyed-prefix-v1",
+              "executionAttempt": 1,
+              "subtask": 0,
+              "checkpointId": 1,
+              "restoredCheckpointId": 1,
+              "lineNumber": 685,
+              "progress": null,
+              "keyProgress": {
+                "keyCount": 8,
+                "key": 5,
+                "inputId": 237,
+                "previousCount": 29,
+                "previousSum": 3422,
+                "newCount": 30,
+                "newSum": 3660
+              },
+              "buildMode": null
+            },
+            {
+              "process": {
+                "logicalName": "taskmanager-1",
+                "runtimeId": "c8ba373fb4a38dbf36e148a6fbf64f8f3cf6e9fdb0114ae8d315926f163d1e3a",
+                "process": "taskmanager-1#2"
+              },
+              "event": "RESTORED_KEY",
+              "jobId": "26bbf6e12a5b38105783428ea6f8591d",
+              "operatorUid": "flink-stability-keyed-prefix-v1",
+              "executionAttempt": 1,
+              "subtask": 0,
+              "checkpointId": 1,
+              "restoredCheckpointId": 1,
+              "lineNumber": 686,
+              "progress": null,
+              "keyProgress": {
+                "keyCount": 8,
+                "key": 6,
+                "inputId": 238,
+                "previousCount": 29,
+                "previousSum": 3451,
+                "newCount": 30,
+                "newSum": 3690
+              },
+              "buildMode": null
+            },
+            {
+              "process": {
+                "logicalName": "taskmanager-1",
+                "runtimeId": "c8ba373fb4a38dbf36e148a6fbf64f8f3cf6e9fdb0114ae8d315926f163d1e3a",
+                "process": "taskmanager-1#2"
+              },
+              "event": "RESTORED_KEY",
+              "jobId": "26bbf6e12a5b38105783428ea6f8591d",
+              "operatorUid": "flink-stability-keyed-prefix-v1",
+              "executionAttempt": 1,
+              "subtask": 0,
+              "checkpointId": 1,
+              "restoredCheckpointId": 1,
+              "lineNumber": 679,
+              "progress": null,
+              "keyProgress": {
+                "keyCount": 8,
+                "key": 7,
+                "inputId": 231,
+                "previousCount": 28,
+                "previousSum": 3248,
+                "newCount": 29,
+                "newSum": 3480
+              },
+              "buildMode": null
+            }
+          ],
+          "mutantResets": []
+        },
+        "errors": [],
+        "confirmed": true,
+        "finalCaptureConfirmed": true
+      }
+    ],
+    "subjectClasses": {
+      "status": "confirmed",
+      "expectedSource": "/opt/flink/lib/flink-stability-connector-00000000-6bb63f7b09930d99745325393b481c092b0c26d626e738b7a1fd6fd8d7d4f1da.jar",
+      "detail": "every observed entry-class load came from /opt/flink/lib/flink-stability-connector-00000000-6bb63f7b09930d99745325393b481c092b0c26d626e738b7a1fd6fd8d7d4f1da.jar and one TaskManager loaded every entry class",
+      "processes": [
+        {
+          "process": "jobmanager-1#1",
+          "sources": {
+            "org.apache.flink.connector.kafka.source.KafkaSource": [
+              "/opt/flink/lib/flink-stability-connector-00000000-6bb63f7b09930d99745325393b481c092b0c26d626e738b7a1fd6fd8d7d4f1da.jar"
+            ],
+            "org.apache.flink.connector.kafka.sink.KafkaSink": [
+              "/opt/flink/lib/flink-stability-connector-00000000-6bb63f7b09930d99745325393b481c092b0c26d626e738b7a1fd6fd8d7d4f1da.jar"
+            ]
+          }
+        },
+        {
+          "process": "taskmanager-1#1",
+          "sources": {
+            "org.apache.flink.connector.kafka.source.KafkaSource": [
+              "/opt/flink/lib/flink-stability-connector-00000000-6bb63f7b09930d99745325393b481c092b0c26d626e738b7a1fd6fd8d7d4f1da.jar"
+            ],
+            "org.apache.flink.connector.kafka.sink.KafkaSink": [
+              "/opt/flink/lib/flink-stability-connector-00000000-6bb63f7b09930d99745325393b481c092b0c26d626e738b7a1fd6fd8d7d4f1da.jar"
+            ]
+          }
+        },
+        {
+          "process": "taskmanager-1#2",
+          "sources": {
+            "org.apache.flink.connector.kafka.source.KafkaSource": [
+              "/opt/flink/lib/flink-stability-connector-00000000-6bb63f7b09930d99745325393b481c092b0c26d626e738b7a1fd6fd8d7d4f1da.jar"
+            ],
+            "org.apache.flink.connector.kafka.sink.KafkaSink": [
+              "/opt/flink/lib/flink-stability-connector-00000000-6bb63f7b09930d99745325393b481c092b0c26d626e738b7a1fd6fd8d7d4f1da.jar"
+            ]
+          }
+        }
+      ]
+    },
+    "sinkTransactions": {
+      "status": "listed",
+      "transactionalIdPrefix": "keyed-prefix",
+      "total": 27,
+      "unresolved": []
+    },
+    "flinkComponents": 3,
+    "flinkRuntime": {
+      "identityKind": "docker-image-id",
+      "status": "confirmed",
+      "detail": "Every recorded Flink incarnation used local Docker image sha256:2e93ded2cb7bf1a50f71b663d5e3ea01420bcc4e549cbf666d05120f939713c7; initial, replacement, and fenced process identities are covered",
+      "expectedImageId": "sha256:2e93ded2cb7bf1a50f71b663d5e3ea01420bcc4e549cbf666d05120f939713c7",
+      "config": {
+        "execution.checkpointing.data-inline-threshold": "0 b",
+        "execution.checkpointing.max-concurrent-checkpoints": "1",
+        "execution.checkpointing.tolerable-failed-checkpoints": "10"
+      },
+      "runtimeJar": {
+        "status": "not-requested"
+      },
+      "connectorArtifactSets": [
+        [
+          {
+            "index": 0,
+            "containerPath": "/opt/flink/lib/flink-stability-connector-00000000-6bb63f7b09930d99745325393b481c092b0c26d626e738b7a1fd6fd8d7d4f1da.jar",
+            "sha256": "6bb63f7b09930d99745325393b481c092b0c26d626e738b7a1fd6fd8d7d4f1da"
+          },
+          {
+            "index": 1,
+            "containerPath": "/opt/flink/lib/flink-stability-connector-00000001-4eeeae8d20c078abb64b015ec158add383ac581571cddc45c68f0c9ae0230720.jar",
+            "sha256": "4eeeae8d20c078abb64b015ec158add383ac581571cddc45c68f0c9ae0230720"
+          },
+          {
+            "index": 2,
+            "containerPath": "/opt/flink/lib/flink-stability-connector-00000002-d8054ae7c0d1c2d2f55d28e46026ebe5892881f3fab5f439233184381c3b4a1f.jar",
+            "sha256": "d8054ae7c0d1c2d2f55d28e46026ebe5892881f3fab5f439233184381c3b4a1f"
+          },
+          {
+            "index": 3,
+            "containerPath": "/opt/flink/lib/flink-stability-connector-00000003-4b364e6850dc89172fcf1d4dd26b8ff5488eda44ff4657e22dd265203dd5ab3c.jar",
+            "sha256": "4b364e6850dc89172fcf1d4dd26b8ff5488eda44ff4657e22dd265203dd5ab3c"
+          },
+          {
+            "index": 4,
+            "containerPath": "/opt/flink/lib/flink-stability-connector-00000004-e2d202d4606e23aeaf8a5a9632db06f5fefd5b63d251c3f503f9faaa78530e5c.jar",
+            "sha256": "e2d202d4606e23aeaf8a5a9632db06f5fefd5b63d251c3f503f9faaa78530e5c"
+          },
+          {
+            "index": 5,
+            "containerPath": "/opt/flink/lib/flink-stability-connector-00000005-f30d77f5826b9e9813342e84ab412095ed4ed5cf4fef6f93cebb848cb0fd0294.jar",
+            "sha256": "f30d77f5826b9e9813342e84ab412095ed4ed5cf4fef6f93cebb848cb0fd0294"
+          },
+          {
+            "index": 6,
+            "containerPath": "/opt/flink/lib/flink-stability-connector-00000006-bcf39f152c5553c2501a491fc4a73c5b0330741e8eed96a481323b8ee89738af.jar",
+            "sha256": "bcf39f152c5553c2501a491fc4a73c5b0330741e8eed96a481323b8ee89738af"
+          },
+          {
+            "index": 7,
+            "containerPath": "/opt/flink/lib/flink-stability-connector-00000007-581bd61000ef7648943f781ca05689e56d03f6052748365a8e2b3a9b5d3fa32f.jar",
+            "sha256": "581bd61000ef7648943f781ca05689e56d03f6052748365a8e2b3a9b5d3fa32f"
+          },
+          {
+            "index": 8,
+            "containerPath": "/opt/flink/lib/flink-stability-connector-00000008-b6c3237e24b8252a5a9c3a0e1ae30ef8f323412e74bd358548b7a9e527d676df.jar",
+            "sha256": "b6c3237e24b8252a5a9c3a0e1ae30ef8f323412e74bd358548b7a9e527d676df"
+          },
+          {
+            "index": 9,
+            "containerPath": "/opt/flink/lib/flink-stability-connector-00000009-a58a84c4271e50df4c96ed916ccb7e48a869f8ed9cdcda1ad5d3d4c33b0214a3.jar",
+            "sha256": "a58a84c4271e50df4c96ed916ccb7e48a869f8ed9cdcda1ad5d3d4c33b0214a3"
+          },
+          {
+            "index": 10,
+            "containerPath": "/opt/flink/lib/flink-stability-connector-00000010-4c766cb3f855415ee734b2392949a0b6f12a60879334a74518deaf6270d32e36.jar",
+            "sha256": "4c766cb3f855415ee734b2392949a0b6f12a60879334a74518deaf6270d32e36"
+          },
+          {
+            "index": 11,
+            "containerPath": "/opt/flink/lib/flink-stability-connector-00000011-d3ef575e3e4979678dc01bf1dcce51021493b4d11fb7f1be8ad982877c16a1c0.jar",
+            "sha256": "d3ef575e3e4979678dc01bf1dcce51021493b4d11fb7f1be8ad982877c16a1c0"
+          }
+        ]
+      ],
+      "components": [
+        {
+          "logicalName": "jobmanager-1",
+          "role": "job_manager",
+          "runtimeId": "9fb54a11520838f3c68ca834f8d1f2d3766fa4062ac112d45631d147e140a1b8",
+          "imageReference": "flink:2.2.0",
+          "imageId": "sha256:2e93ded2cb7bf1a50f71b663d5e3ea01420bcc4e549cbf666d05120f939713c7",
+          "targetBindingSha256": "337c49c3e240250602169fd2e4a151877d6263e61be41f452196144a98ca25d8",
+          "classpathManifestSha256": "a54ace901de9a3498bb7a2deb90c19f10bdd438bcb3c49b6b36e71db9f2fe473",
+          "config": {
+            "execution.checkpointing.data-inline-threshold": "0 b",
+            "execution.checkpointing.max-concurrent-checkpoints": "1",
+            "execution.checkpointing.tolerable-failed-checkpoints": "10"
+          },
+          "effectiveConfiguration": {
+            "path": "/opt/flink/conf/config.yaml",
+            "sourceSha256": "16b1a9b87fd7085777508cfbd88b8a7af8902414e88aa6d52fa59c420c880c51",
+            "observedSha256": "16b1a9b87fd7085777508cfbd88b8a7af8902414e88aa6d52fa59c420c880c51",
+            "launcher": [
+              "/bin/bash",
+              "/opt/flink/flink-stability-launch.sh",
+              "jobmanager"
+            ],
+            "observedValues": {
+              "execution.checkpointing.data-inline-threshold": "0 b",
+              "execution.checkpointing.max-concurrent-checkpoints": "1",
+              "execution.checkpointing.tolerable-failed-checkpoints": "10"
+            }
+          },
+          "classLoadProcess": "jobmanager-1#1",
+          "connectorArtifactsRef": 0
+        },
+        {
+          "logicalName": "taskmanager-1",
+          "role": "task_manager",
+          "runtimeId": "c46d3ab92aa3c094c1956a35ff650f9b33ba76e05c9f819fd721b18afe1639cb",
+          "imageReference": "flink:2.2.0",
+          "imageId": "sha256:2e93ded2cb7bf1a50f71b663d5e3ea01420bcc4e549cbf666d05120f939713c7",
+          "targetBindingSha256": "337c49c3e240250602169fd2e4a151877d6263e61be41f452196144a98ca25d8",
+          "classpathManifestSha256": "a54ace901de9a3498bb7a2deb90c19f10bdd438bcb3c49b6b36e71db9f2fe473",
+          "config": {
+            "execution.checkpointing.data-inline-threshold": "0 b",
+            "execution.checkpointing.max-concurrent-checkpoints": "1",
+            "execution.checkpointing.tolerable-failed-checkpoints": "10"
+          },
+          "effectiveConfiguration": {
+            "path": "/opt/flink/conf/config.yaml",
+            "sourceSha256": "3adb41ea09a4cab53c7ae2d5928e18f3572fe7e6d89a63132b4fd77d2ff3cb93",
+            "observedSha256": "3adb41ea09a4cab53c7ae2d5928e18f3572fe7e6d89a63132b4fd77d2ff3cb93",
+            "launcher": [
+              "/bin/bash",
+              "/opt/flink/flink-stability-launch.sh",
+              "taskmanager"
+            ],
+            "observedValues": {
+              "execution.checkpointing.data-inline-threshold": "0 b",
+              "execution.checkpointing.max-concurrent-checkpoints": "1",
+              "execution.checkpointing.tolerable-failed-checkpoints": "10"
+            }
+          },
+          "classLoadProcess": "taskmanager-1#1",
+          "connectorArtifactsRef": 0
+        },
+        {
+          "logicalName": "taskmanager-1",
+          "role": "task_manager",
+          "runtimeId": "c8ba373fb4a38dbf36e148a6fbf64f8f3cf6e9fdb0114ae8d315926f163d1e3a",
+          "imageReference": "flink:2.2.0",
+          "imageId": "sha256:2e93ded2cb7bf1a50f71b663d5e3ea01420bcc4e549cbf666d05120f939713c7",
+          "targetBindingSha256": "337c49c3e240250602169fd2e4a151877d6263e61be41f452196144a98ca25d8",
+          "classpathManifestSha256": "a54ace901de9a3498bb7a2deb90c19f10bdd438bcb3c49b6b36e71db9f2fe473",
+          "config": {
+            "execution.checkpointing.data-inline-threshold": "0 b",
+            "execution.checkpointing.max-concurrent-checkpoints": "1",
+            "execution.checkpointing.tolerable-failed-checkpoints": "10"
+          },
+          "effectiveConfiguration": {
+            "path": "/opt/flink/conf/config.yaml",
+            "sourceSha256": "1824dcb1aa1a774ea8bd99ff43f624ab26c0ab9ad1a9b28e51e3ce0b1be1b03f",
+            "observedSha256": "1824dcb1aa1a774ea8bd99ff43f624ab26c0ab9ad1a9b28e51e3ce0b1be1b03f",
+            "launcher": [
+              "/bin/bash",
+              "/opt/flink/flink-stability-launch.sh",
+              "taskmanager"
+            ],
+            "observedValues": {
+              "execution.checkpointing.data-inline-threshold": "0 b",
+              "execution.checkpointing.max-concurrent-checkpoints": "1",
+              "execution.checkpointing.tolerable-failed-checkpoints": "10"
+            }
+          },
+          "classLoadProcess": "taskmanager-1#2",
+          "connectorArtifactsRef": 0
+        }
+      ]
+    }
+  },
+  "_publication": {
+    "kind": "sanitized-projection",
+    "originalSourcePath": "jobs/checkpoint-storage-integration-pilots-20261027-02/attempts/correct-eio/run/pilot-03/stdout.json",
+    "originalSha256": "e9625a6a0cfe4f5e828a5b251479c0dad01d608e07c9711682a21fa472aab03a",
+    "originalBytes": 17659385,
+    "sanitizationNotes": [
+      "Host workspace<host-home> paths replaced with <workspace>, <host-home>, <host-temporary>; Docker/container paths are retained.",
+      "Original bytes remain in the local jobs evidence; this publication is not a replayable raw proof.",
+      "Detailed omitted fields are listed in publicationOmissions; counts, verdicts, diagnostics and component events are retained."
+    ],
+    "publicationOmissions": [
+      {
+        "jsonPointer": "/evidence/kafkaLogs",
+        "kind": "non-selected-evidence"
+      },
+      {
+        "jsonPointer": "/evidence/savepointRestores",
+        "kind": "non-selected-evidence"
+      },
+      {
+        "jsonPointer": "/evidence/flinkHa",
+        "kind": "non-selected-evidence"
+      },
+      {
+        "jsonPointer": "/evidence/kafkaTransactionVersion",
+        "kind": "non-selected-evidence"
+      },
+      {
+        "jsonPointer": "/evidence/packetFaults",
+        "kind": "non-selected-evidence"
+      },
+      {
+        "jsonPointer": "/evidence/brokerOperations",
+        "kind": "non-selected-evidence"
+      },
+      {
+        "jsonPointer": "/evidence/networkFaults",
+        "kind": "non-selected-evidence"
+      },
+      {
+        "jsonPointer": "/evidence/stateRecovery/trace/markers",
+        "kind": "array",
+        "items": 58
+      },
+      {
+        "jsonPointer": "/evidence/stateRecovery/readinessAttempts",
+        "kind": "detailed-readiness",
+        "items": 1
+      },
+      {
+        "jsonPointer": "/evidence/stateRecovery/recoveries/0/readiness",
+        "kind": "duplicate-readiness"
+      },
+      {
+        "jsonPointer": "/evidence/checkpointStorage/instances/0/operations",
+        "kind": "array",
+        "items": 11932
+      },
+      {
+        "jsonPointer": "/evidence/checkpointStorage/instances/0/commands",
+        "kind": "array",
+        "items": 10
+      },
+      {
+        "jsonPointer": "/evidence/checkpointStorage/instances/1/operations",
+        "kind": "array",
+        "items": 647
+      },
+      {
+        "jsonPointer": "/evidence/checkpointStorage/instances/1/commands",
+        "kind": "array",
+        "items": 6
+      },
+      {
+        "jsonPointer": "/evidence/checkpointStorage/instances/2/operations",
+        "kind": "array",
+        "items": 4612
+      },
+      {
+        "jsonPointer": "/evidence/checkpointStorage/instances/2/commands",
+        "kind": "array",
+        "items": 1
+      },
+      {
+        "jsonPointer": "/evidence/checkpointStorageFaults/0/failureTrace/markers",
+        "kind": "array",
+        "items": 6
+      },
+      {
+        "jsonPointer": "/evidence/checkpointStorageFaults/0/recoveryTrace/markers",
+        "kind": "array",
+        "items": 18
+      },
+      {
+        "jsonPointer": "/evidence/checkpointStorageFaults/0/samples/0/storage/instances/0/operations",
+        "kind": "array",
+        "items": 691
+      },
+      {
+        "jsonPointer": "/evidence/checkpointStorageFaults/0/samples/0/storage/instances/0/commands",
+        "kind": "array",
+        "items": 2
+      },
+      {
+        "jsonPointer": "/evidence/checkpointStorageFaults/0/samples/0/storage/instances/1/operations",
+        "kind": "array",
+        "items": 143
+      },
+      {
+        "jsonPointer": "/evidence/checkpointStorageFaults/0/samples/0/storage/instances/1/commands",
+        "kind": "array",
+        "items": 2
+      },
+      {
+        "jsonPointer": "/evidence/checkpointStorageFaults/0/samples/1/storage/instances/0/operations",
+        "kind": "array",
+        "items": 693
+      },
+      {
+        "jsonPointer": "/evidence/checkpointStorageFaults/0/samples/1/storage/instances/0/commands",
+        "kind": "array",
+        "items": 4
+      },
+      {
+        "jsonPointer": "/evidence/checkpointStorageFaults/0/samples/1/storage/instances/1/operations",
+        "kind": "array",
+        "items": 145
+      },
+      {
+        "jsonPointer": "/evidence/checkpointStorageFaults/0/samples/1/storage/instances/1/commands",
+        "kind": "array",
+        "items": 4
+      },
+      {
+        "jsonPointer": "/evidence/checkpointStorageFaults/0/samples/2/storage/instances/0/operations",
+        "kind": "array",
+        "items": 762
+      },
+      {
+        "jsonPointer": "/evidence/checkpointStorageFaults/0/samples/2/storage/instances/0/commands",
+        "kind": "array",
+        "items": 6
+      },
+      {
+        "jsonPointer": "/evidence/checkpointStorageFaults/0/samples/2/storage/instances/1/operations",
+        "kind": "array",
+        "items": 647
+      },
+      {
+        "jsonPointer": "/evidence/checkpointStorageFaults/0/samples/2/storage/instances/1/commands",
+        "kind": "array",
+        "items": 6
+      },
+      {
+        "jsonPointer": "/evidence/checkpointStorageFaults/0/samples/3/storage/instances/0/operations",
+        "kind": "array",
+        "items": 897
+      },
+      {
+        "jsonPointer": "/evidence/checkpointStorageFaults/0/samples/3/storage/instances/0/commands",
+        "kind": "array",
+        "items": 7
+      },
+      {
+        "jsonPointer": "/evidence/checkpointStorageFaults/0/samples/3/storage/instances/1/operations",
+        "kind": "array",
+        "items": 647
+      },
+      {
+        "jsonPointer": "/evidence/checkpointStorageFaults/0/samples/3/storage/instances/1/commands",
+        "kind": "array",
+        "items": 6
+      },
+      {
+        "jsonPointer": "/evidence/checkpointStorageFaults/0/samples/4/storage/instances/0/operations",
+        "kind": "array",
+        "items": 899
+      },
+      {
+        "jsonPointer": "/evidence/checkpointStorageFaults/0/samples/4/storage/instances/0/commands",
+        "kind": "array",
+        "items": 9
+      },
+      {
+        "jsonPointer": "/evidence/checkpointStorageFaults/0/samples/4/storage/instances/1/operations",
+        "kind": "array",
+        "items": 647
+      },
+      {
+        "jsonPointer": "/evidence/checkpointStorageFaults/0/samples/4/storage/instances/1/commands",
+        "kind": "array",
+        "items": 6
+      },
+      {
+        "jsonPointer": "/evidence/checkpointStorageFaults/0/samples/5/storage/instances/0/operations",
+        "kind": "array",
+        "items": 1418
+      },
+      {
+        "jsonPointer": "/evidence/checkpointStorageFaults/0/samples/5/storage/instances/0/commands",
+        "kind": "array",
+        "items": 10
+      },
+      {
+        "jsonPointer": "/evidence/checkpointStorageFaults/0/samples/5/storage/instances/1/operations",
+        "kind": "array",
+        "items": 647
+      },
+      {
+        "jsonPointer": "/evidence/checkpointStorageFaults/0/samples/5/storage/instances/1/commands",
+        "kind": "array",
+        "items": 6
+      },
+      {
+        "jsonPointer": "/evidence/checkpointStorageFaults/0/samples/5/storage/instances/2/operations",
+        "kind": "array",
+        "items": 1993
+      },
+      {
+        "jsonPointer": "/evidence/checkpointStorageFaults/0/samples/5/storage/instances/2/commands",
+        "kind": "array",
+        "items": 1
+      },
+      {
+        "jsonPointer": "/evidence/checkpointStorage/instances/1/verification/jvmCommand",
+        "kind": "long-text-excerpt",
+        "originalCharacters": 4241,
+        "publishedCharacters": 2048
+      },
+      {
+        "jsonPointer": "/evidence/checkpointStorage/instances/2/verification/jvmCommand",
+        "kind": "long-text-excerpt",
+        "originalCharacters": 4241,
+        "publishedCharacters": 2048
+      },
+      {
+        "jsonPointer": "/evidence/checkpointStorageFaults/0/triggerResult/failure",
+        "kind": "long-text-excerpt",
+        "originalCharacters": 220453,
+        "publishedCharacters": 2048
+      },
+      {
+        "jsonPointer": "/evidence/checkpointStorageFaults/0/samples/0/storage",
+        "kind": "stage-storage-summary",
+        "omitted": "duplicate verification, paths, materialization and command/operation arrays"
+      },
+      {
+        "jsonPointer": "/evidence/checkpointStorageFaults/0/samples/1/storage",
+        "kind": "stage-storage-summary",
+        "omitted": "duplicate verification, paths, materialization and command/operation arrays"
+      },
+      {
+        "jsonPointer": "/evidence/checkpointStorageFaults/0/samples/2/storage",
+        "kind": "stage-storage-summary",
+        "omitted": "duplicate verification, paths, materialization and command/operation arrays"
+      },
+      {
+        "jsonPointer": "/evidence/checkpointStorageFaults/0/samples/3/storage",
+        "kind": "stage-storage-summary",
+        "omitted": "duplicate verification, paths, materialization and command/operation arrays"
+      },
+      {
+        "jsonPointer": "/evidence/checkpointStorageFaults/0/samples/4/storage",
+        "kind": "stage-storage-summary",
+        "omitted": "duplicate verification, paths, materialization and command/operation arrays"
+      },
+      {
+        "jsonPointer": "/evidence/checkpointStorageFaults/0/samples/5/storage",
+        "kind": "stage-storage-summary",
+        "omitted": "duplicate verification, paths, materialization and command/operation arrays"
+      }
+    ]
+  }
+}

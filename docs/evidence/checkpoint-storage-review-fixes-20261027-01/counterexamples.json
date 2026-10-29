@@ -1,0 +1,111 @@
+{
+  "allRejected": true,
+  "originalEvidenceModified": false,
+  "manifestSha256": "c9f673f7cd883796b58e8a4dd70e61646e50a8bfaab026cc07bf4d7d1448d945",
+  "verifierSha256": {
+    "check.py": "7bb17e58606cdf965107108dfdf76e1a065c095dd9fcdc5f2a62074292698e56",
+    "audit.py": "dde7b9375095ec7c974e4405fab3f989e46f577997ee0a187b644468083a4df6",
+    "framework.py": "c328b7b4a9b549ddc45bd99751eaf632517fd71afd867462c6e029f2c759e89a",
+    "state_recovery_check.py": "03635fbd2760240d02491a8a22d4caccd953434e676ba450675922caba81a6f5",
+    "component_events.py": "77bb40fc37fceee0771cc9a87b003873c396802a6f407e6e6d8e2f88289f1af5"
+  },
+  "counterexamples": [
+    {
+      "counterexample": "30001 mismatches for 30000 records",
+      "rejected": true,
+      "error": "State totals are missing or out of bounds"
+    },
+    {
+      "counterexample": "negative mutant count and sum",
+      "rejected": true,
+      "error": "Malformed numeric mismatch sample"
+    },
+    {
+      "counterexample": "deleted component events with unchanged raw logs",
+      "rejected": true,
+      "error": "Component retained-prefix audit failed: Component event list is incomplete or differs from captured output",
+      "independentComponentAudit": {
+        "coverage": "retained-final-prefix",
+        "originalCaptureBoundaryKnown": false,
+        "completeProcessLifetime": false,
+        "originalCaptureCoverage": "captured-prefix",
+        "reportedEventCount": 0,
+        "events": [
+          {
+            "process": "taskmanager-1#2",
+            "timestamp": "2026-10-27 13:21:56,114",
+            "level": "INFO",
+            "logger": "org.apache.kafka.clients.producer.internals.TransactionManager",
+            "kinds": [
+              "producer-fenced"
+            ],
+            "message": "[Producer clientId=producer-keyed-prefix-0-1, transactionalId=keyed-prefix-0-1] Transiting to fatal error state due to org.apache.kafka.common.errors.ProducerFencedException: There is a newer producer with the same transactionalId which fences the current one.",
+            "transactionalId": "keyed-prefix-0-1"
+          },
+          {
+            "process": "taskmanager-1#2",
+            "timestamp": "2026-10-27 13:21:56,117",
+            "level": "ERROR",
+            "logger": "org.apache.flink.connector.kafka.sink.internal.KafkaCommitter",
+            "kinds": [
+              "producer-fenced"
+            ],
+            "message": "Unable to commit transaction (CommitRequestImpl{state=RECEIVED, numRetries=0, committable=KafkaCommittable{producerId=1, epoch=1, transactionalId='keyed-prefix-0-1', producer=null}}) because its producer is already fenced. This means that you either have a different producer with the same 'transactional.id' (this is unlikely with the 'KafkaSink' as all generated ids are unique and shouldn't be reused) or recovery took longer than 'transaction.timeout.ms' (7200000ms). In both cases this most likely signals data loss, please consult the Flink documentation for more details.",
+            "producerId": "1",
+            "epoch": "1",
+            "transactionalId": "keyed-prefix-0-1"
+          }
+        ],
+        "eventCount": 2,
+        "captures": [
+          {
+            "process": "jobmanager-1#1",
+            "bytes": 137146,
+            "sha256": "9500779cab571180968b361f022e44737c5be380fb4eb7b22a5be295a7a08488",
+            "newlineTerminated": true
+          },
+          {
+            "process": "taskmanager-1#1",
+            "bytes": 83204,
+            "sha256": "69e45b63ecd8ba8d675d22115ed0cd9c4801a8331283ac1a400e6bddc1804ade",
+            "newlineTerminated": true
+          },
+          {
+            "process": "taskmanager-1#2",
+            "bytes": 170097,
+            "sha256": "602dc520cf0e733ef35b1464cd14a8a0d3cb6aa8661dcbe4c67dd15e941fb02f",
+            "newlineTerminated": true
+          }
+        ],
+        "diagnostics": [
+          "Component event list is incomplete or differs from captured output"
+        ],
+        "complete": false,
+        "consistent": false,
+        "confirmed": false,
+        "limitation": "Checks the entire hashed retained final prefix for every physical process; does not establish the original parser read boundary or complete process lifetime."
+      }
+    },
+    {
+      "counterexample": "all live intervals overlap",
+      "rejected": true,
+      "error": "attempts/correct-healthy/run-2: live execution overlaps or precedes preflight/previous attempt"
+    },
+    {
+      "counterexample": "all live intervals precede preflight",
+      "rejected": true,
+      "error": "attempts/correct-healthy/run-1: live execution overlaps or precedes preflight/previous attempt"
+    }
+  ],
+  "_publication": {
+    "kind": "sanitized-copy",
+    "originalSourcePath": "jobs/checkpoint-storage-review-fixes-20261027-01/counterexamples.json",
+    "originalSha256": "ab602b5aa6f978a9257776a3c96883796026fdff059f0cfb918c983c681df4c0",
+    "originalBytes": 4675,
+    "sanitizationNotes": [
+      "Host workspace<host-home> paths replaced with <workspace>, <host-home>, <host-temporary>; Docker/container paths are retained.",
+      "Original bytes remain in the local jobs evidence; this publication is not a replayable raw proof."
+    ],
+    "publicationOmissions": []
+  }
+}

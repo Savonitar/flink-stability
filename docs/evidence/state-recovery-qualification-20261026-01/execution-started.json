@@ -1,0 +1,16 @@
+{
+  "attempts": 12,
+  "automaticRetries": 0,
+  "dockerApiVersion": "1.44",
+  "_publication": {
+    "kind": "sanitized-copy",
+    "originalSourcePath": "jobs/state-recovery-qualification-20261026-01/execution-started.json",
+    "originalSha256": "5151003599459d88361a89334ca0bd8c8b29c2aca2a09172aa5b2c3ab2841cbc",
+    "originalBytes": 68,
+    "sanitizationNotes": [
+      "Host workspace<host-home> paths replaced with <workspace>, <host-home>, <host-temporary>; Docker/container paths are retained.",
+      "Original bytes remain in the local jobs evidence; this publication is not a replayable raw proof."
+    ],
+    "publicationOmissions": []
+  }
+}

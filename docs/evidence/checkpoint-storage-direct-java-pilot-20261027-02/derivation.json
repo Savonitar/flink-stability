@@ -1,0 +1,15 @@
+{
+  "source": "jobs/checkpoint-storage-direct-java-pilot-20261027-01",
+  "reason": "The initial pilot imported frozen framework.py without -B; Python generated __pycache__, correctly rejected by exact inventory. No CLI or containers started. This fresh pilot uses -B with the same pinned framework bytes.",
+  "_publication": {
+    "kind": "sanitized-copy",
+    "originalSourcePath": "jobs/checkpoint-storage-direct-java-pilot-20261027-02/derivation.json",
+    "originalSha256": "f8ed8763baa122a52db53dfb1555362c4e124612a208ca728c849cdc623efbbb",
+    "originalBytes": 308,
+    "sanitizationNotes": [
+      "Host workspace<host-home> paths replaced with <workspace>, <host-home>, <host-temporary>; Docker/container paths are retained.",
+      "Original bytes remain in the local jobs evidence; this publication is not a replayable raw proof."
+    ],
+    "publicationOmissions": []
+  }
+}

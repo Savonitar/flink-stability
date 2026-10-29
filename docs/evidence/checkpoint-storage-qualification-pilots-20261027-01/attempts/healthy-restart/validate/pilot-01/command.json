@@ -1,0 +1,41 @@
+{
+  "argv": [
+    "<host-home>/.sdkman/candidates/maven/current/bin/mvn",
+    "-o",
+    "-q",
+    "-B",
+    "-ntp",
+    "-s",
+    "<workspace>/jobs/checkpoint-storage-qualification-pilots-20261027-01/attempts/healthy-restart/validate/pilot-01/settings.xml",
+    "-gs",
+    "<workspace>/jobs/checkpoint-storage-qualification-pilots-20261027-01/attempts/healthy-restart/validate/pilot-01/settings.xml",
+    "-Dmaven.repo.local=<host-home>/.m2/repository",
+    "-Dapi.version=1.44",
+    "-f",
+    "<workspace>/pom.xml",
+    "exec:java",
+    "-pl",
+    "cli",
+    "-Dexec.args=validate --catalog-root <workspace>/jobs/checkpoint-storage-qualification-pilots-20261027-01/catalogs/healthy-restart --scenario checkpoint-storage-healthy-restart --artifact-root <workspace> --show-plan --offline"
+  ],
+  "cwd": "<workspace>/jobs/checkpoint-storage-qualification-pilots-20261027-01/attempts/healthy-restart/validate/pilot-01",
+  "case": "healthy-restart",
+  "operation": "validate",
+  "automaticRetries": 0,
+  "timeoutSeconds": 900,
+  "manifestSha256": "83ef2dac940de71ef08c4a6ce77604150e97a1fb5904d3520074664e39086280",
+  "dockerEndpoint": "unix://<host-home>/.docker/run/docker.sock",
+  "emptySettings": "settings.xml",
+  "emptyDockerConfig": "docker-config",
+  "_publication": {
+    "kind": "sanitized-copy",
+    "originalSourcePath": "jobs/checkpoint-storage-qualification-pilots-20261027-01/attempts/healthy-restart/validate/pilot-01/command.json",
+    "originalSha256": "3f258ccdf20fb8fc4d59b7d31c4d1e3fbf4d11ba6690f4635ce29ea491da0940",
+    "originalBytes": 1568,
+    "sanitizationNotes": [
+      "Host workspace<host-home> paths replaced with <workspace>, <host-home>, <host-temporary>; Docker/container paths are retained.",
+      "Original bytes remain in the local jobs evidence; this publication is not a replayable raw proof."
+    ],
+    "publicationOmissions": []
+  }
+}

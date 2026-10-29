@@ -1,0 +1,43 @@
+{
+  "kind": "verification-log-summary",
+  "sourceLineCount": 251,
+  "summaryLines": [
+    {
+      "line": 80,
+      "text": "[INFO] Tests run: 18, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.052 s -- in org.savonitar.flink.stability.core.execution.ScenarioVerdictTest"
+    },
+    {
+      "line": 82,
+      "text": "[INFO] Tests run: 31, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.027 s -- in org.savonitar.flink.stability.core.execution.FlinkRuntimeIdentityTest"
+    },
+    {
+      "line": 84,
+      "text": "[INFO] Tests run: 28, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.200 s -- in org.savonitar.flink.stability.core.execution.CheckpointStorageFaultTest"
+    },
+    {
+      "line": 88,
+      "text": "[INFO] Tests run: 77, Failures: 0, Errors: 0, Skipped: 0"
+    },
+    {
+      "line": 247,
+      "text": "[INFO] BUILD SUCCESS"
+    },
+    {
+      "line": 249,
+      "text": "[INFO] Total time:  6.509 s"
+    }
+  ],
+  "scope": "Selected test totals, build outcome and elapsed-time lines only. Full log, command details and warnings are not reproduced; consult original SHA-256 provenance.",
+  "_publication": {
+    "kind": "log-summary",
+    "originalSourcePath": "jobs/checkpoint-storage-integration-checks-20261027-01/maven-install-07.log",
+    "originalSha256": "57b38242ef361338ce3ea9945fc058cf5ede06e8577017cf5ae55922b6b8c322",
+    "originalBytes": 16802,
+    "sanitizationNotes": [
+      "Host workspace<host-home> paths replaced with <workspace>, <host-home>, <host-temporary>; Docker/container paths are retained.",
+      "Original bytes remain in the local jobs evidence; this publication is not a replayable raw proof.",
+      "Only numbered aggregate test/build summary lines are included; no raw Maven/Python/native log is copied."
+    ],
+    "publicationOmissions": []
+  }
+}

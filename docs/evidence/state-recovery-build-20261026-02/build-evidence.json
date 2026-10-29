@@ -1,0 +1,145 @@
+{
+  "version": 1,
+  "mutation": "reset-state-on-restore-v1",
+  "mutationScope": "Keyed aggregate only; once per key on first event after genuine restore; initial start, source and sink unchanged",
+  "artifacts": {
+    "correct": {
+      "path": "<workspace>/jobs/state-recovery-build-20261026-02/build/correct/flink-job-generator.jar",
+      "sha256": "4c8ca4211b01d26ba0c49a2060259c117b95016fef798b4a0c187a332edd9711",
+      "buildMode": "correct"
+    },
+    "mutant": {
+      "path": "<workspace>/jobs/state-recovery-build-20261026-02/build/mutant/flink-job-generator-state-reset-on-restore.jar",
+      "sha256": "0ad8e5eeec5deb8e732a346dffc54c3675a6cb7c086e5c1bfa23a1389798d54a",
+      "buildMode": "reset-state-on-restore-v1"
+    }
+  },
+  "changedEntries": [
+    "META-INF/MANIFEST.MF",
+    "META-INF/flink-stability/keyed-prefix-build.properties"
+  ],
+  "sourceSnapshots": {
+    "correct": {
+      "path": "<workspace>/jobs/state-recovery-build-20261026-02/sources/correct",
+      "sha256": {
+        "pom.xml": "430cb52bd12a624b74d9f87d3418015fb18b74ac3fc675765e1e1aa53e72e9bd",
+        "flink-job-generator/pom.xml": "49cc9a45456bdba2fd0a2fc427757d61da1a76ed66047e17e0b92726f33b34d2",
+        "flink-job-generator/WorkloadBuildGuard.java": "6d88b29831b46a1563826bf4c7824fe808988d958096c32aef3235cbf2fc51c4",
+        "flink-job-generator/src/main/java/org/savonitar/flink/stability/flinkjob/AsyncSnapshotDelay.java": "033ef97c8dddbfc5dfa9e0be6cb309992cd7205c05606d5fae3b1fd782e253bd",
+        "flink-job-generator/src/main/java/org/savonitar/flink/stability/flinkjob/ConnectorNamingStrategy.java": "3ccf6fe54410f056331b76d58438cd7c1dd85f3e1691cc408ef921d014c70689",
+        "flink-job-generator/src/main/java/org/savonitar/flink/stability/flinkjob/FlinkKafkaEosJob.java": "2b8b560b4f652d4f44e6f582a8a263d31a5a55d489be82cdac6e8ab16308c3de",
+        "flink-job-generator/src/main/java/org/savonitar/flink/stability/flinkjob/FlinkKafkaEosJobArguments.java": "8a2e486ad4513b2e2e9ba4bbc52b22be5a9d96ac7971c018bec04658bfb8da2c",
+        "flink-job-generator/src/main/java/org/savonitar/flink/stability/flinkjob/KeyedPrefixFunction.java": "fdfab8d3c5592595d8645b75bda8028720d5a410913f628951759db578310d29",
+        "flink-job-generator/src/main/java/org/savonitar/flink/stability/flinkjob/StateRecoveryBuild.java": "1ff694e7932486b9cae947a69052577da95909465b9cdb4b12ab9b7c2a62a817",
+        "flink-job-generator/src/main/java/org/savonitar/flink/stability/flinkjob/WorkloadProtocolV1Configuration.java": "1d4d9adebbc8810660cfac47a630ee3c90c81820c927570c3893b9ab9df0f33b",
+        "flink-job-generator/src/main/resources/log4j2.properties": "4063a293e1f0d4dad2b0d1ce87a1d038d4fdd7ba9ef31c9f4666731083bad650",
+        "flink-job-generator/src/test/java/org/savonitar/flink/stability/flinkjob/AsyncSnapshotDelayTest.java": "db93d4a3db4be125ad4095fef8eca23dd18498f42ae9063547d6babd13c0a59d",
+        "flink-job-generator/src/test/java/org/savonitar/flink/stability/flinkjob/ConnectorNamingStrategyTest.java": "c946c63e4c4148a5da709d4284edc492bafd47e70ce9d310eb862e0877a93474",
+        "flink-job-generator/src/test/java/org/savonitar/flink/stability/flinkjob/FlinkKafkaEosJobArgumentsTest.java": "02b2471ae701af4af6c1ca509e44e1fd88691e8915e04349f03cf769d611e123",
+        "flink-job-generator/src/test/java/org/savonitar/flink/stability/flinkjob/KeyedPrefixFunctionTest.java": "41d13ab4bf8f328287afe820fd628eb5f4710e0e17ab7d5acac05f167db89051",
+        "flink-job-generator/src/test/java/org/savonitar/flink/stability/flinkjob/StateRecoveryBuildTest.java": "df04e4ce9932356b20a1eb2574538f10637dad538645bacbb528671b227571c8",
+        "flink-job-generator/src/test/java/org/savonitar/flink/stability/flinkjob/WorkloadProtocolV1ConfigurationTest.java": "41e38a7aa957eac716a8a2fba610cb926144ab8c107c35ab7f59f42960063d34",
+        "flink-job-generator/src/build-identity/META-INF/flink-stability/keyed-prefix-build.properties": "eb171a675d1e0f0c0ac805957675d7d66ebb0c88e8664983aaa76e4171610858"
+      }
+    },
+    "mutant": {
+      "path": "<workspace>/jobs/state-recovery-build-20261026-02/sources/mutant",
+      "sha256": {
+        "pom.xml": "430cb52bd12a624b74d9f87d3418015fb18b74ac3fc675765e1e1aa53e72e9bd",
+        "flink-job-generator/pom.xml": "49cc9a45456bdba2fd0a2fc427757d61da1a76ed66047e17e0b92726f33b34d2",
+        "flink-job-generator/WorkloadBuildGuard.java": "6d88b29831b46a1563826bf4c7824fe808988d958096c32aef3235cbf2fc51c4",
+        "flink-job-generator/src/main/java/org/savonitar/flink/stability/flinkjob/AsyncSnapshotDelay.java": "033ef97c8dddbfc5dfa9e0be6cb309992cd7205c05606d5fae3b1fd782e253bd",
+        "flink-job-generator/src/main/java/org/savonitar/flink/stability/flinkjob/ConnectorNamingStrategy.java": "3ccf6fe54410f056331b76d58438cd7c1dd85f3e1691cc408ef921d014c70689",
+        "flink-job-generator/src/main/java/org/savonitar/flink/stability/flinkjob/FlinkKafkaEosJob.java": "2b8b560b4f652d4f44e6f582a8a263d31a5a55d489be82cdac6e8ab16308c3de",
+        "flink-job-generator/src/main/java/org/savonitar/flink/stability/flinkjob/FlinkKafkaEosJobArguments.java": "8a2e486ad4513b2e2e9ba4bbc52b22be5a9d96ac7971c018bec04658bfb8da2c",
+        "flink-job-generator/src/main/java/org/savonitar/flink/stability/flinkjob/KeyedPrefixFunction.java": "fdfab8d3c5592595d8645b75bda8028720d5a410913f628951759db578310d29",
+        "flink-job-generator/src/main/java/org/savonitar/flink/stability/flinkjob/StateRecoveryBuild.java": "1ff694e7932486b9cae947a69052577da95909465b9cdb4b12ab9b7c2a62a817",
+        "flink-job-generator/src/main/java/org/savonitar/flink/stability/flinkjob/WorkloadProtocolV1Configuration.java": "1d4d9adebbc8810660cfac47a630ee3c90c81820c927570c3893b9ab9df0f33b",
+        "flink-job-generator/src/main/resources/log4j2.properties": "4063a293e1f0d4dad2b0d1ce87a1d038d4fdd7ba9ef31c9f4666731083bad650",
+        "flink-job-generator/src/test/java/org/savonitar/flink/stability/flinkjob/AsyncSnapshotDelayTest.java": "db93d4a3db4be125ad4095fef8eca23dd18498f42ae9063547d6babd13c0a59d",
+        "flink-job-generator/src/test/java/org/savonitar/flink/stability/flinkjob/ConnectorNamingStrategyTest.java": "c946c63e4c4148a5da709d4284edc492bafd47e70ce9d310eb862e0877a93474",
+        "flink-job-generator/src/test/java/org/savonitar/flink/stability/flinkjob/FlinkKafkaEosJobArgumentsTest.java": "02b2471ae701af4af6c1ca509e44e1fd88691e8915e04349f03cf769d611e123",
+        "flink-job-generator/src/test/java/org/savonitar/flink/stability/flinkjob/KeyedPrefixFunctionTest.java": "41d13ab4bf8f328287afe820fd628eb5f4710e0e17ab7d5acac05f167db89051",
+        "flink-job-generator/src/test/java/org/savonitar/flink/stability/flinkjob/StateRecoveryBuildTest.java": "df04e4ce9932356b20a1eb2574538f10637dad538645bacbb528671b227571c8",
+        "flink-job-generator/src/test/java/org/savonitar/flink/stability/flinkjob/WorkloadProtocolV1ConfigurationTest.java": "41e38a7aa957eac716a8a2fba610cb926144ab8c107c35ab7f59f42960063d34",
+        "flink-job-generator/src/build-identity/META-INF/flink-stability/keyed-prefix-build.properties": "eb171a675d1e0f0c0ac805957675d7d66ebb0c88e8664983aaa76e4171610858"
+      }
+    }
+  },
+  "recipeInputSha256": {
+    "pom.xml": "430cb52bd12a624b74d9f87d3418015fb18b74ac3fc675765e1e1aa53e72e9bd",
+    "flink-job-generator/pom.xml": "49cc9a45456bdba2fd0a2fc427757d61da1a76ed66047e17e0b92726f33b34d2",
+    "flink-job-generator/WorkloadBuildGuard.java": "6d88b29831b46a1563826bf4c7824fe808988d958096c32aef3235cbf2fc51c4",
+    "flink-job-generator/src/main/java/org/savonitar/flink/stability/flinkjob/AsyncSnapshotDelay.java": "033ef97c8dddbfc5dfa9e0be6cb309992cd7205c05606d5fae3b1fd782e253bd",
+    "flink-job-generator/src/main/java/org/savonitar/flink/stability/flinkjob/ConnectorNamingStrategy.java": "3ccf6fe54410f056331b76d58438cd7c1dd85f3e1691cc408ef921d014c70689",
+    "flink-job-generator/src/main/java/org/savonitar/flink/stability/flinkjob/FlinkKafkaEosJob.java": "2b8b560b4f652d4f44e6f582a8a263d31a5a55d489be82cdac6e8ab16308c3de",
+    "flink-job-generator/src/main/java/org/savonitar/flink/stability/flinkjob/FlinkKafkaEosJobArguments.java": "8a2e486ad4513b2e2e9ba4bbc52b22be5a9d96ac7971c018bec04658bfb8da2c",
+    "flink-job-generator/src/main/java/org/savonitar/flink/stability/flinkjob/KeyedPrefixFunction.java": "fdfab8d3c5592595d8645b75bda8028720d5a410913f628951759db578310d29",
+    "flink-job-generator/src/main/java/org/savonitar/flink/stability/flinkjob/StateRecoveryBuild.java": "1ff694e7932486b9cae947a69052577da95909465b9cdb4b12ab9b7c2a62a817",
+    "flink-job-generator/src/main/java/org/savonitar/flink/stability/flinkjob/WorkloadProtocolV1Configuration.java": "1d4d9adebbc8810660cfac47a630ee3c90c81820c927570c3893b9ab9df0f33b",
+    "flink-job-generator/src/main/resources/log4j2.properties": "4063a293e1f0d4dad2b0d1ce87a1d038d4fdd7ba9ef31c9f4666731083bad650",
+    "flink-job-generator/src/test/java/org/savonitar/flink/stability/flinkjob/AsyncSnapshotDelayTest.java": "db93d4a3db4be125ad4095fef8eca23dd18498f42ae9063547d6babd13c0a59d",
+    "flink-job-generator/src/test/java/org/savonitar/flink/stability/flinkjob/ConnectorNamingStrategyTest.java": "c946c63e4c4148a5da709d4284edc492bafd47e70ce9d310eb862e0877a93474",
+    "flink-job-generator/src/test/java/org/savonitar/flink/stability/flinkjob/FlinkKafkaEosJobArgumentsTest.java": "02b2471ae701af4af6c1ca509e44e1fd88691e8915e04349f03cf769d611e123",
+    "flink-job-generator/src/test/java/org/savonitar/flink/stability/flinkjob/KeyedPrefixFunctionTest.java": "41d13ab4bf8f328287afe820fd628eb5f4710e0e17ab7d5acac05f167db89051",
+    "flink-job-generator/src/test/java/org/savonitar/flink/stability/flinkjob/StateRecoveryBuildTest.java": "df04e4ce9932356b20a1eb2574538f10637dad538645bacbb528671b227571c8",
+    "flink-job-generator/src/test/java/org/savonitar/flink/stability/flinkjob/WorkloadProtocolV1ConfigurationTest.java": "41e38a7aa957eac716a8a2fba610cb926144ab8c107c35ab7f59f42960063d34",
+    "flink-job-generator/src/build-identity/META-INF/flink-stability/keyed-prefix-build.properties": "eb171a675d1e0f0c0ac805957675d7d66ebb0c88e8664983aaa76e4171610858",
+    "calibration/state-recovery/build.py": "883e6982c850bb22462ca77b4996cc51292e108d836f911c3642644272a8ed08"
+  },
+  "commands": {
+    "correct": [
+      "mvn",
+      "-B",
+      "-ntp",
+      "-o",
+      "-s",
+      "<workspace>/jobs/state-recovery-build-20261026-02/settings.xml",
+      "-gs",
+      "<workspace>/jobs/state-recovery-build-20261026-02/settings.xml",
+      "-Dmaven.repo.local=<workspace>/jobs/state-recovery-build-20261026-02/cache/repository",
+      "-Dworkload.build.directory=<workspace>/jobs/state-recovery-build-20261026-02/build/correct",
+      "-f",
+      "<workspace>/jobs/state-recovery-build-20261026-02/sources/correct/flink-job-generator/pom.xml",
+      "package"
+    ],
+    "mutant": [
+      "mvn",
+      "-B",
+      "-ntp",
+      "-o",
+      "-s",
+      "<workspace>/jobs/state-recovery-build-20261026-02/settings.xml",
+      "-gs",
+      "<workspace>/jobs/state-recovery-build-20261026-02/settings.xml",
+      "-Dmaven.repo.local=<workspace>/jobs/state-recovery-build-20261026-02/cache/repository",
+      "-Dworkload.build.directory=<workspace>/jobs/state-recovery-build-20261026-02/build/mutant",
+      "-f",
+      "<workspace>/jobs/state-recovery-build-20261026-02/sources/mutant/flink-job-generator/pom.xml",
+      "-Pstate-reset-on-restore",
+      "package"
+    ]
+  },
+  "cache": {
+    "source": "<host-home>/.m2/repository",
+    "path": "<workspace>/jobs/state-recovery-build-20261026-02/cache/repository",
+    "files": 30341,
+    "cloned": 30341,
+    "copied": 0
+  },
+  "javaVersion": "javac 21.0.7",
+  "releaseBytecodeTarget": 11,
+  "unitChecks": "Both artifact modes pass the module tests; all class bytes identical",
+  "runtimeValidation": "pending; no Docker or recovery qualification performed by this recipe",
+  "_publication": {
+    "kind": "sanitized-copy",
+    "originalSourcePath": "jobs/state-recovery-build-20261026-02/build-evidence.json",
+    "originalSha256": "0b5553d8ba108112d919dccde6de8ecb0bd103b5963d3311ba3fcf9c02496456",
+    "originalBytes": 12574,
+    "sanitizationNotes": [
+      "Host workspace<host-home> paths replaced with <workspace>, <host-home>, <host-temporary>; Docker/container paths are retained.",
+      "Original bytes remain in the local jobs evidence; this publication is not a replayable raw proof."
+    ],
+    "publicationOmissions": []
+  }
+}

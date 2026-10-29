@@ -1,5 +1,12 @@
 # Validation and evidence
 
+For documentation changes, stage the intended files and run
+`python3 -B tools/check_doc_links.py` plus `git diff --check`. The link check
+requires relative targets to exist in the tracked repository; ignored local
+evidence cannot satisfy a published link. Follow the
+[evidence publication checklist](evidence/README.md) for sanitized copies and
+separate original/copy hashes.
+
 Run from the repository root with JDK 21 and the Maven dependencies already cached:
 
 ```sh

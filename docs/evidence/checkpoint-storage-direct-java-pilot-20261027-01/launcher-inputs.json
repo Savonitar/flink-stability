@@ -1,0 +1,15 @@
+{
+  "run.py": "8095decaf5e218d643c617758e9d24b4d8384e58321ffceb198491e86326d99f",
+  "pilotLauncherSha256": "fe61e22edd4b1a5b22ad7cbd9b944d8d439dd8baa6dbe65f22486dd92e52be3c",
+  "_publication": {
+    "kind": "sanitized-copy",
+    "originalSourcePath": "jobs/checkpoint-storage-direct-java-pilot-20261027-01/launcher-inputs.json",
+    "originalSha256": "5813985872b402057dc5b8c6639d702b1840dba05bea915c9db7357960717abd",
+    "originalBytes": 176,
+    "sanitizationNotes": [
+      "Host workspace<host-home> paths replaced with <workspace>, <host-home>, <host-temporary>; Docker/container paths are retained.",
+      "Original bytes remain in the local jobs evidence; this publication is not a replayable raw proof."
+    ],
+    "publicationOmissions": []
+  }
+}

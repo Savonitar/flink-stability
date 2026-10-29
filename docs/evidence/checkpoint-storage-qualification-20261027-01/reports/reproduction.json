@@ -1,0 +1,42 @@
+{
+  "qualified": true,
+  "allCommandsSuccessful": true,
+  "byteIdentical": {
+    "qualification.json": true,
+    "qualification.md": true
+  },
+  "differentPythonHashSeeds": [
+    0,
+    1
+  ],
+  "manifestSha256": "c9f673f7cd883796b58e8a4dd70e61646e50a8bfaab026cc07bf4d7d1448d945",
+  "files": [
+    {
+      "iteration": "final",
+      "stdoutSha256": "ed45ddf31f7af59e0c838f7a301cf1af8037c7b35c6f0df730cdcacce7f4a1c5"
+    },
+    {
+      "iteration": "final",
+      "stdoutSha256": "30f96ec95304dd144c3ae246f5a0346e80669ac36b5c299b261b79bb3ee5ce11"
+    },
+    {
+      "iteration": "reproduced",
+      "stdoutSha256": "ed45ddf31f7af59e0c838f7a301cf1af8037c7b35c6f0df730cdcacce7f4a1c5"
+    },
+    {
+      "iteration": "reproduced",
+      "stdoutSha256": "30f96ec95304dd144c3ae246f5a0346e80669ac36b5c299b261b79bb3ee5ce11"
+    }
+  ],
+  "_publication": {
+    "kind": "sanitized-copy",
+    "originalSourcePath": "jobs/checkpoint-storage-qualification-20261027-01/reports/reproduction.json",
+    "originalSha256": "86d40306f67496f8408b3be5a501824ff935ef225c6c70853550f4a62d816bf5",
+    "originalBytes": 829,
+    "sanitizationNotes": [
+      "Host workspace<host-home> paths replaced with <workspace>, <host-home>, <host-temporary>; Docker/container paths are retained.",
+      "Original bytes remain in the local jobs evidence; this publication is not a replayable raw proof."
+    ],
+    "publicationOmissions": []
+  }
+}

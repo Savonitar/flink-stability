@@ -1,0 +1,20 @@
+{
+  "attempts": 12,
+  "automaticRetries": 0,
+  "dockerApiVersion": "1.44",
+  "dockerEndpoint": "unix://<host-home>/.docker/run/docker.sock",
+  "formatVersion": 1,
+  "frameworkManifestSha256": "dab6678930cf0e5b40af97748bd431a39ccc5968ed4ff5523c1572be09242cac",
+  "manifestSha256": "c9f673f7cd883796b58e8a4dd70e61646e50a8bfaab026cc07bf4d7d1448d945",
+  "_publication": {
+    "kind": "sanitized-copy",
+    "originalSourcePath": "jobs/checkpoint-storage-qualification-20261027-01/execution-started.json",
+    "originalSha256": "1fc24f57c9d37d49218dc0f8615423f0438705751cfa618f43d8af1b27f527fe",
+    "originalBytes": 354,
+    "sanitizationNotes": [
+      "Host workspace<host-home> paths replaced with <workspace>, <host-home>, <host-temporary>; Docker/container paths are retained.",
+      "Original bytes remain in the local jobs evidence; this publication is not a replayable raw proof."
+    ],
+    "publicationOmissions": []
+  }
+}

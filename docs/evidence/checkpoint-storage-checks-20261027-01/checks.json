@@ -1,0 +1,40 @@
+{
+  "java": {
+    "command": "mvn -o -B -ntp -s jobs/checkpoint-fuse-preflight-20261027-01/maven-settings.xml -gs jobs/checkpoint-fuse-preflight-20261027-01/maven-settings.xml verify",
+    "jdk": "21.0.7",
+    "tests": 1505,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 1,
+    "exitCode": 0
+  },
+  "python": {
+    "command": "python3 -m unittest discover -s tools/tests -v",
+    "tests": 314,
+    "failures": 0,
+    "errors": 0,
+    "exitCode": 0
+  },
+  "native": {
+    "buildEvidence": "jobs/checkpoint-storage-helper-build-20261027-03/build-evidence.json",
+    "pristineChecks": 243,
+    "status": "pass"
+  },
+  "live": {
+    "result": "jobs/checkpoint-storage-probe-20261027-02/result.json",
+    "checks": 7,
+    "status": "pass",
+    "exitCode": 0
+  },
+  "_publication": {
+    "kind": "sanitized-copy",
+    "originalSourcePath": "jobs/checkpoint-storage-checks-20261027-01/checks.json",
+    "originalSha256": "6fc0004c4076fbcf94d56cf3f2e95bbeceaa47cf997983851c690584fde9ac11",
+    "originalBytes": 764,
+    "sanitizationNotes": [
+      "Host workspace<host-home> paths replaced with <workspace>, <host-home>, <host-temporary>; Docker/container paths are retained.",
+      "Original bytes remain in the local jobs evidence; this publication is not a replayable raw proof."
+    ],
+    "publicationOmissions": []
+  }
+}

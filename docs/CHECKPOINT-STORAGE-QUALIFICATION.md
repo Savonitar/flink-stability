@@ -14,8 +14,12 @@ fault and retained integration pilots; the
 [implementation plan](STATE-RECOVERY-STORAGE-FAULT-PLAN.md#pr-5--live-qualification-and-reproducible-evidence)
 keeps prototype, integration and qualification as separate gates. The
 [recipe guide](../calibration/checkpoint-storage/README.md) explains how to
-prepare a new batch. Retained `jobs/` links are local evidence and are not
-distributed as repository source.
+prepare a new batch. Links below open [published sanitized copies and compact
+summaries](evidence/README.md). The original `jobs/` evidence remains local and
+unchanged. Printed receipt/result hashes identify those **raw originals**;
+the [publication manifest](evidence/checkpoint-storage-publication-manifest.json)
+records each copy's separate SHA-256 and its omissions. The copies omit raw
+journals, binaries and detailed transcripts, so they cannot rerun the full audit.
 
 ## Review corrections and independent re-audit
 
@@ -38,8 +42,8 @@ current verifier's re-audit of the twelve original attempts pass with this guard
 
 The original matrix, manifests, frozen recipes and reports remain unchanged.
 The updated verifier's explicit `--re-audit` produced a separate
-[JSON report](../jobs/checkpoint-storage-review-fixes-20261027-01/re-audit-final.json)
-and [Markdown report](../jobs/checkpoint-storage-review-fixes-20261027-01/re-audit-final.md):
+[JSON report](evidence/checkpoint-storage-review-fixes-20261027-01/re-audit-final.summary.json)
+and [Markdown report](evidence/checkpoint-storage-review-fixes-20261027-01/re-audit-final.md):
 all twelve original attempts still qualify, with no errors. All eighteen
 reported component events match the independent extraction from 33 physical
 process logs (3,901,852 bytes), and all preflight/live intervals are ordered.
@@ -49,9 +53,9 @@ explicitly reported. The re-audit identifies the current verifier separately
 from the original recipe and does not qualify changed runtime binaries.
 
 The updated JSON and Markdown reports were
-[reproduced byte-for-byte](../jobs/checkpoint-storage-review-fixes-20261027-01/re-audit-reproduction.json)
+[reproduced byte-for-byte](evidence/checkpoint-storage-review-fixes-20261027-01/re-audit-reproduction.json)
 with another Python hash seed. Separate
-[memory-only counterexample checks](../jobs/checkpoint-storage-review-fixes-20261027-01/counterexamples.json)
+[memory-only counterexample checks](evidence/checkpoint-storage-review-fixes-20261027-01/counterexamples.json)
 on original run evidence reject 30,001 mismatches for 30,000 records, negative
 mutant count/sum, deleted component events, overlapping attempts and live
 intervals before preflight. The omitted component events remain visible in the
@@ -61,14 +65,14 @@ Offline verification after these fixes: full JDK 21 reactor `mvn install`
 (including `verify`) passed 1,616 tests, with zero failures/errors and one opt-in
 Docker test skipped; all 411 Python tests passed. The exact commands and logs
 are retained in
-[the review verification directory](../jobs/checkpoint-storage-review-fixes-20261027-01/).
+[the review verification directory](evidence/checkpoint-storage-review-fixes-20261027-01/README.md).
 The first offline installation was denied writing to the Maven cache; the
 authorized retry completed successfully. A first targeted test compile had a
 test-fixture generic-type error; the corrected targeted run passed all 27 tests.
 Neither failed preparation launched a live attempt.
 
 The changed runtime then passed one fresh, separately frozen `correct-eio`
-[live smoke and independent audit](../jobs/checkpoint-storage-review-fixes-20261027-01/live-smoke-02/smoke-finished.json).
+[live smoke and independent audit](evidence/checkpoint-storage-review-fixes-20261027-01/live-smoke-02/smoke-finished.summary.json).
 Its Docker-free validation passed before the only live launch; the run took
 280.67 seconds, with no retry. Checkpoint 1 was the materialized baseline,
 checkpoint 2 failed, the TaskManager was physically replaced, and the new
@@ -120,17 +124,17 @@ result remains in its allocated slot. A timeout, uncertain process termination
 or unconfirmed cleanup stops further launches and leaves an incomplete matrix.
 The four `validate --show-plan --offline` calls precede the execution-started
 receipt; their
-[completion receipt](../jobs/checkpoint-storage-qualification-20261027-01/validation-finished.json)
+[completion receipt](evidence/checkpoint-storage-qualification-20261027-01/validation-finished.json)
 lists all four cells and has SHA-256
 `faaecca77664d1b08402cf668dea44c701c58a00957410cb0020333eb7bd3619`.
 
 ## Frozen identities
 
-| Receipt or artifact | SHA-256 |
+| Receipt or artifact | Original raw receipt / artifact SHA-256 |
 | --- | --- |
-| [Matrix manifest](../jobs/checkpoint-storage-qualification-20261027-01/manifest.json) | `c9f673f7cd883796b58e8a4dd70e61646e50a8bfaab026cc07bf4d7d1448d945` |
-| [Framework manifest](../jobs/checkpoint-storage-qualification-20261027-01/framework/manifest.json) | `dab6678930cf0e5b40af97748bd431a39ccc5968ed4ff5523c1572be09242cac` |
-| [Execution-started receipt](../jobs/checkpoint-storage-qualification-20261027-01/execution-started.json) | `1fc24f57c9d37d49218dc0f8615423f0438705751cfa618f43d8af1b27f527fe` |
+| [Matrix manifest](evidence/checkpoint-storage-qualification-20261027-01/manifest.json) | `c9f673f7cd883796b58e8a4dd70e61646e50a8bfaab026cc07bf4d7d1448d945` |
+| [Framework manifest](evidence/checkpoint-storage-qualification-20261027-01/framework/manifest.summary.json) | `dab6678930cf0e5b40af97748bd431a39ccc5968ed4ff5523c1572be09242cac` |
+| [Execution-started receipt](evidence/checkpoint-storage-qualification-20261027-01/execution-started.json) | `1fc24f57c9d37d49218dc0f8615423f0438705751cfa618f43d8af1b27f527fe` |
 | Correct workload, `artifacts/correct.jar` | `4c8ca4211b01d26ba0c49a2060259c117b95016fef798b4a0c187a332edd9711` |
 | Reset-on-restore workload, `artifacts/mutant.jar` | `0ad8e5eeec5deb8e732a346dffc54c3675a6cb7c086e5c1bfa23a1389798d54a` |
 | Workload build evidence | `0b5553d8ba108112d919dccde6de8ecb0bd103b5963d3311ba3fcf9c02496456` |
@@ -175,7 +179,7 @@ Kafka is `apache/kafka:4.0.0`, resolved to
 `sha256:2cecec9e3ea2d63fd5d1da1ab95e6bb7c33a7ff81053c4eb46f4176cd0bad8c9`.
 The helper and Flink image platform pin is `linux/arm64`.
 
-The [platform receipt](../jobs/checkpoint-storage-qualification-20261027-01/evidence/platform.json)
+The [platform receipt](evidence/checkpoint-storage-qualification-20261027-01/evidence/platform.json)
 has SHA-256
 `979f1decd92cd412925ce4074554708f7689f3de765f14d383bbd1e8a467d465`:
 
@@ -254,15 +258,15 @@ counts remain visible. Producer-fencing observations do not disappear because
 data validation passed. Both reports were generated twice, with
 `PYTHONHASHSEED=0` and `PYTHONHASHSEED=1`, and matched byte-for-byte. All four
 checker/renderer invocations exited zero; the
-[reproduction receipt](../jobs/checkpoint-storage-qualification-20261027-01/reports/reproduction.json)
+[reproduction receipt](evidence/checkpoint-storage-qualification-20261027-01/reports/reproduction.json)
 retains the comparison and command hashes.
 
-| Final report | SHA-256 |
+| Published report copy or summary | Original raw report SHA-256 |
 | --- | --- |
-| [Independent JSON report](../jobs/checkpoint-storage-qualification-20261027-01/reports/final/qualification.json) | `ed45ddf31f7af59e0c838f7a301cf1af8037c7b35c6f0df730cdcacce7f4a1c5` |
-| [Generated Markdown report](../jobs/checkpoint-storage-qualification-20261027-01/reports/final/qualification.md) | `30f96ec95304dd144c3ae246f5a0346e80669ac36b5c299b261b79bb3ee5ce11` |
-| [Separate read-only audit](../jobs/checkpoint-storage-qualification-review-20261027-01/review-finished.json) | `9d12741a99e800bd65fe3c924ad9682b2a0789bb2ca6b77ba389e31991148f06` |
-| [Independent arithmetic and native-operation supplement](../jobs/checkpoint-storage-qualification-review-20261027-01/supplemental-summary.json) | `8f12d0a1ab203e1764501da885c8d9f1b99c2c7a02ac763898d1f5ceb4c0b921` |
+| [Independent JSON report](evidence/checkpoint-storage-qualification-20261027-01/reports/final/qualification.summary.json) | `ed45ddf31f7af59e0c838f7a301cf1af8037c7b35c6f0df730cdcacce7f4a1c5` |
+| [Generated Markdown report](evidence/checkpoint-storage-qualification-20261027-01/reports/final/qualification.md) | `30f96ec95304dd144c3ae246f5a0346e80669ac36b5c299b261b79bb3ee5ce11` |
+| [Separate read-only audit](evidence/checkpoint-storage-qualification-review-20261027-01/review-finished.json) | `9d12741a99e800bd65fe3c924ad9682b2a0789bb2ca6b77ba389e31991148f06` |
+| [Independent arithmetic and native-operation supplement](evidence/checkpoint-storage-qualification-review-20261027-01/supplemental-summary.json) | `8f12d0a1ab203e1764501da885c8d9f1b99c2c7a02ac763898d1f5ceb4c0b921` |
 
 ## Results
 
@@ -314,13 +318,13 @@ time was 2,986.88 seconds; artifact checks and preflight are additional.
 
 ## Separate offline checks and retained pilots
 
-The [PR 5 Python regression log](../jobs/checkpoint-storage-qualification-preparation-20261027-03/python-unittest-final.log)
+The [PR 5 Python regression log](evidence/checkpoint-storage-qualification-preparation-20261027-03/python-unittest-final.log.summary.json)
 reports **367 passing tests**. This covers preparation/freezing, bounded runner
 behavior, failure retention, independent evidence checking and deterministic
 reporting alongside existing Python tooling. It does not demonstrate live
 fault qualification.
 
-The prior [PR 4 JDK 21 full-reactor verification](../jobs/checkpoint-storage-integration-checks-20261027-01/maven-verify-final.log)
+The prior [PR 4 JDK 21 full-reactor verification](evidence/checkpoint-storage-integration-checks-20261027-01/maven-verify-final.log.summary.json)
 reported **1,611 Java tests, zero failures/errors and one skipped opt-in Docker
 lifecycle test**. PR 5 uses that same production Java source baseline and adds
 Python qualification tooling, a preparation-only Java helper and documentation.
@@ -330,12 +334,12 @@ result, not a claim that Java tests were rerun for each qualification attempt.
 The successful reference results were frozen under `evidence/references/` and
 remain linked to their original paths by `referenceSources` in the manifest:
 
-| Reference | Original retained result | Raw result SHA-256 |
+| Reference | Published result summary | Original raw result SHA-256 |
 | --- | --- | --- |
-| Correct healthy | [PR 4 batch 02, healthy pilot 01](../jobs/checkpoint-storage-integration-pilots-20261027-02/attempts/healthy-fuse/run/pilot-01/stdout.json) | `e17a408c9f0f6f5ecd39b0bd99129e2fff67ab9ce2b89b15780606aaa0d73db4` |
-| Correct healthy restart | [Qualification pilot, healthy restart 01](../jobs/checkpoint-storage-qualification-pilots-20261027-01/attempts/healthy-restart/run/pilot-01/stdout.json) | `49da248550df5b46bab26df1b46777efb775e99779f42d7686786ed5bf843e37` |
-| Correct EIO | [PR 4 batch 02, correct EIO pilot 03](../jobs/checkpoint-storage-integration-pilots-20261027-02/attempts/correct-eio/run/pilot-03/stdout.json) | `e9625a6a0cfe4f5e828a5b251479c0dad01d608e07c9711682a21fa472aab03a` |
-| Mutant EIO | [PR 4 batch 02, mutant EIO pilot 01](../jobs/checkpoint-storage-integration-pilots-20261027-02/attempts/mutant-eio/run/pilot-01/stdout.json) | `b7642c06315649293e444a71b575749b65eba3e227a3f5347b92e13537bf6d25` |
+| Correct healthy | [PR 4 batch 02, healthy pilot 01](evidence/checkpoint-storage-integration-pilots-20261027-02/attempts/healthy-fuse/run/pilot-01/stdout.summary.json) | `e17a408c9f0f6f5ecd39b0bd99129e2fff67ab9ce2b89b15780606aaa0d73db4` |
+| Correct healthy restart | [Qualification pilot, healthy restart 01](evidence/checkpoint-storage-qualification-pilots-20261027-01/attempts/healthy-restart/run/pilot-01/stdout.summary.json) | `49da248550df5b46bab26df1b46777efb775e99779f42d7686786ed5bf843e37` |
+| Correct EIO | [PR 4 batch 02, correct EIO pilot 03](evidence/checkpoint-storage-integration-pilots-20261027-02/attempts/correct-eio/run/pilot-03/stdout.summary.json) | `e9625a6a0cfe4f5e828a5b251479c0dad01d608e07c9711682a21fa472aab03a` |
+| Mutant EIO | [PR 4 batch 02, mutant EIO pilot 01](evidence/checkpoint-storage-integration-pilots-20261027-02/attempts/mutant-eio/run/pilot-01/stdout.summary.json) | `b7642c06315649293e444a71b575749b65eba3e227a3f5347b92e13537bf6d25` |
 
 The healthy restart pilot passed with FINISHED, one restoration, 21 completed
 checkpoints, all 30,000 expected IDs and no state mismatch. Its two
@@ -347,9 +351,9 @@ The following preparation history is also preserved:
 
 | Retained attempt | Outcome and scope |
 | --- | --- |
-| [Healthy-restart validate pilot 01](../jobs/checkpoint-storage-qualification-pilots-20261027-01/attempts/healthy-restart/validate/pilot-01/command.json) | Rejected before CLI execution because target and installed framework artifacts differed. It was not a live run or a successful validation. The original attempt remains; a separate validate pilot 02 passed after installing the same checkout. |
-| [Direct-Java pilot 01 inputs](../jobs/checkpoint-storage-direct-java-pilot-20261027-01/launcher-inputs.json) | Rejected before CLI or container startup because importing without `-B` created unlisted `__pycache__` files inside the frozen inventory. The [fresh pilot's derivation receipt](../jobs/checkpoint-storage-direct-java-pilot-20261027-02/derivation.json) records the correction; the earlier attempt was not overwritten. |
-| [Direct-Java pilot 02 result](../jobs/checkpoint-storage-direct-java-pilot-20261027-02/run/stdout.json) | PASS, `validator.kafka.state-prefix.match`; direct frozen-classpath launch exited zero and exact cleanup was confirmed. Result SHA-256: `5aa949dd37be70a691981fab82ce575592c3a38b9e186e4662580aeed41f511c`. This launch check is separate from the twelve allocations. |
+| [Healthy-restart validate pilot 01](evidence/checkpoint-storage-qualification-pilots-20261027-01/attempts/healthy-restart/validate/pilot-01/command.json) | Rejected before CLI execution because target and installed framework artifacts differed. It was not a live run or a successful validation. The original attempt remains; a separate validate pilot 02 passed after installing the same checkout. |
+| [Direct-Java pilot 01 inputs](evidence/checkpoint-storage-direct-java-pilot-20261027-01/launcher-inputs.json) | Rejected before CLI or container startup because importing without `-B` created unlisted `__pycache__` files inside the frozen inventory. The [fresh pilot's derivation receipt](evidence/checkpoint-storage-direct-java-pilot-20261027-02/derivation.json) records the correction; the earlier attempt was not overwritten. |
+| [Direct-Java pilot 02 result](evidence/checkpoint-storage-direct-java-pilot-20261027-02/run/stdout.summary.json) | PASS, `validator.kafka.state-prefix.match`; direct frozen-classpath launch exited zero and exact cleanup was confirmed. Result SHA-256: `5aa949dd37be70a691981fab82ce575592c3a38b9e186e4662580aeed41f511c`. This launch check is separate from the twelve allocations. |
 
 ## Scope and limitations
 

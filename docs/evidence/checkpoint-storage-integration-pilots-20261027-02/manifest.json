@@ -1,0 +1,177 @@
+{
+  "formatVersion": 1,
+  "kind": "checkpoint-storage-integration-pilots",
+  "executionStatus": "not-started",
+  "automaticRetries": 0,
+  "qualificationMatrix": false,
+  "workload": {
+    "totalRecords": 30000,
+    "keyCount": 8,
+    "parallelism": 1,
+    "processingDelayMs": 5,
+    "checkpointIntervalMs": 10000,
+    "smallFileThreshold": 0,
+    "maxConcurrent": 1,
+    "tolerableFailures": 10
+  },
+  "artifacts": {
+    "correct": {
+      "path": "artifacts/correct.jar",
+      "sha256": "4c8ca4211b01d26ba0c49a2060259c117b95016fef798b4a0c187a332edd9711",
+      "buildMode": "correct",
+      "source": "jobs/state-recovery-build-20261026-02/build/correct/flink-job-generator.jar"
+    },
+    "mutant": {
+      "path": "artifacts/mutant.jar",
+      "sha256": "0ad8e5eeec5deb8e732a346dffc54c3675a6cb7c086e5c1bfa23a1389798d54a",
+      "buildMode": "reset-state-on-restore-v1",
+      "source": "jobs/state-recovery-build-20261026-02/build/mutant/flink-job-generator-state-reset-on-restore.jar"
+    }
+  },
+  "workloadBuild": {
+    "source": "jobs/state-recovery-build-20261026-02/build-evidence.json",
+    "path": "evidence/workload-build-evidence.json",
+    "sha256": "0b5553d8ba108112d919dccde6de8ecb0bd103b5963d3311ba3fcf9c02496456"
+  },
+  "helperBuild": {
+    "source": "jobs/checkpoint-storage-helper-build-20261027-04",
+    "path": "artifacts/helper",
+    "manifestSha256": "9ab2001ccc55e700a76c12d0ba64d4824d1089d21e85adffa5216d75d8582ecf",
+    "imageId": "sha256:2e93ded2cb7bf1a50f71b663d5e3ea01420bcc4e549cbf666d05120f939713c7",
+    "platform": "linux/arm64",
+    "files": {
+      "checkpoint-fuse": "49d01b4f62b6a7bd8256779777cf1e6d193d2e1d7365796c115f4ffb66c85f66",
+      "checkpoint-fuse-selftest": "bbdd6a07da940c9d9db135958ec7f1caf8502f03767203f349aa65b5c7a3b9d5",
+      "probe.jar": "2fd880248a7515b08ee419e1ff875cc1edff8e0f784878aa55a0aaa0a1780983"
+    }
+  },
+  "runtimeIdentity": {
+    "connectorSha256": "6bb63f7b09930d99745325393b481c092b0c26d626e738b7a1fd6fd8d7d4f1da",
+    "connectorArtifacts": [
+      {
+        "containerPath": "/opt/flink/lib/flink-stability-connector-00000000-6bb63f7b09930d99745325393b481c092b0c26d626e738b7a1fd6fd8d7d4f1da.jar",
+        "sha256": "6bb63f7b09930d99745325393b481c092b0c26d626e738b7a1fd6fd8d7d4f1da"
+      },
+      {
+        "containerPath": "/opt/flink/lib/flink-stability-connector-00000001-4eeeae8d20c078abb64b015ec158add383ac581571cddc45c68f0c9ae0230720.jar",
+        "sha256": "4eeeae8d20c078abb64b015ec158add383ac581571cddc45c68f0c9ae0230720"
+      },
+      {
+        "containerPath": "/opt/flink/lib/flink-stability-connector-00000002-d8054ae7c0d1c2d2f55d28e46026ebe5892881f3fab5f439233184381c3b4a1f.jar",
+        "sha256": "d8054ae7c0d1c2d2f55d28e46026ebe5892881f3fab5f439233184381c3b4a1f"
+      },
+      {
+        "containerPath": "/opt/flink/lib/flink-stability-connector-00000003-4b364e6850dc89172fcf1d4dd26b8ff5488eda44ff4657e22dd265203dd5ab3c.jar",
+        "sha256": "4b364e6850dc89172fcf1d4dd26b8ff5488eda44ff4657e22dd265203dd5ab3c"
+      },
+      {
+        "containerPath": "/opt/flink/lib/flink-stability-connector-00000004-e2d202d4606e23aeaf8a5a9632db06f5fefd5b63d251c3f503f9faaa78530e5c.jar",
+        "sha256": "e2d202d4606e23aeaf8a5a9632db06f5fefd5b63d251c3f503f9faaa78530e5c"
+      },
+      {
+        "containerPath": "/opt/flink/lib/flink-stability-connector-00000005-f30d77f5826b9e9813342e84ab412095ed4ed5cf4fef6f93cebb848cb0fd0294.jar",
+        "sha256": "f30d77f5826b9e9813342e84ab412095ed4ed5cf4fef6f93cebb848cb0fd0294"
+      },
+      {
+        "containerPath": "/opt/flink/lib/flink-stability-connector-00000006-bcf39f152c5553c2501a491fc4a73c5b0330741e8eed96a481323b8ee89738af.jar",
+        "sha256": "bcf39f152c5553c2501a491fc4a73c5b0330741e8eed96a481323b8ee89738af"
+      },
+      {
+        "containerPath": "/opt/flink/lib/flink-stability-connector-00000007-581bd61000ef7648943f781ca05689e56d03f6052748365a8e2b3a9b5d3fa32f.jar",
+        "sha256": "581bd61000ef7648943f781ca05689e56d03f6052748365a8e2b3a9b5d3fa32f"
+      },
+      {
+        "containerPath": "/opt/flink/lib/flink-stability-connector-00000008-b6c3237e24b8252a5a9c3a0e1ae30ef8f323412e74bd358548b7a9e527d676df.jar",
+        "sha256": "b6c3237e24b8252a5a9c3a0e1ae30ef8f323412e74bd358548b7a9e527d676df"
+      },
+      {
+        "containerPath": "/opt/flink/lib/flink-stability-connector-00000009-a58a84c4271e50df4c96ed916ccb7e48a869f8ed9cdcda1ad5d3d4c33b0214a3.jar",
+        "sha256": "a58a84c4271e50df4c96ed916ccb7e48a869f8ed9cdcda1ad5d3d4c33b0214a3"
+      },
+      {
+        "containerPath": "/opt/flink/lib/flink-stability-connector-00000010-4c766cb3f855415ee734b2392949a0b6f12a60879334a74518deaf6270d32e36.jar",
+        "sha256": "4c766cb3f855415ee734b2392949a0b6f12a60879334a74518deaf6270d32e36"
+      },
+      {
+        "containerPath": "/opt/flink/lib/flink-stability-connector-00000011-d3ef575e3e4979678dc01bf1dcce51021493b4d11fb7f1be8ad982877c16a1c0.jar",
+        "sha256": "d3ef575e3e4979678dc01bf1dcce51021493b4d11fb7f1be8ad982877c16a1c0"
+      }
+    ],
+    "flinkImageReference": "flink:2.2.0",
+    "flinkImageId": "sha256:2e93ded2cb7bf1a50f71b663d5e3ea01420bcc4e549cbf666d05120f939713c7",
+    "kafkaImageReference": "apache/kafka:4.0.0",
+    "kafkaImageId": "sha256:2cecec9e3ea2d63fd5d1da1ab95e6bb7c33a7ff81053c4eb46f4176cd0bad8c9"
+  },
+  "cases": [
+    {
+      "name": "healthy-fuse",
+      "scenario": "checkpoint-storage-healthy-fuse",
+      "catalog": "catalogs/healthy-fuse",
+      "mode": "correct",
+      "atomicFault": false,
+      "expectedOutcome": "pass",
+      "anticipatedRawOutcome": "pass",
+      "qualification": "pilot only; PR5 fixed twelve-attempt matrix remains pending"
+    },
+    {
+      "name": "correct-eio",
+      "scenario": "checkpoint-storage-correct-eio",
+      "catalog": "catalogs/correct-eio",
+      "mode": "correct",
+      "atomicFault": true,
+      "expectedOutcome": "pass",
+      "anticipatedRawOutcome": "pass",
+      "qualification": "pilot only; PR5 fixed twelve-attempt matrix remains pending"
+    },
+    {
+      "name": "mutant-eio",
+      "scenario": "checkpoint-storage-mutant-eio",
+      "catalog": "catalogs/mutant-eio",
+      "mode": "mutant",
+      "atomicFault": true,
+      "expectedOutcome": "pass",
+      "anticipatedRawOutcome": "fail",
+      "qualification": "pilot only; PR5 fixed twelve-attempt matrix remains pending"
+    }
+  ],
+  "frozenFiles": {
+    "README.md": "56f9a26d769a00358d625b83ed03c1336735bd1dfa569cc0cf82f5af40c3a8f7",
+    "artifacts/correct.jar": "4c8ca4211b01d26ba0c49a2060259c117b95016fef798b4a0c187a332edd9711",
+    "artifacts/helper/build-evidence.json": "9ab2001ccc55e700a76c12d0ba64d4824d1089d21e85adffa5216d75d8582ecf",
+    "artifacts/helper/bundle/checkpoint-fuse": "49d01b4f62b6a7bd8256779777cf1e6d193d2e1d7365796c115f4ffb66c85f66",
+    "artifacts/helper/bundle/checkpoint-fuse-selftest": "bbdd6a07da940c9d9db135958ec7f1caf8502f03767203f349aa65b5c7a3b9d5",
+    "artifacts/helper/bundle/probe.jar": "2fd880248a7515b08ee419e1ff875cc1edff8e0f784878aa55a0aaa0a1780983",
+    "artifacts/mutant.jar": "0ad8e5eeec5deb8e732a346dffc54c3675a6cb7c086e5c1bfa23a1389798d54a",
+    "catalogs/correct-eio/checkpoint-storage-correct-eio.expected.yaml": "4eaafcff048e63e4100f05979a9a589d24b476443b43750162ce5113542bb0c4",
+    "catalogs/correct-eio/checkpoint-storage-correct-eio.yaml": "858daa270fa4915aa8b1558de5ed7a16f412d2a5bdfdeb15dbf6ad421d6a17e3",
+    "catalogs/healthy-fuse/checkpoint-storage-healthy-fuse.expected.yaml": "130be0f53844d9b7b4b2fbd5297312526475d673d1a021b15f0065a7ea1de303",
+    "catalogs/healthy-fuse/checkpoint-storage-healthy-fuse.yaml": "f2fe27d7320d9aa15bb278229b2a08b6cd57557a23474d02bbf7212e64e3d759",
+    "catalogs/mutant-eio/checkpoint-storage-mutant-eio.expected.yaml": "ee85c1cdec111b700cf6317bce73c7b0012f5cf4b7a31262382a9226ea7464f2",
+    "catalogs/mutant-eio/checkpoint-storage-mutant-eio.yaml": "72ea7e06054c9f1b8ef119cd5aae9d3b369a4045d7bfc236f172a32bb0f112d5",
+    "evidence/catalog-template.yaml": "a2bfb39ee2d983d893df5c615f2575e024122d3e5f5629f0a0da0c328749f0f3",
+    "evidence/derivation.json": "27089c383481bdae284a1ee3d5d64f27851fa7d6223f8daaf1afd6021852c138",
+    "evidence/freeze-recipe.py": "74e696ce25ef38b08b83b6cb1cabef4d075a89be3740ed4c7b2be24db2d996a4",
+    "evidence/parent-manifest.json": "65627a6b615c1334f5ae2f84cf38057f1f15fb97a5c8a1b021951bdad7014bbb",
+    "evidence/reference-matrix-manifest.json": "e96821280b1d102e1972fb11f7ec0e2882e8a3c98b7614e1c65981e288a3e4a2",
+    "evidence/workload-build-evidence.json": "0b5553d8ba108112d919dccde6de8ecb0bd103b5963d3311ba3fcf9c02496456",
+    "run-with-framework.py": "cd14cd20afaa27b4435a086c2b20ddd0d129c528cbd2d16da94af0451ba31858",
+    "run.py": "a6a7d4202d9f2165419521e0182dd6ad2780f0982dce369ae484441511566180"
+  },
+  "derivation": {
+    "path": "evidence/derivation.json",
+    "sha256": "27089c383481bdae284a1ee3d5d64f27851fa7d6223f8daaf1afd6021852c138",
+    "parentManifestSha256": "65627a6b615c1334f5ae2f84cf38057f1f15fb97a5c8a1b021951bdad7014bbb"
+  },
+  "completionTimeoutMillis": 300000,
+  "_publication": {
+    "kind": "sanitized-copy",
+    "originalSourcePath": "jobs/checkpoint-storage-integration-pilots-20261027-02/manifest.json",
+    "originalSha256": "dc211ef90d5f4ac3cbcc720d73dfb5a4455a511fbe56724cfc625cd0b009fb99",
+    "originalBytes": 9019,
+    "sanitizationNotes": [
+      "Host workspace<host-home> paths replaced with <workspace>, <host-home>, <host-temporary>; Docker/container paths are retained.",
+      "Original bytes remain in the local jobs evidence; this publication is not a replayable raw proof."
+    ],
+    "publicationOmissions": []
+  }
+}

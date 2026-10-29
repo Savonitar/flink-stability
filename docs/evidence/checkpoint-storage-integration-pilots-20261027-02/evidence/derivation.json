@@ -1,0 +1,87 @@
+{
+  "formatVersion": 1,
+  "kind": "checkpoint-storage-pilot-budget-derivation",
+  "parent": {
+    "path": "jobs/checkpoint-storage-integration-pilots-20261027-01",
+    "manifestSha256": "65627a6b615c1334f5ae2f84cf38057f1f15fb97a5c8a1b021951bdad7014bbb"
+  },
+  "child": "jobs/checkpoint-storage-integration-pilots-20261027-02",
+  "changes": [
+    {
+      "path": "catalogs/healthy-fuse/checkpoint-storage-healthy-fuse.yaml",
+      "parentSha256": "b57c49f9475c94f0f7254687a595419933670ae2ff704c841d08be363cf0cf89",
+      "sha256": "f2fe27d7320d9aa15bb278229b2a08b6cd57557a23474d02bbf7212e64e3d759",
+      "semanticChange": {
+        "field": "completion_timeout",
+        "before": "3m",
+        "after": "5m"
+      },
+      "artifactReferenceRelocation": {
+        "from": "jobs/checkpoint-storage-integration-pilots-20261027-01",
+        "to": "jobs/checkpoint-storage-integration-pilots-20261027-02",
+        "occurrences": 2
+      }
+    },
+    {
+      "path": "catalogs/correct-eio/checkpoint-storage-correct-eio.yaml",
+      "parentSha256": "f6ad4826cf2014390d95cf6aff512db56584954ac0c86b2ce987d91d7104e2ee",
+      "sha256": "858daa270fa4915aa8b1558de5ed7a16f412d2a5bdfdeb15dbf6ad421d6a17e3",
+      "semanticChange": {
+        "field": "completion_timeout",
+        "before": "3m",
+        "after": "5m"
+      },
+      "artifactReferenceRelocation": {
+        "from": "jobs/checkpoint-storage-integration-pilots-20261027-01",
+        "to": "jobs/checkpoint-storage-integration-pilots-20261027-02",
+        "occurrences": 2
+      }
+    },
+    {
+      "path": "catalogs/mutant-eio/checkpoint-storage-mutant-eio.yaml",
+      "parentSha256": "9c6b3088e9b7b00c53679320486b085a2d22dbbabd325c38663409b4b81a015d",
+      "sha256": "72ea7e06054c9f1b8ef119cd5aae9d3b369a4045d7bfc236f172a32bb0f112d5",
+      "semanticChange": {
+        "field": "completion_timeout",
+        "before": "3m",
+        "after": "5m"
+      },
+      "artifactReferenceRelocation": {
+        "from": "jobs/checkpoint-storage-integration-pilots-20261027-01",
+        "to": "jobs/checkpoint-storage-integration-pilots-20261027-02",
+        "occurrences": 2
+      }
+    }
+  ],
+  "catalogExpectedOutcomes": "All remain PASS",
+  "unchangedExperimentInputs": [
+    "workload JARs",
+    "helper bundle and build manifest",
+    "N=30000",
+    "K=8",
+    "delay=5ms",
+    "checkpoint interval=10s",
+    "tolerance=10",
+    "atomic timeout=90s",
+    "lease=120s",
+    "runtime and connector identities"
+  ],
+  "reason": "Parent healthy pilot observed slower effective record processing; extend natural completion budget without altering fault/oracle contracts.",
+  "executionStatus": "not-started",
+  "automaticRetries": 0,
+  "launcher": {
+    "path": "run-with-framework.py",
+    "sha256": "cd14cd20afaa27b4435a086c2b20ddd0d129c528cbd2d16da94af0451ba31858"
+  },
+  "_publication": {
+    "kind": "sanitized-copy",
+    "originalSourcePath": "jobs/checkpoint-storage-integration-pilots-20261027-02/evidence/derivation.json",
+    "originalSha256": "27089c383481bdae284a1ee3d5d64f27851fa7d6223f8daaf1afd6021852c138",
+    "originalBytes": 2823,
+    "sanitizationNotes": [
+      "Host workspace<host-home> paths replaced with <workspace>, <host-home>, <host-temporary>; Docker/container paths are retained.",
+      "Original bytes remain in the local jobs evidence; this publication is not a replayable raw proof."
+    ],
+    "publicationOmissions": []
+  }
+}

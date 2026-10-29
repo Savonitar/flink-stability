@@ -1,0 +1,27 @@
+{
+  "kind": "verification-log-summary",
+  "sourceLineCount": 339,
+  "summaryLines": [
+    {
+      "line": 337,
+      "text": "Ran 314 tests in 29.343s"
+    },
+    {
+      "line": 339,
+      "text": "OK"
+    }
+  ],
+  "scope": "Selected test totals, build outcome and elapsed-time lines only. Full log, command details and warnings are not reproduced; consult original SHA-256 provenance.",
+  "_publication": {
+    "kind": "log-summary",
+    "originalSourcePath": "jobs/checkpoint-storage-integration-checks-20261027-01/python-unittest.log",
+    "originalSha256": "57aa524d1750113a2e84fcbfbd6c8849b84fce97b2ae1f0f9ff96d4be853d3d9",
+    "originalBytes": 57496,
+    "sanitizationNotes": [
+      "Host workspace<host-home> paths replaced with <workspace>, <host-home>, <host-temporary>; Docker/container paths are retained.",
+      "Original bytes remain in the local jobs evidence; this publication is not a replayable raw proof.",
+      "Only numbered aggregate test/build summary lines are included; no raw Maven/Python/native log is copied."
+    ],
+    "publicationOmissions": []
+  }
+}

@@ -1,0 +1,29 @@
+{
+  "allTwelveConfirmed": true,
+  "allocated": 12,
+  "componentEventCount": 18,
+  "confirmedCounts": {
+    "correct-eio": 3,
+    "correct-healthy": 3,
+    "correct-restart": 3,
+    "mutant-eio": 3
+  },
+  "errors": [],
+  "formatVersion": 1,
+  "frameworkManifestSha256": "dab6678930cf0e5b40af97748bd431a39ccc5968ed4ff5523c1572be09242cac",
+  "manifestSha256": "c9f673f7cd883796b58e8a4dd70e61646e50a8bfaab026cc07bf4d7d1448d945",
+  "missing": [],
+  "restErrorCount": 0,
+  "reviewed": 12,
+  "_publication": {
+    "kind": "sanitized-copy",
+    "originalSourcePath": "jobs/checkpoint-storage-qualification-review-20261027-01/review-finished.json",
+    "originalSha256": "9d12741a99e800bd65fe3c924ad9682b2a0789bb2ca6b77ba389e31991148f06",
+    "originalBytes": 484,
+    "sanitizationNotes": [
+      "Host workspace<host-home> paths replaced with <workspace>, <host-home>, <host-temporary>; Docker/container paths are retained.",
+      "Original bytes remain in the local jobs evidence; this publication is not a replayable raw proof."
+    ],
+    "publicationOmissions": []
+  }
+}

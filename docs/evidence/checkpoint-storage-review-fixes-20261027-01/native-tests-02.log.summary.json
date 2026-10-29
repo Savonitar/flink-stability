@@ -1,0 +1,47 @@
+{
+  "kind": "verification-log-summary",
+  "sourceLineCount": 175,
+  "summaryLines": [
+    {
+      "line": 149,
+      "text": "[INFO] Tests run: 11, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.645 s -- in org.savonitar.flink.stability.testcontainers.TestcontainersContainerHandleTest"
+    },
+    {
+      "line": 151,
+      "text": "[INFO] Tests run: 2, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.002 s -- in org.savonitar.flink.stability.testcontainers.ContainerDriverCallBoundaryTest"
+    },
+    {
+      "line": 153,
+      "text": "[INFO] Tests run: 5, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 1.381 s -- in org.savonitar.flink.stability.testcontainers.FuseCheckpointStorageConcurrencyTest"
+    },
+    {
+      "line": 155,
+      "text": "[INFO] Tests run: 9, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.172 s -- in org.savonitar.flink.stability.testcontainers.FuseCheckpointStorageRuntimeTest"
+    },
+    {
+      "line": 159,
+      "text": "[INFO] Tests run: 27, Failures: 0, Errors: 0, Skipped: 0"
+    },
+    {
+      "line": 171,
+      "text": "[INFO] BUILD SUCCESS"
+    },
+    {
+      "line": 173,
+      "text": "[INFO] Total time:  4.835 s"
+    }
+  ],
+  "scope": "Selected test totals, build outcome and elapsed-time lines only. Full log, command details and warnings are not reproduced; consult original SHA-256 provenance.",
+  "_publication": {
+    "kind": "log-summary",
+    "originalSourcePath": "jobs/checkpoint-storage-review-fixes-20261027-01/native-tests-02.log",
+    "originalSha256": "016e688a1be14eae6030a6a0aa880515dffac896e5c7de08bc676cb692eb7958",
+    "originalBytes": 10231,
+    "sanitizationNotes": [
+      "Host workspace<host-home> paths replaced with <workspace>, <host-home>, <host-temporary>; Docker/container paths are retained.",
+      "Original bytes remain in the local jobs evidence; this publication is not a replayable raw proof.",
+      "Only numbered aggregate test/build summary lines are included; no raw Maven/Python/native log is copied."
+    ],
+    "publicationOmissions": []
+  }
+}

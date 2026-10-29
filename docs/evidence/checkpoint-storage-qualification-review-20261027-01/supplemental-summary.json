@@ -1,0 +1,138 @@
+{
+  "componentKinds": {
+    "producer-fenced": 18
+  },
+  "componentLevels": {
+    "ERROR": 9,
+    "INFO": 9
+  },
+  "confirmedCleanupContainers": 45,
+  "confirmedCleanupStorageVolumes": 12,
+  "fixedAllocationConfirmed": true,
+  "formatVersion": 1,
+  "healthyStorageIo": [
+    {
+      "cell": "correct-healthy",
+      "checkpointWrites": 5178,
+      "metadataFinalizations": 20,
+      "number": 1,
+      "writtenBytes": 112935
+    },
+    {
+      "cell": "correct-healthy",
+      "checkpointWrites": 5178,
+      "metadataFinalizations": 20,
+      "number": 2,
+      "writtenBytes": 112935
+    },
+    {
+      "cell": "correct-healthy",
+      "checkpointWrites": 5178,
+      "metadataFinalizations": 20,
+      "number": 3,
+      "writtenBytes": 112935
+    },
+    {
+      "cell": "correct-restart",
+      "checkpointWrites": 5494,
+      "metadataFinalizations": 21,
+      "number": 1,
+      "writtenBytes": 123812
+    },
+    {
+      "cell": "correct-restart",
+      "checkpointWrites": 5494,
+      "metadataFinalizations": 21,
+      "number": 2,
+      "writtenBytes": 123812
+    },
+    {
+      "cell": "correct-restart",
+      "checkpointWrites": 5756,
+      "metadataFinalizations": 22,
+      "number": 3,
+      "writtenBytes": 129737
+    }
+  ],
+  "journalBytes": 172024081,
+  "journalReferences": 111,
+  "manifestSha256": "c9f673f7cd883796b58e8a4dd70e61646e50a8bfaab026cc07bf4d7d1448d945",
+  "mutantResetReceipts": 24,
+  "mutants": [
+    {
+      "firstId": 625,
+      "firstSample": {
+        "actualCount": 1,
+        "actualKey": 1,
+        "actualSum": 626,
+        "expectedCount": 79,
+        "expectedKey": 1,
+        "expectedSum": 24806,
+        "id": 625,
+        "offset": 1169,
+        "partition": 0
+      },
+      "mismatches": 29375,
+      "number": 1,
+      "samplesArithmeticallyChecked": 100
+    },
+    {
+      "firstId": 750,
+      "firstSample": {
+        "actualCount": 1,
+        "actualKey": 6,
+        "actualSum": 751,
+        "expectedCount": 94,
+        "expectedKey": 6,
+        "expectedSum": 35626,
+        "id": 750,
+        "offset": 1282,
+        "partition": 0
+      },
+      "mismatches": 29250,
+      "number": 2,
+      "samplesArithmeticallyChecked": 100
+    },
+    {
+      "firstId": 906,
+      "firstSample": {
+        "actualCount": 1,
+        "actualKey": 2,
+        "actualSum": 907,
+        "expectedCount": 114,
+        "expectedKey": 2,
+        "expectedSum": 51870,
+        "id": 906,
+        "offset": 1446,
+        "partition": 0
+      },
+      "mismatches": 29094,
+      "number": 3,
+      "samplesArithmeticallyChecked": 100
+    }
+  ],
+  "nativeEioOperations": {
+    "create": 120
+  },
+  "rawCheckpointBytesRetained": false,
+  "rawOutcomes": {
+    "fail": 3,
+    "pass": 9
+  },
+  "restErrorCount": 0,
+  "restorations": 9,
+  "restoredKeyReceipts": 72,
+  "totalExactIds": 360000,
+  "uniqueJournalFiles": 87,
+  "_publication": {
+    "kind": "sanitized-copy",
+    "originalSourcePath": "jobs/checkpoint-storage-qualification-review-20261027-01/supplemental-summary.json",
+    "originalSha256": "8f12d0a1ab203e1764501da885c8d9f1b99c2c7a02ac763898d1f5ceb4c0b921",
+    "originalBytes": 2852,
+    "sanitizationNotes": [
+      "Host workspace<host-home> paths replaced with <workspace>, <host-home>, <host-temporary>; Docker/container paths are retained.",
+      "Original bytes remain in the local jobs evidence; this publication is not a replayable raw proof."
+    ],
+    "publicationOmissions": []
+  }
+}

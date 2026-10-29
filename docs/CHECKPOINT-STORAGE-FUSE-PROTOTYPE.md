@@ -1,12 +1,18 @@
 # Checkpoint-storage FUSE prototype
 
+Historical evidence links open [sanitized copies and compact summaries](evidence/README.md).
+Printed receipt/result hashes identify the **raw originals**, retained unchanged
+under local `jobs/`. The [publication manifest](evidence/checkpoint-storage-publication-manifest.json)
+records each copy's separate SHA-256 and omissions. Full journals, binaries and
+command transcripts are not included; the copies cannot rerun the raw audit.
+
 The PR 3 prototype implements a bounded filesystem write-failure experiment
 using two FUSE views of one fresh Docker named volume and a standalone Java I/O
 probe. It does not yet provision a Flink job or inject a failure into a real
 Flink checkpoint. That integration is [PR 4 in the implementation plan](STATE-RECOVERY-STORAGE-FAULT-PLAN.md#pr-4--typed-storage-control-and-checkpoint-failure-orchestration).
 
 **Qualified on Docker Desktop `linux/arm64`, 2026-10-27.** The
-[final retained run](../jobs/checkpoint-storage-probe-20261027-02/result.json)
+[final retained run](evidence/checkpoint-storage-probe-20261027-02/result.summary.json)
 returned PASS and exit 0 for all seven cases. Both primary instances produced
 matching native EIO receipts for Java create/write failures; healing restored
 cross-mount reads of the exact 23 bytes `before-fault-after-heal`. The same JVM
@@ -173,13 +179,13 @@ activation property was unset. This includes 17 focused Java probe tests.
 41 probe/qualifier tests and 15 builder tests. Native build checks and the live
 Docker observations are reported separately below.
 
-[Retained commands and test results](../jobs/checkpoint-storage-checks-20261027-01/checks.json)
+[Retained commands and test results](evidence/checkpoint-storage-checks-20261027-01/checks.json)
 link to the complete Maven/Python output. Documentation links and
 `git diff --check` passed. No normal CI check starts FUSE or requires Docker.
 
 ## Retained artifacts and observed environment
 
-The final helper is [build 03](../jobs/checkpoint-storage-helper-build-20261027-03/build-evidence.json).
+The final helper is [build 03](evidence/checkpoint-storage-helper-build-20261027-03/build-evidence.json).
 It passed 243 native core/jail checks in the pristine image, plus the Java 17
 probe exchange under UID/GID `9999:9999` with effective capabilities zero.
 These build checks do not themselves mount FUSE. The dependency-lock SHA-256 is
@@ -193,12 +199,6 @@ These build checks do not themselves mount FUSE. The dependency-lock SHA-256 is
 
 The image digest is
 `flink@sha256:7ecfab9d5e8ec6987a248b32f6605b5fe9bcb7347aea0d7b1bc3976588408681`.
-The observed environment is Docker Desktop 4.56.0, Docker Engine 29.1.3,
-`linux/arm64`, kernel `6.12.54-linuxkit`, and Temurin Java 17.0.19. The helper
-uses GCC 13.3.0 and static libfuse 3.14.0. A native Linux qualification has not
-been performed.
-
-Earlier artifacts remain immutable:
 The 27 October 2026 qualification used the classic graphdriver image store.
 Its arm64 image config digest is
 `sha256:2e93ded2cb7bf1a50f71b663d5e3ea01420bcc4e549cbf666d05120f939713c7`;
@@ -210,19 +210,25 @@ store backend. Optional `image_digest` is the content-addressable repository
 pin; `image_id` depends on the backend. These identity checks preserve the
 historical qualification scope.
 
+The observed environment is Docker Desktop 4.56.0, Docker Engine 29.1.3,
+`linux/arm64`, kernel `6.12.54-linuxkit`, and Temurin Java 17.0.19. The helper
+uses GCC 13.3.0 and static libfuse 3.14.0. A native Linux qualification has not
+been performed.
 
-- [Build 01](../jobs/checkpoint-storage-helper-build-20261027-01/build-evidence.json)
+Earlier artifacts remain immutable:
+
+- [Build 01](evidence/checkpoint-storage-helper-build-20261027-01/build-evidence.json)
   passed its original checks before journal reservation hardening.
-- [Build 02](../jobs/checkpoint-storage-helper-build-20261027-02/build-evidence.json)
+- [Build 02](evidence/checkpoint-storage-helper-build-20261027-02/build-evidence.json)
   passed after that hardening. Build 03 additionally contains namespace-before-fault
   matching and the builder's pinned-image download fallback.
-- [Pilot 01](../jobs/checkpoint-storage-probe-pilot-20261027-01/result.json)
+- [Pilot 01](evidence/checkpoint-storage-probe-pilot-20261027-01/result.summary.json)
   failed when runtime `chmod` of copied artifacts was denied under reduced
   capabilities. The adapter now verifies prepared file modes without that chmod.
-- [Pilot 02](../jobs/checkpoint-storage-probe-pilot-20261027-02/result.json)
+- [Pilot 02](evidence/checkpoint-storage-probe-pilot-20261027-02/result.summary.json)
   failed when cancellation attempted to signal the JVM across UIDs. Cancellation
   now sends the signal as the JVM's own UID.
-- [Qualification attempt 01](../jobs/checkpoint-storage-probe-20261027-01/result.json)
+- [Qualification attempt 01](evidence/checkpoint-storage-probe-20261027-01/result.summary.json)
   completed the seven cases, then failed the capability spelling check described
   above. Read-only reevaluation with the exact alias fix recognizes the seven
   cases; the stored failed result is preserved and is not relabeled as PASS.

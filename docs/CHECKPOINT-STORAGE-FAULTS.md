@@ -1,5 +1,11 @@
 # Checkpoint storage faults
 
+Historical evidence links open [sanitized copies and compact summaries](evidence/README.md).
+Printed receipt/result hashes identify the **raw originals**, retained unchanged
+under local `jobs/`. The [publication manifest](evidence/checkpoint-storage-publication-manifest.json)
+records separate sanitized-copy hashes and omissions. These copies exclude full
+native journals, binaries and detailed transcripts and cannot rerun the raw audit.
+
 PR 4 adds an opt-in Flink checkpoint write-failure experiment to the native
 scenario runner. A FUSE rule returns real `EIO` for checkpoint creates/writes;
 the runner identifies the failed checkpoint and kills the sole TaskManager
@@ -303,7 +309,7 @@ they are not erased by incomplete fault evidence.
 ## Retained verification and artifacts
 
 The final JDK 21 reactor
-[verify](../jobs/checkpoint-storage-integration-checks-20261027-01/maven-verify-final.log)
+[verify](evidence/checkpoint-storage-integration-checks-20261027-01/maven-verify-final.log.summary.json)
 passed after the pilot corrections: 1,611 Java tests reported, zero
 failures/errors, one opt-in Docker lifecycle test skipped; elapsed time was
 21.779 seconds. This is the retained PR 4 regression check; the later
@@ -311,7 +317,7 @@ failures/errors, one opt-in Docker lifecycle test skipped; elapsed time was
 records the deadline correction and its fresh live smoke separately.
 
 The earlier full JDK 21 reactor install in
-[install 04](../jobs/checkpoint-storage-integration-checks-20261027-01/maven-install-04.log)
+[install 04](evidence/checkpoint-storage-integration-checks-20261027-01/maven-install-04.log.summary.json)
 completed successfully: 1,602 Java tests reported, zero failures/errors, one
 opt-in Docker lifecycle test skipped. Coverage includes released Flink REST
 serialization, response limits/deadlines, real checkpoint metadata round trips,
@@ -321,22 +327,22 @@ FUSE qualification.
 
 Subsequent focused checks also passed:
 
-- [Install 05](../jobs/checkpoint-storage-integration-checks-20261027-01/maven-install-05.log):
+- [Install 05](evidence/checkpoint-storage-integration-checks-20261027-01/maven-install-05.log.summary.json):
   55 runtime-identity and storage-fault tests, including the corrected effective
   configuration pairing and causal evidence checks.
-- [Install 06](../jobs/checkpoint-storage-integration-checks-20261027-01/maven-install-06.log):
+- [Install 06](evidence/checkpoint-storage-integration-checks-20261027-01/maven-install-06.log.summary.json):
   nine adapter tests, including the explicit 16 MiB/25,000-record journal limits.
-- [Install 07](../jobs/checkpoint-storage-integration-checks-20261027-01/maven-install-07.log):
+- [Install 07](evidence/checkpoint-storage-integration-checks-20261027-01/maven-install-07.log.summary.json):
   77 verdict, runtime-identity and storage-fault tests, including bounded polling
   while checkpoint history is pending after a failed trigger.
-- [Python tooling](../jobs/checkpoint-storage-integration-checks-20261027-01/python-unittest.log):
+- [Python tooling](evidence/checkpoint-storage-integration-checks-20261027-01/python-unittest.log.summary.json):
   all 314 tests passed.
 
 The integrated pilots use
-[helper build 04](../jobs/checkpoint-storage-helper-build-20261027-04/build-evidence.json),
+[helper build 04](evidence/checkpoint-storage-helper-build-20261027-04/build-evidence.json),
 which adds the metadata inspector to `probe.jar`. Its native helper bytes remain
 the same as the qualified PR 3 build. Both workloads come from the separate
-[state-recovery build 02](../jobs/state-recovery-build-20261026-02/build-evidence.json).
+[state-recovery build 02](evidence/state-recovery-build-20261026-02/build-evidence.json).
 The correct and mutant JARs are frozen copies; the mutant still resets only on
 genuine restoration, and its expected-result catalog remains PASS.
 
@@ -355,17 +361,17 @@ outcomes:
 
 | Attempt | Observed outcome and scope |
 | --- | --- |
-| [Batch 01, pilot 01](../jobs/checkpoint-storage-integration-pilots-20261027-01/attempts/healthy-fuse/run/pilot-01/stdout.json) | INCONCLUSIVE, `infrastructure.flink-start-failed`, because effective configuration evidence did not match. The configuration pairing was corrected; the original result remains unchanged. |
-| [Batch 01, pilot 02](../jobs/checkpoint-storage-integration-pilots-20261027-01/attempts/healthy-fuse/run/pilot-02/stdout.json) | FAIL, `verification.flink.job-completion-timeout`, with the job still RUNNING at the three-minute completion limit. Flink reported 17 completed checkpoints and no restoration/failure. Both journals were complete after the physical fence, with 9,187 and 2,369 records. These observations do not make the incomplete run pass. |
+| [Batch 01, pilot 01](evidence/checkpoint-storage-integration-pilots-20261027-01/attempts/healthy-fuse/run/pilot-01/stdout.summary.json) | INCONCLUSIVE, `infrastructure.flink-start-failed`, because effective configuration evidence did not match. The configuration pairing was corrected; the original result remains unchanged. |
+| [Batch 01, pilot 02](evidence/checkpoint-storage-integration-pilots-20261027-01/attempts/healthy-fuse/run/pilot-02/stdout.summary.json) | FAIL, `verification.flink.job-completion-timeout`, with the job still RUNNING at the three-minute completion limit. Flink reported 17 completed checkpoints and no restoration/failure. Both journals were complete after the physical fence, with 9,187 and 2,369 records. These observations do not make the incomplete run pass. |
 
 The requested 5 ms per-record sleep did not imply completion of all 30,000
 records within three minutes. A fresh
-[batch 02 manifest](../jobs/checkpoint-storage-integration-pilots-20261027-02/manifest.json)
+[batch 02 manifest](evidence/checkpoint-storage-integration-pilots-20261027-02/manifest.json)
 keeps the same workload/helper bytes, input, key count, checkpoint settings,
 fault timeout/lease and PASS expectations. Its only scenario changes are the
 natural completion budget from three to five minutes and references relocated
 to the new batch. The
-[derivation receipt](../jobs/checkpoint-storage-integration-pilots-20261027-02/evidence/derivation.json)
+[derivation receipt](evidence/checkpoint-storage-integration-pilots-20261027-02/evidence/derivation.json)
 binds those changes to the parent manifest. Framework JARs and source/class
 hashes are captured separately for each attempt; the adapter's updated journal
 limits are framework changes, not changes to the frozen helper artifact.
@@ -374,7 +380,7 @@ The first batch 02 healthy control passed independent evidence review:
 
 | Attempt | Observed outcome and scope |
 | --- | --- |
-| [Batch 02, healthy-fuse pilot 01](../jobs/checkpoint-storage-integration-pilots-20261027-02/attempts/healthy-fuse/run/pilot-01/stdout.json) | PASS, `validator.kafka.state-prefix.match`. Flink FINISHED with 21 completed checkpoints, no restores and no failures. The terminal oracle traversed the fixed boundary and found exactly 30,000 expected IDs, zero missing/unexpected/malformed/duplicate IDs and zero state mismatches across eight keys. Physical fencing and quiescent storage capture were confirmed; component errors and storage diagnostics were empty. |
+| [Batch 02, healthy-fuse pilot 01](evidence/checkpoint-storage-integration-pilots-20261027-02/attempts/healthy-fuse/run/pilot-01/stdout.summary.json) | PASS, `validator.kafka.state-prefix.match`. Flink FINISHED with 21 completed checkpoints, no restores and no failures. The terminal oracle traversed the fixed boundary and found exactly 30,000 expected IDs, zero missing/unexpected/malformed/duplicate IDs and zero state mismatches across eight keys. Physical fencing and quiescent storage capture were confirmed; component errors and storage diagnostics were empty. |
 
 The result SHA-256 is
 `e17a408c9f0f6f5ecd39b0bd99129e2fff67ab9ce2b89b15780606aaa0d73db4`.
@@ -389,7 +395,7 @@ with contiguous sequences and every retained operation matching its raw record:
 The journals contained only STARTING/HEALTHY states and no EIO. Both JVMs ran
 with UID/GID 9999 and no effective capabilities; raw-backing reads and writes
 were denied. All 21 frozen batch files matched the manifest. The
-[framework snapshot](../jobs/checkpoint-storage-integration-pilots-20261027-02/attempts/healthy-fuse/run/pilot-01/framework/manifest.json)
+[framework snapshot](evidence/checkpoint-storage-integration-pilots-20261027-02/attempts/healthy-fuse/run/pilot-01/framework/manifest.summary.json)
 has SHA-256 `be8fca98347dd11df538dc701bac14a7028de62df97ac320037ac3eb6d117b2c`;
 its six copied JARs matched the recorded target/installed hashes, and all 752
 captured class/resource hashes matched entries inside those JARs. Runtime image,
@@ -400,8 +406,8 @@ The atomic-fault pilots are also retained with their original failures:
 
 | Attempt | Observed outcome and scope |
 | --- | --- |
-| [Batch 02, correct-eio pilot 01](../jobs/checkpoint-storage-integration-pilots-20261027-02/attempts/correct-eio/run/pilot-01/stdout.json) | FAIL, `verification.flink.job-completion-timeout`. Checkpoint 2 was the completed baseline. The failed trigger's stack identified checkpoint 3 and `Input/output error`; native TaskManager receipts recorded EIO creates under `chk-3`. The immediate FAILED_CHECKPOINT history still reported total/completed/failed counts 2/2/0, so the runner rejected an `Ambiguous failed checkpoint window` and issued ABORT. No planned TaskManager kill/replacement was confirmed. Continued checkpoint failures and automatic recovery preceded the completion timeout; the terminal oracle did not run. |
-| [Batch 02, correct-eio pilot 02](../jobs/checkpoint-storage-integration-pilots-20261027-02/attempts/correct-eio/run/pilot-02/stdout.json) | FAIL, `verification.flink.job-completion-timeout`. Completed checkpoint 1 and the unique EIO failure of checkpoint 2 were correlated, and the physical TaskManager kill was recorded. The STOPPED sample contained checkpoints 3–6, all FAILED and triggered after the kill; totals were 6 attempted, 1 completed, 5 failed and 0 in progress. The runner rejected `Checkpoint boundary changed before healing`, issued ABORT and never healed or started a replacement. The terminal oracle did not run. |
+| [Batch 02, correct-eio pilot 01](evidence/checkpoint-storage-integration-pilots-20261027-02/attempts/correct-eio/run/pilot-01/stdout.summary.json) | FAIL, `verification.flink.job-completion-timeout`. Checkpoint 2 was the completed baseline. The failed trigger's stack identified checkpoint 3 and `Input/output error`; native TaskManager receipts recorded EIO creates under `chk-3`. The immediate FAILED_CHECKPOINT history still reported total/completed/failed counts 2/2/0, so the runner rejected an `Ambiguous failed checkpoint window` and issued ABORT. No planned TaskManager kill/replacement was confirmed. Continued checkpoint failures and automatic recovery preceded the completion timeout; the terminal oracle did not run. |
+| [Batch 02, correct-eio pilot 02](evidence/checkpoint-storage-integration-pilots-20261027-02/attempts/correct-eio/run/pilot-02/stdout.summary.json) | FAIL, `verification.flink.job-completion-timeout`. Completed checkpoint 1 and the unique EIO failure of checkpoint 2 were correlated, and the physical TaskManager kill was recorded. The STOPPED sample contained checkpoints 3–6, all FAILED and triggered after the kill; totals were 6 attempted, 1 completed, 5 failed and 0 in progress. The runner rejected `Checkpoint boundary changed before healing`, issued ABORT and never healed or started a replacement. The terminal oracle did not run. |
 
 Pilot 01 result SHA-256 is
 `f145b0c07873a7ed839fdaedd6dd9d7dd7abe174e5d529dc0cdbc91b2381deee`.
@@ -426,7 +432,7 @@ the following integrated observation after that correction.
 
 | Attempt | Observed outcome and scope |
 | --- | --- |
-| [Batch 02, correct-eio pilot 03](../jobs/checkpoint-storage-integration-pilots-20261027-02/attempts/correct-eio/run/pilot-03/stdout.json) | PASS, `validator.kafka.state-prefix.match`. All six causal stages and final capture were confirmed: completed checkpoint 1, failed checkpoint 2, physical kill, heal, replacement and restoration from checkpoint 1. Flink FINISHED with 22 completed checkpoints and one restoration. Exactly 30,000 IDs and eight keys passed with zero data defects or state mismatches. |
+| [Batch 02, correct-eio pilot 03](evidence/checkpoint-storage-integration-pilots-20261027-02/attempts/correct-eio/run/pilot-03/stdout.summary.json) | PASS, `validator.kafka.state-prefix.match`. All six causal stages and final capture were confirmed: completed checkpoint 1, failed checkpoint 2, physical kill, heal, replacement and restoration from checkpoint 1. Flink FINISHED with 22 completed checkpoints and one restoration. Exactly 30,000 IDs and eight keys passed with zero data defects or state mismatches. |
 
 The result SHA-256 is
 `e9625a6a0cfe4f5e828a5b251479c0dad01d608e07c9711682a21fa472aab03a`.
@@ -454,14 +460,14 @@ were independently checked.
 All three storage instances were complete and quiescent after their physical
 fences, with empty storage/fault diagnostics. Artifact pins and the six copied
 framework JARs, including 752 class/resource entries, matched the
-[framework manifest](../jobs/checkpoint-storage-integration-pilots-20261027-02/attempts/correct-eio/run/pilot-03/framework/manifest.json),
+[framework manifest](evidence/checkpoint-storage-integration-pilots-20261027-02/attempts/correct-eio/run/pilot-03/framework/manifest.summary.json),
 SHA-256 `13a7a79f53b0420a879ee050c7a2f7ccf0da9bcf5f80194a860c1755261b2f7c`.
 
 The paired state-reset mutant demonstrated the oracle's sensitivity:
 
 | Attempt | Observed outcome and scope |
 | --- | --- |
-| [Batch 02, mutant-eio pilot 01](../jobs/checkpoint-storage-integration-pilots-20261027-02/attempts/mutant-eio/run/pilot-01/stdout.json) | Raw FAIL, `validator.kafka.state-prefix.state-mismatch`, against the unchanged PASS expectation. Flink FINISHED with 21 completed checkpoints and one restoration from checkpoint 1. All 30,000 IDs were present exactly once with no malformed/unexpected IDs, but 29,671 records had incorrect state. All six fault stages, final capture and recovery provenance were confirmed. |
+| [Batch 02, mutant-eio pilot 01](evidence/checkpoint-storage-integration-pilots-20261027-02/attempts/mutant-eio/run/pilot-01/stdout.summary.json) | Raw FAIL, `validator.kafka.state-prefix.state-mismatch`, against the unchanged PASS expectation. Flink FINISHED with 21 completed checkpoints and one restoration from checkpoint 1. All 30,000 IDs were present exactly once with no malformed/unexpected IDs, but 29,671 records had incorrect state. All six fault stages, final capture and recovery provenance were confirmed. |
 
 Its result SHA-256 is
 `b7642c06315649293e444a71b575749b65eba3e227a3f5347b92e13537bf6d25`.
@@ -495,7 +501,7 @@ the mutant failed state arithmetic. These observations do not establish that
 the component events are harmless or that other recovery paths preserve
 correctness.
 
-The retained [cleanup check](../jobs/checkpoint-storage-integration-checks-20261027-01/cleanup-check.json)
+The retained [cleanup check](evidence/checkpoint-storage-integration-checks-20261027-01/cleanup-check.json)
 covered all seven attempts: all 22 exact container IDs were absent, and each of
 the seven owned storage-volume label queries returned no volumes. The receipt
 records `allRemoved: true`; no retained run files were removed.

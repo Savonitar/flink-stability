@@ -23,9 +23,9 @@ mode and private packaged identity resource.
 
 - Correct workload SHA-256: `4c8ca4211b01d26ba0c49a2060259c117b95016fef798b4a0c187a332edd9711`.
 - Mutant workload SHA-256: `0ad8e5eeec5deb8e732a346dffc54c3675a6cb7c086e5c1bfa23a1389798d54a`.
-- Successful build receipt: `jobs/state-recovery-build-20261026-02/build-evidence.json`.
-- Frozen batch: `jobs/state-recovery-qualification-20261026-01/`.
-- Final checker report: `jobs/state-recovery-qualification-20261026-01-report.json`.
+- [Sanitized build receipt](evidence/state-recovery-build-20261026-02/build-evidence.json).
+- [Published frozen-batch manifest](evidence/state-recovery-qualification-20261026-01/manifest.json).
+- [Compact final checker report](evidence/state-recovery-qualification-20261026-01/final-report.summary.json).
 
 Pinned Docker image IDs:
 
@@ -33,8 +33,11 @@ Pinned Docker image IDs:
 - Kafka: `sha256:2cecec9e3ea2d63fd5d1da1ab95e6bb7c33a7ff81053c4eb46f4176cd0bad8c9`.
 
 The manifest also records the connector primary hash and full installed closure.
-These local evidence directories are ignored by Git; raw artifacts and logs
-remain unchanged. The [recipe](../calibration/state-recovery/README.md) documents
+The original local evidence directories are ignored by Git; raw artifacts and logs
+remain unchanged. The [publication manifest](evidence/checkpoint-storage-publication-manifest.json)
+records original SHA-256 values separately from the sanitized-copy SHA-256 values,
+with explicit omissions. Published copies cannot rerun the full raw-evidence check.
+The [recipe](../calibration/state-recovery/README.md) documents
 build, freeze, execution and checker commands. This batch used JDK 21 and
 `run.py --docker-api-version 1.44`, setting both Docker client version contexts.
 

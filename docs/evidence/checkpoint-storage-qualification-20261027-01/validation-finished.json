@@ -1,0 +1,21 @@
+{
+  "complete": true,
+  "formatVersion": 1,
+  "validated": [
+    "correct-healthy",
+    "correct-restart",
+    "correct-eio",
+    "mutant-eio"
+  ],
+  "_publication": {
+    "kind": "sanitized-copy",
+    "originalSourcePath": "jobs/checkpoint-storage-qualification-20261027-01/validation-finished.json",
+    "originalSha256": "faaecca77664d1b08402cf668dea44c701c58a00957410cb0020333eb7bd3619",
+    "originalBytes": 149,
+    "sanitizationNotes": [
+      "Host workspace<host-home> paths replaced with <workspace>, <host-home>, <host-temporary>; Docker/container paths are retained.",
+      "Original bytes remain in the local jobs evidence; this publication is not a replayable raw proof."
+    ],
+    "publicationOmissions": []
+  }
+}

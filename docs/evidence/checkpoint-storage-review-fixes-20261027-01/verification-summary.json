@@ -1,0 +1,48 @@
+{
+  "kind": "checkpoint-storage-review-corrections",
+  "reviewFindingsResolved": 4,
+  "javaTests": {
+    "run": 1616,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 1
+  },
+  "pythonTests": {
+    "run": 411,
+    "failures": 0,
+    "errors": 0
+  },
+  "historicalReaudit": {
+    "qualified": true,
+    "attempts": 12,
+    "reportedAndIndependentEvents": 18,
+    "originalEvidenceModified": false
+  },
+  "freshLiveSmoke": {
+    "confirmed": true,
+    "attempts": 1,
+    "qualificationMatrix": false
+  },
+  "files": {
+    "maven-install-02.log": "8e30bf246522af2bcae810c96f7b28d2a711adcf7f1be9aea2fea38209dd8bc6",
+    "python-unittest-final.log": "d16d4380efaa5514488c0c4e99ad644997caaa5c774dce1d9c2335fae5b2e94e",
+    "native-tests-02.log": "016e688a1be14eae6030a6a0aa880515dffac896e5c7de08bc676cb692eb7958",
+    "re-audit-final.json": "f072e30fe7d0277e58c9335ebb43dd233ea2628cc21f34fa5cc9fbe0e2cfd226",
+    "re-audit-final.md": "1b4d2cdd8e58c1e6408ce18c2c48317cc30645d8c66d26d8250d5e76c1100c22",
+    "counterexamples.json": "ab602b5aa6f978a9257776a3c96883796026fdff059f0cfb918c983c681df4c0",
+    "re-audit-reproduction.json": "d00e893aee3d4000880448f48db70c35fb7e5ebdad58e4d0a7a0ccd353476374",
+    "live-smoke-02/smoke-manifest.json": "59bff070f7225ff4f7a5d8f2880fec14cd65e513564f36b99b5563984d4a69b1",
+    "live-smoke-02/smoke-finished.json": "06290a990341ab9cfb700e5ea8671a14568f6beb0d22d8c442a6910de93f94fb"
+  },
+  "_publication": {
+    "kind": "sanitized-copy",
+    "originalSourcePath": "jobs/checkpoint-storage-review-fixes-20261027-01/verification-summary.json",
+    "originalSha256": "42db3bd85032bf4a85efd34bc0116640a642121e674f0308fb63977fa9b0ce5a",
+    "originalBytes": 1417,
+    "sanitizationNotes": [
+      "Host workspace<host-home> paths replaced with <workspace>, <host-home>, <host-temporary>; Docker/container paths are retained.",
+      "Original bytes remain in the local jobs evidence; this publication is not a replayable raw proof."
+    ],
+    "publicationOmissions": []
+  }
+}

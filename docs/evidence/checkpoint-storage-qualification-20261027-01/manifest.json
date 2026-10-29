@@ -1,0 +1,350 @@
+{
+  "artifacts": {
+    "correct": {
+      "path": "artifacts/correct.jar",
+      "sha256": "4c8ca4211b01d26ba0c49a2060259c117b95016fef798b4a0c187a332edd9711"
+    },
+    "mutant": {
+      "path": "artifacts/mutant.jar",
+      "sha256": "0ad8e5eeec5deb8e732a346dffc54c3675a6cb7c086e5c1bfa23a1389798d54a"
+    }
+  },
+  "attemptsPerCell": 3,
+  "automaticRetries": 0,
+  "buildEvidence": {
+    "path": "evidence/workload-build-evidence.json",
+    "sha256": "0b5553d8ba108112d919dccde6de8ecb0bd103b5963d3311ba3fcf9c02496456"
+  },
+  "cells": [
+    {
+      "attempts": [
+        "attempts/correct-healthy/run-1",
+        "attempts/correct-healthy/run-2",
+        "attempts/correct-healthy/run-3"
+      ],
+      "catalog": "catalogs/correct-healthy",
+      "execution": "healthy",
+      "expectedRawOutcome": "pass",
+      "expectedRawReason": "validator.kafka.state-prefix.match",
+      "expectedSha256": "e11712748ef0154f7e52a903ccdb09fadbdaf9fd794a670408d35f0f5573cfac",
+      "mode": "correct",
+      "name": "correct-healthy",
+      "requiredOutcome": "pass",
+      "scenario": "checkpoint-storage-calibration",
+      "scenarioSha256": "eebae240ca994b03432a590f8b0334198f77b1bb53f44285a03eb40d3bf80689"
+    },
+    {
+      "attempts": [
+        "attempts/correct-restart/run-1",
+        "attempts/correct-restart/run-2",
+        "attempts/correct-restart/run-3"
+      ],
+      "catalog": "catalogs/correct-restart",
+      "execution": "restart",
+      "expectedRawOutcome": "pass",
+      "expectedRawReason": "validator.kafka.state-prefix.match",
+      "expectedSha256": "e11712748ef0154f7e52a903ccdb09fadbdaf9fd794a670408d35f0f5573cfac",
+      "mode": "correct",
+      "name": "correct-restart",
+      "requiredOutcome": "pass",
+      "scenario": "checkpoint-storage-calibration",
+      "scenarioSha256": "b815ba9a691aed23956eb22647ba22ea46dd4a87c8850fdf35f685377b28f473"
+    },
+    {
+      "attempts": [
+        "attempts/correct-eio/run-1",
+        "attempts/correct-eio/run-2",
+        "attempts/correct-eio/run-3"
+      ],
+      "catalog": "catalogs/correct-eio",
+      "execution": "eio",
+      "expectedRawOutcome": "pass",
+      "expectedRawReason": "validator.kafka.state-prefix.match",
+      "expectedSha256": "e11712748ef0154f7e52a903ccdb09fadbdaf9fd794a670408d35f0f5573cfac",
+      "mode": "correct",
+      "name": "correct-eio",
+      "requiredOutcome": "pass",
+      "scenario": "checkpoint-storage-calibration",
+      "scenarioSha256": "d3702cb433889132a57b960aabe724f0d3e47ca44de3cdb71a234ce126c1596f"
+    },
+    {
+      "attempts": [
+        "attempts/mutant-eio/run-1",
+        "attempts/mutant-eio/run-2",
+        "attempts/mutant-eio/run-3"
+      ],
+      "catalog": "catalogs/mutant-eio",
+      "execution": "eio",
+      "expectedRawOutcome": "fail",
+      "expectedRawReason": "validator.kafka.state-prefix.state-mismatch",
+      "expectedSha256": "e11712748ef0154f7e52a903ccdb09fadbdaf9fd794a670408d35f0f5573cfac",
+      "mode": "mutant",
+      "name": "mutant-eio",
+      "requiredOutcome": "pass",
+      "scenario": "checkpoint-storage-calibration",
+      "scenarioSha256": "ca82900e73dfb8126db0dc02fa928192d6108442b67a97ec178139c38f26f378"
+    }
+  ],
+  "formatVersion": 1,
+  "frameworkFreeze": {
+    "path": "framework/manifest.json",
+    "sha256": "dab6678930cf0e5b40af97748bd431a39ccc5968ed4ff5523c1572be09242cac"
+  },
+  "frozenFiles": {
+    "artifacts/correct.jar": "4c8ca4211b01d26ba0c49a2060259c117b95016fef798b4a0c187a332edd9711",
+    "artifacts/helper/build-evidence.json": "9ab2001ccc55e700a76c12d0ba64d4824d1089d21e85adffa5216d75d8582ecf",
+    "artifacts/helper/bundle/checkpoint-fuse": "49d01b4f62b6a7bd8256779777cf1e6d193d2e1d7365796c115f4ffb66c85f66",
+    "artifacts/helper/bundle/checkpoint-fuse-selftest": "bbdd6a07da940c9d9db135958ec7f1caf8502f03767203f349aa65b5c7a3b9d5",
+    "artifacts/helper/bundle/probe.jar": "2fd880248a7515b08ee419e1ff875cc1edff8e0f784878aa55a0aaa0a1780983",
+    "artifacts/mutant.jar": "0ad8e5eeec5deb8e732a346dffc54c3675a6cb7c086e5c1bfa23a1389798d54a",
+    "catalogs/correct-eio/checkpoint-storage-calibration.expected.yaml": "e11712748ef0154f7e52a903ccdb09fadbdaf9fd794a670408d35f0f5573cfac",
+    "catalogs/correct-eio/checkpoint-storage-calibration.yaml": "d3702cb433889132a57b960aabe724f0d3e47ca44de3cdb71a234ce126c1596f",
+    "catalogs/correct-healthy/checkpoint-storage-calibration.expected.yaml": "e11712748ef0154f7e52a903ccdb09fadbdaf9fd794a670408d35f0f5573cfac",
+    "catalogs/correct-healthy/checkpoint-storage-calibration.yaml": "eebae240ca994b03432a590f8b0334198f77b1bb53f44285a03eb40d3bf80689",
+    "catalogs/correct-restart/checkpoint-storage-calibration.expected.yaml": "e11712748ef0154f7e52a903ccdb09fadbdaf9fd794a670408d35f0f5573cfac",
+    "catalogs/correct-restart/checkpoint-storage-calibration.yaml": "b815ba9a691aed23956eb22647ba22ea46dd4a87c8850fdf35f685377b28f473",
+    "catalogs/mutant-eio/checkpoint-storage-calibration.expected.yaml": "e11712748ef0154f7e52a903ccdb09fadbdaf9fd794a670408d35f0f5573cfac",
+    "catalogs/mutant-eio/checkpoint-storage-calibration.yaml": "ca82900e73dfb8126db0dc02fa928192d6108442b67a97ec178139c38f26f378",
+    "evidence/build-sources/correct/flink-job-generator/WorkloadBuildGuard.java": "6d88b29831b46a1563826bf4c7824fe808988d958096c32aef3235cbf2fc51c4",
+    "evidence/build-sources/correct/flink-job-generator/pom.xml": "49cc9a45456bdba2fd0a2fc427757d61da1a76ed66047e17e0b92726f33b34d2",
+    "evidence/build-sources/correct/flink-job-generator/src/build-identity/META-INF/flink-stability/keyed-prefix-build.properties": "eb171a675d1e0f0c0ac805957675d7d66ebb0c88e8664983aaa76e4171610858",
+    "evidence/build-sources/correct/flink-job-generator/src/main/java/org/savonitar/flink/stability/flinkjob/AsyncSnapshotDelay.java": "033ef97c8dddbfc5dfa9e0be6cb309992cd7205c05606d5fae3b1fd782e253bd",
+    "evidence/build-sources/correct/flink-job-generator/src/main/java/org/savonitar/flink/stability/flinkjob/ConnectorNamingStrategy.java": "3ccf6fe54410f056331b76d58438cd7c1dd85f3e1691cc408ef921d014c70689",
+    "evidence/build-sources/correct/flink-job-generator/src/main/java/org/savonitar/flink/stability/flinkjob/FlinkKafkaEosJob.java": "2b8b560b4f652d4f44e6f582a8a263d31a5a55d489be82cdac6e8ab16308c3de",
+    "evidence/build-sources/correct/flink-job-generator/src/main/java/org/savonitar/flink/stability/flinkjob/FlinkKafkaEosJobArguments.java": "8a2e486ad4513b2e2e9ba4bbc52b22be5a9d96ac7971c018bec04658bfb8da2c",
+    "evidence/build-sources/correct/flink-job-generator/src/main/java/org/savonitar/flink/stability/flinkjob/KeyedPrefixFunction.java": "fdfab8d3c5592595d8645b75bda8028720d5a410913f628951759db578310d29",
+    "evidence/build-sources/correct/flink-job-generator/src/main/java/org/savonitar/flink/stability/flinkjob/StateRecoveryBuild.java": "1ff694e7932486b9cae947a69052577da95909465b9cdb4b12ab9b7c2a62a817",
+    "evidence/build-sources/correct/flink-job-generator/src/main/java/org/savonitar/flink/stability/flinkjob/WorkloadProtocolV1Configuration.java": "1d4d9adebbc8810660cfac47a630ee3c90c81820c927570c3893b9ab9df0f33b",
+    "evidence/build-sources/correct/flink-job-generator/src/main/resources/log4j2.properties": "4063a293e1f0d4dad2b0d1ce87a1d038d4fdd7ba9ef31c9f4666731083bad650",
+    "evidence/build-sources/correct/flink-job-generator/src/test/java/org/savonitar/flink/stability/flinkjob/AsyncSnapshotDelayTest.java": "db93d4a3db4be125ad4095fef8eca23dd18498f42ae9063547d6babd13c0a59d",
+    "evidence/build-sources/correct/flink-job-generator/src/test/java/org/savonitar/flink/stability/flinkjob/ConnectorNamingStrategyTest.java": "c946c63e4c4148a5da709d4284edc492bafd47e70ce9d310eb862e0877a93474",
+    "evidence/build-sources/correct/flink-job-generator/src/test/java/org/savonitar/flink/stability/flinkjob/FlinkKafkaEosJobArgumentsTest.java": "02b2471ae701af4af6c1ca509e44e1fd88691e8915e04349f03cf769d611e123",
+    "evidence/build-sources/correct/flink-job-generator/src/test/java/org/savonitar/flink/stability/flinkjob/KeyedPrefixFunctionTest.java": "41d13ab4bf8f328287afe820fd628eb5f4710e0e17ab7d5acac05f167db89051",
+    "evidence/build-sources/correct/flink-job-generator/src/test/java/org/savonitar/flink/stability/flinkjob/StateRecoveryBuildTest.java": "df04e4ce9932356b20a1eb2574538f10637dad538645bacbb528671b227571c8",
+    "evidence/build-sources/correct/flink-job-generator/src/test/java/org/savonitar/flink/stability/flinkjob/WorkloadProtocolV1ConfigurationTest.java": "41e38a7aa957eac716a8a2fba610cb926144ab8c107c35ab7f59f42960063d34",
+    "evidence/build-sources/correct/pom.xml": "430cb52bd12a624b74d9f87d3418015fb18b74ac3fc675765e1e1aa53e72e9bd",
+    "evidence/build-sources/mutant/flink-job-generator/WorkloadBuildGuard.java": "6d88b29831b46a1563826bf4c7824fe808988d958096c32aef3235cbf2fc51c4",
+    "evidence/build-sources/mutant/flink-job-generator/pom.xml": "49cc9a45456bdba2fd0a2fc427757d61da1a76ed66047e17e0b92726f33b34d2",
+    "evidence/build-sources/mutant/flink-job-generator/src/build-identity/META-INF/flink-stability/keyed-prefix-build.properties": "eb171a675d1e0f0c0ac805957675d7d66ebb0c88e8664983aaa76e4171610858",
+    "evidence/build-sources/mutant/flink-job-generator/src/main/java/org/savonitar/flink/stability/flinkjob/AsyncSnapshotDelay.java": "033ef97c8dddbfc5dfa9e0be6cb309992cd7205c05606d5fae3b1fd782e253bd",
+    "evidence/build-sources/mutant/flink-job-generator/src/main/java/org/savonitar/flink/stability/flinkjob/ConnectorNamingStrategy.java": "3ccf6fe54410f056331b76d58438cd7c1dd85f3e1691cc408ef921d014c70689",
+    "evidence/build-sources/mutant/flink-job-generator/src/main/java/org/savonitar/flink/stability/flinkjob/FlinkKafkaEosJob.java": "2b8b560b4f652d4f44e6f582a8a263d31a5a55d489be82cdac6e8ab16308c3de",
+    "evidence/build-sources/mutant/flink-job-generator/src/main/java/org/savonitar/flink/stability/flinkjob/FlinkKafkaEosJobArguments.java": "8a2e486ad4513b2e2e9ba4bbc52b22be5a9d96ac7971c018bec04658bfb8da2c",
+    "evidence/build-sources/mutant/flink-job-generator/src/main/java/org/savonitar/flink/stability/flinkjob/KeyedPrefixFunction.java": "fdfab8d3c5592595d8645b75bda8028720d5a410913f628951759db578310d29",
+    "evidence/build-sources/mutant/flink-job-generator/src/main/java/org/savonitar/flink/stability/flinkjob/StateRecoveryBuild.java": "1ff694e7932486b9cae947a69052577da95909465b9cdb4b12ab9b7c2a62a817",
+    "evidence/build-sources/mutant/flink-job-generator/src/main/java/org/savonitar/flink/stability/flinkjob/WorkloadProtocolV1Configuration.java": "1d4d9adebbc8810660cfac47a630ee3c90c81820c927570c3893b9ab9df0f33b",
+    "evidence/build-sources/mutant/flink-job-generator/src/main/resources/log4j2.properties": "4063a293e1f0d4dad2b0d1ce87a1d038d4fdd7ba9ef31c9f4666731083bad650",
+    "evidence/build-sources/mutant/flink-job-generator/src/test/java/org/savonitar/flink/stability/flinkjob/AsyncSnapshotDelayTest.java": "db93d4a3db4be125ad4095fef8eca23dd18498f42ae9063547d6babd13c0a59d",
+    "evidence/build-sources/mutant/flink-job-generator/src/test/java/org/savonitar/flink/stability/flinkjob/ConnectorNamingStrategyTest.java": "c946c63e4c4148a5da709d4284edc492bafd47e70ce9d310eb862e0877a93474",
+    "evidence/build-sources/mutant/flink-job-generator/src/test/java/org/savonitar/flink/stability/flinkjob/FlinkKafkaEosJobArgumentsTest.java": "02b2471ae701af4af6c1ca509e44e1fd88691e8915e04349f03cf769d611e123",
+    "evidence/build-sources/mutant/flink-job-generator/src/test/java/org/savonitar/flink/stability/flinkjob/KeyedPrefixFunctionTest.java": "41d13ab4bf8f328287afe820fd628eb5f4710e0e17ab7d5acac05f167db89051",
+    "evidence/build-sources/mutant/flink-job-generator/src/test/java/org/savonitar/flink/stability/flinkjob/StateRecoveryBuildTest.java": "df04e4ce9932356b20a1eb2574538f10637dad538645bacbb528671b227571c8",
+    "evidence/build-sources/mutant/flink-job-generator/src/test/java/org/savonitar/flink/stability/flinkjob/WorkloadProtocolV1ConfigurationTest.java": "41e38a7aa957eac716a8a2fba610cb926144ab8c107c35ab7f59f42960063d34",
+    "evidence/build-sources/mutant/pom.xml": "430cb52bd12a624b74d9f87d3418015fb18b74ac3fc675765e1e1aa53e72e9bd",
+    "evidence/helper-sources/testcontainers/checkpoint_storage_build.py": "c15c0836a5eea64b385b54949626217aa1bb75bcf22b260e58167200aaa6fd83",
+    "evidence/helper-sources/testcontainers/src/main/java/org/savonitar/flink/stability/testcontainers/storage/CheckpointStateInspector.java": "f447f8607bc4e625095d64b7c12eddf192953342bfade6f65c01daa99110061c",
+    "evidence/helper-sources/testcontainers/src/main/java/org/savonitar/flink/stability/testcontainers/storage/CheckpointStorageIoProbe.java": "b855410c8ffef766cca6c1228b03b1d6a9f3eb3eb8b05f20911aac61c72824dd",
+    "evidence/helper-sources/testcontainers/src/main/native/checkpoint-fuse/checkpoint_fuse.c": "b2e1c10bdea0e79939971677edee99f3abac39b625c3c1b804f27f21ce8399a8",
+    "evidence/helper-sources/testcontainers/src/main/native/checkpoint-fuse/core.c": "f8b0a5ca2a49b1172803f7a174133eeb79cc9ff6ebe5dda16a2be4204bf89976",
+    "evidence/helper-sources/testcontainers/src/main/native/checkpoint-fuse/core.h": "1313b5c1ea4e61f12d9d30a13df2c54dc347d57a42a29c842f472dcc3670510e",
+    "evidence/helper-sources/testcontainers/src/main/native/checkpoint-fuse/dependencies.json": "1458d129527d65c94d60fee9226cd557049f4e89b541b6f1aa93f7a3d516ba47",
+    "evidence/helper-sources/testcontainers/src/main/native/checkpoint-fuse/jail.c": "2e5590446991aca9cf0d389b35ee0389dec76783b886c2dcb1da7900b4ea4131",
+    "evidence/helper-sources/testcontainers/src/main/native/checkpoint-fuse/jail.h": "5f0270f2b9d4914a9606aa14b44a5d01c431dab30edfa1b6827668fce320e630",
+    "evidence/helper-sources/testcontainers/src/main/native/checkpoint-fuse/selftest.c": "245503aec3ddb3130649f85e8aa883c386f71807f967705e38f01b0cf20c644f",
+    "evidence/parent-manifest.json": "dc211ef90d5f4ac3cbcc720d73dfb5a4455a511fbe56724cfc625cd0b009fb99",
+    "evidence/platform.json": "979f1decd92cd412925ce4074554708f7689f3de765f14d383bbd1e8a467d465",
+    "evidence/recipe/README.md": "82263319e2edaba4bcdd5bb46c106557a4ae8c2b49a1c4ec0f553f337d40d8d7",
+    "evidence/recipe/ResolveClosure.java": "2ba4849e8381f91a82212d3c26a4a939290643ee1231582646c8ef55cbc56659",
+    "evidence/recipe/audit.py": "dde7b9375095ec7c974e4405fab3f989e46f577997ee0a187b644468083a4df6",
+    "evidence/recipe/catalogs.py": "02483b37cdd5936b726a9e0479d28e260bd3d8c8884a8c0c27c45dd00dbce188",
+    "evidence/recipe/check.py": "e01e200dfbeb89fc85e2a69c8ae2659b28506b0eb99be9fc25c2101534c89fc7",
+    "evidence/recipe/framework.py": "c328b7b4a9b549ddc45bd99751eaf632517fd71afd867462c6e029f2c759e89a",
+    "evidence/recipe/prepare.py": "6ef831ef1e03a429a508cef9fc0525e66beac6e16e8da5bf6695ab8bfd84ef7e",
+    "evidence/recipe/report.py": "5bffb77d77386f468cff92d24d83a568778963138c38ee4cc6eedfc7d192414f",
+    "evidence/recipe/run.py": "8095decaf5e218d643c617758e9d24b4d8384e58321ffceb198491e86326d99f",
+    "evidence/recipe/state_recovery_check.py": "dcb395ab22844ba909f1e0700eca42bf02ba0c60e51acc31e94de48204b4549f",
+    "evidence/references/correct-eio.json": "e9625a6a0cfe4f5e828a5b251479c0dad01d608e07c9711682a21fa472aab03a",
+    "evidence/references/correct-healthy.json": "e17a408c9f0f6f5ecd39b0bd99129e2fff67ab9ce2b89b15780606aaa0d73db4",
+    "evidence/references/correct-restart.json": "49da248550df5b46bab26df1b46777efb775e99779f42d7686786ed5bf843e37",
+    "evidence/references/mutant-eio.json": "b7642c06315649293e444a71b575749b65eba3e227a3f5347b92e13537bf6d25",
+    "evidence/workload-build-evidence.json": "0b5553d8ba108112d919dccde6de8ecb0bd103b5963d3311ba3fcf9c02496456"
+  },
+  "helperBundle": {
+    "files": {
+      "checkpoint-fuse": "49d01b4f62b6a7bd8256779777cf1e6d193d2e1d7365796c115f4ffb66c85f66",
+      "checkpoint-fuse-selftest": "bbdd6a07da940c9d9db135958ec7f1caf8502f03767203f349aa65b5c7a3b9d5",
+      "probe.jar": "2fd880248a7515b08ee419e1ff875cc1edff8e0f784878aa55a0aaa0a1780983"
+    },
+    "imageId": "sha256:2e93ded2cb7bf1a50f71b663d5e3ea01420bcc4e549cbf666d05120f939713c7",
+    "manifestSha256": "9ab2001ccc55e700a76c12d0ba64d4824d1089d21e85adffa5216d75d8582ecf",
+    "path": "artifacts/helper",
+    "platform": "linux/arm64"
+  },
+  "kind": "checkpoint-storage-calibration",
+  "outerTimeoutSeconds": 900,
+  "platformEvidence": {
+    "path": "evidence/platform.json",
+    "sha256": "979f1decd92cd412925ce4074554708f7689f3de765f14d383bbd1e8a467d465"
+  },
+  "recipeFiles": {
+    "evidence/build-sources/correct/flink-job-generator/WorkloadBuildGuard.java": "6d88b29831b46a1563826bf4c7824fe808988d958096c32aef3235cbf2fc51c4",
+    "evidence/build-sources/correct/flink-job-generator/pom.xml": "49cc9a45456bdba2fd0a2fc427757d61da1a76ed66047e17e0b92726f33b34d2",
+    "evidence/build-sources/correct/flink-job-generator/src/build-identity/META-INF/flink-stability/keyed-prefix-build.properties": "eb171a675d1e0f0c0ac805957675d7d66ebb0c88e8664983aaa76e4171610858",
+    "evidence/build-sources/correct/flink-job-generator/src/main/java/org/savonitar/flink/stability/flinkjob/AsyncSnapshotDelay.java": "033ef97c8dddbfc5dfa9e0be6cb309992cd7205c05606d5fae3b1fd782e253bd",
+    "evidence/build-sources/correct/flink-job-generator/src/main/java/org/savonitar/flink/stability/flinkjob/ConnectorNamingStrategy.java": "3ccf6fe54410f056331b76d58438cd7c1dd85f3e1691cc408ef921d014c70689",
+    "evidence/build-sources/correct/flink-job-generator/src/main/java/org/savonitar/flink/stability/flinkjob/FlinkKafkaEosJob.java": "2b8b560b4f652d4f44e6f582a8a263d31a5a55d489be82cdac6e8ab16308c3de",
+    "evidence/build-sources/correct/flink-job-generator/src/main/java/org/savonitar/flink/stability/flinkjob/FlinkKafkaEosJobArguments.java": "8a2e486ad4513b2e2e9ba4bbc52b22be5a9d96ac7971c018bec04658bfb8da2c",
+    "evidence/build-sources/correct/flink-job-generator/src/main/java/org/savonitar/flink/stability/flinkjob/KeyedPrefixFunction.java": "fdfab8d3c5592595d8645b75bda8028720d5a410913f628951759db578310d29",
+    "evidence/build-sources/correct/flink-job-generator/src/main/java/org/savonitar/flink/stability/flinkjob/StateRecoveryBuild.java": "1ff694e7932486b9cae947a69052577da95909465b9cdb4b12ab9b7c2a62a817",
+    "evidence/build-sources/correct/flink-job-generator/src/main/java/org/savonitar/flink/stability/flinkjob/WorkloadProtocolV1Configuration.java": "1d4d9adebbc8810660cfac47a630ee3c90c81820c927570c3893b9ab9df0f33b",
+    "evidence/build-sources/correct/flink-job-generator/src/main/resources/log4j2.properties": "4063a293e1f0d4dad2b0d1ce87a1d038d4fdd7ba9ef31c9f4666731083bad650",
+    "evidence/build-sources/correct/flink-job-generator/src/test/java/org/savonitar/flink/stability/flinkjob/AsyncSnapshotDelayTest.java": "db93d4a3db4be125ad4095fef8eca23dd18498f42ae9063547d6babd13c0a59d",
+    "evidence/build-sources/correct/flink-job-generator/src/test/java/org/savonitar/flink/stability/flinkjob/ConnectorNamingStrategyTest.java": "c946c63e4c4148a5da709d4284edc492bafd47e70ce9d310eb862e0877a93474",
+    "evidence/build-sources/correct/flink-job-generator/src/test/java/org/savonitar/flink/stability/flinkjob/FlinkKafkaEosJobArgumentsTest.java": "02b2471ae701af4af6c1ca509e44e1fd88691e8915e04349f03cf769d611e123",
+    "evidence/build-sources/correct/flink-job-generator/src/test/java/org/savonitar/flink/stability/flinkjob/KeyedPrefixFunctionTest.java": "41d13ab4bf8f328287afe820fd628eb5f4710e0e17ab7d5acac05f167db89051",
+    "evidence/build-sources/correct/flink-job-generator/src/test/java/org/savonitar/flink/stability/flinkjob/StateRecoveryBuildTest.java": "df04e4ce9932356b20a1eb2574538f10637dad538645bacbb528671b227571c8",
+    "evidence/build-sources/correct/flink-job-generator/src/test/java/org/savonitar/flink/stability/flinkjob/WorkloadProtocolV1ConfigurationTest.java": "41e38a7aa957eac716a8a2fba610cb926144ab8c107c35ab7f59f42960063d34",
+    "evidence/build-sources/correct/pom.xml": "430cb52bd12a624b74d9f87d3418015fb18b74ac3fc675765e1e1aa53e72e9bd",
+    "evidence/build-sources/mutant/flink-job-generator/WorkloadBuildGuard.java": "6d88b29831b46a1563826bf4c7824fe808988d958096c32aef3235cbf2fc51c4",
+    "evidence/build-sources/mutant/flink-job-generator/pom.xml": "49cc9a45456bdba2fd0a2fc427757d61da1a76ed66047e17e0b92726f33b34d2",
+    "evidence/build-sources/mutant/flink-job-generator/src/build-identity/META-INF/flink-stability/keyed-prefix-build.properties": "eb171a675d1e0f0c0ac805957675d7d66ebb0c88e8664983aaa76e4171610858",
+    "evidence/build-sources/mutant/flink-job-generator/src/main/java/org/savonitar/flink/stability/flinkjob/AsyncSnapshotDelay.java": "033ef97c8dddbfc5dfa9e0be6cb309992cd7205c05606d5fae3b1fd782e253bd",
+    "evidence/build-sources/mutant/flink-job-generator/src/main/java/org/savonitar/flink/stability/flinkjob/ConnectorNamingStrategy.java": "3ccf6fe54410f056331b76d58438cd7c1dd85f3e1691cc408ef921d014c70689",
+    "evidence/build-sources/mutant/flink-job-generator/src/main/java/org/savonitar/flink/stability/flinkjob/FlinkKafkaEosJob.java": "2b8b560b4f652d4f44e6f582a8a263d31a5a55d489be82cdac6e8ab16308c3de",
+    "evidence/build-sources/mutant/flink-job-generator/src/main/java/org/savonitar/flink/stability/flinkjob/FlinkKafkaEosJobArguments.java": "8a2e486ad4513b2e2e9ba4bbc52b22be5a9d96ac7971c018bec04658bfb8da2c",
+    "evidence/build-sources/mutant/flink-job-generator/src/main/java/org/savonitar/flink/stability/flinkjob/KeyedPrefixFunction.java": "fdfab8d3c5592595d8645b75bda8028720d5a410913f628951759db578310d29",
+    "evidence/build-sources/mutant/flink-job-generator/src/main/java/org/savonitar/flink/stability/flinkjob/StateRecoveryBuild.java": "1ff694e7932486b9cae947a69052577da95909465b9cdb4b12ab9b7c2a62a817",
+    "evidence/build-sources/mutant/flink-job-generator/src/main/java/org/savonitar/flink/stability/flinkjob/WorkloadProtocolV1Configuration.java": "1d4d9adebbc8810660cfac47a630ee3c90c81820c927570c3893b9ab9df0f33b",
+    "evidence/build-sources/mutant/flink-job-generator/src/main/resources/log4j2.properties": "4063a293e1f0d4dad2b0d1ce87a1d038d4fdd7ba9ef31c9f4666731083bad650",
+    "evidence/build-sources/mutant/flink-job-generator/src/test/java/org/savonitar/flink/stability/flinkjob/AsyncSnapshotDelayTest.java": "db93d4a3db4be125ad4095fef8eca23dd18498f42ae9063547d6babd13c0a59d",
+    "evidence/build-sources/mutant/flink-job-generator/src/test/java/org/savonitar/flink/stability/flinkjob/ConnectorNamingStrategyTest.java": "c946c63e4c4148a5da709d4284edc492bafd47e70ce9d310eb862e0877a93474",
+    "evidence/build-sources/mutant/flink-job-generator/src/test/java/org/savonitar/flink/stability/flinkjob/FlinkKafkaEosJobArgumentsTest.java": "02b2471ae701af4af6c1ca509e44e1fd88691e8915e04349f03cf769d611e123",
+    "evidence/build-sources/mutant/flink-job-generator/src/test/java/org/savonitar/flink/stability/flinkjob/KeyedPrefixFunctionTest.java": "41d13ab4bf8f328287afe820fd628eb5f4710e0e17ab7d5acac05f167db89051",
+    "evidence/build-sources/mutant/flink-job-generator/src/test/java/org/savonitar/flink/stability/flinkjob/StateRecoveryBuildTest.java": "df04e4ce9932356b20a1eb2574538f10637dad538645bacbb528671b227571c8",
+    "evidence/build-sources/mutant/flink-job-generator/src/test/java/org/savonitar/flink/stability/flinkjob/WorkloadProtocolV1ConfigurationTest.java": "41e38a7aa957eac716a8a2fba610cb926144ab8c107c35ab7f59f42960063d34",
+    "evidence/build-sources/mutant/pom.xml": "430cb52bd12a624b74d9f87d3418015fb18b74ac3fc675765e1e1aa53e72e9bd",
+    "evidence/helper-sources/testcontainers/checkpoint_storage_build.py": "c15c0836a5eea64b385b54949626217aa1bb75bcf22b260e58167200aaa6fd83",
+    "evidence/helper-sources/testcontainers/src/main/java/org/savonitar/flink/stability/testcontainers/storage/CheckpointStateInspector.java": "f447f8607bc4e625095d64b7c12eddf192953342bfade6f65c01daa99110061c",
+    "evidence/helper-sources/testcontainers/src/main/java/org/savonitar/flink/stability/testcontainers/storage/CheckpointStorageIoProbe.java": "b855410c8ffef766cca6c1228b03b1d6a9f3eb3eb8b05f20911aac61c72824dd",
+    "evidence/helper-sources/testcontainers/src/main/native/checkpoint-fuse/checkpoint_fuse.c": "b2e1c10bdea0e79939971677edee99f3abac39b625c3c1b804f27f21ce8399a8",
+    "evidence/helper-sources/testcontainers/src/main/native/checkpoint-fuse/core.c": "f8b0a5ca2a49b1172803f7a174133eeb79cc9ff6ebe5dda16a2be4204bf89976",
+    "evidence/helper-sources/testcontainers/src/main/native/checkpoint-fuse/core.h": "1313b5c1ea4e61f12d9d30a13df2c54dc347d57a42a29c842f472dcc3670510e",
+    "evidence/helper-sources/testcontainers/src/main/native/checkpoint-fuse/dependencies.json": "1458d129527d65c94d60fee9226cd557049f4e89b541b6f1aa93f7a3d516ba47",
+    "evidence/helper-sources/testcontainers/src/main/native/checkpoint-fuse/jail.c": "2e5590446991aca9cf0d389b35ee0389dec76783b886c2dcb1da7900b4ea4131",
+    "evidence/helper-sources/testcontainers/src/main/native/checkpoint-fuse/jail.h": "5f0270f2b9d4914a9606aa14b44a5d01c431dab30edfa1b6827668fce320e630",
+    "evidence/helper-sources/testcontainers/src/main/native/checkpoint-fuse/selftest.c": "245503aec3ddb3130649f85e8aa883c386f71807f967705e38f01b0cf20c644f",
+    "evidence/recipe/README.md": "82263319e2edaba4bcdd5bb46c106557a4ae8c2b49a1c4ec0f553f337d40d8d7",
+    "evidence/recipe/ResolveClosure.java": "2ba4849e8381f91a82212d3c26a4a939290643ee1231582646c8ef55cbc56659",
+    "evidence/recipe/audit.py": "dde7b9375095ec7c974e4405fab3f989e46f577997ee0a187b644468083a4df6",
+    "evidence/recipe/catalogs.py": "02483b37cdd5936b726a9e0479d28e260bd3d8c8884a8c0c27c45dd00dbce188",
+    "evidence/recipe/check.py": "e01e200dfbeb89fc85e2a69c8ae2659b28506b0eb99be9fc25c2101534c89fc7",
+    "evidence/recipe/framework.py": "c328b7b4a9b549ddc45bd99751eaf632517fd71afd867462c6e029f2c759e89a",
+    "evidence/recipe/prepare.py": "6ef831ef1e03a429a508cef9fc0525e66beac6e16e8da5bf6695ab8bfd84ef7e",
+    "evidence/recipe/report.py": "5bffb77d77386f468cff92d24d83a568778963138c38ee4cc6eedfc7d192414f",
+    "evidence/recipe/run.py": "8095decaf5e218d643c617758e9d24b4d8384e58321ffceb198491e86326d99f",
+    "evidence/recipe/state_recovery_check.py": "dcb395ab22844ba909f1e0700eca42bf02ba0c60e51acc31e94de48204b4549f"
+  },
+  "referenceSources": {
+    "correct-eio": "jobs/checkpoint-storage-integration-pilots-20261027-02/attempts/correct-eio/run/pilot-03/stdout.json",
+    "correct-healthy": "jobs/checkpoint-storage-integration-pilots-20261027-02/attempts/healthy-fuse/run/pilot-01/stdout.json",
+    "correct-restart": "jobs/checkpoint-storage-qualification-pilots-20261027-01/attempts/healthy-restart/run/pilot-01/stdout.json",
+    "mutant-eio": "jobs/checkpoint-storage-integration-pilots-20261027-02/attempts/mutant-eio/run/pilot-01/stdout.json"
+  },
+  "references": {
+    "correct-eio": {
+      "path": "evidence/references/correct-eio.json",
+      "sha256": "e9625a6a0cfe4f5e828a5b251479c0dad01d608e07c9711682a21fa472aab03a"
+    },
+    "correct-healthy": {
+      "path": "evidence/references/correct-healthy.json",
+      "sha256": "e17a408c9f0f6f5ecd39b0bd99129e2fff67ab9ce2b89b15780606aaa0d73db4"
+    },
+    "correct-restart": {
+      "path": "evidence/references/correct-restart.json",
+      "sha256": "49da248550df5b46bab26df1b46777efb775e99779f42d7686786ed5bf843e37"
+    },
+    "mutant-eio": {
+      "path": "evidence/references/mutant-eio.json",
+      "sha256": "b7642c06315649293e444a71b575749b65eba3e227a3f5347b92e13537bf6d25"
+    }
+  },
+  "runtimeIdentity": {
+    "connectorArtifacts": [
+      {
+        "containerPath": "/opt/flink/lib/flink-stability-connector-00000000-6bb63f7b09930d99745325393b481c092b0c26d626e738b7a1fd6fd8d7d4f1da.jar",
+        "sha256": "6bb63f7b09930d99745325393b481c092b0c26d626e738b7a1fd6fd8d7d4f1da"
+      },
+      {
+        "containerPath": "/opt/flink/lib/flink-stability-connector-00000001-4eeeae8d20c078abb64b015ec158add383ac581571cddc45c68f0c9ae0230720.jar",
+        "sha256": "4eeeae8d20c078abb64b015ec158add383ac581571cddc45c68f0c9ae0230720"
+      },
+      {
+        "containerPath": "/opt/flink/lib/flink-stability-connector-00000002-d8054ae7c0d1c2d2f55d28e46026ebe5892881f3fab5f439233184381c3b4a1f.jar",
+        "sha256": "d8054ae7c0d1c2d2f55d28e46026ebe5892881f3fab5f439233184381c3b4a1f"
+      },
+      {
+        "containerPath": "/opt/flink/lib/flink-stability-connector-00000003-4b364e6850dc89172fcf1d4dd26b8ff5488eda44ff4657e22dd265203dd5ab3c.jar",
+        "sha256": "4b364e6850dc89172fcf1d4dd26b8ff5488eda44ff4657e22dd265203dd5ab3c"
+      },
+      {
+        "containerPath": "/opt/flink/lib/flink-stability-connector-00000004-e2d202d4606e23aeaf8a5a9632db06f5fefd5b63d251c3f503f9faaa78530e5c.jar",
+        "sha256": "e2d202d4606e23aeaf8a5a9632db06f5fefd5b63d251c3f503f9faaa78530e5c"
+      },
+      {
+        "containerPath": "/opt/flink/lib/flink-stability-connector-00000005-f30d77f5826b9e9813342e84ab412095ed4ed5cf4fef6f93cebb848cb0fd0294.jar",
+        "sha256": "f30d77f5826b9e9813342e84ab412095ed4ed5cf4fef6f93cebb848cb0fd0294"
+      },
+      {
+        "containerPath": "/opt/flink/lib/flink-stability-connector-00000006-bcf39f152c5553c2501a491fc4a73c5b0330741e8eed96a481323b8ee89738af.jar",
+        "sha256": "bcf39f152c5553c2501a491fc4a73c5b0330741e8eed96a481323b8ee89738af"
+      },
+      {
+        "containerPath": "/opt/flink/lib/flink-stability-connector-00000007-581bd61000ef7648943f781ca05689e56d03f6052748365a8e2b3a9b5d3fa32f.jar",
+        "sha256": "581bd61000ef7648943f781ca05689e56d03f6052748365a8e2b3a9b5d3fa32f"
+      },
+      {
+        "containerPath": "/opt/flink/lib/flink-stability-connector-00000008-b6c3237e24b8252a5a9c3a0e1ae30ef8f323412e74bd358548b7a9e527d676df.jar",
+        "sha256": "b6c3237e24b8252a5a9c3a0e1ae30ef8f323412e74bd358548b7a9e527d676df"
+      },
+      {
+        "containerPath": "/opt/flink/lib/flink-stability-connector-00000009-a58a84c4271e50df4c96ed916ccb7e48a869f8ed9cdcda1ad5d3d4c33b0214a3.jar",
+        "sha256": "a58a84c4271e50df4c96ed916ccb7e48a869f8ed9cdcda1ad5d3d4c33b0214a3"
+      },
+      {
+        "containerPath": "/opt/flink/lib/flink-stability-connector-00000010-4c766cb3f855415ee734b2392949a0b6f12a60879334a74518deaf6270d32e36.jar",
+        "sha256": "4c766cb3f855415ee734b2392949a0b6f12a60879334a74518deaf6270d32e36"
+      },
+      {
+        "containerPath": "/opt/flink/lib/flink-stability-connector-00000011-d3ef575e3e4979678dc01bf1dcce51021493b4d11fb7f1be8ad982877c16a1c0.jar",
+        "sha256": "d3ef575e3e4979678dc01bf1dcce51021493b4d11fb7f1be8ad982877c16a1c0"
+      }
+    ],
+    "connectorSha256": "6bb63f7b09930d99745325393b481c092b0c26d626e738b7a1fd6fd8d7d4f1da",
+    "flinkImageId": "sha256:2e93ded2cb7bf1a50f71b663d5e3ea01420bcc4e549cbf666d05120f939713c7",
+    "flinkImageReference": "flink:2.2.0",
+    "kafkaImageId": "sha256:2cecec9e3ea2d63fd5d1da1ab95e6bb7c33a7ff81053c4eb46f4176cd0bad8c9",
+    "kafkaImageReference": "apache/kafka:4.0.0"
+  },
+  "workload": {
+    "checkpointIntervalMillis": 10000,
+    "completionTimeoutMillis": 300000,
+    "keyCount": 8,
+    "maxConcurrent": 1,
+    "parallelism": 1,
+    "processingDelayMillis": 5,
+    "smallFileThreshold": 0,
+    "tolerableFailures": 10,
+    "totalRecords": 30000
+  },
+  "_publication": {
+    "kind": "sanitized-copy",
+    "originalSourcePath": "jobs/checkpoint-storage-qualification-20261027-01/manifest.json",
+    "originalSha256": "c9f673f7cd883796b58e8a4dd70e61646e50a8bfaab026cc07bf4d7d1448d945",
+    "originalBytes": 30891,
+    "sanitizationNotes": [
+      "Host workspace<host-home> paths replaced with <workspace>, <host-home>, <host-temporary>; Docker/container paths are retained.",
+      "Original bytes remain in the local jobs evidence; this publication is not a replayable raw proof."
+    ],
+    "publicationOmissions": []
+  }
+}

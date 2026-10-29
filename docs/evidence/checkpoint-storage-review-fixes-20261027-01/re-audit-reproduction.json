@@ -1,0 +1,24 @@
+{
+  "identical": true,
+  "variants": {
+    "json": {
+      "sameBytes": true,
+      "sha256": "f072e30fe7d0277e58c9335ebb43dd233ea2628cc21f34fa5cc9fbe0e2cfd226"
+    },
+    "md": {
+      "sameBytes": true,
+      "sha256": "1b4d2cdd8e58c1e6408ce18c2c48317cc30645d8c66d26d8250d5e76c1100c22"
+    }
+  },
+  "_publication": {
+    "kind": "sanitized-copy",
+    "originalSourcePath": "jobs/checkpoint-storage-review-fixes-20261027-01/re-audit-reproduction.json",
+    "originalSha256": "d00e893aee3d4000880448f48db70c35fb7e5ebdad58e4d0a7a0ccd353476374",
+    "originalBytes": 299,
+    "sanitizationNotes": [
+      "Host workspace<host-home> paths replaced with <workspace>, <host-home>, <host-temporary>; Docker/container paths are retained.",
+      "Original bytes remain in the local jobs evidence; this publication is not a replayable raw proof."
+    ],
+    "publicationOmissions": []
+  }
+}

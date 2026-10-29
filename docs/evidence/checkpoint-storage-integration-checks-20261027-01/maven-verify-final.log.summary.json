@@ -1,0 +1,627 @@
+{
+  "kind": "verification-log-summary",
+  "sourceLineCount": 604,
+  "summaryLines": [
+    {
+      "line": 48,
+      "text": "[INFO] Tests run: 3, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.031 s -- in org.savonitar.flink.stability.runtime.api.FlinkConfigurationTest"
+    },
+    {
+      "line": 50,
+      "text": "[INFO] Tests run: 4, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.003 s -- in org.savonitar.flink.stability.runtime.api.MonotonicDeadlineTest"
+    },
+    {
+      "line": 52,
+      "text": "[INFO] Tests run: 1, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0 s -- in org.savonitar.flink.stability.runtime.api.ChecksTest"
+    },
+    {
+      "line": 54,
+      "text": "[INFO] Tests run: 9, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.027 s -- in org.savonitar.flink.stability.runtime.api.ConnectorClasspathManifestTest"
+    },
+    {
+      "line": 56,
+      "text": "[INFO] Tests run: 2, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.002 s -- in org.savonitar.flink.stability.runtime.api.TaskManagerControlTest"
+    },
+    {
+      "line": 58,
+      "text": "[INFO] Tests run: 12, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.014 s -- in org.savonitar.flink.stability.runtime.api.FlinkRuntimeTargetTest"
+    },
+    {
+      "line": 60,
+      "text": "[INFO] Tests run: 3, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.004 s -- in org.savonitar.flink.stability.runtime.api.FuseCheckpointStorageTest"
+    },
+    {
+      "line": 62,
+      "text": "[INFO] Tests run: 2, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.003 s -- in org.savonitar.flink.stability.runtime.api.TokenServiceControlTest"
+    },
+    {
+      "line": 64,
+      "text": "[INFO] Tests run: 10, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.011 s -- in org.savonitar.flink.stability.runtime.api.KafkaRuntimeTargetTest"
+    },
+    {
+      "line": 66,
+      "text": "[INFO] Tests run: 2, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.003 s -- in org.savonitar.flink.stability.runtime.api.DigestsTest"
+    },
+    {
+      "line": 70,
+      "text": "[INFO] Tests run: 48, Failures: 0, Errors: 0, Skipped: 0"
+    },
+    {
+      "line": 102,
+      "text": "[INFO] Tests run: 1, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.079 s -- in org.savonitar.flink.stability.core.CorePackageArchitectureTest"
+    },
+    {
+      "line": 104,
+      "text": "[INFO] Tests run: 7, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.245 s -- in org.savonitar.flink.stability.core.flink.FlinkHaEndpointTest"
+    },
+    {
+      "line": 106,
+      "text": "[INFO] Tests run: 15, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.030 s -- in org.savonitar.flink.stability.core.flink.FlinkRestApiClientTest"
+    },
+    {
+      "line": 108,
+      "text": "[INFO] Tests run: 2, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.268 s -- in org.savonitar.flink.stability.core.flink.FlinkRestHaPolicyIntegrationTest"
+    },
+    {
+      "line": 110,
+      "text": "[INFO] Tests run: 19, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.158 s -- in org.savonitar.flink.stability.core.flink.FlinkCheckpointEvidenceTest"
+    },
+    {
+      "line": 112,
+      "text": "[INFO] Tests run: 4, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.006 s -- in org.savonitar.flink.stability.core.flink.FlinkSavepointTest"
+    },
+    {
+      "line": 114,
+      "text": "[INFO] Tests run: 13, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.021 s -- in org.savonitar.flink.stability.core.flink.FlinkRestApiClientRestEvidenceTest"
+    },
+    {
+      "line": 116,
+      "text": "[INFO] Tests run: 10, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.027 s -- in org.savonitar.flink.stability.core.flink.FlinkCheckpointTriggerTest"
+    },
+    {
+      "line": 118,
+      "text": "[INFO] Tests run: 4, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.006 s -- in org.savonitar.flink.stability.core.flink.FlinkRestPolicyTest"
+    },
+    {
+      "line": 123,
+      "text": "[INFO] Tests run: 20, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.143 s -- in org.savonitar.flink.stability.core.spec.document.SpecificationCatalogLoaderTest"
+    },
+    {
+      "line": 125,
+      "text": "[INFO] Tests run: 43, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.140 s -- in org.savonitar.flink.stability.core.spec.document.SpecificationLoaderTest"
+    },
+    {
+      "line": 127,
+      "text": "[INFO] Tests run: 4, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.007 s -- in org.savonitar.flink.stability.core.spec.document.ScenarioBundleTest"
+    },
+    {
+      "line": 129,
+      "text": "[INFO] Tests run: 59, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.161 s -- in org.savonitar.flink.stability.core.spec.resolution.ScenarioNetworkPreflightValidatorTest"
+    },
+    {
+      "line": 131,
+      "text": "[INFO] Tests run: 20, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.051 s -- in org.savonitar.flink.stability.core.spec.resolution.ExpectedResultSelectorTest"
+    },
+    {
+      "line": 133,
+      "text": "[INFO] Tests run: 21, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.066 s -- in org.savonitar.flink.stability.core.spec.resolution.ScenarioPreflightValidatorTest"
+    },
+    {
+      "line": 135,
+      "text": "[INFO] Tests run: 15, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.071 s -- in org.savonitar.flink.stability.core.spec.resolution.SuitePlanResolverTest"
+    },
+    {
+      "line": 137,
+      "text": "[INFO] Tests run: 25, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.053 s -- in org.savonitar.flink.stability.core.spec.resolution.FlinkKafkaCompatibilityValidatorTest"
+    },
+    {
+      "line": 139,
+      "text": "[INFO] Tests run: 6, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.038 s -- in org.savonitar.flink.stability.core.spec.resolution.StatePrefixContractTest"
+    },
+    {
+      "line": 141,
+      "text": "[INFO] Tests run: 36, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.056 s -- in org.savonitar.flink.stability.core.spec.resolution.ScenarioParameterResolverTest"
+    },
+    {
+      "line": 143,
+      "text": "[INFO] Tests run: 4, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.009 s -- in org.savonitar.flink.stability.core.spec.resolution.ScenarioPlanResolverTest"
+    },
+    {
+      "line": 145,
+      "text": "[INFO] Tests run: 1, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0 s -- in org.savonitar.flink.stability.core.spec.resolution.ValidatorReasonRegistryTest"
+    },
+    {
+      "line": 147,
+      "text": "[INFO] Tests run: 18, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.036 s -- in org.savonitar.flink.stability.core.spec.resolution.ScenarioPhasePreflightValidatorTest"
+    },
+    {
+      "line": 149,
+      "text": "[INFO] Tests run: 18, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.030 s -- in org.savonitar.flink.stability.core.execution.TokenCheckpointBarrierTest"
+    },
+    {
+      "line": 151,
+      "text": "[INFO] Tests run: 8, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.004 s -- in org.savonitar.flink.stability.core.execution.FlinkTerminalWriteFenceTest"
+    },
+    {
+      "line": 153,
+      "text": "[INFO] Tests run: 26, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.012 s -- in org.savonitar.flink.stability.core.execution.TokenScopeProofTest"
+    },
+    {
+      "line": 155,
+      "text": "[INFO] Tests run: 4, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.012 s -- in org.savonitar.flink.stability.core.execution.ProtocolFaultEvidenceTest"
+    },
+    {
+      "line": 157,
+      "text": "[INFO] Tests run: 16, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.054 s -- in org.savonitar.flink.stability.core.execution.ProxyFaultInjectorTest"
+    },
+    {
+      "line": 159,
+      "text": "[INFO] Tests run: 16, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.042 s -- in org.savonitar.flink.stability.core.execution.StateRecoveryEvidenceTest"
+    },
+    {
+      "line": 161,
+      "text": "[INFO] Tests run: 10, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.085 s -- in org.savonitar.flink.stability.core.execution.plan.CheckpointStoragePlanCompilerTest"
+    },
+    {
+      "line": 163,
+      "text": "[INFO] Tests run: 69, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.440 s -- in org.savonitar.flink.stability.core.execution.plan.ExecutableScenarioPlanCompilerTest"
+    },
+    {
+      "line": 165,
+      "text": "[INFO] Tests run: 8, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.066 s -- in org.savonitar.flink.stability.core.execution.plan.CustomRuntimePlanTest"
+    },
+    {
+      "line": 167,
+      "text": "[INFO] Tests run: 7, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.003 s -- in org.savonitar.flink.stability.core.execution.StateRecoveryReportTest"
+    },
+    {
+      "line": 169,
+      "text": "[INFO] Tests run: 7, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.016 s -- in org.savonitar.flink.stability.core.execution.StateRecoveryGateTest"
+    },
+    {
+      "line": 171,
+      "text": "[INFO] Tests run: 6, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.006 s -- in org.savonitar.flink.stability.core.execution.FlinkLogMarkerEvidenceTest"
+    },
+    {
+      "line": 173,
+      "text": "[INFO] Tests run: 31, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.004 s -- in org.savonitar.flink.stability.core.execution.TaskManagerKillEffectTest"
+    },
+    {
+      "line": 175,
+      "text": "[INFO] Tests run: 26, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.012 s -- in org.savonitar.flink.stability.core.execution.FlinkHaEvidenceTest"
+    },
+    {
+      "line": 177,
+      "text": "[INFO] Tests run: 22, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.088 s -- in org.savonitar.flink.stability.core.execution.ExecutablePhaseExecutorTest"
+    },
+    {
+      "line": 179,
+      "text": "[INFO] Tests run: 4, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.008 s -- in org.savonitar.flink.stability.core.execution.SavepointLifecycleTest"
+    },
+    {
+      "line": 181,
+      "text": "[INFO] Tests run: 9, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.002 s -- in org.savonitar.flink.stability.core.execution.RuntimeJarIdentityTest"
+    },
+    {
+      "line": 183,
+      "text": "[INFO] Tests run: 18, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.010 s -- in org.savonitar.flink.stability.core.execution.ScenarioVerdictTest"
+    },
+    {
+      "line": 185,
+      "text": "[INFO] Tests run: 6, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.001 s -- in org.savonitar.flink.stability.core.execution.FlinkProcessHealthTest"
+    },
+    {
+      "line": 187,
+      "text": "[INFO] Tests run: 17, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.005 s -- in org.savonitar.flink.stability.core.execution.kafka.KafkaTransactionVersionTest"
+    },
+    {
+      "line": 189,
+      "text": "[INFO] Tests run: 16, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 1.441 s -- in org.savonitar.flink.stability.core.execution.kafka.KafkaTopicReadinessTest"
+    },
+    {
+      "line": 191,
+      "text": "[INFO] Tests run: 19, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.053 s -- in org.savonitar.flink.stability.core.execution.kafka.KafkaInputPreparerTest"
+    },
+    {
+      "line": 193,
+      "text": "[INFO] Tests run: 2, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.185 s -- in org.savonitar.flink.stability.core.execution.AttemptCleanupBoundaryTest"
+    },
+    {
+      "line": 195,
+      "text": "[INFO] Tests run: 31, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.012 s -- in org.savonitar.flink.stability.core.execution.FlinkRuntimeIdentityTest"
+    },
+    {
+      "line": 197,
+      "text": "[INFO] Tests run: 32, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.074 s -- in org.savonitar.flink.stability.core.execution.CheckpointStorageFaultTest"
+    },
+    {
+      "line": 199,
+      "text": "[INFO] Tests run: 2, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.001 s -- in org.savonitar.flink.stability.core.execution.CheckpointKillWindowTest"
+    },
+    {
+      "line": 201,
+      "text": "[INFO] Tests run: 2, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.007 s -- in org.savonitar.flink.stability.core.execution.CheckpointRetentionEvidenceTest"
+    },
+    {
+      "line": 203,
+      "text": "[INFO] Tests run: 5, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.011 s -- in org.savonitar.flink.stability.core.execution.ComponentErrorEvidenceTest"
+    },
+    {
+      "line": 205,
+      "text": "[INFO] Tests run: 14, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.011 s -- in org.savonitar.flink.stability.core.execution.SubjectClassOriginsTest"
+    },
+    {
+      "line": 207,
+      "text": "[INFO] Tests run: 6, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.001 s -- in org.savonitar.flink.stability.core.execution.FlinkHaObservationsTest"
+    },
+    {
+      "line": 209,
+      "text": "[INFO] Tests run: 61, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 1.124 s -- in org.savonitar.flink.stability.core.execution.V1ScenarioExecutorTest"
+    },
+    {
+      "line": 211,
+      "text": "[INFO] Tests run: 6, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.097 s -- in org.savonitar.flink.stability.core.campaign.CampaignGeneratorTest"
+    },
+    {
+      "line": 213,
+      "text": "[INFO] Tests run: 15, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.136 s -- in org.savonitar.flink.stability.core.artifact.ArtifactPlanResolverConnectorClosureTest"
+    },
+    {
+      "line": 215,
+      "text": "[INFO] Tests run: 28, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.179 s -- in org.savonitar.flink.stability.core.artifact.ArtifactPlanResolverTest"
+    },
+    {
+      "line": 217,
+      "text": "[INFO] Tests run: 13, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.253 s -- in org.savonitar.flink.stability.core.artifact.MavenRuntimeClosureTest"
+    },
+    {
+      "line": 219,
+      "text": "[INFO] Tests run: 33, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.040 s -- in org.savonitar.flink.stability.core.artifact.ConnectorClosureLockFactoryTest"
+    },
+    {
+      "line": 221,
+      "text": "[INFO] Tests run: 9, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.035 s -- in org.savonitar.flink.stability.core.artifact.FuseCheckpointBundlePreparerTest"
+    },
+    {
+      "line": 223,
+      "text": "[INFO] Tests run: 7, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.018 s -- in org.savonitar.flink.stability.core.artifact.CentralMavenArtifactLookupTest"
+    },
+    {
+      "line": 225,
+      "text": "[INFO] Tests run: 5, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.019 s -- in org.savonitar.flink.stability.core.artifact.ConnectorClusterBundleBuilderTest"
+    },
+    {
+      "line": 227,
+      "text": "[INFO] Tests run: 5, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.012 s -- in org.savonitar.flink.stability.core.artifact.WorkloadProtocolArtifactValidatorTest"
+    },
+    {
+      "line": 229,
+      "text": "[INFO] Tests run: 4, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.010 s -- in org.savonitar.flink.stability.core.validation.kafka.KafkaLogArchiveReaderTest"
+    },
+    {
+      "line": 231,
+      "text": "[INFO] Tests run: 1, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.001 s -- in org.savonitar.flink.stability.core.validation.kafka.KafkaTransactionMetadataTest"
+    },
+    {
+      "line": 233,
+      "text": "[INFO] Tests run: 5, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.003 s -- in org.savonitar.flink.stability.core.validation.kafka.KafkaTransactionLogEvidenceTest"
+    },
+    {
+      "line": 235,
+      "text": "[INFO] Tests run: 18, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.008 s -- in org.savonitar.flink.stability.core.validation.kafka.KafkaIdSetValidatorTest"
+    },
+    {
+      "line": 237,
+      "text": "[INFO] Tests run: 18, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.127 s -- in org.savonitar.flink.stability.core.validation.kafka.KafkaStatePrefixValidatorTest"
+    },
+    {
+      "line": 239,
+      "text": "[INFO] Tests run: 10, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.090 s -- in org.savonitar.flink.stability.core.validation.kafka.KafkaLogSegmentDecoderTest"
+    },
+    {
+      "line": 241,
+      "text": "[INFO] Tests run: 1, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0 s -- in org.savonitar.flink.stability.core.validation.kafka.KafkaTransactionListingTest"
+    },
+    {
+      "line": 243,
+      "text": "[INFO] Tests run: 7, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.003 s -- in org.savonitar.flink.stability.core.validation.kafka.KafkaTransactionStateDecoderTest"
+    },
+    {
+      "line": 245,
+      "text": "[INFO] Tests run: 15, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 1.016 s -- in org.savonitar.flink.stability.core.validation.kafka.KafkaClientSnapshotReaderTest"
+    },
+    {
+      "line": 247,
+      "text": "[INFO] Tests run: 6, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.003 s -- in org.savonitar.flink.stability.core.validation.kafka.KafkaClientStateSnapshotReaderTest"
+    },
+    {
+      "line": 251,
+      "text": "[INFO] Tests run: 1071, Failures: 0, Errors: 0, Skipped: 0"
+    },
+    {
+      "line": 286,
+      "text": "[INFO] Tests run: 8, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.120 s -- in org.savonitar.flink.stability.faultproxy.FaultRuleBookTest"
+    },
+    {
+      "line": 291,
+      "text": "[INFO] Tests run: 3, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.082 s -- in org.savonitar.flink.stability.faultproxy.PoolingProtocolTest"
+    },
+    {
+      "line": 293,
+      "text": "[INFO] Tests run: 4, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.020 s -- in org.savonitar.flink.stability.faultproxy.ProtocolMessagesTest"
+    },
+    {
+      "line": 295,
+      "text": "[INFO] Tests run: 6, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.045 s -- in org.savonitar.flink.stability.faultproxy.ProduceResponseFaultTest"
+    },
+    {
+      "line": 297,
+      "text": "[INFO] Tests run: 13, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.034 s -- in org.savonitar.flink.stability.faultproxy.KafkaProtocolFaultFilterTest"
+    },
+    {
+      "line": 299,
+      "text": "[INFO] Tests run: 6, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.189 s -- in org.savonitar.flink.stability.faultproxy.ProtocolActionsTest"
+    },
+    {
+      "line": 303,
+      "text": "[INFO] Tests run: 40, Failures: 0, Errors: 0, Skipped: 0"
+    },
+    {
+      "line": 338,
+      "text": "[INFO] Tests run: 8, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.147 s -- in org.savonitar.flink.stability.token.SyntheticDelegationTokenTest"
+    },
+    {
+      "line": 342,
+      "text": "[INFO] Tests run: 8, Failures: 0, Errors: 0, Skipped: 0"
+    },
+    {
+      "line": 381,
+      "text": "[INFO] Tests run: 5, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.079 s -- in org.savonitar.flink.stability.testcontainers.KafkaBrokerFaultTest"
+    },
+    {
+      "line": 383,
+      "text": "[INFO] Tests run: 2, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.011 s -- in org.savonitar.flink.stability.testcontainers.KafkaStopDockerCallContractTest"
+    },
+    {
+      "line": 385,
+      "text": "[INFO] Tests run: 3, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.010 s -- in org.savonitar.flink.stability.testcontainers.DockerPacketFaultSidecarTest"
+    },
+    {
+      "line": 387,
+      "text": "[INFO] Tests run: 3, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.002 s -- in org.savonitar.flink.stability.testcontainers.ContainerOperationDeadlineTest"
+    },
+    {
+      "line": 389,
+      "text": "[INFO] Tests run: 8, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.010 s -- in org.savonitar.flink.stability.testcontainers.CustomKafkaRuntimeTest"
+    },
+    {
+      "line": 391,
+      "text": "[INFO] Tests run: 4, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.013 s -- in org.savonitar.flink.stability.testcontainers.KafkaLaunchContractTest"
+    },
+    {
+      "line": 393,
+      "text": "[INFO] Tests run: 12, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.370 s -- in org.savonitar.flink.stability.testcontainers.SyntheticTokenServiceTest"
+    },
+    {
+      "line": 395,
+      "text": "[INFO] Tests run: 14, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.774 s -- in org.savonitar.flink.stability.testcontainers.FlinkHaRuntimeTest"
+    },
+    {
+      "line": 397,
+      "text": "[INFO] Tests run: 7, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.540 s -- in org.savonitar.flink.stability.testcontainers.OwnedKafkaArchiveCaptureTest"
+    },
+    {
+      "line": 399,
+      "text": "[INFO] Tests run: 11, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.604 s -- in org.savonitar.flink.stability.testcontainers.TestcontainersContainerHandleTest"
+    },
+    {
+      "line": 401,
+      "text": "[INFO] Tests run: 1, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.020 s -- in org.savonitar.flink.stability.testcontainers.TestcontainersLifecycleOrderTest"
+    },
+    {
+      "line": 403,
+      "text": "[INFO] Tests run: 4, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.015 s -- in org.savonitar.flink.stability.testcontainers.KafkaInventoryCommandTest"
+    },
+    {
+      "line": 405,
+      "text": "[INFO] Tests run: 3, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.006 s -- in org.savonitar.flink.stability.testcontainers.ClusterManagerKafkaRuntimeTest"
+    },
+    {
+      "line": 407,
+      "text": "[INFO] Tests run: 2, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.001 s -- in org.savonitar.flink.stability.testcontainers.ContainerDriverCallBoundaryTest"
+    },
+    {
+      "line": 409,
+      "text": "[INFO] Tests run: 5, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.044 s -- in org.savonitar.flink.stability.testcontainers.FlinkProcessConfigurationTest"
+    },
+    {
+      "line": 411,
+      "text": "[INFO] Tests run: 1, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.107 s -- in org.savonitar.flink.stability.testcontainers.KafkaRuntimeStartupTest"
+    },
+    {
+      "line": 413,
+      "text": "[INFO] Tests run: 17, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.148 s -- in org.savonitar.flink.stability.testcontainers.storage.CheckpointStateInspectorTest"
+    },
+    {
+      "line": 415,
+      "text": "[INFO] Tests run: 17, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 1.614 s -- in org.savonitar.flink.stability.testcontainers.storage.CheckpointStorageIoProbeTest"
+    },
+    {
+      "line": 417,
+      "text": "[INFO] Tests run: 7, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.231 s -- in org.savonitar.flink.stability.testcontainers.KafkaBrokerAdminTest"
+    },
+    {
+      "line": 419,
+      "text": "[INFO] Tests run: 6, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.027 s -- in org.savonitar.flink.stability.testcontainers.KafkaRollingRestartTest"
+    },
+    {
+      "line": 421,
+      "text": "[INFO] Tests run: 2, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.002 s -- in org.savonitar.flink.stability.testcontainers.KafkaRestartEndpointTest"
+    },
+    {
+      "line": 423,
+      "text": "[INFO] Tests run: 1, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0 s -- in org.savonitar.flink.stability.testcontainers.KafkaRuntimeTargetTest"
+    },
+    {
+      "line": 425,
+      "text": "[INFO] Tests run: 4, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.123 s -- in org.savonitar.flink.stability.testcontainers.SelectiveKafkaLogCaptureTest"
+    },
+    {
+      "line": 427,
+      "text": "[INFO] Tests run: 26, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.026 s -- in org.savonitar.flink.stability.testcontainers.ClusterManagerTest"
+    },
+    {
+      "line": 429,
+      "text": "[INFO] Tests run: 3, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.003 s -- in org.savonitar.flink.stability.testcontainers.RetainedFlinkLogTest"
+    },
+    {
+      "line": 431,
+      "text": "[WARNING] Tests run: 24, Failures: 0, Errors: 0, Skipped: 1, Time elapsed: 0.080 s -- in org.savonitar.flink.stability.testcontainers.KafkaGracefulStopDockerTest"
+    },
+    {
+      "line": 433,
+      "text": "[INFO] Tests run: 2, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.001 s -- in org.savonitar.flink.stability.testcontainers.KroxyliciousProxyTest"
+    },
+    {
+      "line": 435,
+      "text": "[INFO] Tests run: 4, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.015 s -- in org.savonitar.flink.stability.testcontainers.ImageConnectorVerificationTest"
+    },
+    {
+      "line": 437,
+      "text": "[INFO] Tests run: 6, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.006 s -- in org.savonitar.flink.stability.testcontainers.KafkaSelectedBrokerFaultTest"
+    },
+    {
+      "line": 439,
+      "text": "[INFO] Tests run: 4, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.006 s -- in org.savonitar.flink.stability.testcontainers.KafkaCommitWindowObserverTest"
+    },
+    {
+      "line": 441,
+      "text": "[INFO] Tests run: 9, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.013 s -- in org.savonitar.flink.stability.testcontainers.PacketFaultBackendTest"
+    },
+    {
+      "line": 443,
+      "text": "[INFO] Tests run: 24, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.042 s -- in org.savonitar.flink.stability.testcontainers.FlinkContainerTest"
+    },
+    {
+      "line": 445,
+      "text": "[INFO] Tests run: 10, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.006 s -- in org.savonitar.flink.stability.testcontainers.KafkaPausedEndpointTest"
+    },
+    {
+      "line": 447,
+      "text": "[INFO] Tests run: 7, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.220 s -- in org.savonitar.flink.stability.testcontainers.KafkaLogInventoryTest"
+    },
+    {
+      "line": 449,
+      "text": "[INFO] Tests run: 1, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.002 s -- in org.savonitar.flink.stability.testcontainers.SyntheticTokenPluginTest"
+    },
+    {
+      "line": 451,
+      "text": "[INFO] Tests run: 9, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.118 s -- in org.savonitar.flink.stability.testcontainers.FuseCheckpointStorageRuntimeTest"
+    },
+    {
+      "line": 453,
+      "text": "[INFO] Tests run: 13, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.020 s -- in org.savonitar.flink.stability.testcontainers.KafkaLifecycleInspectionTest"
+    },
+    {
+      "line": 455,
+      "text": "[INFO] Tests run: 8, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.005 s -- in org.savonitar.flink.stability.testcontainers.FlinkSessionLogTest"
+    },
+    {
+      "line": 459,
+      "text": "[WARNING] Tests run: 289, Failures: 0, Errors: 0, Skipped: 1"
+    },
+    {
+      "line": 508,
+      "text": "[INFO] Tests run: 1, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.076 s -- in org.savonitar.flink.stability.cli.PacketFaultEvidenceRendererTest"
+    },
+    {
+      "line": 510,
+      "text": "[INFO] Tests run: 5, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.017 s -- in org.savonitar.flink.stability.cli.FlinkHaEvidenceRendererTest"
+    },
+    {
+      "line": 512,
+      "text": "[INFO] Tests run: 35, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.406 s -- in org.savonitar.flink.stability.cli.RunScenarioCommandTest"
+    },
+    {
+      "line": 514,
+      "text": "[INFO] Tests run: 6, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.122 s -- in org.savonitar.flink.stability.cli.InspectKafkaLogCommandTest"
+    },
+    {
+      "line": 516,
+      "text": "[INFO] Tests run: 3, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.008 s -- in org.savonitar.flink.stability.cli.StateRecoveryEvidenceRendererTest"
+    },
+    {
+      "line": 518,
+      "text": "[INFO] Tests run: 4, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.145 s -- in org.savonitar.flink.stability.cli.FlinkTokenTraceTest"
+    },
+    {
+      "line": 520,
+      "text": "[INFO] Tests run: 4, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.323 s -- in org.savonitar.flink.stability.cli.CampaignCommandTest"
+    },
+    {
+      "line": 522,
+      "text": "[INFO] Tests run: 28, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.412 s -- in org.savonitar.flink.stability.cli.ValidateSpecificationsCommandTest"
+    },
+    {
+      "line": 524,
+      "text": "[INFO] Tests run: 1, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.005 s -- in org.savonitar.flink.stability.cli.CliParameterParserTest"
+    },
+    {
+      "line": 526,
+      "text": "[INFO] Tests run: 3, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 1.326 s -- in org.savonitar.flink.stability.cli.CliShutdownLoggingTest"
+    },
+    {
+      "line": 530,
+      "text": "[INFO] Tests run: 90, Failures: 0, Errors: 0, Skipped: 0"
+    },
+    {
+      "line": 569,
+      "text": "[INFO] Tests run: 20, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.191 s -- in org.savonitar.flink.stability.flinkjob.WorkloadProtocolV1ConfigurationTest"
+    },
+    {
+      "line": 571,
+      "text": "[INFO] Tests run: 4, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.002 s -- in org.savonitar.flink.stability.flinkjob.ConnectorNamingStrategyTest"
+    },
+    {
+      "line": 573,
+      "text": "[INFO] Tests run: 21, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.008 s -- in org.savonitar.flink.stability.flinkjob.FlinkKafkaEosJobArgumentsTest"
+    },
+    {
+      "line": 575,
+      "text": "[INFO] Tests run: 8, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.014 s -- in org.savonitar.flink.stability.flinkjob.KeyedPrefixFunctionTest"
+    },
+    {
+      "line": 577,
+      "text": "[INFO] Tests run: 10, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.327 s -- in org.savonitar.flink.stability.flinkjob.AsyncSnapshotDelayTest"
+    },
+    {
+      "line": 579,
+      "text": "[INFO] Tests run: 2, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.028 s -- in org.savonitar.flink.stability.flinkjob.StateRecoveryBuildTest"
+    },
+    {
+      "line": 583,
+      "text": "[INFO] Tests run: 65, Failures: 0, Errors: 0, Skipped: 0"
+    },
+    {
+      "line": 600,
+      "text": "[INFO] BUILD SUCCESS"
+    },
+    {
+      "line": 602,
+      "text": "[INFO] Total time:  21.779 s"
+    }
+  ],
+  "scope": "Selected test totals, build outcome and elapsed-time lines only. Full log, command details and warnings are not reproduced; consult original SHA-256 provenance.",
+  "_publication": {
+    "kind": "log-summary",
+    "originalSourcePath": "jobs/checkpoint-storage-integration-checks-20261027-01/maven-verify-final.log",
+    "originalSha256": "7d14d4570c493b7f3b0de11ee70abde26f941d98f4426b0657da274c3a92ccae",
+    "originalBytes": 51277,
+    "sanitizationNotes": [
+      "Host workspace<host-home> paths replaced with <workspace>, <host-home>, <host-temporary>; Docker/container paths are retained.",
+      "Original bytes remain in the local jobs evidence; this publication is not a replayable raw proof.",
+      "Only numbered aggregate test/build summary lines are included; no raw Maven/Python/native log is copied."
+    ],
+    "publicationOmissions": []
+  }
+}

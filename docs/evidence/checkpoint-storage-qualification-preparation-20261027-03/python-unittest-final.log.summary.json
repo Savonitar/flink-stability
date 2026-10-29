@@ -1,0 +1,27 @@
+{
+  "kind": "verification-log-summary",
+  "sourceLineCount": 420,
+  "summaryLines": [
+    {
+      "line": 418,
+      "text": "Ran 367 tests in 15.868s"
+    },
+    {
+      "line": 420,
+      "text": "OK"
+    }
+  ],
+  "scope": "Selected test totals, build outcome and elapsed-time lines only. Full log, command details and warnings are not reproduced; consult original SHA-256 provenance.",
+  "_publication": {
+    "kind": "log-summary",
+    "originalSourcePath": "jobs/checkpoint-storage-qualification-preparation-20261027-03/python-unittest-final.log",
+    "originalSha256": "6615c797f7e63c22d492b839d3c2d21f0749a8bbaac2514edeb3c0f4ee0e7b28",
+    "originalBytes": 69416,
+    "sanitizationNotes": [
+      "Host workspace<host-home> paths replaced with <workspace>, <host-home>, <host-temporary>; Docker/container paths are retained.",
+      "Original bytes remain in the local jobs evidence; this publication is not a replayable raw proof.",
+      "Only numbered aggregate test/build summary lines are included; no raw Maven/Python/native log is copied."
+    ],
+    "publicationOmissions": []
+  }
+}

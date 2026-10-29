@@ -1,0 +1,197 @@
+{
+  "attemptResults": [
+    "jobs/checkpoint-storage-integration-pilots-20261027-01/attempts/healthy-fuse/run/pilot-01/stdout.json",
+    "jobs/checkpoint-storage-integration-pilots-20261027-01/attempts/healthy-fuse/run/pilot-02/stdout.json",
+    "jobs/checkpoint-storage-integration-pilots-20261027-02/attempts/correct-eio/run/pilot-01/stdout.json",
+    "jobs/checkpoint-storage-integration-pilots-20261027-02/attempts/correct-eio/run/pilot-02/stdout.json",
+    "jobs/checkpoint-storage-integration-pilots-20261027-02/attempts/correct-eio/run/pilot-03/stdout.json",
+    "jobs/checkpoint-storage-integration-pilots-20261027-02/attempts/healthy-fuse/run/pilot-01/stdout.json",
+    "jobs/checkpoint-storage-integration-pilots-20261027-02/attempts/mutant-eio/run/pilot-01/stdout.json"
+  ],
+  "containerIds": [
+    "029551f35065342e7e0c8c6b816cc4a49d0cab6df172d789d193b39226345378",
+    "03dfd5f3540997575fd3a952d32a7f2d13a9f98020367170fb99000d77761eff",
+    "04b7759441a8a2acde83c62b5c61604d033cfdfa8ca0fa18c48754ffa4a18f4c",
+    "08c7a33fbe3287f22ae1aab277601d3f2746ff823991da398c6b12eef137c435",
+    "21eb78731693c0415c980101d5c1c5ea345bc17a50763f73e8d3e0f69642d3d3",
+    "2ef3f1ca7c0a94007cf9ff42ded253bfa49bdd9d3d85fe7b8d7cb8e10389d776",
+    "3d0404ef7e739a00fd698a86acb4efadba7ffcb538186e80ede6470209647259",
+    "429fdec546f2faf0d13f1f59d0e3d8a924361c66eec1db398a4304288078e4b9",
+    "4c0fccfb73be9391006b12994793b64041b73cd8c148c6d5dba733c5f836bcad",
+    "56eed6c82404e69e2236f7cfc4fad0742a1b3da5b2cf4f200e7ba6b3a78db83a",
+    "7959bb7a3f6e8fbed6377c5e51b67904bb551a3972df67300ba5290a436e81e8",
+    "7a9de6171f53bf320f3f52262490dd87e9bbac4d7ff25de1a4320bdb5365c74c",
+    "9834df12571b8f25e46dd9fa7ba5360630bc2f7f8a36cbc311b85b4ba5125541",
+    "9fb54a11520838f3c68ca834f8d1f2d3766fa4062ac112d45631d147e140a1b8",
+    "afa934a1e53a9a27d509f3041de9ec7825b2b11089dcd413ac1299f6694d7e9c",
+    "b636342397325f3f2a807a672867149b15835f12a2b12d4455e764e63a25ef50",
+    "c33d1201e285dfa02051b51e713ea966056d4515f4494d1e14e6cf87edc5a983",
+    "c46d3ab92aa3c094c1956a35ff650f9b33ba76e05c9f819fd721b18afe1639cb",
+    "c8ba373fb4a38dbf36e148a6fbf64f8f3cf6e9fdb0114ae8d315926f163d1e3a",
+    "cd04ebe28c13d751a2208bd1953d506293485b64e03b08fd12cb777abbce2691",
+    "e54bb115364c3f5b60d399be0a6e6c7fc7f2ba3074d6f60669c991f52df559f7",
+    "edc73a0991ad30ea8d102f37c001c2cf318a78edbb72ce7bc091205f04bddded"
+  ],
+  "missingContainerIds": [
+    "029551f35065342e7e0c8c6b816cc4a49d0cab6df172d789d193b39226345378",
+    "03dfd5f3540997575fd3a952d32a7f2d13a9f98020367170fb99000d77761eff",
+    "04b7759441a8a2acde83c62b5c61604d033cfdfa8ca0fa18c48754ffa4a18f4c",
+    "08c7a33fbe3287f22ae1aab277601d3f2746ff823991da398c6b12eef137c435",
+    "21eb78731693c0415c980101d5c1c5ea345bc17a50763f73e8d3e0f69642d3d3",
+    "2ef3f1ca7c0a94007cf9ff42ded253bfa49bdd9d3d85fe7b8d7cb8e10389d776",
+    "3d0404ef7e739a00fd698a86acb4efadba7ffcb538186e80ede6470209647259",
+    "429fdec546f2faf0d13f1f59d0e3d8a924361c66eec1db398a4304288078e4b9",
+    "4c0fccfb73be9391006b12994793b64041b73cd8c148c6d5dba733c5f836bcad",
+    "56eed6c82404e69e2236f7cfc4fad0742a1b3da5b2cf4f200e7ba6b3a78db83a",
+    "7959bb7a3f6e8fbed6377c5e51b67904bb551a3972df67300ba5290a436e81e8",
+    "7a9de6171f53bf320f3f52262490dd87e9bbac4d7ff25de1a4320bdb5365c74c",
+    "9834df12571b8f25e46dd9fa7ba5360630bc2f7f8a36cbc311b85b4ba5125541",
+    "9fb54a11520838f3c68ca834f8d1f2d3766fa4062ac112d45631d147e140a1b8",
+    "afa934a1e53a9a27d509f3041de9ec7825b2b11089dcd413ac1299f6694d7e9c",
+    "b636342397325f3f2a807a672867149b15835f12a2b12d4455e764e63a25ef50",
+    "c33d1201e285dfa02051b51e713ea966056d4515f4494d1e14e6cf87edc5a983",
+    "c46d3ab92aa3c094c1956a35ff650f9b33ba76e05c9f819fd721b18afe1639cb",
+    "c8ba373fb4a38dbf36e148a6fbf64f8f3cf6e9fdb0114ae8d315926f163d1e3a",
+    "cd04ebe28c13d751a2208bd1953d506293485b64e03b08fd12cb777abbce2691",
+    "e54bb115364c3f5b60d399be0a6e6c7fc7f2ba3074d6f60669c991f52df559f7",
+    "edc73a0991ad30ea8d102f37c001c2cf318a78edbb72ce7bc091205f04bddded"
+  ],
+  "containerInspection": {
+    "argv": [
+      "container",
+      "inspect",
+      "--format",
+      "{{.Id}}",
+      "029551f35065342e7e0c8c6b816cc4a49d0cab6df172d789d193b39226345378",
+      "03dfd5f3540997575fd3a952d32a7f2d13a9f98020367170fb99000d77761eff",
+      "04b7759441a8a2acde83c62b5c61604d033cfdfa8ca0fa18c48754ffa4a18f4c",
+      "08c7a33fbe3287f22ae1aab277601d3f2746ff823991da398c6b12eef137c435",
+      "21eb78731693c0415c980101d5c1c5ea345bc17a50763f73e8d3e0f69642d3d3",
+      "2ef3f1ca7c0a94007cf9ff42ded253bfa49bdd9d3d85fe7b8d7cb8e10389d776",
+      "3d0404ef7e739a00fd698a86acb4efadba7ffcb538186e80ede6470209647259",
+      "429fdec546f2faf0d13f1f59d0e3d8a924361c66eec1db398a4304288078e4b9",
+      "4c0fccfb73be9391006b12994793b64041b73cd8c148c6d5dba733c5f836bcad",
+      "56eed6c82404e69e2236f7cfc4fad0742a1b3da5b2cf4f200e7ba6b3a78db83a",
+      "7959bb7a3f6e8fbed6377c5e51b67904bb551a3972df67300ba5290a436e81e8",
+      "7a9de6171f53bf320f3f52262490dd87e9bbac4d7ff25de1a4320bdb5365c74c",
+      "9834df12571b8f25e46dd9fa7ba5360630bc2f7f8a36cbc311b85b4ba5125541",
+      "9fb54a11520838f3c68ca834f8d1f2d3766fa4062ac112d45631d147e140a1b8",
+      "afa934a1e53a9a27d509f3041de9ec7825b2b11089dcd413ac1299f6694d7e9c",
+      "b636342397325f3f2a807a672867149b15835f12a2b12d4455e764e63a25ef50",
+      "c33d1201e285dfa02051b51e713ea966056d4515f4494d1e14e6cf87edc5a983",
+      "c46d3ab92aa3c094c1956a35ff650f9b33ba76e05c9f819fd721b18afe1639cb",
+      "c8ba373fb4a38dbf36e148a6fbf64f8f3cf6e9fdb0114ae8d315926f163d1e3a",
+      "cd04ebe28c13d751a2208bd1953d506293485b64e03b08fd12cb777abbce2691",
+      "e54bb115364c3f5b60d399be0a6e6c7fc7f2ba3074d6f60669c991f52df559f7",
+      "edc73a0991ad30ea8d102f37c001c2cf318a78edbb72ce7bc091205f04bddded"
+    ],
+    "exitCode": 1,
+    "stdout": "\n",
+    "stderr": "Error response from daemon: No such container: 029551f35065342e7e0c8c6b816cc4a49d0cab6df172d789d193b39226345378\nError response from daemon: No such container: 03dfd5f3540997575fd3a952d32a7f2d13a9f98020367170fb99000d77761eff\nError response from daemon: No such container: 04b7759441a8a2acde83c62b5c61604d033cfdfa8ca0fa18c48754ffa4a18f4c\nError response from daemon: No such container: 08c7a33fbe3287f22ae1aab277601d3f2746ff823991da398c6b12eef137c435\nError response from daemon: No such container: 21eb78731693c0415c980101d5c1c5ea345bc17a50763f73e8d3e0f69642d3d3\nError response from daemon: No such container: 2ef3f1ca7c0a94007cf9ff42ded253bfa49bdd9d3d85fe7b8d7cb8e10389d776\nError response from daemon: No such container: 3d0404ef7e739a00fd698a86acb4efadba7ffcb538186e80ede6470209647259\nError response from daemon: No such container: 429fdec546f2faf0d13f1f59d0e3d8a924361c66eec1db398a4304288078e4b9\nError response from daemon: No such container: 4c0fccfb73be9391006b12994793b64041b73cd8c148c6d5dba733c5f836bcad\nError response from daemon: No such container: 56eed6c82404e69e2236f7cfc4fad0742a1b3da5b2cf4f200e7ba6b3a78db83a\nError response from daemon: No such container: 7959bb7a3f6e8fbed6377c5e51b67904bb551a3972df67300ba5290a436e81e8\nError response from daemon: No such container: 7a9de6171f53bf320f3f52262490dd87e9bbac4d7ff25de1a4320bdb5365c74c\nError response from daemon: No such container: 9834df12571b8f25e46dd9fa7ba5360630bc2f7f8a36cbc311b85b4ba5125541\nError response from daemon: No such container: 9fb54a11520838f3c68ca834f8d1f2d3766fa4062ac112d45631d147e140a1b8\nError response from daemon: No such container: afa934a1e53a9a27d509f3041de9ec7825b2b11089dcd413ac1299f6694d7e9c\nError response from daemon: No such container: b636342397325f3f2a807a672867149b15835f12a2b12d4455e764e63a25ef50\nError response from daemon: No such container: c33d1201e285dfa02051b51e713ea966056d4515f4494d1e14e6cf87edc5a983\nError response from daemon: No such container: c46d3ab92aa3c094c1956a35ff650f9b33ba76e05c9f819fd721b18afe1639cb\nError response from daemon: No such container: c8ba373fb4a38dbf36e148a6fbf64f8f3cf6e9fdb0114ae8d315926f163d1e3a\nError response from daemon: No such container: cd04ebe28c13d751a2208bd1953d506293485b64e03b08fd12cb777abbce2691\nError response from daemon: No such container: e54bb115364c3f5b60d399be0a6e6c7fc7f2ba3074d6f60669c991f52df559f7\nError response from daemon: No such container: edc73a0991ad30ea8d102f37c001c2cf318a78edbb72ce7bc091205f04bddded\n"
+  },
+  "volumeInspections": [
+    {
+      "argv": [
+        "volume",
+        "ls",
+        "--filter",
+        "label=org.savonitar.flink-stability.storage=storage-3b6bd913-2139-4211-b357-5d23a92ec9bf",
+        "--format",
+        "{{.Name}}"
+      ],
+      "exitCode": 0,
+      "stdout": "",
+      "stderr": ""
+    },
+    {
+      "argv": [
+        "volume",
+        "ls",
+        "--filter",
+        "label=org.savonitar.flink-stability.storage=storage-6ac2ce0f-f241-47bc-beb8-586b3ca2a864",
+        "--format",
+        "{{.Name}}"
+      ],
+      "exitCode": 0,
+      "stdout": "",
+      "stderr": ""
+    },
+    {
+      "argv": [
+        "volume",
+        "ls",
+        "--filter",
+        "label=org.savonitar.flink-stability.storage=storage-84151b56-49c6-46a7-971e-55a0215fe91b",
+        "--format",
+        "{{.Name}}"
+      ],
+      "exitCode": 0,
+      "stdout": "",
+      "stderr": ""
+    },
+    {
+      "argv": [
+        "volume",
+        "ls",
+        "--filter",
+        "label=org.savonitar.flink-stability.storage=storage-899fb66d-82b8-4dc9-a2f8-dd41c51f513e",
+        "--format",
+        "{{.Name}}"
+      ],
+      "exitCode": 0,
+      "stdout": "",
+      "stderr": ""
+    },
+    {
+      "argv": [
+        "volume",
+        "ls",
+        "--filter",
+        "label=org.savonitar.flink-stability.storage=storage-b0e0f154-17dc-4843-b381-cb83df2de631",
+        "--format",
+        "{{.Name}}"
+      ],
+      "exitCode": 0,
+      "stdout": "",
+      "stderr": ""
+    },
+    {
+      "argv": [
+        "volume",
+        "ls",
+        "--filter",
+        "label=org.savonitar.flink-stability.storage=storage-c2e5f0e0-9996-418e-a8c8-2150676ab7e1",
+        "--format",
+        "{{.Name}}"
+      ],
+      "exitCode": 0,
+      "stdout": "",
+      "stderr": ""
+    },
+    {
+      "argv": [
+        "volume",
+        "ls",
+        "--filter",
+        "label=org.savonitar.flink-stability.storage=storage-fab481a5-1692-4e59-bed8-c50b3a67a8cb",
+        "--format",
+        "{{.Name}}"
+      ],
+      "exitCode": 0,
+      "stdout": "",
+      "stderr": ""
+    }
+  ],
+  "allRemoved": true,
+  "_publication": {
+    "kind": "sanitized-copy",
+    "originalSourcePath": "jobs/checkpoint-storage-integration-checks-20261027-01/cleanup-check.json",
+    "originalSha256": "ed5814fdee87ce6c0057b5987133dac9d1b15db92cd00b4b6e341e7b6bdb2487",
+    "originalBytes": 10384,
+    "sanitizationNotes": [
+      "Host workspace<host-home> paths replaced with <workspace>, <host-home>, <host-temporary>; Docker/container paths are retained.",
+      "Original bytes remain in the local jobs evidence; this publication is not a replayable raw proof."
+    ],
+    "publicationOmissions": []
+  }
+}

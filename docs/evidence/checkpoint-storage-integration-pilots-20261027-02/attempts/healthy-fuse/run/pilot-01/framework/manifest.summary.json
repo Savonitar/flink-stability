@@ -1,0 +1,76 @@
+{
+  "formatVersion": 1,
+  "jars": [
+    {
+      "module": "runtime-api",
+      "path": "runtime-api-0.1.0-SNAPSHOT.jar",
+      "targetSha256": "ebdab6dd421b335be2b4bbd41eef099f4859764c88646b3183298be45b911b86",
+      "installedSha256": "ebdab6dd421b335be2b4bbd41eef099f4859764c88646b3183298be45b911b86"
+    },
+    {
+      "module": "core",
+      "path": "core-0.1.0-SNAPSHOT.jar",
+      "targetSha256": "a8e86db1ebfb82e18696e2b46b98d9b0761987f654d10c6565b092260be33ecf",
+      "installedSha256": "a8e86db1ebfb82e18696e2b46b98d9b0761987f654d10c6565b092260be33ecf"
+    },
+    {
+      "module": "testcontainers",
+      "path": "testcontainers-0.1.0-SNAPSHOT.jar",
+      "targetSha256": "5909dff3b659700c828ff66268236a00bc358c34c149ea6386a244725e838eeb",
+      "installedSha256": "5909dff3b659700c828ff66268236a00bc358c34c149ea6386a244725e838eeb"
+    },
+    {
+      "module": "cli",
+      "path": "cli-0.1.0-SNAPSHOT.jar",
+      "targetSha256": "763e2ec54a1361c078e3b3dd026fbbd7898d75988545d06357968a0031243739",
+      "installedSha256": "763e2ec54a1361c078e3b3dd026fbbd7898d75988545d06357968a0031243739"
+    },
+    {
+      "module": "kroxylicious-fault-filter",
+      "path": "kroxylicious-fault-filter-0.1.0-SNAPSHOT.jar",
+      "targetSha256": "7222efbddc3d7a058ed9469901f72b2702723e644224d17b320431a9cbce78da",
+      "installedSha256": "7222efbddc3d7a058ed9469901f72b2702723e644224d17b320431a9cbce78da"
+    },
+    {
+      "module": "synthetic-token-plugin",
+      "path": "synthetic-token-plugin-0.1.0-SNAPSHOT.jar",
+      "targetSha256": "3edba08d054b17ad60f4b8915c48026aa05953df4a0407467ee2f052c480bdf0",
+      "installedSha256": "3edba08d054b17ad60f4b8915c48026aa05953df4a0407467ee2f052c480bdf0"
+    }
+  ],
+  "launcherSha256": "cd14cd20afaa27b4435a086c2b20ddd0d129c528cbd2d16da94af0451ba31858",
+  "pilotRunnerSha256": "a6a7d4202d9f2165419521e0182dd6ad2780f0982dce369ae484441511566180",
+  "note": "Captured before launching Maven; no source-revision claim inferred from binary hashes",
+  "sourceSha256PublicationSummary": {
+    "entries": 295,
+    "canonicalJsonSha256": "489be705200215dd413ca21b1f21b80c5389738a55ac53aad1ee74f38f152dfb",
+    "scope": "Inventory omitted; original manifest SHA-256 binds the complete map."
+  },
+  "targetClassesSha256PublicationSummary": {
+    "entries": 752,
+    "canonicalJsonSha256": "5126371fe818d8f19d0f51d02e9ccb0364a6997f2bb7e6573d69328ab90d3843",
+    "scope": "Inventory omitted; original manifest SHA-256 binds the complete map."
+  },
+  "_publication": {
+    "kind": "sanitized-projection",
+    "originalSourcePath": "jobs/checkpoint-storage-integration-pilots-20261027-02/attempts/healthy-fuse/run/pilot-01/framework/manifest.json",
+    "originalSha256": "be8fca98347dd11df538dc701bac14a7028de62df97ac320037ac3eb6d117b2c",
+    "originalBytes": 185615,
+    "sanitizationNotes": [
+      "Host workspace<host-home> paths replaced with <workspace>, <host-home>, <host-temporary>; Docker/container paths are retained.",
+      "Original bytes remain in the local jobs evidence; this publication is not a replayable raw proof."
+    ],
+    "publicationOmissions": [
+      {
+        "jsonPointer": "/sourceSha256",
+        "kind": "hash-inventory",
+        "entries": 295
+      },
+      {
+        "jsonPointer": "/targetClassesSha256",
+        "kind": "hash-inventory",
+        "entries": 752
+      }
+    ]
+  }
+}
