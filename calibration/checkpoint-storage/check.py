@@ -22,6 +22,7 @@ def module(name, path):
 HERE = Path(__file__).absolute().parent
 audit = module("native", HERE / "audit.py")
 framework = module("framework", HERE / "framework.py")
+inventory = module("inventory", HERE / "inventory.py")
 STATE_SOURCE = HERE / "state_recovery_check.py"
 if not STATE_SOURCE.exists():
     STATE_SOURCE = HERE.parent / "state-recovery/check.py"
@@ -134,7 +135,7 @@ phases:
 
 def verifier_identity():
     paths = {"check.py": Path(__file__), "audit.py": HERE / "audit.py",
-             "framework.py": HERE / "framework.py", "state_recovery_check.py": STATE_SOURCE}
+             "framework.py": HERE / "framework.py", "inventory.py": HERE / "inventory.py", "state_recovery_check.py": STATE_SOURCE}
     component_parser = HERE / "component_events.py"
     if component_parser.exists():
         paths["component_events.py"] = component_parser
@@ -183,7 +184,7 @@ def validate_manifest(batch, *, re_audit=False):
                     "Invalid reference source label")
     recipes = manifest["recipeFiles"]
     required = {"evidence/recipe/" + name for name in
-                ("check.py", "audit.py", "state_recovery_check.py", "framework.py", "catalogs.py", "run.py", "README.md",
+                ("check.py", "audit.py", "state_recovery_check.py", "framework.py", "inventory.py", "catalogs.py", "run.py", "README.md",
                  "prepare.py", "ResolveClosure.java", "report.py")}
     if not re_audit:
         required.add("evidence/recipe/component_events.py")
@@ -223,7 +224,8 @@ def validate_manifest(batch, *, re_audit=False):
     for name, value in hb["sourceHashes"].items():
         require(frozen.get("evidence/helper-sources/" + name) == value, "Frozen helper source is missing")
     require(manifest["frameworkFreeze"]["path"] == "framework/manifest.json", "Wrong framework manifest path")
-    receipt(batch, manifest["frameworkFreeze"])
+    framework_manifest = parse(receipt(batch, manifest["frameworkFreeze"]))
+    inventory.validate(batch, frozen, framework_manifest["files"])
     framework.validate_framework(Path(batch) / "framework")
     require(set(manifest["references"]) == {row[0] for row in CELLS}, "Missing separate pilot references")
     reference_nonces = set()

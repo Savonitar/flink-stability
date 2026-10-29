@@ -42,7 +42,7 @@ class FrozenFixture:
         self.output = root / "jobs/qualification"
         self.helper_source = root / "jobs/helper-build"
         self.references = {}
-        for name in ("catalogs.py", "run.py", "check.py", "audit.py", "component_events.py", "report.py", "framework.py", "prepare.py", "ResolveClosure.java", "README.md"):
+        for name in ("catalogs.py", "run.py", "check.py", "audit.py", "component_events.py", "inventory.py", "report.py", "framework.py", "prepare.py", "ResolveClosure.java", "README.md"):
             put(self.recipe / name, ("# generated fixture " + name + "\n").encode())
         put(root / "calibration/state-recovery/check.py", b"# independent reference fixture\n")
         artifacts, snapshots = {}, {}
@@ -83,7 +83,7 @@ class FrozenFixture:
 
     def freeze_framework(self, destination, **unused):
         destination.mkdir()
-        put(destination / "manifest.json", {"formatVersion": 1, "test": "frozen framework"})
+        put(destination / "manifest.json", {"formatVersion": 1, "test": "frozen framework", "files": {}})
 
     def freeze(self, platform_evidence=None):
         def modules(name, unused):
@@ -198,6 +198,40 @@ class CheckpointStorageCatalogTest(unittest.TestCase):
             (root / "link").symlink_to(root / "target")
             with self.assertRaises(ValueError): catalogs.guarded(root / "link/file", root)
             with self.assertRaises(ValueError): catalogs.decode(b'{"version":1,"version":2}')
+
+    def test_frozen_inventory_rejects_unlisted_files_and_bytecode_everywhere(self):
+        additions = ("evidence/recipe/x.pyc", "evidence/extra.json", "catalogs/correct-eio/extra.yaml",
+                     "framework/extra.jar", "unlisted-report.json", "evidence/recipe/__pycache__/x.pyc",
+                     "attempts/correct-eio/run-1/__pycache__/x.pyc", "validation/correct-eio/__pycache__/x.pyc")
+        for extra in additions:
+            with self.subTest(extra=extra), tempfile.TemporaryDirectory() as temporary:
+                fixture = FrozenFixture(Path(temporary).resolve())
+                fixture.freeze()
+                put(fixture.output / extra, b"unexpected generated fixture\n")
+                with self.assertRaisesRegex(ValueError, "frozen batch"):
+                    catalogs.validate_frozen(fixture.output)
+
+    def test_frozen_inventory_allows_only_named_runner_receipts_and_mutable_trees(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            fixture = FrozenFixture(Path(temporary).resolve())
+            fixture.freeze()
+            for name in ("execution-started.json", "execution-finished.json", "validation-started.json",
+                         "validation-finished.json", "attempts/correct-eio/run-1/stdout.json",
+                         "validation/correct-eio/stdout.json"):
+                put(fixture.output / name, {})
+            catalogs.validate_frozen(fixture.output)
+            (fixture.output / "evidence/unlisted-empty-directory").mkdir()
+            with self.assertRaisesRegex(ValueError, "Unexpected directory"):
+                catalogs.validate_frozen(fixture.output)
+
+    def test_frozen_inventory_rejects_link_in_mutable_output_without_following_it(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            fixture = FrozenFixture(Path(temporary).resolve())
+            fixture.freeze()
+            (fixture.output / "attempts").mkdir()
+            (fixture.output / "attempts/linked").symlink_to(fixture.root / "not-created")
+            with self.assertRaisesRegex(ValueError, "Symbolic link"):
+                catalogs.validate_frozen(fixture.output)
 
 
 def result_fixture(directory):

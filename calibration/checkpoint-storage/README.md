@@ -134,6 +134,12 @@ is interrupted, exceeds its outer deadline, or resource cleanup cannot be
 confirmed. To investigate or change a recipe, prepare a separate fresh batch;
 never overwrite the frozen manifest or rerun an existing attempt directory.
 
+The batch file inventory is exact. Only `attempts/`, `validation/` and the four
+named `execution-{started,finished}.json` / `validation-{started,finished}.json`
+runner receipts may grow after freezing. Extra evidence, catalogs, recipe files,
+empty directories and Python bytecode are rejected; `__pycache__` is forbidden
+even inside mutable output trees. Save generated reports outside the frozen batch.
+
 ## Check evidence without rewriting outcomes
 
 Run the retained checker without creating Python bytecode beside frozen inputs:
@@ -206,7 +212,7 @@ and enable shell no-clobber so an earlier report cannot be overwritten:
 ```sh
 set -C
 python3 -B jobs/checkpoint-storage-qualification/evidence/recipe/check.py \
-  jobs/checkpoint-storage-qualification > jobs/checkpoint-storage-qualification/new-check-report.json
+  jobs/checkpoint-storage-qualification > jobs/checkpoint-storage-new-check-report.json
 python3 -B jobs/checkpoint-storage-qualification/evidence/recipe/report.py \
-  jobs/checkpoint-storage-qualification > jobs/checkpoint-storage-qualification/new-report.md
+  jobs/checkpoint-storage-qualification > jobs/checkpoint-storage-new-report.md
 ```
