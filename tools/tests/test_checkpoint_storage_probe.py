@@ -43,6 +43,9 @@ class Evidence:
         self.state = {name: "HEALTHY" for name in "abcd"}
         self.fault = {name: None for name in "abcd"}
         self.requests = {name: 0 for name in "abcd"}
+        self.counters = {name: {operation: {"count": 0, "bytes": 0}
+                               for operation in ("read", "getattr", "readdir", "access", "flush", "release")}
+                         for name in "abcd"}
         self.report = {"version": 1, "kind": "checkpoint-fuse-probe", "status": "observed",
                        "attemptId": ATTEMPT, "storageId": STORAGE, "namespace": NAMESPACE,
                        "imageId": IMAGE, "platform": "linux/arm64",
@@ -90,6 +93,8 @@ class Evidence:
                "operation": operation, "path": path, "faultOperation": fault_operation,
                "result": result, "errno": error, "requestedBytes": requested,
                "returnedBytes": returned, "datasync": datasync, "reason": reason}
+        if operation[0].isupper():
+            row["counters"] = copy.deepcopy(self.counters[name])
         self.journals[name].append(row)
         return row
 
@@ -113,14 +118,16 @@ class Evidence:
                 self.state[name] = "HEALTHY"
             elif operation == "ABORT":
                 self.state[name] = "ABORTED"
-        event = self.event(name, operation if ok else "REJECT", error=0 if ok else 22,
-                           result=0 if ok else -1, reason="accepted" if ok else error)
+        event = (self.journals[name][-1] if operation == "STATUS" and ok else
+                 self.event(name, operation if ok else "REJECT", error=0 if ok else 22,
+                            result=0 if ok else -1, reason="accepted" if ok else error))
         response = {"version": 1, "ok": ok, "error": error, "state": self.state[name],
                     "attemptId": ATTEMPT, "storageId": STORAGE, "instanceId": name, "namespace": NAMESPACE,
                     "faultId": self.fault[name], "revision": self.revision[name], "sequence": event["sequence"],
                     "journalComplete": True, "daemonPid": self.report["instances"][name]["daemonPid"],
                     "leaseRemainingMs": 30000 if self.state[name] == "ARMED" else 0,
                     "stopping": operation == "STOP" and ok}
+        response["counters"] = copy.deepcopy(self.counters[name])
         request = " ".join(map(str, (operation, ATTEMPT, STORAGE, request_instance or name, revision, *args)))
         self.observation(name, suffix, "control", request, response, started)
 
@@ -139,6 +146,12 @@ class Evidence:
         if exception:
             response.update(exceptionClass=exception, exceptionMessage="fixture filesystem failure",
                             exceptionMessageTruncated=False)
+        if status == "ok":
+            aggregate = {"read": "read", "stat": "getattr", "list": "readdir", "close": "release"}.get(operation)
+            if aggregate:
+                self.counters[name][aggregate]["count"] += 1
+                if aggregate == "read":
+                    self.counters[name][aggregate]["bytes"] += details["readBytes"]
         request = "\t".join(map(str, (number, operation, *args)))
         self.observation(name, suffix, "java", request, response, started)
         return response
@@ -212,6 +225,7 @@ class Evidence:
         for name in "ab":
             self.java(name, "symlink", "read", "escape-link/unknown", path="escape-link/unknown",
                       status="rejected", phase="read", exception="java.lang.IllegalArgumentException")
+        self.event("a", "SUMMARY")
         self.control("a", "before-death", "STATUS")
         self.report["instances"]["a"]["daemonBeforeKill"] = "104 (checkpoint-fuse) S 1 104 104 0 " + "0 " * 17 + "123456 0\n"
         self.report["instances"]["a"]["mountInfoAfterKill"] = self.report["instances"]["a"]["mountInfo"]
@@ -260,6 +274,67 @@ class QualificationTest(unittest.TestCase):
 
     def test_complete_four_instance_evidence_qualifies(self):
         self.assertEqual(7, len(self.qualify()))
+
+    def test_status_observes_previous_sequence_without_spending_a_journal_record(self):
+        self.assertFalse(any(event["operation"] == "STATUS" for events in self.evidence.journals.values() for event in events))
+        response = self.evidence.row("a.before-death")["response"]
+        self.assertEqual("SUMMARY", self.evidence.journals["a"][response["sequence"] - 1]["operation"])
+        self.assertEqual(3, response["counters"]["read"]["count"])
+        self.assertEqual(len(BASE) * 3 + len(AFTER), response["counters"]["read"]["bytes"])
+        self.assertEqual(7, len(self.qualify()))
+
+    def test_status_counters_may_advance_without_an_additional_journal_row(self):
+        # Counters need not be identical to the last record: successful metadata is aggregated.
+        value = self.evidence.row("a.before-death")["response"]
+        value["counters"]["getattr"]["count"] += 1
+        self.assertEqual(7, len(self.qualify()))
+
+    def test_missing_malformed_overflowed_and_noninteger_counters_reject(self):
+        mutations = [lambda row: row.pop("counters"),
+                     lambda row: row["counters"].pop("access"),
+                     lambda row: row["counters"].update(unknown={"count": 0, "bytes": 0}),
+                     lambda row: row["counters"]["read"].update(count=True),
+                     lambda row: row["counters"]["read"].update(count=1 << 63),
+                     lambda row: row["counters"]["getattr"].update(bytes=1),
+                     lambda row: row["counters"]["read"].update(count=0, bytes=1)]
+        for target in ("control", "journal"):
+            for number, mutate in enumerate(mutations):
+                with self.subTest(target=target, mutation=number):
+                    self.evidence = Evidence()
+                    value = (self.evidence.row("a.before-death")["response"] if target == "control"
+                             else next(row for row in self.evidence.journals["a"] if row["operation"] == "SUMMARY"))
+                    mutate(value)
+                    self.reject()
+
+    def test_regressing_summary_and_control_counters_reject(self):
+        for target in ("journal", "control"):
+            with self.subTest(target=target):
+                self.evidence = Evidence()
+                value = (next(row for row in self.evidence.journals["a"] if row["operation"] == "SUMMARY")
+                         if target == "journal" else self.evidence.row("a.heal")["response"])
+                value["counters"]["read"] = {"count": 0, "bytes": 0}
+                self.reject()
+
+    def test_status_counters_cannot_exceed_the_next_durable_snapshot(self):
+        self.evidence.row("b.ready")["response"]["counters"]["read"] = {"count": 99, "bytes": 99}
+        self.reject()
+
+    def test_summary_requires_actual_activity_and_startup_counts_are_zero(self):
+        previous = next(row for row in reversed(self.evidence.journals["a"])
+                        if row["operation"] == "REJECT")
+        summary = next(row for row in self.evidence.journals["a"] if row["operation"] == "SUMMARY")
+        summary["counters"] = copy.deepcopy(previous["counters"])
+        self.reject()
+        self.evidence = Evidence()
+        self.evidence.journals["a"][0]["counters"]["access"]["count"] = 1
+        self.reject()
+
+    def test_status_requires_previous_revision_state_and_fault_identity(self):
+        for key, value in (("state", "ARMED"), ("revision", 3), ("faultId", "other")):
+            with self.subTest(key=key):
+                self.evidence = Evidence()
+                self.evidence.row("a.before-death")["response"][key] = value
+                self.reject()
 
     def test_top_level_abort_expiry_failure_and_predeclared_pass_cannot_qualify(self):
         for status in ("aborted", "expired", "failed", "unsupported", "pass"):

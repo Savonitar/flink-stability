@@ -19,6 +19,21 @@ JAVA_MAIN = "org.savonitar.flink.stability.testcontainers.storage.CheckpointStor
 BASE = b"before-fault"
 AFTER = b"-after-heal"
 MAX_OUTPUT = 12 * 1024 * 1024
+IO_COUNTERS = frozenset(("read", "getattr", "readdir", "access", "flush", "release"))
+
+
+def io_counters(value):
+    require(isinstance(value, dict) and set(value) == IO_COUNTERS, "Missing or invalid native I/O counters")
+    for name, counter in value.items():
+        require(isinstance(counter, dict) and set(counter) == {"count", "bytes"}
+                and all(type(number) is int and 0 <= number <= (1 << 63) - 1 for number in counter.values())
+                and (name == "read" or counter["bytes"] == 0)
+                and (counter["count"] != 0 or counter["bytes"] == 0), "Invalid native I/O counter: " + name)
+    return value
+
+
+def counters_advance(previous, current):
+    return all(current[name][field] >= previous[name][field] for name in IO_COUNTERS for field in ("count", "bytes"))
 
 
 def require(condition, message):
@@ -496,7 +511,7 @@ def qualify(report, output):
                 "Foreign control identity")
         if state: require(value["state"] == state, "Wrong control state: " + label)
         return value
-    journals = {}
+    journals, journal_counters = {}, {}
     for name in ("a", "b", "c", "d"):
         instance = report["instances"][name]; inspected = instance["inspection"]
         require(inspected["Image"] == report["imageId"] and inspected["Id"] == instance["containerId"]
@@ -531,10 +546,28 @@ def qualify(report, output):
         require(any(event["operation"] == "READY" and event["reason"] ==
                 "direct_io=1,writeback_cache=0,entry_timeout=0,attr_timeout=0,negative_timeout=0,kernel_cache=0,auto_cache=0"
                 for event in events), "Effective FUSE cache settings were not confirmed")
+        snapshots = []
+        for event in events:
+            operation = event["operation"]
+            require(isinstance(operation, str) and operation and operation != "STATUS",
+                    "STATUS must not consume the native journal budget")
+            if operation[0].isupper():
+                counters = io_counters(event.get("counters"))
+                require(not snapshots or counters_advance(snapshots[-1][1], counters), "Native counters moved backwards")
+                if operation in {"START", "READY"}:
+                    require(all(counter["count"] == counter["bytes"] == 0 for counter in counters.values()),
+                            "Startup counters are not zero")
+                if operation == "SUMMARY":
+                    require(snapshots and counters != snapshots[-1][1], "SUMMARY has no new aggregate activity")
+                snapshots.append((event["sequence"], counters))
+            elif "counters" in event:
+                raise ValueError("Unexpected counters on an individual native I/O receipt")
+        require(snapshots, "Native lifecycle counters are missing")
+        journal_counters[name] = snapshots
         journals[name] = events
     require(len({item["inspection"]["Mounts"][0]["Name"] for item in report["instances"].values()}) == 1,
             "Mounts do not share the same backing volume")
-    previous_end = 0
+    previous_end, control_counters, control_sequences = 0, {}, {}
     for row in report["observations"]:
         require(row["startedMonotonicNs"] >= previous_end
                 and row["finishedMonotonicNs"] >= row["startedMonotonicNs"], "Observation order is invalid")
@@ -553,8 +586,21 @@ def qualify(report, output):
                     "Control receipt sequence/process identity is invalid")
             event = journals[row["instance"]][value["sequence"] - 1]
             expected = row["request"].split()[0] if value["ok"] else "REJECT"
-            require(event["operation"] == expected and event["revision"] == value["revision"]
-                    and event["state"] == value["state"], "Control acknowledgement is not in the captured journal")
+            require((expected == "STATUS" or event["operation"] == expected)
+                    and event["revision"] == value["revision"] and event["state"] == value["state"]
+                    and event["faultId"] == value["faultId"], "Control acknowledgement differs from captured journal state")
+            counters = io_counters(value.get("counters"))
+            previous = control_counters.get(row["instance"])
+            require(previous is None or counters_advance(previous, counters), "Control I/O counters moved backwards")
+            require(value["sequence"] >= control_sequences.get(row["instance"], 0), "Control sequence moved backwards")
+            control_counters[row["instance"]] = counters
+            control_sequences[row["instance"]] = value["sequence"]
+            earlier = [item for sequence, item in journal_counters[row["instance"]] if sequence <= value["sequence"]]
+            later = [item for sequence, item in journal_counters[row["instance"]] if sequence > value["sequence"]]
+            require(earlier and counters_advance(earlier[-1], counters)
+                    and (not later or counters_advance(counters, later[0])), "Control counters contradict journal snapshots")
+            if expected != "STATUS":
+                require(event["counters"] == counters, "Mutating/rejected control counters differ from acknowledgement")
     for name in ("a", "b"):
         for suffix in ("create", "open", "fsync", "fdatasync", "evidence-write", "healed-write", "healed-fsync",
                        "healed-create", "close", "rename", "peer-stat", "peer-list", "peer-delete"):
