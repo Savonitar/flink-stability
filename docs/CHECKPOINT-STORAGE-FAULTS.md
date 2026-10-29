@@ -324,6 +324,40 @@ creation/removal retain their ordering even if creation returns late. These
 bounds cover driver and lock waits; they do not preempt a stalled host filesystem
 while writing local evidence.
 
+## Source-response provenance
+
+Current FUSE attempts retain bounded original Flink REST response bodies before
+typed parsing, exact checkpoint-inspector stdout, and Docker inspect source-token
+projections containing only `Id` and `State`. The Docker projection preserves the
+original value bytes and excludes `Config` and `Env`; it is not the full inspect
+response. Typed fields carry the capture path, byte count, SHA-256, request identity,
+call group and harness monotonic interval. History, configuration, failed details,
+trigger acknowledgement/status, pre/post-kill clocks, every six-stage job view,
+the final job view, readiness's original checkpoint overview, materialization and
+physical fence states have counterparts.
+There is no second inspect measurement used to manufacture the receipt.
+
+Capture failures prevent a confirmed result. Each store permits at most 4,096
+responses, 2 MiB per response and 64 MiB in aggregate; files are created once with
+owner-only access. Flink GET retries retain their individual responses in the same
+call group; checkpoint POST is never replayed. The Docker client may retry an
+idempotent GET within the shared deadline, so its receipt describes the final
+returned response rather than a single wire exchange. Local evidence writes are
+checked against the remaining budget but cannot preempt a stalled host filesystem.
+
+The current calibration checker reads the retained source bytes and compares all
+corresponding typed values, request identities and causal intervals. A rehashed
+result-only edit, a missing counterpart or a reused earlier group cannot replace
+the required observation. Hashes establish consistency of retained bytes, not
+authenticity of a daemon. Harness monotonic timestamps and JobManager epoch clocks
+remain separate observations. The terminal Kafka counts and state verdict remain
+the framework oracle's output; the Python checker does not replay raw Kafka data.
+
+The October 27 retained attempts predate these captures. Their derived REST,
+inspector and fence receipts retain their historical scope; the originals and
+frozen verifiers are unchanged, and the current source-response gate does not
+retroactively qualify them. A fresh run is required to verify this implementation.
+
 ## Result interpretation and remaining qualification
 
 The JSON evidence includes `checkpointStorage`, `checkpointStorageFaults`,

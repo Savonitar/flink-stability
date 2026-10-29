@@ -130,6 +130,18 @@ def render(report, manifest=None, framework=None, launch=None, platform=None):
               "It does not establish the original parser read boundary or complete process lifetime. "
               "Raw reported counts and independently extracted counts remain separate; a mismatch or partial capture prevents confirmation.", ""]
     lines += ["- " + escaped(value) for value in component_details] if component_details else ["Independent component event evidence is unavailable."]
+    lines += ["", "## Source response audit", "",
+              "Current qualification compares typed proof with hash-bound Flink response bodies, exact inspector stdout and Docker Id/State source-token projections. "
+              "Docker Config/Env is not retained. These are source-response comparisons, not reserialized typed receipts.", ""]
+    for row in rows:
+        proof = row.get("rawEvidenceAudit") or {}
+        lines.append("- " + escaped(str(row.get("cell", "unknown")) + " run-" + str(row.get("number", "unknown")))
+                     + ": " + ("confirmed" if proof.get("confirmed") is True else "unavailable/unconfirmed")
+                     + "; captures " + count(proof.get("captureCount")) + "; call groups " + count(proof.get("groupCount")) + ".")
+    lines += ["", "Scope: hashes establish retained-byte consistency, not responding-daemon authenticity. "
+              "Harness monotonic timestamps and JobManager epoch timestamps remain separate observed clocks. "
+              "Terminal Kafka counts are trusted framework-oracle output; the checker does not replay raw Kafka records. "
+              "Historical attempts without source captures cannot satisfy this current evidence gate."]
     lines += ["",
               "## Exact frozen identities", ""]
     pins = [("Matrix manifest SHA-256", report.get("manifestSha256", "unavailable")),

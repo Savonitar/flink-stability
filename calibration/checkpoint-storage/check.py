@@ -135,7 +135,8 @@ phases:
 
 def verifier_identity():
     paths = {"check.py": Path(__file__), "audit.py": HERE / "audit.py",
-             "framework.py": HERE / "framework.py", "inventory.py": HERE / "inventory.py", "state_recovery_check.py": STATE_SOURCE}
+             "framework.py": HERE / "framework.py", "inventory.py": HERE / "inventory.py",
+             "raw_evidence.py": HERE / "raw_evidence.py", "state_recovery_check.py": STATE_SOURCE}
     component_parser = HERE / "component_events.py"
     if component_parser.exists():
         paths["component_events.py"] = component_parser
@@ -184,7 +185,7 @@ def validate_manifest(batch, *, re_audit=False):
                     "Invalid reference source label")
     recipes = manifest["recipeFiles"]
     required = {"evidence/recipe/" + name for name in
-                ("check.py", "audit.py", "state_recovery_check.py", "framework.py", "inventory.py", "catalogs.py", "run.py", "README.md",
+                ("check.py", "audit.py", "raw_evidence.py", "state_recovery_check.py", "framework.py", "inventory.py", "catalogs.py", "run.py", "README.md",
                  "prepare.py", "ResolveClosure.java", "report.py")}
     if not re_audit:
         required.add("evidence/recipe/component_events.py")
@@ -439,6 +440,7 @@ def audit_attempt_contract(result, exit_code, cell, manifest, directory, retaine
     row = state.audit_attempt(result, exit_code, generic_cell, manifest)
     row["logSha256"] = state.verify_marker_logs(directory, result["evidence"]["stateRecovery"]["trace"]["markers"])
     row.update(subject)
+    row["rawEvidenceAudit"] = module("raw_evidence", HERE / "raw_evidence.py").audit(result, retained)
     row["checkpointStorage"] = audit.audit_storage(result, cell, manifest, retained)
     endpoint = parse(read(directory, "command.json"))["environment"]["DOCKER_HOST"]
     row["cleanup"] = audit.cleanup_receipt(directory, result, endpoint)

@@ -64,6 +64,10 @@ final class VerifiedFlinkContainer extends GenericContainer<VerifiedFlinkContain
 
     void verifyStorageProcess() { if (storage != null) storage.verifyFlinkProcess(storageMount); }
 
+    Optional<FlinkHaControl.ProcessState> capturedStorageProcessState(ContainerOperationDeadline deadline) {
+        return storage == null ? Optional.empty() : Optional.of(storage.inspectProcess(storageMount, deadline));
+    }
+
     private boolean literalConfiguration() { return !runtimeTarget.effectiveConfig().isEmpty(); }
 
     private Map<String, String> requestedConfiguration() { return runtimeTarget.effectiveConfig(); }

@@ -262,7 +262,7 @@ def freeze(parent_manifest, references, output, framework_inputs, *, root=ROOT, 
         require(isinstance(decode(platform_bytes), dict), "Platform evidence must be a JSON object")
         files["evidence/platform.json"] = platform_bytes
         platform_receipt = {"path": "evidence/platform.json", "sha256": digest(platform_bytes)}
-    for name in ("catalogs.py", "run.py", "check.py", "audit.py", "component_events.py", "inventory.py", "report.py", "framework.py", "prepare.py", "ResolveClosure.java", "README.md"):
+    for name in ("catalogs.py", "run.py", "check.py", "audit.py", "raw_evidence.py", "component_events.py", "inventory.py", "report.py", "framework.py", "prepare.py", "ResolveClosure.java", "README.md"):
         files["evidence/recipe/" + name] = read(recipe / name, root)
     files["evidence/recipe/state_recovery_check.py"] = read(root / "calibration/state-recovery/check.py", root)
     cells = []
@@ -328,7 +328,7 @@ def validate_frozen(batch):
     for name, value in manifest["frozenFiles"].items():
         read(batch / relative(name), batch, value)
     required_recipe = {"evidence/recipe/" + name for name in
-                       ("catalogs.py", "run.py", "check.py", "audit.py", "component_events.py", "inventory.py", "report.py", "framework.py", "prepare.py", "ResolveClosure.java", "README.md", "state_recovery_check.py")}
+                       ("catalogs.py", "run.py", "check.py", "audit.py", "raw_evidence.py", "component_events.py", "inventory.py", "report.py", "framework.py", "prepare.py", "ResolveClosure.java", "README.md", "state_recovery_check.py")}
     require(required_recipe.issubset(manifest["recipeFiles"]), "Frozen recipe is incomplete")
     for name, value in manifest["recipeFiles"].items():
         require(manifest["frozenFiles"].get(name) == value, "Recipe pin differs")

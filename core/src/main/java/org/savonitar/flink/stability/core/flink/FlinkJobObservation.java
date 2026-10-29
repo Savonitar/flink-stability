@@ -1,6 +1,7 @@
 package org.savonitar.flink.stability.core.flink;
 
 import java.io.IOException;
+import org.savonitar.flink.stability.runtime.api.RawEvidenceRef;
 import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
@@ -21,7 +22,7 @@ public record FlinkJobObservation(
         long restoredCheckpoints,
         Optional<Restore> latestRestore,
         List<Failure> failures,
-        List<Subtask> subtasks) {
+        List<Subtask> subtasks, List<RawEvidenceRef> rawEvidence) {
 
     private static final Set<String> ACTIVE_SUBTASK_STATES =
             Set.of("DEPLOYING", "INITIALIZING", "RUNNING");
@@ -34,6 +35,12 @@ public record FlinkJobObservation(
         latestRestore = Objects.requireNonNull(latestRestore, "latestRestore");
         failures = List.copyOf(Objects.requireNonNull(failures, "failures"));
         subtasks = List.copyOf(Objects.requireNonNull(subtasks, "subtasks"));
+        rawEvidence = List.copyOf(rawEvidence);
+    }
+
+    public FlinkJobObservation(long jobManagerTimeMillis, FlinkJobState state, long completedCheckpoints,
+            long restoredCheckpoints, Optional<Restore> latestRestore, List<Failure> failures, List<Subtask> subtasks) {
+        this(jobManagerTimeMillis, state, completedCheckpoints, restoredCheckpoints, latestRestore, failures, subtasks, List.of());
     }
 
     /** Failures that Flink recorded strictly after the given JobManager time, newest first. */

@@ -42,7 +42,7 @@ class FrozenFixture:
         self.output = root / "jobs/qualification"
         self.helper_source = root / "jobs/helper-build"
         self.references = {}
-        for name in ("catalogs.py", "run.py", "check.py", "audit.py", "component_events.py", "inventory.py", "report.py", "framework.py", "prepare.py", "ResolveClosure.java", "README.md"):
+        for name in ("catalogs.py", "run.py", "check.py", "audit.py", "raw_evidence.py", "component_events.py", "inventory.py", "report.py", "framework.py", "prepare.py", "ResolveClosure.java", "README.md"):
             put(self.recipe / name, ("# generated fixture " + name + "\n").encode())
         put(root / "calibration/state-recovery/check.py", b"# independent reference fixture\n")
         artifacts, snapshots = {}, {}
@@ -119,6 +119,7 @@ class CheckpointStorageCatalogTest(unittest.TestCase):
             event_parser = "evidence/recipe/component_events.py"
             self.assertEqual((fixture.recipe / "component_events.py").read_bytes(), (fixture.output / event_parser).read_bytes())
             self.assertEqual(manifest["frozenFiles"][event_parser], manifest["recipeFiles"][event_parser])
+            self.assertEqual(manifest["frozenFiles"]["evidence/recipe/raw_evidence.py"], manifest["recipeFiles"]["evidence/recipe/raw_evidence.py"])
             self.assertEqual({name: "jobs/pilots/" + name + ".json" for name, _, _ in catalogs.CELLS}, manifest["referenceSources"])
             self.assertNotIn("platformEvidence", manifest)
             (fixture.parent / "artifacts/correct.jar").write_bytes(b"changed after freeze")
@@ -174,10 +175,11 @@ class CheckpointStorageCatalogTest(unittest.TestCase):
                 with self.assertRaises(ValueError): fixture.freeze()
 
     def test_runner_validation_rejects_changed_recipe_catalog_artifact_or_allocations(self):
-        for change in ("recipe", "component-parser", "catalog", "artifact", "attempt", "expectation", "recipe-omitted", "component-parser-omitted"):
+        for change in ("recipe", "component-parser", "raw-parser", "catalog", "artifact", "attempt", "expectation", "recipe-omitted", "component-parser-omitted", "raw-parser-omitted"):
             with self.subTest(change=change), tempfile.TemporaryDirectory() as temporary:
                 fixture = FrozenFixture(Path(temporary).resolve()); manifest = fixture.freeze()
                 paths = {"recipe": "evidence/recipe/framework.py", "component-parser": "evidence/recipe/component_events.py",
+                         "raw-parser": "evidence/recipe/raw_evidence.py",
                          "catalog": "catalogs/correct-eio/" + catalogs.SCENARIO + ".yaml",
                          "artifact": "artifacts/correct.jar"}
                 if change in paths:
@@ -187,6 +189,7 @@ class CheckpointStorageCatalogTest(unittest.TestCase):
                     if change == "expectation": manifest["cells"][-1]["requiredOutcome"] = "fail"
                     if change == "recipe-omitted": manifest["recipeFiles"].pop("evidence/recipe/framework.py")
                     if change == "component-parser-omitted": manifest["recipeFiles"].pop("evidence/recipe/component_events.py")
+                    if change == "raw-parser-omitted": manifest["recipeFiles"].pop("evidence/recipe/raw_evidence.py")
                     put(fixture.output / "manifest.json", manifest)
                 with self.assertRaises(ValueError): catalogs.validate_frozen(fixture.output)
 

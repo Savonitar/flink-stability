@@ -150,16 +150,22 @@ public interface FlinkHaControl {
 
     record ProcessState(String runtimeId, boolean running, boolean paused,
                         Optional<Long> exitCode, Optional<Boolean> oomKilled,
-                        Optional<String> finishedAt) {
+                        Optional<String> finishedAt, Optional<RawEvidenceRef> rawEvidence) {
         public ProcessState {
             runtimeId = requireNonBlank(runtimeId, "runtimeId");
             Objects.requireNonNull(exitCode, "exitCode");
             Objects.requireNonNull(oomKilled, "oomKilled");
+            rawEvidence = Objects.requireNonNull(rawEvidence, "rawEvidence");
             finishedAt = Objects.requireNonNull(finishedAt, "finishedAt")
                     .map(value -> requireNonBlank(value, "finishedAt"));
             if (running && (exitCode.isPresent() || finishedAt.isPresent())) {
                 throw new IllegalArgumentException("A running process has no observed exit");
             }
+        }
+
+        public ProcessState(String runtimeId, boolean running, boolean paused, Optional<Long> exitCode,
+                            Optional<Boolean> oomKilled, Optional<String> finishedAt) {
+            this(runtimeId, running, paused, exitCode, oomKilled, finishedAt, Optional.empty());
         }
 
         public ProcessState(String runtimeId, boolean running, boolean paused) {

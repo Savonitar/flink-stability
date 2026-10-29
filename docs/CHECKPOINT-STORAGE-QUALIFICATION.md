@@ -21,6 +21,40 @@ the [publication manifest](evidence/checkpoint-storage-publication-manifest.json
 records each copy's separate SHA-256 and its omissions. The copies omit raw
 journals, binaries and detailed transcripts, so they cannot rerun the full audit.
 
+## Current source-response contract and historical scope
+
+The October 27 matrix and its review reports are historical qualification of the
+recorded artifacts and verifier. They retained typed Flink REST, inspector and
+physical-fence receipts, but did not retain the corresponding original REST or
+Docker response bytes. A typed JSON receipt is a derived result, even when its
+file is hashed. The historical hashes and outcomes below remain unchanged.
+
+New FUSE attempts retain decoded Flink HTTP response bodies, exact inspector
+stdout and Docker inspect `Id`/`State` source-token projections. The projection
+excludes Docker `Config`/`Env` and is labelled as a projection. Current checking
+compares every required typed counterpart with those bytes: readiness's original
+checkpoint overview, six-stage job/history observations, configuration and failed
+details, trigger acknowledgement/status, pre/post-kill clocks, materialization,
+the final job observation and physical process states. Capture hashes, byte limits,
+request identities, distinct call groups and ARM/kill/HEAL ordering are checked.
+Missing source captures cannot be replaced with a reserialized typed object.
+
+The current catalog contract is version 2 and requires explicit mutant opt-in.
+The current checker, including `--re-audit`, rejects the old batch: it lacks that
+contract and the new source captures. Use its preserved historical verifier to
+reproduce the historical result; a fresh batch is necessary to qualify current
+runtime changes. The October 27 re-audit described below is not a claim that the
+present checker requalifies the old matrix.
+
+Hashes establish retained-byte consistency, not responding-daemon authenticity.
+Harness monotonic timestamps and JobManager epoch times are separate observations,
+without an independent clock-attestation or cross-clock synchronization claim.
+Terminal Kafka counts and state verdicts remain framework-oracle output; the
+Python checker checks those reported contracts, mismatch arithmetic and supporting
+receipts, but does not replay raw Kafka records. Keyed file sizes/hashes come from
+the pinned inspector's retained stdout, supported by native I/O receipts; raw
+checkpoint file contents are not independently replayed by this checker.
+
 ## Review corrections and independent re-audit
 
 The subsequent review identified one runtime deadline defect and three checker
@@ -38,10 +72,10 @@ all twelve use the same timestamp after preflight. Wall-clock duration must be
 positive and agree with positive monotonic elapsed time within one second;
 larger drift leaves chronology unconfirmed. The additional checks also reject
 artificially compressed/stretched intervals. All 415 Python tests and the
-current verifier's re-audit of the twelve original attempts pass with this guard.
+October 27 review verifier's re-audit of the twelve original attempts passed with this guard.
 
 The original matrix, manifests, frozen recipes and reports remain unchanged.
-The updated verifier's explicit `--re-audit` produced a separate
+The October 27 review verifier's explicit `--re-audit` produced a separate
 [JSON report](evidence/checkpoint-storage-review-fixes-20261027-01/re-audit-final.summary.json)
 and [Markdown report](evidence/checkpoint-storage-review-fixes-20261027-01/re-audit-final.md):
 all twelve original attempts still qualify, with no errors. All eighteen
@@ -49,7 +83,7 @@ reported component events match the independent extraction from 33 physical
 process logs (3,901,852 bytes), and all preflight/live intervals are ordered.
 This verifies the **retained final log prefixes**; the original collector's exact
 earlier byte boundary and complete process lifetime remain unproven and are
-explicitly reported. The re-audit identifies the current verifier separately
+explicitly reported. The re-audit identifies that review verifier separately
 from the original recipe and does not qualify changed runtime binaries.
 
 The updated JSON and Markdown reports were
@@ -226,9 +260,10 @@ manifest, native journals and a hashed retained-file index. Read-only Docker
 queries check that each exact Flink/Kafka container ID and owned storage volume
 is absent after cleanup.
 
-The independent checker rechecks fixed inputs and recipe identities, command
-isolation, natural FINISHED completion, physical writer fencing, the complete
-fixed Kafka `read_committed` traversal and exact state-prefix result. Recovery
+The historical independent checker rechecks fixed inputs and recipe identities,
+command isolation, natural FINISHED completion and physical writer-fence receipts.
+It checks the framework's reported complete fixed Kafka `read_committed` traversal
+and exact state-prefix result; it does not replay the Kafka records. Recovery
 requires the old/new physical and execution identities, the completed baseline
 checkpoint, restored state and progress for every key. EIO cells additionally
 require the external keyed state file materialization, exactly correlated

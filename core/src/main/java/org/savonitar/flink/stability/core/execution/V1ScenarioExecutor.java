@@ -274,6 +274,9 @@ public final class V1ScenarioExecutor {
             String jobManagerRestUrl = runtime.startFlink(prepared.flinkRuntimeTarget());
             flink = flinkControlFactory.open(jobManagerRestUrl);
             resources.flink = flink;
+            if (plan.job().checkpointing().fuse().isPresent()) {
+                flink.enableRawEvidence(context.checkpointStorageRoot().resolve("raw-flink-rest"));
+            }
             if (plan.flink().highAvailability().isPresent() && flink instanceof FlinkRestApiClient client) {
                 client.useEndpointResolver(runtime::currentFlinkRestEndpoint);
             }

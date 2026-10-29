@@ -95,8 +95,19 @@ public final class StateRecoveryEvidence {
     public record Readiness(boolean ready, String reason, String jobId, int keyCount, long totalRecords,
                             TaskManagerControl.Identity target, int executionAttempt,
                             FlinkJobObservation jobObservation, Map<Long, Checkpoint> completedSnapshots,
-                            CommittedPrefix committedPrefix) {
-        public Readiness { completedSnapshots = Map.copyOf(completedSnapshots); }
+                            CommittedPrefix committedPrefix,
+                            List<org.savonitar.flink.stability.runtime.api.RawEvidenceRef> checkpointEvidence) {
+        public Readiness { completedSnapshots = Map.copyOf(completedSnapshots); checkpointEvidence = List.copyOf(checkpointEvidence); }
+        public Readiness(boolean ready, String reason, String jobId, int keyCount, long totalRecords,
+                         TaskManagerControl.Identity target, int executionAttempt, FlinkJobObservation jobObservation,
+                         Map<Long, Checkpoint> completedSnapshots, CommittedPrefix committedPrefix) {
+            this(ready, reason, jobId, keyCount, totalRecords, target, executionAttempt, jobObservation,
+                    completedSnapshots, committedPrefix, List.of());
+        }
+        public Readiness withCheckpointEvidence(List<org.savonitar.flink.stability.runtime.api.RawEvidenceRef> raw) {
+            return new Readiness(ready, reason, jobId, keyCount, totalRecords, target, executionAttempt,
+                    jobObservation, completedSnapshots, committedPrefix, raw);
+        }
     }
 
     public record Recovery(boolean confirmed, String reason, Readiness readiness, long restoredCheckpointId,

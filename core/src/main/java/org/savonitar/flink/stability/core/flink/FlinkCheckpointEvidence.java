@@ -2,6 +2,7 @@ package org.savonitar.flink.stability.core.flink;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import org.savonitar.flink.stability.runtime.api.MonotonicDeadline;
+import org.savonitar.flink.stability.runtime.api.RawEvidenceRef;
 
 import java.io.IOException;
 import java.time.Duration;
@@ -31,7 +32,8 @@ public final class FlinkCheckpointEvidence {
             long id, Status status, boolean savepoint, String checkpointType,
             long triggerTimestamp, long latestAckTimestamp, long checkpointedSize, long stateSize,
             int numSubtasks, int numAcknowledgedSubtasks, OptionalLong failureTimestamp,
-            Optional<String> failureMessage, Optional<String> externalPath, Optional<Boolean> discarded) {
+            Optional<String> failureMessage, Optional<String> externalPath, Optional<Boolean> discarded,
+            List<RawEvidenceRef> rawEvidence) {
         public Checkpoint {
             Objects.requireNonNull(status, "status");
             Objects.requireNonNull(checkpointType, "checkpointType");
@@ -39,6 +41,20 @@ public final class FlinkCheckpointEvidence {
             Objects.requireNonNull(failureMessage, "failureMessage");
             Objects.requireNonNull(externalPath, "externalPath");
             Objects.requireNonNull(discarded, "discarded");
+            rawEvidence = List.copyOf(rawEvidence);
+        }
+        public Checkpoint(long id, Status status, boolean savepoint, String checkpointType,
+                long triggerTimestamp, long latestAckTimestamp, long checkpointedSize, long stateSize,
+                int numSubtasks, int numAcknowledgedSubtasks, OptionalLong failureTimestamp,
+                Optional<String> failureMessage, Optional<String> externalPath, Optional<Boolean> discarded) {
+            this(id, status, savepoint, checkpointType, triggerTimestamp, latestAckTimestamp, checkpointedSize,
+                    stateSize, numSubtasks, numAcknowledgedSubtasks, failureTimestamp, failureMessage,
+                    externalPath, discarded, List.of());
+        }
+        public Checkpoint withRawEvidence(List<RawEvidenceRef> raw) {
+            return new Checkpoint(id, status, savepoint, checkpointType, triggerTimestamp, latestAckTimestamp,
+                    checkpointedSize, stateSize, numSubtasks, numAcknowledgedSubtasks, failureTimestamp,
+                    failureMessage, externalPath, discarded, raw);
         }
     }
 
@@ -50,7 +66,7 @@ public final class FlinkCheckpointEvidence {
     public record History(
             String jobId, Counts counts, List<Checkpoint> retained,
             Optional<Checkpoint> latestCompleted, Optional<Checkpoint> latestFailed,
-            Optional<Checkpoint> latestSavepoint, Optional<Restored> latestRestored) {
+            Optional<Checkpoint> latestSavepoint, Optional<Restored> latestRestored, List<RawEvidenceRef> rawEvidence) {
         public History {
             Objects.requireNonNull(jobId, "jobId");
             Objects.requireNonNull(counts, "counts");
@@ -59,6 +75,16 @@ public final class FlinkCheckpointEvidence {
             Objects.requireNonNull(latestFailed, "latestFailed");
             Objects.requireNonNull(latestSavepoint, "latestSavepoint");
             Objects.requireNonNull(latestRestored, "latestRestored");
+            rawEvidence = List.copyOf(rawEvidence);
+        }
+
+        public History(String jobId, Counts counts, List<Checkpoint> retained,
+                Optional<Checkpoint> latestCompleted, Optional<Checkpoint> latestFailed,
+                Optional<Checkpoint> latestSavepoint, Optional<Restored> latestRestored) {
+            this(jobId, counts, retained, latestCompleted, latestFailed, latestSavepoint, latestRestored, List.of());
+        }
+        public History withRawEvidence(List<RawEvidenceRef> raw) {
+            return new History(jobId, counts, retained, latestCompleted, latestFailed, latestSavepoint, latestRestored, raw);
         }
 
         public long highestObservedId() {
@@ -86,7 +112,22 @@ public final class FlinkCheckpointEvidence {
             String jobId, String mode, long intervalMillis, long timeoutMillis, long minPauseMillis,
             int maxConcurrent, int tolerableFailedCheckpoints, String stateBackend, String checkpointStorage,
             boolean unalignedCheckpoints, boolean stateChangelogEnabled,
-            boolean externalized, boolean deleteOnCancellation) {}
+            boolean externalized, boolean deleteOnCancellation, List<RawEvidenceRef> rawEvidence) {
+        public Configuration { rawEvidence = List.copyOf(rawEvidence); }
+        public Configuration(String jobId, String mode, long intervalMillis, long timeoutMillis, long minPauseMillis,
+                int maxConcurrent, int tolerableFailedCheckpoints, String stateBackend, String checkpointStorage,
+                boolean unalignedCheckpoints, boolean stateChangelogEnabled, boolean externalized,
+                boolean deleteOnCancellation) {
+            this(jobId, mode, intervalMillis, timeoutMillis, minPauseMillis, maxConcurrent, tolerableFailedCheckpoints,
+                    stateBackend, checkpointStorage, unalignedCheckpoints, stateChangelogEnabled, externalized,
+                    deleteOnCancellation, List.of());
+        }
+        public Configuration withRawEvidence(List<RawEvidenceRef> raw) {
+            return new Configuration(jobId, mode, intervalMillis, timeoutMillis, minPauseMillis, maxConcurrent,
+                    tolerableFailedCheckpoints, stateBackend, checkpointStorage, unalignedCheckpoints,
+                    stateChangelogEnabled, externalized, deleteOnCancellation, raw);
+        }
+    }
 
     @FunctionalInterface
     interface Request {

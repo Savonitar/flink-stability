@@ -580,6 +580,7 @@ class CheckpointStorageFaultTest {
         private Object flinkCall(String method, Object[] arguments) throws Exception {
             now.addAndGet(1_000_000);
             return switch (method) {
+                case "latestCallEvidence" -> List.of();
                 case "checkpointConfiguration" -> new FlinkCheckpointEvidence.Configuration(JOB, "exactly_once", 10000, 60000,
                         0, 1, observedTolerance, "HashMapStateBackend", "FileSystemCheckpointStorage", false, false, false, false);
                 case "checkpointHistory" -> observedHistory();
@@ -779,7 +780,8 @@ class CheckpointStorageFaultTest {
         return new CheckpointStorageFault.Evidence(original.path(), original.jobId(), original.triggerId(), original.timeoutMillis(),
                 original.checkpointId(), original.failedCheckpointId(), original.configuration(), original.readiness(), original.materialization(),
                 original.triggerResult(), original.failedCheckpoint(), original.failureTrace(), trace, original.samples(), original.transitions(),
-                original.kill(), original.restart(), recovery, original.errors(), original.declaredControls());
+                original.kill(), original.restart(), recovery, original.errors(), original.declaredControls(),
+                original.triggerSubmitEvidence(), original.beforeKillEvidence(), original.afterKillEvidence());
     }
     private static StateRecoveryEvidence.Marker copyMarker(StateRecoveryEvidence.Marker original,
             StateRecoveryEvidence.ProcessIdentity process, String uid, long line) {

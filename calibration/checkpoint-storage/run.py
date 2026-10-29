@@ -99,6 +99,8 @@ def retain_evidence(root, directory, total_records=30000):
                 target, kind = "logs/" + path.name, "flink-log"
             elif path.parent.name == "checkpoint-storage-journals":
                 target, kind = "native-journals/" + path.name, "native-journal"
+            elif path.parent.name in {"raw-flink-rest", "raw-storage"}:
+                target, kind = "raw-evidence/" + path.parent.name + "/" + path.name, "raw-response"
             else:
                 target, kind = "checkpoint-evidence/" + str(path.relative_to(checkpoint)), "checkpoint-evidence"
             sources[str(path)] = (target, kind, None)
@@ -117,7 +119,9 @@ def retain_evidence(root, directory, total_records=30000):
             for value in node:
                 referenced(value)
     referenced(result["evidence"])
-    require(len(sources) <= 512, "Evidence file count limit exceeded")
+    require(sum(value[1] != "raw-response" for value in sources.values()) <= 512
+            and sum(value[1] == "raw-response" for value in sources.values()) <= 8192,
+            "Evidence file count limit exceeded")
     receipts, total, journal_bytes, names = [], 0, 0, set()
     for source, (name, kind, expected) in sorted(sources.items()):
         require(name not in names, "Evidence filenames collide")

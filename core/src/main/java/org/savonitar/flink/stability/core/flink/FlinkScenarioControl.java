@@ -10,6 +10,14 @@ import static org.savonitar.flink.stability.runtime.api.Checks.requireNonBlank;
 
 /** Typed Flink operations used by the first v1 scenario executor. */
 public interface FlinkScenarioControl extends FlinkJobControl, AutoCloseable {
+    /** Enables bounded source-byte retention only for an attempt that requests this proof. */
+    default void enableRawEvidence(Path directory) throws IOException {
+        throw new UnsupportedOperationException("Raw Flink response evidence unavailable");
+    }
+
+    /** Exact responses from the immediately completed scalar call, never a later endpoint match. */
+    default List<org.savonitar.flink.stability.runtime.api.RawEvidenceRef> latestCallEvidence() { return List.of(); }
+
     String uploadJar(Path jar, String expectedSha256) throws IOException;
 
     FlinkJobHandle submit(FlinkJobSubmission submission) throws IOException;

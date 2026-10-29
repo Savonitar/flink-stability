@@ -12,6 +12,8 @@ import okhttp3.Response;
 import okhttp3.MultipartBody;
 import org.savonitar.flink.stability.runtime.api.Digests;
 import org.savonitar.flink.stability.runtime.api.MonotonicDeadline;
+import org.savonitar.flink.stability.runtime.api.RawEvidenceRef;
+import org.savonitar.flink.stability.runtime.api.RawEvidenceStore;
 
 import java.io.IOException;
 import java.io.InterruptedIOException;
@@ -49,6 +51,27 @@ public final class FlinkRestApiClient implements FlinkScenarioControl {
     private final LongSupplier nanoTime;
     private final Sleeper sleeper;
     private final List<RestError> restErrors = new ArrayList<>();
+    private RawEvidenceStore rawEvidence;
+    private long groupSequence;
+    private String activeGroup;
+    private List<RawEvidenceRef> latestCallEvidence = List.of();
+
+    @Override public void enableRawEvidence(Path directory) throws IOException {
+        if (rawEvidence != null) throw new IllegalStateException("Raw evidence already enabled");
+        rawEvidence = new RawEvidenceStore(directory);
+    }
+
+    @Override public List<RawEvidenceRef> latestCallEvidence() { return latestCallEvidence; }
+
+    private EvidenceCall evidenceCall(String name) { return new EvidenceCall(name); }
+
+    private final class EvidenceCall implements AutoCloseable {
+        private final long cursor = rawEvidence == null ? 0 : rawEvidence.cursor();
+        private final String previous = activeGroup;
+        private EvidenceCall(String name) { activeGroup = name + "-" + ++groupSequence; }
+        private List<RawEvidenceRef> references() { return rawEvidence == null ? List.of() : rawEvidence.since(cursor); }
+        @Override public void close() { latestCallEvidence = references(); activeGroup = previous; }
+    }
 
     public FlinkRestApiClient(String jobManagerUrl) {
         this(new OkHttpTransport(normalizeUrl(jobManagerUrl), new OkHttpClient.Builder()
@@ -108,29 +131,39 @@ public final class FlinkRestApiClient implements FlinkScenarioControl {
 
     @Override
     public String triggerCheckpoint(FlinkJobHandle job, String triggerId, Duration timeout) throws IOException {
-        return FlinkCheckpointTrigger.submit(job, triggerId, timeout, mapper, this::execute, nanoTime);
+        try (var call = evidenceCall("checkpoint-trigger-submit")) {
+            return FlinkCheckpointTrigger.submit(job, triggerId, timeout, mapper, this::execute, nanoTime);
+        }
     }
 
     @Override
     public FlinkCheckpointTrigger.Observation checkpointStatus(
             FlinkJobHandle job, String triggerId, Duration timeout) throws IOException {
-        return FlinkCheckpointTrigger.status(job, triggerId, timeout, this::execute, nanoTime);
+        try (var call = evidenceCall("checkpoint-trigger-status")) {
+            return FlinkCheckpointTrigger.status(job, triggerId, timeout, this::execute, nanoTime).withRawEvidence(call.references());
+        }
     }
 
     @Override
     public FlinkCheckpointEvidence.History checkpointHistory(FlinkJobHandle job, Duration timeout) throws IOException {
-        return FlinkCheckpointEvidence.history(job, timeout, this::checkpointEvidence, nanoTime);
+        try (var call = evidenceCall("checkpoint-history")) {
+            return FlinkCheckpointEvidence.history(job, timeout, this::checkpointEvidence, nanoTime).withRawEvidence(call.references());
+        }
     }
 
     @Override
     public FlinkCheckpointEvidence.Checkpoint checkpointDetails(
             FlinkJobHandle job, long checkpointId, Duration timeout) throws IOException {
-        return FlinkCheckpointEvidence.details(job, checkpointId, timeout, this::checkpointEvidence, nanoTime);
+        try (var call = evidenceCall("checkpoint-details")) {
+            return FlinkCheckpointEvidence.details(job, checkpointId, timeout, this::checkpointEvidence, nanoTime).withRawEvidence(call.references());
+        }
     }
 
     @Override
     public FlinkCheckpointEvidence.Configuration checkpointConfiguration(FlinkJobHandle job, Duration timeout) throws IOException {
-        return FlinkCheckpointEvidence.configuration(job, timeout, this::checkpointEvidence, nanoTime);
+        try (var call = evidenceCall("checkpoint-configuration")) {
+            return FlinkCheckpointEvidence.configuration(job, timeout, this::checkpointEvidence, nanoTime).withRawEvidence(call.references());
+        }
     }
 
     private JsonNode checkpointEvidence(String endpoint, MonotonicDeadline deadline) throws IOException {
@@ -300,6 +333,7 @@ public final class FlinkRestApiClient implements FlinkScenarioControl {
 
     @Override
     public JsonNode checkpointOverview(FlinkJobHandle job, Duration timeout) throws IOException {
+        try (var call = evidenceCall("checkpoint-overview")) {
         MonotonicDeadline deadline = MonotonicDeadline.start(timeout, nanoTime);
         String jobPath = "/jobs/" + pathSegment(job.jobId());
         JsonNode response = get(jobPath + "/checkpoints", deadline);
@@ -311,6 +345,7 @@ public final class FlinkRestApiClient implements FlinkScenarioControl {
             object.set("observedJobVertices", get(jobPath, deadline).path("vertices"));
         }
         return object;
+        }
     }
 
     private long completedCheckpointCount(
@@ -328,9 +363,11 @@ public final class FlinkRestApiClient implements FlinkScenarioControl {
 
     @Override
     public long jobManagerTimeMillis(FlinkJobHandle job, Duration timeout) throws IOException {
+        try (var call = evidenceCall("job-manager-clock")) {
         Objects.requireNonNull(job, "job");
         MonotonicDeadline deadline = MonotonicDeadline.start(timeout, nanoTime);
         return requiredLong(get("/jobs/" + pathSegment(job.jobId()), deadline), "now");
+        }
     }
 
     @Override
@@ -340,6 +377,7 @@ public final class FlinkRestApiClient implements FlinkScenarioControl {
 
     @Override
     public FlinkJobObservation observe(FlinkJobHandle job, Duration timeout) throws IOException {
+        try (var call = evidenceCall("job-observation")) {
         Objects.requireNonNull(job, "job");
         MonotonicDeadline deadline = MonotonicDeadline.start(timeout, nanoTime);
         String jobPath = "/jobs/" + pathSegment(job.jobId());
@@ -384,7 +422,8 @@ public final class FlinkRestApiClient implements FlinkScenarioControl {
                 count(checkpoints, "restored"),
                 latestRestore,
                 failures,
-                subtasks);
+                subtasks, call.references());
+        }
     }
 
     private static long count(JsonNode checkpoints, String name) throws IOException {
@@ -495,9 +534,11 @@ public final class FlinkRestApiClient implements FlinkScenarioControl {
 
     private JsonNode execute(String method, String endpoint, byte[] requestBody,
             MonotonicDeadline deadline, int maximumResponseBytes) throws IOException {
+        if (rawEvidence != null) maximumResponseBytes = Math.min(maximumResponseBytes, RawEvidenceStore.MAX_RESPONSE_BYTES);
         while (true) {
             Duration remaining = deadline == null ? DEFAULT_CALL_TIMEOUT : remaining(deadline);
             HttpResponse response;
+            long started = nanoTime.getAsLong();
             try {
                 response = transport.executeBounded(method, endpoint, requestBody, remaining, maximumResponseBytes);
             } catch (InterruptedIOException timeout) {
@@ -506,6 +547,11 @@ public final class FlinkRestApiClient implements FlinkScenarioControl {
                             "Timed out waiting for Flink operation completion", timeout);
                 }
                 throw timeout;
+            }
+            if (rawEvidence != null) {
+                rawEvidence.retain(response.body(), "flink-rest-decoded-body",
+                        activeGroup == null ? "request-" + ++groupSequence : activeGroup,
+                        method, endpoint, response.status(), started, nanoTime.getAsLong());
             }
             if (!response.successful()) {
                 IOException failure = httpFailure(method, endpoint, response);

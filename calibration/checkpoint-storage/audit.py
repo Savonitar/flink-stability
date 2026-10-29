@@ -139,7 +139,7 @@ class RetainedEvidence:
         self.directory = Path(directory)
         self.index = parse(read(directory, "retained-evidence.json"))
         require(self.index.get("version") == 1 and isinstance(self.index.get("files"), list)
-                and len(self.index["files"]) <= 2048, "Invalid retained evidence index")
+                and len(self.index["files"]) <= 8704, "Invalid retained evidence index")
         self.files, self.local, self.journals = {}, {}, {}
         self.journal_bytes = 0
         total = 0
@@ -154,6 +154,32 @@ class RetainedEvidence:
             require(total <= 512 * 1024 * 1024, "Retained evidence exceeds aggregate bound")
             self.files[row["sourcePath"]] = row
             self.local[row["localPath"]] = row
+
+    def raw(self, reference, parse_json=True):
+        """Resolve a source label only through the locally retained, hashed file inventory."""
+        receipt = self.files.get(reference["path"])
+        require(receipt is not None and receipt["kind"] == "raw-response"
+                and receipt["sha256"] == reference["sha256"], "Raw response has no matching retained copy")
+        data = read(self.directory, receipt["localPath"], reference["sha256"], 2 * 1024 * 1024)
+        require(len(data) == reference["bytes"], "Raw response byte length differs")
+        return parse(data.decode("utf-8", errors="strict")) if parse_json else data
+
+    def raw_inventory(self, checkpoint_root):
+        stores = {name: {"files": 0, "bytes": 0} for name in ("raw-flink-rest", "raw-storage")}
+        for source, receipt in self.files.items():
+            if receipt["kind"] != "raw-response":
+                continue
+            path = PurePosixPath(source)
+            name = path.parent.name
+            require(name in stores and str(path.parent.parent) == checkpoint_root
+                    and re.fullmatch(r"[0-9]{6}\.json", path.name) and 1 <= int(path.stem) <= 4096,
+                    "Raw response inventory is outside its source store")
+            data = read(self.directory, receipt["localPath"], receipt["sha256"], 2 * 1024 * 1024)
+            require(data, "Raw response inventory contains an empty body")
+            stores[name]["files"] += 1; stores[name]["bytes"] += len(data)
+            require(stores[name]["files"] <= 4096 and stores[name]["bytes"] <= 64 * 1024 * 1024,
+                    "Raw response store exceeds its capture bound")
+        return stores
 
     def journal(self, instance, storage):
         source = instance["journalPath"]
@@ -395,7 +421,7 @@ def audit_storage(result, cell, manifest, retained):
             "Causal stages exceeded their shared deadline")
     require(fault["confirmed"] is True and fault["finalCaptureConfirmed"] is True and fault["errors"] == [], "Storage fault remained unconfirmed")
     before, armed, failed, stopped, healed, recovered = samples
-    configuration = fault["configuration"]
+    configuration = {key: value for key, value in fault["configuration"].items() if key != "rawEvidence"}
     require(configuration == {"jobId": fault["jobId"], "mode": "exactly_once", "intervalMillis": 10000,
                               "timeoutMillis": 600000, "minPauseMillis": 0, "maxConcurrent": 1,
                               "tolerableFailedCheckpoints": 10, "stateBackend": "HashMapStateBackend",
@@ -412,9 +438,13 @@ def audit_storage(result, cell, manifest, retained):
     rc, rr = checkpoint_history(recovered["checkpoints"], job)
     require(baseline in br and br[baseline]["status"] == "COMPLETED" and before["checkpoints"]["latestCompleted"] == br[baseline]
             and max(br) == baseline and bc["inProgress"] == bc["restored"] == 0, "Completed baseline was not exclusive before arming")
-    require(armed["checkpoints"] == before["checkpoints"], "Checkpoint boundary changed during ARM")
+    require({key: value for key, value in armed["checkpoints"].items() if key != "rawEvidence"}
+            == {key: value for key, value in before["checkpoints"].items() if key != "rawEvidence"},
+            "Checkpoint boundary changed during ARM")
     require(set(fr) - set(br) == {failed_id} and all(fr[key] == value for key, value in br.items())
-            and fr[failed_id] == fault["failedCheckpoint"] and fr[failed_id]["status"] == "FAILED"
+            and {key: value for key, value in fr[failed_id].items() if key != "rawEvidence"}
+            == {key: value for key, value in fault["failedCheckpoint"].items() if key != "rawEvidence"}
+            and fr[failed_id]["status"] == "FAILED"
             and failed["checkpoints"]["latestCompleted"] == br[baseline]
             and fc == dict(bc, total=bc["total"] + 1, failed=bc["failed"] + 1), "Failed trigger does not identify one unique new failed checkpoint")
     require(failed["checkpoints"]["latestFailed"] == fr[failed_id], "Latest failure differs from correlated checkpoint")

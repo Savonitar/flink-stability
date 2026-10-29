@@ -209,6 +209,7 @@ final class V1ExecutionResultRenderer {
                 flinkJob.put("state", job.state().name());
                 flinkJob.put("completedCheckpoints", job.completedCheckpoints());
                 flinkJob.put("restoredCheckpoints", job.restoredCheckpoints());
+                if (!job.rawEvidence().isEmpty()) flinkJob.set("observation", StateRecoveryEvidenceRenderer.render(job, JSON));
                 job.latestRestore().ifPresent(restore ->
                         flinkJob.put("latestRestoredCheckpoint", restore.checkpointId()));
                 flinkJob.put("failures", job.failures().size());

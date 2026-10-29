@@ -28,7 +28,7 @@ final class TestcontainersContainerHandle implements ContainerHandle {
             FlinkComponentRole role,
             FlinkRuntimeTarget runtimeTarget) {
         this.verifiedContainer = Objects.requireNonNull(container, "container");
-        this.lifecycle = new ContainerLifecycle(container);
+        this.lifecycle = new ContainerLifecycle(container, container::capturedStorageProcessState);
         this.logicalName = Objects.requireNonNull(logicalName, "logicalName");
         this.role = Objects.requireNonNull(role, "role");
         this.runtimeTarget = Objects.requireNonNull(runtimeTarget, "runtimeTarget");
@@ -159,10 +159,17 @@ final class TestcontainersContainerHandle implements ContainerHandle {
 
         private final GenericContainer<?> container;
         private final Object driverCallLock = new Object();
+        private final java.util.function.Function<ContainerOperationDeadline, Optional<FlinkHaControl.ProcessState>> rawProcess;
         private volatile boolean pauseAttempted;
 
         ContainerLifecycle(GenericContainer<?> container) {
+            this(container, ignored -> Optional.empty());
+        }
+
+        ContainerLifecycle(GenericContainer<?> container,
+                java.util.function.Function<ContainerOperationDeadline, Optional<FlinkHaControl.ProcessState>> rawProcess) {
             this.container = Objects.requireNonNull(container, "container");
+            this.rawProcess = Objects.requireNonNull(rawProcess, "rawProcess");
         }
 
         void start() {
@@ -260,6 +267,11 @@ final class TestcontainersContainerHandle implements ContainerHandle {
 
         FlinkHaControl.ProcessState processState(ContainerOperationDeadline deadline) {
             String id = runtimeId();
+            Optional<FlinkHaControl.ProcessState> captured = ContainerDriverCallBoundary.call(deadline,
+                    "capturing process state for " + id, () -> {
+                        synchronized (driverCallLock) { return rawProcess.apply(deadline); }
+                    });
+            if (captured.isPresent()) return captured.orElseThrow();
             InspectContainerResponse inspection = ContainerDriverCallBoundary.call(
                     deadline, "inspecting process state for " + id, () -> {
                         synchronized (driverCallLock) {

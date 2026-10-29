@@ -94,8 +94,13 @@ public interface StorageFaultControl {
 
     record Materialization(Instance instance, String jobId, long checkpointId, String operatorUid,
                            FileEvidence metadata, List<FileEvidence> files, boolean complete,
-                           List<String> diagnostics) {
-        public Materialization { files = List.copyOf(files); diagnostics = List.copyOf(diagnostics); }
+                           List<String> diagnostics, Optional<RawEvidenceRef> rawEvidence) {
+        public Materialization { files = List.copyOf(files); diagnostics = List.copyOf(diagnostics);
+            rawEvidence = Objects.requireNonNull(rawEvidence, "rawEvidence"); }
+        public Materialization(Instance instance, String jobId, long checkpointId, String operatorUid,
+                               FileEvidence metadata, List<FileEvidence> files, boolean complete, List<String> diagnostics) {
+            this(instance, jobId, checkpointId, operatorUid, metadata, files, complete, diagnostics, Optional.empty());
+        }
     }
 
     default Materialization inspectCheckpoint(String jobId, long checkpointId, Duration timeout) {

@@ -44,6 +44,7 @@ final class FuseCheckpointStorageRuntime implements StorageFaultControl, AutoClo
     private final DockerClient docker;
     private final ContainerFileReader fileReader;
     private final Path captureRoot;
+    private final RawEvidenceStore rawEvidence;
     private long retainedBytes;
     private final String attemptId = "attempt-" + UUID.randomUUID();
     private final String storageId = "storage-" + UUID.randomUUID();
@@ -76,7 +77,8 @@ final class FuseCheckpointStorageRuntime implements StorageFaultControl, AutoClo
         this.fileReader = Objects.requireNonNull(fileReader);
         verifyBundle(target);
         this.captureRoot = evidenceRoot.resolve("checkpoint-storage-journals");
-        try { Files.createDirectory(captureRoot); Files.setPosixFilePermissions(captureRoot, java.nio.file.attribute.PosixFilePermissions.fromString("rwx------")); }
+        try { Files.createDirectory(captureRoot); Files.setPosixFilePermissions(captureRoot, java.nio.file.attribute.PosixFilePermissions.fromString("rwx------"));
+            rawEvidence = new RawEvidenceStore(evidenceRoot.resolve("raw-storage")); }
         catch (java.io.IOException failure) { throw new java.io.UncheckedIOException(failure); }
         this.docker = Objects.requireNonNull(docker.get());
         lastSnapshot = snapshot();
@@ -496,11 +498,31 @@ final class FuseCheckpointStorageRuntime implements StorageFaultControl, AutoClo
 
     private Materialization inspectCheckpoint(String jobId, long checkpointId, ContainerOperationDeadline deadline) {
         Mount mount = mounts.stream().filter(m -> !m.dead && m.instance != null && m.role == FlinkComponentRole.JOB_MANAGER).findFirst().orElseThrow();
-        Exec receipt = exec(mount, "9999:9999", deadline, "java", "-Xmx128m", "-cp", HELPER + "/probe.jar:/opt/flink/lib/*",
+        long started = System.nanoTime();
+        RawExec receipt = execRaw(mount, "9999:9999", deadline, "java", "-Xmx128m", "-cp", HELPER + "/probe.jar:/opt/flink/lib/*",
                 "org.savonitar.flink.stability.testcontainers.storage.CheckpointStateInspector", "--root", VIEW + "/" + namespace,
                 "--job-id", jobId, "--checkpoint-id", Long.toString(checkpointId));
-        requireSuccess(receipt);
-        JsonNode node = object(receipt.stdout);
+        Materialization result = retainInspectorReceipt(receipt.stdout, receipt.exitCode, rawEvidence,
+                mount.instance, namespace, jobId, checkpointId, started, System.nanoTime());
+        checkActive(deadline);
+        files.add(result.metadata()); files.addAll(result.files());
+        capture(mount, false, deadline);
+        return result;
+    }
+
+    /** Retains source bytes even when decoding, parsing or the inspector's exit status fails. */
+    static Materialization retainInspectorReceipt(byte[] stdout, int exitCode, RawEvidenceStore store,
+            Instance instance, String namespace, String jobId, long checkpointId,
+            long startedNanos, long completedNanos) {
+        RawEvidenceRef raw;
+        try {
+            raw = store.retain(stdout, "checkpoint-inspector-stdout",
+                    "checkpoint-inspector-" + (store.cursor() + 1), "EXEC",
+                    "/containers/" + instance.runtimeId() + "/checkpoint-inspector/" + jobId + "/" + checkpointId,
+                    exitCode, startedNanos, completedNanos);
+        } catch (java.io.IOException failure) { throw new java.io.UncheckedIOException(failure); }
+        if (exitCode != 0) throw new IllegalStateException("Checkpoint inspector exited " + exitCode);
+        JsonNode node = object(utf8(stdout));
         if (number(node, "version") != 1 || !jobId.equals(text(node, "jobId")) || checkpointId != number(node, "checkpointId")
                 || !node.path("files").isArray() || node.path("files").isEmpty())
             throw new IllegalStateException("Checkpoint inspector returned incomplete identity/files");
@@ -515,9 +537,15 @@ final class FuseCheckpointStorageRuntime implements StorageFaultControl, AutoClo
             state.add(observed);
         }
         if (state.size() > 128) throw new IllegalStateException("Checkpoint state file count exceeds bound");
-        files.add(metadata); files.addAll(state);
-        capture(mount, false, deadline);
-        return new Materialization(mount.instance, jobId, checkpointId, text(node, "operatorUid"), metadata, state, true, List.of());
+        return new Materialization(instance, jobId, checkpointId, text(node, "operatorUid"), metadata, state, true, List.of(), Optional.of(raw));
+    }
+
+    FlinkHaControl.ProcessState inspectProcess(Mount mount, ContainerOperationDeadline deadline) {
+        var factory = DockerClientFactory.instance();
+        var endpoint = factory.getTransportConfig().getDockerHost();
+        requireLocalEndpoint(endpoint);
+        return new RawDockerProcessState(rawEvidence, endpoint, factory.getActiveApiVersion())
+                .inspect(mount.container.getContainerId(), deadline);
     }
 
     private static FileEvidence file(JsonNode node, String prefix) {
@@ -690,6 +718,11 @@ final class FuseCheckpointStorageRuntime implements StorageFaultControl, AutoClo
 
     /** Caps output while it arrives; the same monotonic budget covers create, attach, completion and inspect. */
     private Exec exec(Mount mount, String user, ContainerOperationDeadline deadline, String... args) {
+        RawExec raw = execRaw(mount, user, deadline, args);
+        return new Exec(raw.exitCode, utf8(raw.stdout), utf8(raw.stderr));
+    }
+
+    private RawExec execRaw(Mount mount, String user, ContainerOperationDeadline deadline, String... args) {
         return driver(deadline, "execute owned storage command", () -> {
             var created = docker.execCreateCmd(mount.container.getContainerId()).withUser(user).withAttachStdout(true).withAttachStderr(true).withCmd(args).exec();
             checkActive(deadline);
@@ -702,11 +735,12 @@ final class FuseCheckpointStorageRuntime implements StorageFaultControl, AutoClo
                 checkActive(deadline);
                 var inspected = docker.inspectExecCmd(created.getId()).exec();
                 if (Boolean.TRUE.equals(inspected.isRunning()) || inspected.getExitCodeLong() == null) throw new IllegalStateException("Storage exec completion is unconfirmed");
-                return new Exec(Math.toIntExact(inspected.getExitCodeLong()), utf8(callback.stdout.toByteArray()), utf8(callback.stderr.toByteArray()));
+                return new RawExec(Math.toIntExact(inspected.getExitCodeLong()), callback.stdout.toByteArray(), callback.stderr.toByteArray());
             }
         });
     }
     private record Exec(int exitCode, String stdout, String stderr) {}
+    private record RawExec(int exitCode, byte[] stdout, byte[] stderr) {}
     private static final class Capture extends ResultCallback.Adapter<Frame> {
         final ByteArrayOutputStream stdout = new ByteArrayOutputStream(), stderr = new ByteArrayOutputStream();
         volatile RuntimeException failure;

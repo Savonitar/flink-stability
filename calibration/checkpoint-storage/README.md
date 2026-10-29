@@ -95,6 +95,11 @@ python3 -B calibration/checkpoint-storage/catalogs.py \
   --output jobs/checkpoint-storage-qualification
 ```
 
+`catalogs.py --timeout-seconds` freezes the outer process-command deadline in the
+manifest (default 900 seconds). This includes startup and verification and is
+separate from the catalog's five-minute natural job-completion timeout. Choose it
+before freezing; the runner cannot silently extend it for a slow attempt.
+
 The resulting manifest pins the workload arms, helper build and files, runtime
 identity, four catalog/expectation pairs, reference pilots, all recipe files and
 the frozen framework manifest. The framework includes the preparation sources,
@@ -156,6 +161,24 @@ state and post-restore progress. EIO cells additionally need completed external
 keyed checkpoint materialization, the bound failed checkpoint and native EIO
 receipts, the armed kill/heal order, a new healthy daemon and a subsequent
 successful checkpoint.
+
+Current attempts additionally retain bounded source-response captures under the
+attempt checkpoint root. `raw_evidence.py` independently compares successful
+Flink REST bodies, the inspector's exact stdout and the Docker inspect `Id`/`State`
+source-token projection with their typed fields. Every causal stage has its own
+call group, and source intervals must preserve ARM, trigger, physical kill and
+HEAL ordering. The final job observation and each physical fence state require
+their own captures. Missing, swapped, truncated or contradictory counterparts
+cannot qualify. Docker configuration/environment is excluded from the projection.
+The transport may retry an idempotent inspect GET within its deadline; the proof
+binds the returned response, not a single wire exchange.
+
+Hashes establish retained-byte consistency, not daemon authenticity. Harness
+monotonic and JobManager epoch clocks are separately observed; no cross-clock
+synchronization is claimed. Terminal Kafka counts remain framework-oracle output,
+not an independent replay of raw Kafka records. Historical derived receipts are
+not source captures and do not satisfy the current gate; their original frozen
+verifier and reports remain unchanged.
 
 Per-attempt command, exit code, stdout/stderr, component/class-loading logs,
 state markers, immutable FUSE journals and their hashes remain available.

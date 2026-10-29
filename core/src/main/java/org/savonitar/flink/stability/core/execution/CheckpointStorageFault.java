@@ -9,6 +9,7 @@ import org.savonitar.flink.stability.core.flink.FlinkJobState;
 import org.savonitar.flink.stability.core.flink.FlinkScenarioControl;
 import org.savonitar.flink.stability.runtime.api.FlinkComponentRole;
 import org.savonitar.flink.stability.runtime.api.MonotonicDeadline;
+import org.savonitar.flink.stability.runtime.api.RawEvidenceRef;
 import org.savonitar.flink.stability.runtime.api.StorageFaultControl;
 import org.savonitar.flink.stability.runtime.api.V1AttemptRuntime;
 
@@ -56,12 +57,29 @@ public final class CheckpointStorageFault {
                            PhaseExecutionEvidence.TaskManagerKill kill,
                            PhaseExecutionEvidence.TaskManagerRestart restart,
                            StateRecoveryEvidence.Recovery recovery, List<String> errors,
-                           ExecutableScenarioPlan.CheckpointControls declaredControls) {
+                           ExecutableScenarioPlan.CheckpointControls declaredControls,
+                           List<RawEvidenceRef> triggerSubmitEvidence, List<RawEvidenceRef> beforeKillEvidence,
+                           List<RawEvidenceRef> afterKillEvidence) {
         public Evidence {
             java.util.Objects.requireNonNull(declaredControls, "declaredControls");
+            triggerSubmitEvidence = List.copyOf(triggerSubmitEvidence);
+            beforeKillEvidence = List.copyOf(beforeKillEvidence); afterKillEvidence = List.copyOf(afterKillEvidence);
             samples = List.copyOf(samples); transitions = List.copyOf(transitions); errors = List.copyOf(errors);
             if (samples.size() > 6 || transitions.size() > 3 || errors.size() > 20)
                 throw new IllegalArgumentException("Storage experiment evidence limit exceeded");
+        }
+        public Evidence(String path, String jobId, String triggerId, long timeoutMillis,
+                        long checkpointId, long failedCheckpointId, FlinkCheckpointEvidence.Configuration configuration,
+                        StateRecoveryEvidence.Readiness readiness, StorageFaultControl.Materialization materialization,
+                        FlinkCheckpointTrigger.Observation triggerResult, FlinkCheckpointEvidence.Checkpoint failedCheckpoint,
+                        StateRecoveryEvidence.Trace failureTrace, StateRecoveryEvidence.Trace recoveryTrace,
+                        List<Sample> samples, List<StorageFaultControl.Transition> transitions,
+                        PhaseExecutionEvidence.TaskManagerKill kill, PhaseExecutionEvidence.TaskManagerRestart restart,
+                        StateRecoveryEvidence.Recovery recovery, List<String> errors,
+                        ExecutableScenarioPlan.CheckpointControls declaredControls) {
+            this(path, jobId, triggerId, timeoutMillis, checkpointId, failedCheckpointId, configuration,
+                    readiness, materialization, triggerResult, failedCheckpoint, failureTrace, recoveryTrace,
+                    samples, transitions, kill, restart, recovery, errors, declaredControls, List.of(), List.of(), List.of());
         }
         public Evidence(String path, String jobId, String triggerId, long timeoutMillis,
                         long checkpointId, long failedCheckpointId, FlinkCheckpointEvidence.Configuration configuration,
@@ -132,6 +150,7 @@ public final class CheckpointStorageFault {
 
             // Exactly one submission, even if its response is lost. A failed trigger has no checkpoint ID.
             require(flink.triggerCheckpoint(job, r.triggerId, left(deadline)).equals(r.triggerId), "Checkpoint trigger acknowledgement mismatch");
+            r.triggerSubmitEvidence = flink.latestCallEvidence();
             do {
                 r.triggerResult = flink.checkpointStatus(job, r.triggerId, left(deadline));
                 if (r.triggerResult.state() == FlinkCheckpointTrigger.State.IN_PROGRESS) pause(deadline);
@@ -168,8 +187,10 @@ public final class CheckpointStorageFault {
             require(sameExecution(r.readiness, failed.job()), "Unexpected failure/restart before the deliberate TaskManager kill");
 
             long beforeKill = flink.jobManagerTimeMillis(job, left(deadline));
+            r.beforeKillEvidence = flink.latestCallEvidence();
             runtime.killTaskManager(TARGET, left(deadline));
             long afterKill = flink.jobManagerTimeMillis(job, left(deadline));
+            r.afterKillEvidence = flink.latestCallEvidence();
             r.kill = new PhaseExecutionEvidence.TaskManagerKill(path, iterations, TARGET,
                     new FlinkJobObservation.Attempt(Optional.of(failed.job()), Optional.empty()),
                     OptionalLong.of(beforeKill), OptionalLong.of(afterKill), Optional.of(r.readiness.target()),
@@ -647,12 +668,13 @@ public final class CheckpointStorageFault {
         PhaseExecutionEvidence.TaskManagerRestart restart;
         StateRecoveryEvidence.Recovery recovery;
         final List<String> errors = new ArrayList<>();
+        List<RawEvidenceRef> triggerSubmitEvidence = List.of(), beforeKillEvidence = List.of(), afterKillEvidence = List.of();
         Recorder(String path, String jobId, long timeout, ExecutableScenarioPlan.CheckpointControls declaredControls) {
             this.path = path; this.jobId = jobId; this.timeout = timeout;
             this.declaredControls = java.util.Objects.requireNonNull(declaredControls, "declaredControls");
         }
         Evidence snapshot() { return new Evidence(path, jobId, triggerId, timeout, checkpoint, failedId, configuration, readiness,
                 materialization, triggerResult, failedCheckpoint, failureTrace, recoveryTrace, samples, transitions, kill, restart,
-                recovery, errors, declaredControls); }
+                recovery, errors, declaredControls, triggerSubmitEvidence, beforeKillEvidence, afterKillEvidence); }
     }
 }

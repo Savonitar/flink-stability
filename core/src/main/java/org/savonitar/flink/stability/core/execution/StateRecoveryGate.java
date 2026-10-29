@@ -65,10 +65,11 @@ final class StateRecoveryGate {
             var identity = runtime.taskManagerIdentity(target, remaining(deadline))
                     .orElseThrow(() -> new IOException("TaskManager identity unavailable before stateful kill"));
             var checkpoints = flink.checkpointOverview(job, remaining(deadline));
+            var checkpointEvidence = flink.latestCallEvidence();
             var observation = flink.observe(job, remaining(deadline));
             var trace = StateRecoveryEvidence.collect(runtime.flinkProvisioningEvidence(), runtime.flinkComponentLogs(), job.jobId());
             latest = StateRecoveryEvidence.ready(job.jobId(), keys, manifest.totalRecords(), identity,
-                    observation, checkpoints, trace, prefix);
+                    observation, checkpoints, trace, prefix).withCheckpointEvidence(checkpointEvidence);
             remaining(deadline);
             if (latest.ready() || observation.state().terminal()) break;
             sleeper.sleep(deadline.remaining().compareTo(Duration.ofMillis(100)) < 0
