@@ -55,6 +55,15 @@ receipts, but does not replay raw Kafka records. Keyed file sizes/hashes come fr
 the pinned inspector's retained stdout, supported by native I/O receipts; raw
 checkpoint file contents are not independently replayed by this checker.
 
+Current runs also retain `input-evidence.json` and
+`configuration-evidence.json`, explicitly labelled `derived-cli-result-projection`
+with their `stdout.json#...` source. These convenience copies only cross-check the
+CLI result against itself; they are not independent input/configuration proof.
+`derivedCliProjections` in the audit/report records each source, hash and whether
+the file uses the older source-only representation. That representation is
+accepted only with the exact existing source marker and is still classified as
+derived. Neither representation substitutes for the required raw responses.
+
 ## Review corrections and independent re-audit
 
 The subsequent review identified one runtime deadline defect and three checker

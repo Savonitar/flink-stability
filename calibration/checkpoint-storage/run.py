@@ -139,10 +139,12 @@ def retain_evidence(root, directory, total_records=30000):
         receipts.append({"sourcePath": source, "localPath": name, "sha256": digest(data), "kind": kind})
     evidence = result["evidence"]
     write_json(directory / "configuration-evidence.json", {
+        "kind": "derived-cli-result-projection",
         "source": "stdout.json#/evidence/flinkRuntime", "config": evidence.get("flinkRuntime", {}).get("config"),
         "components": [{"runtimeId": value.get("runtimeId"), "effectiveConfiguration": value.get("effectiveConfiguration")}
                        for value in evidence.get("flinkRuntime", {}).get("components", [])]})
-    write_json(directory / "input-evidence.json", {"source": "stdout.json#/evidence/input", "input": evidence.get("input")})
+    write_json(directory / "input-evidence.json", {"kind": "derived-cli-result-projection",
+               "source": "stdout.json#/evidence/input", "input": evidence.get("input")})
     require(type(total_records) is int and total_records == 30000, "Input manifest generation contract differs")
     declared = b"".join((str(number) + "\n").encode() for number in range(total_records))
     with (directory / "input-manifest.txt").open("xb") as handle:

@@ -50,6 +50,23 @@ def fixture():
 
 
 class CheckpointStorageReportTest(unittest.TestCase):
+    def test_current_and_legacy_cli_copies_are_labelled_derived_separately_from_raw_proof(self):
+        value, manifest = fixture()
+        value["attempts"][0]["derivedCliProjections"] = {
+            "kind": "derived-cli-result-projection", "independentProof": False, "files": [
+                {"path": "input-evidence.json", "source": "stdout.json#/evidence/input",
+                 "sha256": "7" * 64, "legacyRepresentation": False},
+                {"path": "configuration-evidence.json", "source": "stdout.json#/evidence/flinkRuntime",
+                 "sha256": "8" * 64, "legacyRepresentation": True}]}
+        text = report.render(value, manifest)
+        self.assertIn("## Derived CLI projections", text)
+        self.assertIn("not independent proof or raw source captures", text)
+        self.assertIn("stdout.json#/evidence/input", text)
+        self.assertIn("legacy representation True", text)
+        self.assertIn("legacy representation False", text)
+        self.assertIn("7" * 64, text)
+        self.assertIn("8" * 64, text)
+
     def test_complete_report_preserves_three_raw_mutant_failures_and_all_event_counts(self):
         value, manifest = fixture()
         text = report.render(value, manifest, {"java": {"sha256": "6" * 64}},

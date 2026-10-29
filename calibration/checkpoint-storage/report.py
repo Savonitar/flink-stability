@@ -142,6 +142,19 @@ def render(report, manifest=None, framework=None, launch=None, platform=None):
               "Harness monotonic timestamps and JobManager epoch timestamps remain separate observed clocks. "
               "Terminal Kafka counts are trusted framework-oracle output; the checker does not replay raw Kafka records. "
               "Historical attempts without source captures cannot satisfy this current evidence gate."]
+    lines += ["", "## Derived CLI projections", "",
+              "Current input-evidence.json and configuration-evidence.json are convenience copies of identified stdout.json fields. "
+              "They are checked for self-consistency and are not independent proof or raw source captures. "
+              "Older files without a kind field are accepted only with the exact existing stdout source marker and remain explicitly labelled as legacy derived projections.", ""]
+    for row in rows:
+        projections = row.get("derivedCliProjections") or {}
+        label = str(row.get("cell", "unknown")) + " run-" + str(row.get("number", "unknown"))
+        if not projections:
+            lines.append("- " + escaped(label) + ": derived projection classification unavailable.")
+        for projection in projections.get("files", []):
+            lines.append("- " + escaped(label + ": " + str(projection.get("path")) + "; source " + str(projection.get("source"))
+                         + "; SHA-256 " + str(projection.get("sha256")) + "; legacy representation "
+                         + str(projection.get("legacyRepresentation"))) + "; not independent proof.")
     lines += ["",
               "## Exact frozen identities", ""]
     pins = [("Matrix manifest SHA-256", report.get("manifestSha256", "unavailable")),

@@ -180,6 +180,16 @@ not an independent replay of raw Kafka records. Historical derived receipts are
 not source captures and do not satisfy the current gate; their original frozen
 verifier and reports remain unchanged.
 
+The current runner also writes `input-evidence.json` and
+`configuration-evidence.json` as **derived CLI result projections**, marked
+`kind: derived-cli-result-projection` and an exact `stdout.json#...` source.
+Their equality checks establish only consistency with the CLI result; these
+files are not raw captures or independent proof. Reports list their source,
+hash and legacy-representation flag under `derivedCliProjections`. Frozen copies
+that predate the `kind` label are recognized only by the same exact source marker
+and remain labelled as derived. Missing mandatory raw evidence still rejects an
+attempt even when both convenience projections match.
+
 Per-attempt command, exit code, stdout/stderr, component/class-loading logs,
 state markers, immutable FUSE journals and their hashes remain available.
 Component-error events and expected producer-fencing observations remain in

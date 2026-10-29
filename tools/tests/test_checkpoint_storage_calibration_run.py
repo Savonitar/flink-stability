@@ -320,6 +320,11 @@ class CheckpointStorageRunnerTest(unittest.TestCase):
             self.assertEqual([str(value) for value in range(30000)], manifest)
             self.assertEqual("reconstructed-declared-integer-sequence", json.loads((directory / "input-manifest.json").read_text())["kind"])
             self.assertTrue((directory / "configuration-evidence.json").is_file())
+            for name, source in (("input-evidence.json", "stdout.json#/evidence/input"),
+                                 ("configuration-evidence.json", "stdout.json#/evidence/flinkRuntime")):
+                projection = json.loads((directory / name).read_bytes())
+                self.assertEqual("derived-cli-result-projection", projection["kind"])
+                self.assertEqual(source, projection["source"])
             self.assertTrue((directory / "logs/flink-stability-output-taskmanager-1-1.log").is_file())
 
     def test_retention_rejects_foreign_path_symlink_and_hash_disagreement(self):

@@ -433,6 +433,18 @@ def audit_attempt(result, exit_code, cell, manifest, directory):
         raise
 
 
+def derived_cli_projection(directory, name, source):
+    """A source-tagged CLI copy is a convenience projection, never independent evidence."""
+    data = read(directory, name)
+    value = parse(data)
+    require(isinstance(value, dict) and value.get("source") == source,
+            "Derived CLI projection source differs: " + name)
+    require("kind" not in value or value["kind"] == "derived-cli-result-projection",
+            "Derived CLI projection kind differs: " + name)
+    return value, {"path": name, "source": source, "sha256": digest(data),
+                   "legacyRepresentation": "kind" not in value}
+
+
 def audit_attempt_contract(result, exit_code, cell, manifest, directory, retained, subject):
     rest = result["evidence"]["flinkRest"]
     require(audit.integer(rest["errorCount"]) and rest["errorCount"] == len(rest["errors"]), "REST error count is inconsistent")
@@ -452,14 +464,18 @@ def audit_attempt_contract(result, exit_code, cell, manifest, directory, retaine
             "Declared input reconstruction differs from frozen input contract")
     require(read(directory, declared["path"], declared["sha256"]) == b"".join((str(i) + "\n").encode() for i in range(total)),
             "Declared input sequence differs")
-    input_receipt = parse(read(directory, "input-evidence.json"))
+    input_receipt, input_projection = derived_cli_projection(directory, "input-evidence.json", "stdout.json#/evidence/input")
     require(input_receipt["input"] == result["evidence"]["input"], "Retained input receipt differs")
-    configuration = parse(read(directory, "configuration-evidence.json"))
+    configuration, configuration_projection = derived_cli_projection(
+        directory, "configuration-evidence.json", "stdout.json#/evidence/flinkRuntime")
     runtime = result["evidence"]["flinkRuntime"]
     require(configuration["config"] == runtime["config"] and configuration["components"] == [
         {"runtimeId": value["runtimeId"], "effectiveConfiguration": value["effectiveConfiguration"]}
         for value in runtime["components"]], "Retained configuration receipt differs")
     row["inputManifest"] = declared
+    row["derivedCliProjections"] = {"kind": "derived-cli-result-projection", "independentProof": False,
+                                   "files": [input_projection, configuration_projection],
+                                   "scope": "CLI result copies checked for self-consistency; mandatory raw source proof is separate"}
     return row
 
 

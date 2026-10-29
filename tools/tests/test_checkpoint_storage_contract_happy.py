@@ -52,9 +52,11 @@ def complete_attempt(directory, mode="correct", execution="eio"):
     put(directory / "input-manifest.json", dict(version=1, kind="reconstructed-declared-integer-sequence",
         firstId=0, endExclusive=total, records=total, inputReceiptComplete=True, path="input-manifest.txt",
         sha256=put(directory / "input-manifest.txt", sequence)))
-    put(directory / "input-evidence.json", dict(input=evidence["input"]))
+    put(directory / "input-evidence.json", dict(kind="derived-cli-result-projection",
+        source="stdout.json#/evidence/input", input=evidence["input"]))
     runtime = evidence["flinkRuntime"]
-    put(directory / "configuration-evidence.json", dict(config=runtime["config"], components=[
+    put(directory / "configuration-evidence.json", dict(kind="derived-cli-result-projection",
+        source="stdout.json#/evidence/flinkRuntime", config=runtime["config"], components=[
         dict(runtimeId=value["runtimeId"], effectiveConfiguration=value["effectiveConfiguration"])
         for value in runtime["components"]]))
     endpoint = "unix:///generated/docker.sock"
@@ -92,11 +94,47 @@ class CompleteAttemptContractTest(unittest.TestCase):
                 self.assertTrue(row["componentEventAudit"]["confirmed"])
                 self.assertTrue(row["rawEvidenceAudit"]["confirmed"])
                 self.assertGreater(row["rawEvidenceAudit"]["captureCount"], 0)
+                self.assertFalse(row["derivedCliProjections"]["independentProof"])
+                self.assertTrue(all(not value["legacyRepresentation"] for value in row["derivedCliProjections"]["files"]))
                 self.assertEqual(6 if execution == "eio" else 0,
                                  row["rawEvidenceAudit"]["typedComparisons"]["checkpointHistories"])
                 self.assertEqual("fail" if mode == "mutant" else "pass", row["rawStatus"])
                 self.assertEqual(6000, row["inputManifest"]["records"])
                 self.assertEqual(row, check.audit_attempt(result, code, cell, manifest, directory))
+
+    def test_exact_source_only_legacy_copies_remain_derived_and_cannot_replace_raw_proof(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            directory = Path(temporary).resolve()
+            result, code, cell, manifest = complete_attempt(directory, execution="healthy")
+            for name in ("input-evidence.json", "configuration-evidence.json"):
+                value = json.loads((directory / name).read_bytes()); value.pop("kind")
+                put(directory / name, value)
+            row = check.audit_attempt(result, code, cell, manifest, directory)
+            projections = row["derivedCliProjections"]
+            self.assertFalse(projections["independentProof"])
+            self.assertTrue(all(value["legacyRepresentation"] for value in projections["files"]))
+            self.assertEqual(["stdout.json#/evidence/input", "stdout.json#/evidence/flinkRuntime"],
+                             [value["source"] for value in projections["files"]])
+            for projection in projections["files"]:
+                self.assertEqual(check.digest((directory / projection["path"]).read_bytes()), projection["sha256"])
+            result["evidence"]["flinkJob"]["observation"].pop("rawEvidence")
+            with self.assertRaisesRegex(ValueError, "missing/bounded REST"):
+                check.audit_attempt(result, code, cell, manifest, directory)
+
+    def test_projection_source_or_kind_cannot_claim_independent_evidence(self):
+        for name in ("input-evidence.json", "configuration-evidence.json"):
+            for field, value in (("kind", "raw-response"), ("kind", None), ("source", "raw/container.json"), ("source", None)):
+                with self.subTest(name=name, field=field, value=value), tempfile.TemporaryDirectory() as temporary:
+                    directory = Path(temporary).resolve()
+                    result, code, cell, manifest = complete_attempt(directory, execution="healthy")
+                    projection = json.loads((directory / name).read_bytes())
+                    if value is None:
+                        if field == "source": projection.pop(field)
+                        else: projection[field] = None
+                    else: projection[field] = value
+                    put(directory / name, projection)
+                    with self.assertRaisesRegex(ValueError, "Derived CLI projection"):
+                        check.audit_attempt(result, code, cell, manifest, directory)
 
     def test_rehashed_raw_job_contradiction_is_rejected_by_the_real_contract(self):
         with tempfile.TemporaryDirectory() as temporary:
