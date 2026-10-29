@@ -161,7 +161,9 @@ public final class ExecutableScenarioPlanCompiler {
             var fuse = executablePlan.job().checkpointing().fuse().orElseThrow();
             runtimeTarget = runtimeTarget.withCheckpointStorage(
                     org.savonitar.flink.stability.core.artifact.FuseCheckpointBundlePreparer.prepare(
-                            preparedPlan, fuse.bundle(), fuse.manifestSha256(), fuse.imageId(), fuse.platform()));
+                            preparedPlan, fuse.bundle(), fuse.manifestSha256(), fuse.imageId(), fuse.platform())
+                            .withTolerableFailedCheckpoints(executablePlan.job().checkpointing().controls()
+                                    .orElseThrow().tolerableFailures()));
         }
         return new PreparedExecutableScenarioPlan(
                 preparedPlan,

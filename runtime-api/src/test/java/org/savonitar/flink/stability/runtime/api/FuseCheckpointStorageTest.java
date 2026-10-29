@@ -70,4 +70,18 @@ class FuseCheckpointStorageTest {
         assertThrows(IllegalArgumentException.class, () -> configured.withExpectedRuntimeJar(
                 new FlinkRuntimeTarget.RuntimeJar("/opt/flink/lib/flink-dist-2.2.0.jar", "f".repeat(64))));
     }
+
+    @Test void declaredToleranceControlsEveryIncarnationAndUsesCanonicalByteUnit() {
+        var storage = storage().withTolerableFailedCheckpoints(3);
+        var configured = target().withCheckpointStorage(storage).withConfig(Map.of("custom.setting", "value"))
+                .withTaskManagers(1).withLogMarkers(List.of()).withExpectedImageId(IMAGE_ID);
+        assertEquals(3, configured.checkpointStorage().orElseThrow().tolerableFailedCheckpoints());
+        assertEquals("3", configured.effectiveConfig().get("execution.checkpointing.tolerable-failed-checkpoints"));
+        assertEquals("1", configured.effectiveConfig().get("execution.checkpointing.max-concurrent-checkpoints"));
+        assertEquals("0 bytes", configured.effectiveConfig().get("execution.checkpointing.data-inline-threshold"));
+        assertEquals(10, storage().tolerableFailedCheckpoints(), "Legacy constructor keeps its historical default");
+        assertNotEquals(storage(), storage);
+        assertThrows(IllegalArgumentException.class, () -> storage().withTolerableFailedCheckpoints(0));
+        assertThrows(IllegalArgumentException.class, () -> storage().withTolerableFailedCheckpoints(11));
+    }
 }

@@ -1368,6 +1368,51 @@ class ExecutableScenarioPlanCompilerTest {
         }
     }
 
+    @Test void bindsDeclaredCheckpointControlsToProcessSettingsAndRejectsReboundTolerance() throws IOException {
+        createJar(artifactRoot.resolve("connector.jar"), false, null);
+        var manifest = new Manifest();
+        manifest.getMainAttributes().put(Attributes.Name.MANIFEST_VERSION, "1.0");
+        manifest.getMainAttributes().put(Attributes.Name.MAIN_CLASS, "example.Main");
+        manifest.getMainAttributes().putValue("Flink-Stability-Workload-Protocol", "v1");
+        manifest.getMainAttributes().putValue("Flink-Stability-Workload-Capabilities", "keyed-prefix-v1");
+        createJar(artifactRoot.resolve("job.jar"), manifest, List.of("example.Main"));
+        String image = "sha256:" + "b".repeat(64);
+        var json = new com.fasterxml.jackson.databind.ObjectMapper();
+        var receipt = json.createObjectNode().put("schemaVersion", 1).put("status", "built")
+                .put("networkDisconnectedBeforeSourceCopy", true).put("javaRelease", 17).put("libfuseVersion", "3.14.0")
+                .put("imageId", image).put("platform", "linux/arm64");
+        receipt.putArray("cleanup").addObject().put("status", "removed");
+        Path helper = Files.createDirectories(artifactRoot.resolve("helper-build/bundle"));
+        var pins = receipt.putObject("files");
+        for (String name : org.savonitar.flink.stability.runtime.api.FuseCheckpointStorage.REQUIRED_FILES) {
+            Path file = Files.writeString(helper.resolve(name), "synthetic helper " + name);
+            pins.put(name, org.savonitar.flink.stability.runtime.api.Digests.sha256(file));
+        }
+        Path receiptFile = artifactRoot.resolve("helper-build/build-evidence.json");
+        Files.write(receiptFile, json.writeValueAsBytes(receipt));
+        String receiptHash = org.savonitar.flink.stability.runtime.api.Digests.sha256(receiptFile);
+        var resolved = resolved(document -> {
+            useLocalArtifacts(document); keyedPrefix(document);
+            ((ObjectNode) document.at("/setup/flink")).put("image_id", image);
+            var checkpointing = (ObjectNode) document.at("/workload/jobs/0/checkpointing");
+            checkpointing.put("small_file_threshold", 0).put("max_concurrent", 1).put("tolerable_failures", 3);
+            ((ObjectNode) checkpointing.path("storage")).putObject("fuse").put("bundle", "./helper-build")
+                    .put("manifest_sha256", receiptHash).put("image_id", image).put("platform", "linux/arm64");
+        });
+        var plan = compiler.compile(resolved);
+        try (var prepared = new ArtifactPlanResolver().resolve(resolved, ArtifactResolutionOptions.online(artifactRoot))) {
+            var bound = compiler.bind(prepared, plan);
+            var target = bound.flinkRuntimeTarget();
+            assertEquals(3, target.checkpointStorage().orElseThrow().tolerableFailedCheckpoints());
+            for (String key : List.of("execution.checkpointing.data-inline-threshold",
+                    "execution.checkpointing.max-concurrent-checkpoints", "execution.checkpointing.tolerable-failed-checkpoints"))
+                assertEquals(plan.job().standardFlinkConfiguration().get(key), target.effectiveConfig().get(key), key);
+            var wrong = target.withCheckpointStorage(target.checkpointStorage().orElseThrow().withTolerableFailedCheckpoints(10));
+            assertThrows(IllegalArgumentException.class, () -> new PreparedExecutableScenarioPlan(prepared, plan,
+                    bound.workloadArtifact(), bound.connectorBundle(), wrong));
+        }
+    }
+
     @Test
     void rejectsAWrongSubjectWhoseDependencySuppliesTheConnectorClasses() throws IOException {
         // Review finding F3: an unrelated local primary plus the released connector as a

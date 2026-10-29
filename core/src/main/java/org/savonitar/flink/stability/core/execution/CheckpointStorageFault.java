@@ -55,11 +55,26 @@ public final class CheckpointStorageFault {
                            List<Sample> samples, List<StorageFaultControl.Transition> transitions,
                            PhaseExecutionEvidence.TaskManagerKill kill,
                            PhaseExecutionEvidence.TaskManagerRestart restart,
-                           StateRecoveryEvidence.Recovery recovery, List<String> errors) {
+                           StateRecoveryEvidence.Recovery recovery, List<String> errors,
+                           ExecutableScenarioPlan.CheckpointControls declaredControls) {
         public Evidence {
+            java.util.Objects.requireNonNull(declaredControls, "declaredControls");
             samples = List.copyOf(samples); transitions = List.copyOf(transitions); errors = List.copyOf(errors);
             if (samples.size() > 6 || transitions.size() > 3 || errors.size() > 20)
                 throw new IllegalArgumentException("Storage experiment evidence limit exceeded");
+        }
+        public Evidence(String path, String jobId, String triggerId, long timeoutMillis,
+                        long checkpointId, long failedCheckpointId, FlinkCheckpointEvidence.Configuration configuration,
+                        StateRecoveryEvidence.Readiness readiness, StorageFaultControl.Materialization materialization,
+                        FlinkCheckpointTrigger.Observation triggerResult, FlinkCheckpointEvidence.Checkpoint failedCheckpoint,
+                        StateRecoveryEvidence.Trace failureTrace, StateRecoveryEvidence.Trace recoveryTrace,
+                        List<Sample> samples, List<StorageFaultControl.Transition> transitions,
+                        PhaseExecutionEvidence.TaskManagerKill kill, PhaseExecutionEvidence.TaskManagerRestart restart,
+                        StateRecoveryEvidence.Recovery recovery, List<String> errors) {
+            this(path, jobId, triggerId, timeoutMillis, checkpointId, failedCheckpointId, configuration,
+                    readiness, materialization, triggerResult, failedCheckpoint, failureTrace, recoveryTrace,
+                    samples, transitions, kill, restart, recovery, errors,
+                    new ExecutableScenarioPlan.CheckpointControls(0, 1, 10));
         }
         public boolean confirmed() {
             try { validate(this); return true; }
@@ -85,7 +100,13 @@ public final class CheckpointStorageFault {
 
     Evidence execute(String path, List<PhaseExecutionEvidence.LoopIteration> iterations, FlinkJobHandle job,
                      ExecutableScenarioPlan.CheckpointStorageFault request) {
-        Recorder r = new Recorder(path, job.jobId(), request.timeout().toMillis());
+        return execute(path, iterations, job, request, new ExecutableScenarioPlan.CheckpointControls(0, 1, 10));
+    }
+
+    Evidence execute(String path, List<PhaseExecutionEvidence.LoopIteration> iterations, FlinkJobHandle job,
+                     ExecutableScenarioPlan.CheckpointStorageFault request,
+                     ExecutableScenarioPlan.CheckpointControls declaredControls) {
+        Recorder r = new Recorder(path, job.jobId(), request.timeout().toMillis(), declaredControls);
         MonotonicDeadline deadline = MonotonicDeadline.start(request.timeout(), clock);
         long started = clock.getAsLong();
         boolean armAttempted = false, healed = false;
@@ -94,7 +115,7 @@ public final class CheckpointStorageFault {
             r.readiness = gate.await(job, TARGET, left(deadline)).orElseThrow(() -> new IOException("No readiness observation"));
             require(r.readiness.ready(), "State readiness unconfirmed: " + r.readiness.reason());
             r.configuration = flink.checkpointConfiguration(job, left(deadline));
-            validateConfiguration(r.configuration, job.jobId());
+            validateConfiguration(r.configuration, job.jobId(), declaredControls);
             r.checkpoint = r.readiness.completedSnapshots().keySet().stream().mapToLong(Long::longValue).max().orElseThrow();
             r.materialization = runtime.inspectCheckpoint(job.jobId(), r.checkpoint, left(deadline));
             Sample before = sample(r, Stage.BEFORE_ARM, job, deadline, started);
@@ -261,10 +282,11 @@ public final class CheckpointStorageFault {
         return candidates.getFirst();
     }
 
-    private static void validateConfiguration(FlinkCheckpointEvidence.Configuration config, String jobId) throws IOException {
+    private static void validateConfiguration(FlinkCheckpointEvidence.Configuration config, String jobId,
+                                              ExecutableScenarioPlan.CheckpointControls declared) throws IOException {
         require(config != null && config.jobId().equals(jobId) && config.mode().equals("exactly_once")
-                && config.maxConcurrent() == 1 && config.tolerableFailedCheckpoints() >= 1
-                && config.tolerableFailedCheckpoints() <= 10 && !config.unalignedCheckpoints()
+                && config.maxConcurrent() == declared.maxConcurrent()
+                && config.tolerableFailedCheckpoints() == declared.tolerableFailures() && !config.unalignedCheckpoints()
                 && !config.stateChangelogEnabled(), "Unsupported observed checkpoint configuration");
     }
 
@@ -495,7 +517,7 @@ public final class CheckpointStorageFault {
         require(e.errors().isEmpty() && e.samples().size() == 6 && e.transitions().size() == 2
                 && e.kill() != null && e.restart() != null && e.recovery() != null && e.recovery().confirmed()
                 && e.recovery().restoredCheckpointId() == e.checkpointId(), "Storage experiment did not complete");
-        validateConfiguration(e.configuration(), e.jobId());
+        validateConfiguration(e.configuration(), e.jobId(), e.declaredControls());
         for (int i = 0; i < 6; i++) {
             Sample sample = e.samples().get(i);
             require(sample.stage() == Stage.values()[i] && sample.sequence() == i + 1 && sample.elapsedNanos() >= 0
@@ -610,6 +632,7 @@ public final class CheckpointStorageFault {
     private static final class Recorder {
         final String path, jobId, triggerId = UUID.randomUUID().toString().replace("-", "");
         final long timeout;
+        final ExecutableScenarioPlan.CheckpointControls declaredControls;
         long checkpoint = -1, failedId = -1;
         FlinkCheckpointEvidence.Configuration configuration;
         StateRecoveryEvidence.Readiness readiness;
@@ -624,8 +647,12 @@ public final class CheckpointStorageFault {
         PhaseExecutionEvidence.TaskManagerRestart restart;
         StateRecoveryEvidence.Recovery recovery;
         final List<String> errors = new ArrayList<>();
-        Recorder(String path, String jobId, long timeout) { this.path = path; this.jobId = jobId; this.timeout = timeout; }
+        Recorder(String path, String jobId, long timeout, ExecutableScenarioPlan.CheckpointControls declaredControls) {
+            this.path = path; this.jobId = jobId; this.timeout = timeout;
+            this.declaredControls = java.util.Objects.requireNonNull(declaredControls, "declaredControls");
+        }
         Evidence snapshot() { return new Evidence(path, jobId, triggerId, timeout, checkpoint, failedId, configuration, readiness,
-                materialization, triggerResult, failedCheckpoint, failureTrace, recoveryTrace, samples, transitions, kill, restart, recovery, errors); }
+                materialization, triggerResult, failedCheckpoint, failureTrace, recoveryTrace, samples, transitions, kill, restart,
+                recovery, errors, declaredControls); }
     }
 }

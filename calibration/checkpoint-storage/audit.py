@@ -332,7 +332,7 @@ def audit_storage(result, cell, manifest, retained):
     runtime = evidence["flinkRuntime"]
     require({item["runtimeId"] for item in identities.values()} == {item["runtimeId"] for item in runtime["components"]}, "Storage and Flink process identities differ")
     require({item["runtimeId"] for item in identities.values()} <= stopped_ids(evidence), "Storage process lacks physical stopped evidence")
-    expected_config = {"execution.checkpointing.data-inline-threshold": "0 b",
+    expected_config = {"execution.checkpointing.data-inline-threshold": "0 bytes",
                        "execution.checkpointing.max-concurrent-checkpoints": "1",
                        "execution.checkpointing.tolerable-failed-checkpoints": "10"}
     require(runtime["config"] == expected_config, "Checkpoint materialization configuration differs")

@@ -91,6 +91,34 @@ class CheckpointStorageFaultTest {
         assertEquals(1, fake.count("restart"));
     }
 
+    @Test void exactDeclaredToleranceIsRequiredBeforeArmingAndInRetainedProof() throws Exception {
+        var declared = new ExecutableScenarioPlan.CheckpointControls(0, 1, 3);
+        var matching = new Fixture(Mode.HEALTHY);
+        matching.observedTolerance = 3;
+        var evidence = matching.execute(declared);
+        assertTrue(evidence.confirmed(), () -> evidence.errors().toString());
+        assertEquals(declared, evidence.declaredControls());
+        assertTrue(CheckpointStorageFault.finalConfirmed(evidence, matching.snapshot(true)));
+
+        var changedDeclaration = new CheckpointStorageFault.Evidence(evidence.path(), evidence.jobId(), evidence.triggerId(),
+                evidence.timeoutMillis(), evidence.checkpointId(), evidence.failedCheckpointId(), evidence.configuration(),
+                evidence.readiness(), evidence.materialization(), evidence.triggerResult(), evidence.failedCheckpoint(),
+                evidence.failureTrace(), evidence.recoveryTrace(), evidence.samples(), evidence.transitions(), evidence.kill(),
+                evidence.restart(), evidence.recovery(), evidence.errors(), new ExecutableScenarioPlan.CheckpointControls(0, 1, 10));
+        assertFalse(changedDeclaration.confirmed());
+        assertFalse(CheckpointStorageFault.finalConfirmed(changedDeclaration, matching.snapshot(true)));
+
+        for (int observed : List.of(1, 2, 4, 10)) {
+            var mismatched = new Fixture(Mode.HEALTHY);
+            mismatched.observedTolerance = observed;
+            var rejected = mismatched.execute(declared);
+            assertFalse(rejected.confirmed(), "Observed tolerance " + observed);
+            assertEquals(List.of("gate"), mismatched.actions, "No storage arming or physical fault before exact config proof");
+            assertTrue(rejected.errors().stream().anyMatch(value -> value.contains("checkpoint configuration")));
+            assertEquals(declared, rejected.declaredControls());
+        }
+    }
+
     @Test void postKillRpcFailuresAreAccountedBeforeHealingAndReplacement() throws Exception {
         var fake = new Fixture(Mode.POST_KILL_FAILURES);
         var evidence = fake.execute();
@@ -514,6 +542,7 @@ class CheckpointStorageFaultTest {
         final FlinkScenarioControl flink;
         final V1AttemptRuntime runtime;
         int phase, failureLogPolls, failureHistoryReads, postKillHistoryReads;
+        int observedTolerance = 10;
         String faultId = "";
         StorageFaultControl.Transition arm, heal;
 
@@ -535,20 +564,24 @@ class CheckpointStorageFaultTest {
         }
 
         CheckpointStorageFault.Evidence execute() {
+            return execute(new ExecutableScenarioPlan.CheckpointControls(0, 1, 10));
+        }
+
+        CheckpointStorageFault.Evidence execute(ExecutableScenarioPlan.CheckpointControls declaredControls) {
             var runner = new CheckpointStorageFault(flink, runtime, (job, target, budget) -> {
                 actions.add("gate"); assertEquals("taskmanager-1", target); assertEquals(JOB, job.jobId());
                 if (mode == Mode.GATE_DEADLINE) now.set(Duration.ofSeconds(3).toNanos());
                 return Optional.of(readiness);
             }, now::get, duration -> now.addAndGet(duration.toNanos()));
             return runner.execute("$/phases/0/steps/1", List.of(), new FlinkJobHandle(JOB),
-                    new ExecutableScenarioPlan.CheckpointStorageFault("state-job", Duration.ofSeconds(2), Duration.ofSeconds(10)));
+                    new ExecutableScenarioPlan.CheckpointStorageFault("state-job", Duration.ofSeconds(2), Duration.ofSeconds(10)), declaredControls);
         }
 
         private Object flinkCall(String method, Object[] arguments) throws Exception {
             now.addAndGet(1_000_000);
             return switch (method) {
                 case "checkpointConfiguration" -> new FlinkCheckpointEvidence.Configuration(JOB, "exactly_once", 10000, 60000,
-                        0, 1, 10, "HashMapStateBackend", "FileSystemCheckpointStorage", false, false, false, false);
+                        0, 1, observedTolerance, "HashMapStateBackend", "FileSystemCheckpointStorage", false, false, false, false);
                 case "checkpointHistory" -> observedHistory();
                 case "checkpointDetails" -> checkpoint(4, true);
                 case "observe" -> observedJob();
@@ -746,7 +779,7 @@ class CheckpointStorageFaultTest {
         return new CheckpointStorageFault.Evidence(original.path(), original.jobId(), original.triggerId(), original.timeoutMillis(),
                 original.checkpointId(), original.failedCheckpointId(), original.configuration(), original.readiness(), original.materialization(),
                 original.triggerResult(), original.failedCheckpoint(), original.failureTrace(), trace, original.samples(), original.transitions(),
-                original.kill(), original.restart(), recovery, original.errors());
+                original.kill(), original.restart(), recovery, original.errors(), original.declaredControls());
     }
     private static StateRecoveryEvidence.Marker copyMarker(StateRecoveryEvidence.Marker original,
             StateRecoveryEvidence.ProcessIdentity process, String uid, long line) {

@@ -56,7 +56,7 @@ public final class FlinkRuntimeTarget {
         this.logMarkers = FlinkLogMarker.validate(logMarkers);
         this.checkpointStorage = Objects.requireNonNull(checkpointStorage, "checkpointStorage");
         checkpointStorage.ifPresent(storage -> {
-            FuseCheckpointStorage.processConfiguration(this.config);
+            storage.effectiveConfiguration(this.config);
             if (taskManagers != 1 || highAvailability.isPresent() || tokenProvider.isPresent()
                     || !expectedImageId.equals(Optional.of(storage.imageId())) || expectedRuntimeJar.isPresent())
                 throw new IllegalArgumentException("FUSE checkpoint storage requires one TaskManager, no HA/token provider, and the pinned released image");
@@ -142,7 +142,7 @@ public final class FlinkRuntimeTarget {
 
     /** Exact requested process configuration, including opt-in capability-owned settings. */
     public Map<String, String> effectiveConfig() {
-        return checkpointStorage.isPresent() ? FuseCheckpointStorage.processConfiguration(config) : config;
+        return checkpointStorage.map(storage -> storage.effectiveConfiguration(config)).orElse(config);
     }
     public java.util.List<FlinkLogMarker> logMarkers() { return logMarkers; }
     public FlinkRuntimeTarget withLogMarkers(java.util.List<FlinkLogMarker> markers) {

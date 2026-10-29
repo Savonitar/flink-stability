@@ -69,7 +69,9 @@ public final class PreparedExecutableScenarioPlan {
         executablePlan.job().checkpointing().fuse().ifPresent(expected -> {
             var actual = flinkRuntimeTarget.checkpointStorage().orElseThrow();
             if (!expected.manifestSha256().equals(actual.manifestSha256())
-                    || !expected.imageId().equals(actual.imageId()) || !expected.platform().equals(actual.platform()))
+                    || !expected.imageId().equals(actual.imageId()) || !expected.platform().equals(actual.platform())
+                    || actual.tolerableFailedCheckpoints() != executablePlan.job().checkpointing().controls()
+                            .orElseThrow().tolerableFailures())
                 throw new IllegalArgumentException("Runtime helper identity differs from executable plan");
         });
     }

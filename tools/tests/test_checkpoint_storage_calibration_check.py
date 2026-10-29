@@ -33,7 +33,7 @@ def fixture(directory, mode="correct", execution="eio"):
     helper = {"imageId": manifest["runtimeIdentity"]["flinkImageId"], "manifestSha256": "f" * 64,
               "files": {"checkpoint-fuse": "1" * 64, "probe.jar": "2" * 64}}
     manifest["helperBundle"] = helper
-    config = {"execution.checkpointing.data-inline-threshold": "0 b",
+    config = {"execution.checkpointing.data-inline-threshold": "0 bytes",
               "execution.checkpointing.max-concurrent-checkpoints": "1",
               "execution.checkpointing.tolerable-failed-checkpoints": "10"}
     evidence["flinkRuntime"]["config"] = config

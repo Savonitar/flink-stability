@@ -62,6 +62,7 @@ public final class ExecutablePhaseExecutor {
     private String savepointDirectory;
     private StateRecoveryGate stateRecoveryGate;
     private boolean keyedPrefix;
+    private Optional<ExecutableScenarioPlan.CheckpointControls> checkpointControls = Optional.empty();
 
     ExecutablePhaseExecutor withStateRecoveryGate(StateRecoveryGate gate) {
         this.stateRecoveryGate = gate;
@@ -139,6 +140,7 @@ public final class ExecutablePhaseExecutor {
         Objects.requireNonNull(plan, "plan");
         Objects.requireNonNull(job, "job");
         keyedPrefix = plan.job().workloadConfiguration().behavior().isPresent();
+        checkpointControls = plan.job().checkpointing().controls();
         if (!tokenProof.map(TokenScopeProof.Requirement::scope)
                 .equals(plan.flink().tokenProvider().flatMap(provider -> provider.proofScope()))
                 || tokenProof.flatMap(TokenScopeProof.Requirement::submission).filter(binding ->
@@ -193,7 +195,7 @@ public final class ExecutablePhaseExecutor {
             } else if (step instanceof ExecutableScenarioPlan.CheckpointStorageFault storage) {
                 var observed = new CheckpointStorageFault(flink, runtime,
                         stateRecoveryGate == null ? null : stateRecoveryGate::awaitReady, nanoTime, sleeper)
-                        .execute(path, loopIterations, job, storage);
+                        .execute(path, loopIterations, job, storage, checkpointControls.orElseThrow());
                 evidence.storageFaults.add(observed);
                 if (observed.kill() != null) evidence.kills.add(observed.kill());
                 if (observed.restart() != null) evidence.restarts.add(observed.restart());

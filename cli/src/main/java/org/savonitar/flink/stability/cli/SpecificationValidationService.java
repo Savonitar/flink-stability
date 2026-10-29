@@ -84,7 +84,7 @@ final class SpecificationValidationService {
                     kafka.set("brokerConfig", mapper.valueToTree(executable.kafka().brokerConfig()));
                     kafka.set("launches", mapper.valueToTree(executable.kafka().runtimeTarget().resolvedLaunches()));
                 }
-                rendered.set("flinkConfig", mapper.valueToTree(bound.flinkRuntimeTarget().config()));
+                rendered.set("flinkConfig", mapper.valueToTree(bound.flinkRuntimeTarget().effectiveConfig()));
                 var flinkRuntime = rendered.putObject("flinkRuntime");
                 flinkRuntime.put("imageReference", bound.flinkRuntimeTarget().imageReference());
                 bound.flinkRuntimeTarget().expectedImageId().ifPresent(value -> flinkRuntime.put("imageId", value));
@@ -93,6 +93,7 @@ final class SpecificationValidationService {
                         .put("type", "fuse-filesystem")
                         .put("checkpointUri", "runtime-generated isolated namespace")
                         .put("manifestSha256", storage.manifestSha256())
+                        .put("tolerableFailedCheckpoints", storage.tolerableFailedCheckpoints())
                         .put("imageId", storage.imageId()).put("platform", storage.platform())
                         .set("files", mapper.valueToTree(storage.files())));
                 CustomRuntimeSubjectEvidence.from(bound).ifPresent(value -> rendered.set("customRuntimeSubject", value));
