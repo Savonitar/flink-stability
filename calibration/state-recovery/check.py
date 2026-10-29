@@ -2,6 +2,7 @@
 """Audit the frozen twelve-attempt state recovery matrix; never run or rewrite it."""
 import argparse
 import hashlib
+import importlib.util
 from io import BytesIO
 import json
 from pathlib import Path
@@ -28,6 +29,16 @@ KEY_PROGRESS_FIELDS = {"keyCount", "key", "inputId", "previousCount", "previousS
 def require(condition, message):
     if not condition:
         raise ValueError(message)
+
+
+def catalog_contract():
+    # Lazy loading keeps the vendored state oracle usable by other calibration
+    # checkers that do not audit the state-recovery catalog format.
+    path = Path(__file__).with_name("catalog_contract.py")
+    spec = importlib.util.spec_from_file_location("state_recovery_catalog_contract", path)
+    value = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(value)
+    return value
 
 
 def integer(value, minimum=0):
@@ -437,6 +448,7 @@ def validate_manifest(batch):
     require(set(manifest["artifacts"]) == set(MODES), "Wrong artifact arms")
     jar_entries = {}
     for mode in MODES:
+        require(manifest["artifacts"][mode]["path"] == "artifacts/" + mode + ".jar", "Wrong fixed workload artifact path")
         data = file_receipt(batch, manifest["artifacts"][mode])
         with ZipFile(BytesIO(data)) as jar:
             names = jar.namelist()
@@ -455,7 +467,7 @@ def validate_manifest(batch):
             "META-INF/flink-stability/keyed-prefix-build.properties"]), "Mutation changed unexpected workload entries")
     require(manifest["artifacts"]["correct"]["sha256"] != manifest["artifacts"]["mutant"]["sha256"], "Mutant is identical to control")
     required_recipe = {"evidence/recipe/" + name for name in ("baseline.yaml", "restart-phase.yaml",
-                       "state-recovery.expected.yaml", "build.py", "catalogs.py", "check.py", "run.py", "README.md")}
+                       "state-recovery.expected.yaml", "build.py", "catalogs.py", "catalog_contract.py", "check.py", "run.py", "README.md")}
     require(required_recipe <= manifest["recipeFiles"].keys(), "Frozen recipe is missing")
     for path, value in manifest["recipeFiles"].items():
         read(batch / path, batch, value)
@@ -464,13 +476,21 @@ def validate_manifest(batch):
                 "Build source is missing or differs from frozen recipe")
     reference = json.loads(file_receipt(batch, manifest["referenceResult"]), object_pairs_hook=unique_object)
     require(runtime_identity(reference) == manifest["runtimeIdentity"], "Frozen runtime differs from reference pilot")
+    require(isinstance(reference["attempt"]["nonce"], str) and re.fullmatch(r"[0-9a-f]{8}", reference["attempt"]["nonce"]),
+            "Reference pilot nonce is missing or malformed")
+    contract = catalog_contract()
+    template = read(batch / "evidence/recipe/baseline.yaml", batch).decode("utf-8")
+    restart_phase = read(batch / "evidence/recipe/restart-phase.yaml", batch).decode("utf-8")
     cells = manifest["cells"]
     require([cell["name"] for cell in cells] == list(CELLS), "Missing, reordered or duplicate matrix cells")
     for cell in cells:
         require(cell["name"] == cell["mode"] + "-" + cell["execution"] and cell["requiredOutcome"] == "pass"
                 and cell["scenario"] == SCENARIO and cell["catalog"] == "catalogs/" + cell["name"], "Invalid matrix cell")
         require(cell["attempts"] == [f"attempts/{cell['name']}/run-{number}" for number in range(1, 4)], "Expected three fixed attempts")
-        read(batch / cell["catalog"] / (SCENARIO + ".yaml"), batch, cell["scenarioSha256"])
+        scenario = read(batch / cell["catalog"] / (SCENARIO + ".yaml"), batch, cell["scenarioSha256"])
+        require(scenario == contract.render(template, restart_phase, contract.artifact_reference(batch, cell["mode"]),
+                                            cell["execution"], manifest["runtimeIdentity"], mode=cell["mode"]),
+                "Frozen scenario differs from the independently rendered qualification contract")
         expected = read(batch / cell["catalog"] / (SCENARIO + ".expected.yaml"), batch, cell["expectedSha256"])
         require(expected == EXPECTED_BYTES, "Expected-result catalog is not unchanged PASS")
     return manifest
@@ -484,7 +504,25 @@ def check_matrix(batch):
     manifest = validate_manifest(batch)
     report = {"qualified": False, "manifestSha256": digest(read(batch / "manifest.json", batch)),
               "confirmedCounts": {name: 0 for name in CELLS}, "attempts": [], "errors": []}
-    nonces = set()
+    reference = load(batch / manifest["referenceResult"]["path"], batch, manifest["referenceResult"]["sha256"])
+    nonces = {reference["attempt"]["nonce"]}
+    try:
+        started = load(batch / "execution-started.json", batch)
+        require(type(started.get("attempts")) is int and started["attempts"] == 12
+                and type(started.get("automaticRetries")) is int and started["automaticRetries"] == 0,
+                "Execution receipt does not allocate exactly twelve attempts without retries")
+        allocated = {relative for cell in manifest["cells"] for relative in cell["attempts"]}
+        actual = set()
+        for cell_path in guarded(batch / "attempts", batch).iterdir():
+            guarded(cell_path, batch)
+            require(cell_path.is_dir() and cell_path.name in CELLS, "Unexpected attempt cell or file")
+            for attempt_path in cell_path.iterdir():
+                guarded(attempt_path, batch)
+                require(attempt_path.is_dir(), "Unexpected file in attempt allocation")
+                actual.add(attempt_path.relative_to(batch).as_posix())
+        require(actual == allocated, "Missing or extra attempt directories")
+    except (ValueError, KeyError, TypeError, OSError) as failure:
+        report["errors"].append({"scope": "execution-allocation", "error": str(failure)})
     for cell in manifest["cells"]:
         for number, relative in enumerate(cell["attempts"], 1):
             row = {"cell": cell["name"], "number": number, "directory": relative, "confirmed": False}
@@ -511,7 +549,7 @@ def check_matrix(batch):
                 row["error"] = str(failure)
                 report["errors"].append({"cell": cell["name"], "number": number, "error": str(failure)})
             report["attempts"].append(row)
-    report["qualified"] = all(count == 3 for count in report["confirmedCounts"].values())
+    report["qualified"] = not report["errors"] and all(count == 3 for count in report["confirmedCounts"].values())
     return report
 
 

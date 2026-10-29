@@ -173,22 +173,24 @@ def matrix_fixture(batch):
              "mutationScope": "Keyed aggregate only; once per key on first event after genuine restore; initial start, source and sink unchanged",
              "artifacts": artifacts, "changedEntries": ["META-INF/MANIFEST.MF", "META-INF/flink-stability/keyed-prefix-build.properties"],
              "recipeInputSha256": {"example.java": build_source["sha256"]}}
-    reference = fixture()[0]
+    reference = fixture(nonce="ffffffff")[0]
     manifest = {"formatVersion": 1, "catalogContractVersion": 2, "kind": "state-recovery-calibration", "attemptsPerCell": 3,
                 "workload": {"keyCount": 8, "totalRecords": 6000}, "artifacts": artifacts,
                 "buildEvidence": put("evidence/build-evidence.json", build),
                 "referenceResult": put("evidence/reference-result.json", reference),
                 "runtimeIdentity": check.runtime_identity(reference), "recipeFiles": {build_source["path"]: build_source["sha256"]},
                 "cells": []}
-    for name in ("baseline.yaml", "restart-phase.yaml", "state-recovery.expected.yaml", "build.py", "catalogs.py", "check.py", "run.py", "README.md"):
-        receipt = put("evidence/recipe/" + name, b"independent recipe fixture\n")
+    for name in ("baseline.yaml", "restart-phase.yaml", "state-recovery.expected.yaml", "build.py", "catalogs.py", "catalog_contract.py", "check.py", "run.py", "README.md"):
+        receipt = put("evidence/recipe/" + name, (RECIPE / name).read_bytes())
         manifest["recipeFiles"][receipt["path"]] = receipt["sha256"]
     ordinal = 0
     for mode in ("correct", "mutant"):
         for execution in ("uninterrupted", "restart"):
             name = mode + "-" + execution
             catalog = "catalogs/" + name
-            scenario = put(catalog + "/state-recovery.yaml", b"format: v1\nkind: scenario\n")
+            scenario = put(catalog + "/state-recovery.yaml", check.catalog_contract().render(
+                (RECIPE / "baseline.yaml").read_text(), (RECIPE / "restart-phase.yaml").read_text(),
+                check.catalog_contract().artifact_reference(batch, mode), execution, manifest["runtimeIdentity"], mode=mode))
             expected = put(catalog + "/state-recovery.expected.yaml",
                            b"format: v1\nkind: expected-result\n\nmeta:\n  name: state-recovery.expected\n  scenario: state-recovery\n\ndefault:\n  outcome: pass\n")
             attempts = []
@@ -206,6 +208,7 @@ def matrix_fixture(batch):
                                       "catalog": catalog, "scenarioSha256": scenario["sha256"], "expectedSha256": expected["sha256"],
                                       "requiredOutcome": "pass", "attempts": attempts})
     put("manifest.json", manifest)
+    put("execution-started.json", {"attempts": 12, "automaticRetries": 0})
     return manifest
 
 
@@ -341,7 +344,7 @@ class StateRecoveryCheckerTest(unittest.TestCase):
                 check.audit_attempt(*args)
             self.assertEqual(args[0]["attempt"]["reason"], "validator.kafka.state-prefix.state-mismatch")
         with tempfile.TemporaryDirectory() as name:
-            batch = Path(name).resolve()
+            batch = Path(name).resolve() / "jobs/batch"
             manifest = matrix_fixture(batch)
             path = batch / manifest["cells"][3]["attempts"][0] / "stdout.json"
             raw = json.loads(path.read_text())
@@ -379,7 +382,7 @@ class StateRecoveryCheckerTest(unittest.TestCase):
 
     def test_matrix_requires_twelve_distinct_confirmed_attempts(self):
         with tempfile.TemporaryDirectory() as name:
-            batch = Path(name).resolve()
+            batch = Path(name).resolve() / "jobs/batch"
             manifest = matrix_fixture(batch)
             report = check.check_matrix(batch)
             self.assertTrue(report["qualified"], report["errors"])
@@ -394,7 +397,7 @@ class StateRecoveryCheckerTest(unittest.TestCase):
 
     def test_window_miss_is_retained_with_raw_mutant_failure_not_retried_or_passed(self):
         with tempfile.TemporaryDirectory() as name:
-            batch = Path(name).resolve()
+            batch = Path(name).resolve() / "jobs/batch"
             manifest = matrix_fixture(batch)
             path = batch / manifest["cells"][3]["attempts"][0] / "stdout.json"
             raw = json.loads(path.read_text())
@@ -410,7 +413,7 @@ class StateRecoveryCheckerTest(unittest.TestCase):
     def test_tampered_artifact_recipe_and_expected_outcome_fail_closed(self):
         for name in ("artifacts/mutant.jar", "evidence/recipe/build.py", "catalogs/mutant-restart/state-recovery.expected.yaml"):
             with self.subTest(path=name), tempfile.TemporaryDirectory() as directory:
-                batch = Path(directory).resolve()
+                batch = Path(directory).resolve() / "jobs/batch"
                 matrix_fixture(batch)
                 with (batch / name).open("ab") as stream:
                     stream.write(b"tamper")
@@ -419,7 +422,7 @@ class StateRecoveryCheckerTest(unittest.TestCase):
 
     def test_duplicate_attempt_nonce_does_not_count_twice(self):
         with tempfile.TemporaryDirectory() as name:
-            batch = Path(name).resolve()
+            batch = Path(name).resolve() / "jobs/batch"
             manifest = matrix_fixture(batch)
             path = batch / manifest["cells"][0]["attempts"][1] / "stdout.json"
             result = json.loads(path.read_text())
@@ -428,6 +431,57 @@ class StateRecoveryCheckerTest(unittest.TestCase):
             report = check.check_matrix(batch)
             self.assertFalse(report["qualified"])
             self.assertEqual(report["confirmedCounts"]["correct-uninterrupted"], 2)
+
+    def test_rehashed_catalog_and_template_edits_do_not_change_the_contract(self):
+        for change in ("catalog", "template-and-catalog", "extra-override"):
+            with self.subTest(change=change), tempfile.TemporaryDirectory() as name:
+                batch = Path(name).resolve() / "jobs/batch"
+                manifest = matrix_fixture(batch)
+                cell = manifest["cells"][0]
+                path = batch / cell["catalog"] / "state-recovery.yaml"
+                changed = path.read_bytes().replace(b"total: 6000", b"total: 60")
+                if change == "extra-override":
+                    changed = path.read_bytes() + b"completion_timeout: 1s\n"
+                path.write_bytes(changed)
+                cell["scenarioSha256"] = check.digest(changed)
+                if change == "template-and-catalog":
+                    template = batch / "evidence/recipe/baseline.yaml"
+                    template.write_bytes(template.read_bytes().replace(b"total: 6000", b"total: 60"))
+                    manifest["recipeFiles"]["evidence/recipe/baseline.yaml"] = check.digest(template.read_bytes())
+                (batch / "manifest.json").write_text(json.dumps(manifest))
+                with self.assertRaisesRegex(ValueError, "contract"):
+                    check.validate_manifest(batch)
+
+    def test_execution_receipt_and_exact_directory_allocation_are_required(self):
+        for change in ("missing-receipt", "wrong-count", "retry", "run-4", "run-99", "extra-cell"):
+            with self.subTest(change=change), tempfile.TemporaryDirectory() as name:
+                batch = Path(name).resolve() / "jobs/batch"
+                matrix_fixture(batch)
+                start = batch / "execution-started.json"
+                if change == "missing-receipt":
+                    start.unlink()
+                elif change in {"wrong-count", "retry"}:
+                    start.write_text(json.dumps({"attempts": 13 if change == "wrong-count" else 12,
+                                                 "automaticRetries": 1 if change == "retry" else 0}))
+                else:
+                    extra = "extra-cell/run-1" if change == "extra-cell" else "correct-uninterrupted/" + change
+                    (batch / "attempts" / extra).mkdir(parents=True)
+                report = check.check_matrix(batch)
+                self.assertFalse(report["qualified"])
+                self.assertEqual(report["errors"][0]["scope"], "execution-allocation")
+                self.assertEqual(12, len(report["attempts"]))
+
+    def test_reference_pilot_nonce_cannot_be_reused_by_a_matrix_attempt(self):
+        with tempfile.TemporaryDirectory() as name:
+            batch = Path(name).resolve() / "jobs/batch"
+            manifest = matrix_fixture(batch)
+            path = batch / manifest["cells"][0]["attempts"][0] / "stdout.json"
+            raw = json.loads(path.read_text())
+            raw["attempt"]["nonce"] = "ffffffff"
+            path.write_text(json.dumps(raw))
+            report = check.check_matrix(batch)
+            self.assertFalse(report["qualified"])
+            self.assertIn("reused", report["attempts"][0]["error"])
 
     def test_catalog_freeze_preserves_pass_and_rejects_overwriting(self):
         spec = importlib.util.spec_from_file_location("state_recovery_catalogs", RECIPE / "catalogs.py")
@@ -451,7 +505,7 @@ class StateRecoveryCheckerTest(unittest.TestCase):
             pilot_path.write_text(json.dumps(pilot))
             recipe = root / "recipe"
             recipe.mkdir()
-            for filename in ("baseline.yaml", "restart-phase.yaml", "state-recovery.expected.yaml", "build.py", "catalogs.py", "check.py", "run.py", "README.md"):
+            for filename in ("baseline.yaml", "restart-phase.yaml", "state-recovery.expected.yaml", "build.py", "catalogs.py", "catalog_contract.py", "check.py", "run.py", "README.md"):
                 (recipe / filename).write_bytes((RECIPE / filename).read_bytes())
             output = root / "jobs" / "qualification"
             frozen = catalogs.freeze(build_path, pilot_path, output, root, recipe)

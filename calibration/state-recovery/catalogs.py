@@ -3,35 +3,15 @@
 import argparse
 import json
 from pathlib import Path
-import re
 
 from check import (EXECUTIONS, EXPECTED_BYTES, MODES, SCENARIO, audit_attempt, digest, guarded,
-                   read, require, runtime_identity)
+                   read, require, runtime_identity, catalog_contract)
 
 RECIPE = Path(__file__).absolute().parent
 ROOT = RECIPE.parents[1]
 
 
-def render(template, restart_phase, workload_reference, execution, runtime_identity=None, *, mode="correct"):
-    require(template.count('"@WORKLOAD_JAR@"') == 1, "Workload placeholder changed")
-    require(execution in EXECUTIONS, "Unknown execution arm")
-    require(mode in MODES, "Unknown workload arm")
-    rendered = template.replace('"@WORKLOAD_JAR@"', json.dumps(workload_reference))
-    if mode == "mutant":
-        require(rendered.count("\nmeta:\n") == 1, "Metadata boundary changed")
-        rendered = rendered.replace("\nmeta:\n", "\nmeta:\n  allow_state_reset_mutant: true\n")
-    if runtime_identity is not None:
-        for component, indentation in (("kafka", "        "), ("flink", "    ")):
-            reference, image_id = runtime_identity[component + "ImageReference"], runtime_identity[component + "ImageId"]
-            image_line = indentation + "image: " + reference + "\n"
-            require(rendered.count(image_line) == 1 and re.fullmatch(r"sha256:[0-9a-f]{64}", image_id),
-                    "Reference image identity differs from the calibration template")
-            rendered = rendered.replace(image_line, image_line + indentation + "image_id: " + json.dumps(image_id) + "\n")
-    if execution == "restart":
-        require(rendered.count("\nterminal_validations:\n") == 1, "Terminal boundary changed")
-        rendered = rendered.replace("\nterminal_validations:\n", "\n" + restart_phase + "\nterminal_validations:\n")
-    return rendered.encode("utf-8")
-
+render = catalog_contract().render
 
 def freeze(build_path, reference_path, output, root=ROOT, recipe=RECIPE):
     root, output = Path(root).absolute(), Path(output).absolute()
@@ -52,7 +32,7 @@ def freeze(build_path, reference_path, output, root=ROOT, recipe=RECIPE):
     expected = read(recipe / "state-recovery.expected.yaml", root)
     require(expected == EXPECTED_BYTES, "Recipe must retain PASS expectation")
     recipe_paths = ("baseline.yaml", "restart-phase.yaml", "state-recovery.expected.yaml",
-                    "build.py", "catalogs.py", "check.py", "run.py", "README.md")
+                    "build.py", "catalogs.py", "catalog_contract.py", "check.py", "run.py", "README.md")
     for name in recipe_paths:
         files["evidence/recipe/" + name] = read(recipe / name, root)
     require(build["recipeInputSha256"], "Build inputs were not recorded")
