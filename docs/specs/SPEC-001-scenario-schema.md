@@ -19,8 +19,9 @@ and validation deadlines. Broader v1 execution capabilities, runtime OCI-digest
 capture, the complete R8.2 replay report, and health/repetition/experiment verdict
 logic remain roadmap work.
 
-**Last updated:** 2026-10-26. State-prefix and PR2 recovery-gate/calibration code
-do not establish live restore or storage-fault qualification.
+**Last updated:** 2026-10-29. Implementation and live qualification are separate
+claims; see the exact artifacts and scope in the
+[checkpoint-storage qualification guide](../CHECKPOINT-STORAGE-QUALIFICATION.md).
 
 This document captures *what the scenario format must express* and why. The JSON
 Schema captures structural constraints; this requirements document remains the

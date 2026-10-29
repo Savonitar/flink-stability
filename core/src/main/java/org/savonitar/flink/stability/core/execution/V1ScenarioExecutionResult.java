@@ -430,7 +430,8 @@ public record V1ScenarioExecutionResult(
 
     public V1ScenarioExecutionResult withCheckpointRetention(CheckpointRetentionEvidence evidence) {
         var updated = new java.util.ArrayList<>(diagnostics);
-        if (!evidence.status().equals("complete")) updated.add(CheckpointRetentionEvidence.INCOMPLETE + ": " + evidence.diagnostics());
+        if (!evidence.status().equals("complete") && !evidence.status().equals(CheckpointRetentionEvidence.NOT_APPLICABLE))
+            updated.add(CheckpointRetentionEvidence.INCOMPLETE + ": " + evidence.diagnostics());
         return new V1ScenarioExecutionResult(status, reason, message, inputManifest, phaseEvidence, writeFenceEvidence, processFenceEvidence, finalJobObservation, terminalValidation, sinkTransactions, subjectClassOrigins, flinkProvisioningEvidence, expectedFlinkRuntime, runtimeClassOrigins, kafkaTransactionVersion, flinkRestErrors, expectedHa, tokenEvidence, haObservations, processObservations, kafkaLogs, componentErrors, kafkaRuntime, flinkLogMarkers, Optional.of(evidence), stateRecovery, updated);
     }
 

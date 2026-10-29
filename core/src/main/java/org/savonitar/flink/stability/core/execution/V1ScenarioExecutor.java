@@ -192,7 +192,8 @@ public final class V1ScenarioExecutor {
         }
         if (context.retainCheckpoints().isPresent()) {
             result = result.withCheckpointRetention(CheckpointRetentionEvidence.copy(context.checkpointStorageRoot(),
-                    context.retainCheckpoints().orElseThrow(), confirmedPhysicalFence(result)));
+                    context.retainCheckpoints().orElseThrow(), confirmedPhysicalFence(result),
+                    prepared.flinkRuntimeTarget().checkpointStorage().isPresent()));
         }
         RuntimeException cleanupFailure = resources.cleanup(cleanupBoundary);
         return cleanupFailure == null ? result : result.withCleanupFailure(cleanupFailure);

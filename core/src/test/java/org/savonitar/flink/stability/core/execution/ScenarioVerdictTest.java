@@ -84,6 +84,18 @@ class ScenarioVerdictTest {
     }
 
     @Test
+    void fuseRetentionNotApplicableDoesNotAddAnIncompleteCopyDiagnostic() {
+        var retained = CheckpointRetentionEvidence.copy(java.nio.file.Path.of("fuse-evidence"),
+                java.nio.file.Path.of("unused-copy"), true, true);
+        var original = attempt(V1ScenarioExecutionResult.Status.PASS, "validator.kafka.id-set.match");
+        var result = original.withCheckpointRetention(retained);
+        assertEquals(original.status(), result.status());
+        assertEquals(original.diagnostics(), result.diagnostics());
+        assertEquals(CheckpointRetentionEvidence.NOT_APPLICABLE, result.checkpointRetention().orElseThrow().status());
+        assertEquals(ScenarioVerdict.Status.PASS, ScenarioVerdict.of(ExpectedOutcome.pass(), result).status());
+    }
+
+    @Test
     void missedCheckpointWindowNeverMasksUnexpectedDataFailures() {
         for (String reason : List.of(DUPLICATES, "validator.kafka.id-set.missing-ids",
                 "validator.kafka.id-set.unexpected-ids", "validator.kafka.id-set.malformed-ids")) {

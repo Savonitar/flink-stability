@@ -561,7 +561,7 @@ def main():
     args = parser.parse_args()
     try:
         report = check_matrix(args.batch, re_audit=args.re_audit)
-    except (ValueError, KeyError, TypeError, IndexError, OSError, BadZipFile) as failure:
+    except Exception as failure:
         report = {"qualified": False, "errors": [str(failure)]}
     print(json.dumps(report, indent=2))
     return 0 if report["qualified"] else 1

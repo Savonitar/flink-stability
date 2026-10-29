@@ -603,6 +603,15 @@ class SupervisorLifecycleTest(unittest.TestCase):
         self.assertEqual("Cleanup failed", result["qualificationError"])
         self.assertEqual("observed", json.loads((owner.output / "observations.json").read_text())["status"])
 
+    def test_malformed_qualification_shape_still_writes_failure_report(self):
+        owner = self.supervisor(self.output / "malformed-shape")
+        owner.run_cases.side_effect = lambda: owner.report.update(instances=None)
+        result = owner.execute()
+        self.assertEqual("failed", result["status"])
+        self.assertIn("qualificationError", result)
+        self.assertEqual("failed", json.loads((owner.output / "result.json").read_text())["status"])
+        owner.cleanup.assert_called_once()
+
     def test_cleanup_refuses_unrelated_container_and_volume_before_any_mutation(self):
         owner = probe.Probe.__new__(probe.Probe)
         owner.output, owner.attempt, owner.volume = self.output, ATTEMPT, "fsi-" + ATTEMPT

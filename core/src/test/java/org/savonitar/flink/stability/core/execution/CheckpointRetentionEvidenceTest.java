@@ -46,4 +46,21 @@ class CheckpointRetentionEvidenceTest {
         try { assertEquals("incomplete", CheckpointRetentionEvidence.copy(source, temporary.resolve("interrupted"), true).status()); }
         finally { Thread.interrupted(); }
     }
+
+    @Test void fuseHostEvidenceIsNeverMisreportedAsRetainedCheckpointState() throws Exception {
+        Path source = Files.createDirectory(temporary.resolve("fuse-evidence"));
+        Files.writeString(source.resolve("flink.log"), "component log");
+        Files.writeString(source.resolve("journal.jsonl"), "storage receipt");
+        for (boolean fenced : new boolean[]{false, true}) {
+            Path output = temporary.resolve("fuse-retained-" + fenced);
+            var result = CheckpointRetentionEvidence.copy(source, output, fenced, true);
+            assertEquals(CheckpointRetentionEvidence.NOT_APPLICABLE, result.status());
+            assertTrue(result.files().isEmpty()); assertEquals(0, result.bytes());
+            assertNull(result.checkpointRoot()); assertNull(result.haRoot());
+            assertFalse(Files.exists(output), "No misleading checkpoint directory is created");
+            assertTrue(result.diagnostics().getFirst().contains("Docker volume"));
+        }
+        assertEquals("component log", Files.readString(source.resolve("flink.log")));
+        assertEquals("storage receipt", Files.readString(source.resolve("journal.jsonl")));
+    }
 }

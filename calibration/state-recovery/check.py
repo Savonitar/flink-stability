@@ -281,7 +281,10 @@ def verify_marker_logs(directory, markers):
         name = "flink-stability-output-" + process.replace("#", "-") + ".log"
         if name not in logs:
             data = read(directory / "logs" / name, directory)
-            logs[name] = data.decode("utf-8").splitlines()
+            # Match BufferedReader.readLine: Unicode separators and control bytes are not line endings.
+            logs[name] = re.split(r"\r\n|\r|\n", data.decode("utf-8"))
+            if logs[name] and logs[name][-1] == "":
+                logs[name].pop()
             receipts[name] = digest(data)
         line_number = marker["lineNumber"]
         require(integer(line_number, 1) and line_number <= len(logs[name]), "Marker line is missing from raw output")
@@ -559,7 +562,7 @@ def main():
     args = parser.parse_args()
     try:
         report = check_matrix(args.batch)
-    except (ValueError, KeyError, TypeError, IndexError, OSError, BadZipFile) as failure:
+    except Exception as failure:
         report = {"qualified": False, "errors": [str(failure)]}
     print(json.dumps(report, indent=2))
     return 0 if report["qualified"] else 1

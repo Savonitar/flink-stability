@@ -42,3 +42,7 @@ regressing counters, and continues to read historical receipts without counters.
 Its fixed-clock aggregation case performs 100,000 successful metadata callbacks
 with 100 SUMMARY entries plus the two startup entries. Live mount behavior and
 the daemon binary are checked separately in a fresh pinned-image helper build.
+
+The builder's `signedIndexSha256` records the downloaded index as provenance;
+it is not a signature-verification claim. The locked package hashes and sizes
+are verified before network disconnection and installation.

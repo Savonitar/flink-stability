@@ -302,8 +302,9 @@ namespace. Existing reads, stat and cleanup remain available. Forward healthy
 `fsync` to the backing filesystem; do not depend on a FUSE `release` callback to
 simulate an application-visible close error.
 
-Rules carry attempt/storage identity, fault ID, revision, allowed operations,
-and a bounded lease. Journals retain relative path, operation, instance, revision,
+Rules carry attempt/storage identity, fault ID, revision and a bounded lease.
+The first mode fixes the injected operation family to `create,write`; it does
+not accept an author-selected operation list. Journals retain relative path, operation, instance, revision,
 timestamp, result/errno and receipt sequence. Truncation or lost receipts is
 explicit and invalidates complete fault confirmation.
 

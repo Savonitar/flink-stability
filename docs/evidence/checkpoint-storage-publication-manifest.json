@@ -1,357 +1,63 @@
 {
+  "formatVersion": 1,
+  "scope": "Selected publication copies and compact summaries of retained state-recovery/checkpoint-storage evidence. These are not raw execution receipts and cannot independently rerun qualification. Original SHA-256 identifies immutable local evidence; sanitizedCopySha256 identifies the published bytes.",
+  "generatedDate": "2026-10-29",
   "entries": [
     {
-      "mode": "sanitized-copy",
-      "omittedFields": [],
-      "originalBytes": 764,
+      "sourcePath": "jobs/checkpoint-storage-checks-20261027-01/checks.json",
       "originalSha256": "6fc0004c4076fbcf94d56cf3f2e95bbeceaa47cf997983851c690584fde9ac11",
+      "originalBytes": 764,
       "publishedPath": "docs/evidence/checkpoint-storage-checks-20261027-01/checks.json",
-      "sanitizationNotes": [
-        "Host workspace/home/temporary paths replaced with <workspace>, <host-home>, <host-temporary>; Docker/container paths are retained.",
-        "Original bytes remain in the local jobs evidence; this publication is not a replayable raw proof."
-      ],
-      "sanitizedCopyBytes": 1326,
       "sanitizedCopySha256": "1603f46b5b5e55892e6ef3d512842d4a4bb394d40846584f48b10ee6db4592c4",
-      "sourcePath": "jobs/checkpoint-storage-checks-20261027-01/checks.json"
+      "sanitizedCopyBytes": 1326,
+      "mode": "sanitized-copy",
+      "sanitizationNotes": [
+        "Host workspace/home/temporary paths replaced with <workspace>, <host-home>, <host-temporary>; Docker/container paths are retained.",
+        "Original bytes remain in the local jobs evidence; this publication is not a replayable raw proof."
+      ],
+      "omittedFields": []
     },
     {
-      "mode": "sanitized-copy",
-      "omittedFields": [],
-      "originalBytes": 176,
+      "sourcePath": "jobs/checkpoint-storage-direct-java-pilot-20261027-01/launcher-inputs.json",
       "originalSha256": "5813985872b402057dc5b8c6639d702b1840dba05bea915c9db7357960717abd",
+      "originalBytes": 176,
       "publishedPath": "docs/evidence/checkpoint-storage-direct-java-pilot-20261027-01/launcher-inputs.json",
-      "sanitizationNotes": [
-        "Host workspace/home/temporary paths replaced with <workspace>, <host-home>, <host-temporary>; Docker/container paths are retained.",
-        "Original bytes remain in the local jobs evidence; this publication is not a replayable raw proof."
-      ],
-      "sanitizedCopyBytes": 758,
       "sanitizedCopySha256": "a406213c186dd089b5d481ae64bf84a9819f8a8d3b581ceb164ddeb3704a655b",
-      "sourcePath": "jobs/checkpoint-storage-direct-java-pilot-20261027-01/launcher-inputs.json"
+      "sanitizedCopyBytes": 758,
+      "mode": "sanitized-copy",
+      "sanitizationNotes": [
+        "Host workspace/home/temporary paths replaced with <workspace>, <host-home>, <host-temporary>; Docker/container paths are retained.",
+        "Original bytes remain in the local jobs evidence; this publication is not a replayable raw proof."
+      ],
+      "omittedFields": []
     },
     {
-      "mode": "sanitized-copy",
-      "omittedFields": [],
-      "originalBytes": 308,
+      "sourcePath": "jobs/checkpoint-storage-direct-java-pilot-20261027-02/derivation.json",
       "originalSha256": "f8ed8763baa122a52db53dfb1555362c4e124612a208ca728c849cdc623efbbb",
+      "originalBytes": 308,
       "publishedPath": "docs/evidence/checkpoint-storage-direct-java-pilot-20261027-02/derivation.json",
-      "sanitizationNotes": [
-        "Host workspace/home/temporary paths replaced with <workspace>, <host-home>, <host-temporary>; Docker/container paths are retained.",
-        "Original bytes remain in the local jobs evidence; this publication is not a replayable raw proof."
-      ],
-      "sanitizedCopyBytes": 885,
       "sanitizedCopySha256": "da6b27a6cdd16ce1de73b517732dddac4e9cdcde15aea20135001e81a3a23190",
-      "sourcePath": "jobs/checkpoint-storage-direct-java-pilot-20261027-02/derivation.json"
-    },
-    {
-      "mode": "sanitized-projection",
-      "omittedFields": [
-        {
-          "jsonPointer": "/evidence/kafkaLogs",
-          "kind": "non-selected-evidence"
-        },
-        {
-          "jsonPointer": "/evidence/savepointRestores",
-          "kind": "non-selected-evidence"
-        },
-        {
-          "jsonPointer": "/evidence/flinkHa",
-          "kind": "non-selected-evidence"
-        },
-        {
-          "jsonPointer": "/evidence/kafkaTransactionVersion",
-          "kind": "non-selected-evidence"
-        },
-        {
-          "jsonPointer": "/evidence/packetFaults",
-          "kind": "non-selected-evidence"
-        },
-        {
-          "jsonPointer": "/evidence/brokerOperations",
-          "kind": "non-selected-evidence"
-        },
-        {
-          "jsonPointer": "/evidence/networkFaults",
-          "kind": "non-selected-evidence"
-        },
-        {
-          "items": 42,
-          "jsonPointer": "/evidence/stateRecovery/trace/markers",
-          "kind": "array"
-        },
-        {
-          "items": 0,
-          "jsonPointer": "/evidence/stateRecovery/readinessAttempts",
-          "kind": "detailed-readiness"
-        },
-        {
-          "items": 10371,
-          "jsonPointer": "/evidence/checkpointStorage/instances/0/operations",
-          "kind": "array"
-        },
-        {
-          "items": 1,
-          "jsonPointer": "/evidence/checkpointStorage/instances/0/commands",
-          "kind": "array"
-        },
-        {
-          "items": 2630,
-          "jsonPointer": "/evidence/checkpointStorage/instances/1/operations",
-          "kind": "array"
-        },
-        {
-          "items": 1,
-          "jsonPointer": "/evidence/checkpointStorage/instances/1/commands",
-          "kind": "array"
-        },
-        {
-          "jsonPointer": "/evidence/checkpointStorage/instances/1/verification/jvmCommand",
-          "kind": "long-text-excerpt",
-          "originalCharacters": 4241,
-          "publishedCharacters": 2048
-        }
-      ],
-      "originalBytes": 8035044,
-      "originalSha256": "5aa949dd37be70a691981fab82ce575592c3a38b9e186e4662580aeed41f511c",
-      "publishedPath": "docs/evidence/checkpoint-storage-direct-java-pilot-20261027-02/run/stdout.summary.json",
-      "sanitizationNotes": [
-        "Host workspace/home/temporary paths replaced with <workspace>, <host-home>, <host-temporary>; Docker/container paths are retained.",
-        "Original bytes remain in the local jobs evidence; this publication is not a replayable raw proof.",
-        "Detailed omitted fields are listed in publicationOmissions; counts, verdicts, diagnostics and component events are retained."
-      ],
-      "sanitizedCopyBytes": 32605,
-      "sanitizedCopySha256": "7ffad2e98f55d3f0bbf869237ec3e9460e88467b756362de3b5413247ea19297",
-      "sourcePath": "jobs/checkpoint-storage-direct-java-pilot-20261027-02/run/stdout.json"
-    },
-    {
+      "sanitizedCopyBytes": 885,
       "mode": "sanitized-copy",
-      "omittedFields": [],
-      "originalBytes": 33573,
-      "originalSha256": "6e9ba4ad5624542ae6106ef061ef877ccf2f98958163e08d5e823a1c2296d948",
-      "publishedPath": "docs/evidence/checkpoint-storage-helper-build-20261027-01/build-evidence.json",
-      "sanitizationNotes": [
-        "Host workspace/home/temporary paths replaced with <workspace>, <host-home>, <host-temporary>; Docker/container paths are retained.",
-        "Original bytes remain in the local jobs evidence; this publication is not a replayable raw proof.",
-        "The macOS Docker CLI executable path is replaced with <host-docker-cli>; container executable paths remain unchanged."
-      ],
-      "sanitizedCopyBytes": 31190,
-      "sanitizedCopySha256": "ced5b6894dc3d7f90c83d4c61d89643f0f3dc33970a84cde259c963af4b23ed8",
-      "sourcePath": "jobs/checkpoint-storage-helper-build-20261027-01/build-evidence.json"
-    },
-    {
-      "mode": "sanitized-copy",
-      "omittedFields": [],
-      "originalBytes": 33573,
-      "originalSha256": "20b50a0fce2bd25a9cd5fb3ecd1ab58d0d30ac74713f17426a7655eaf795ac26",
-      "publishedPath": "docs/evidence/checkpoint-storage-helper-build-20261027-02/build-evidence.json",
-      "sanitizationNotes": [
-        "Host workspace/home/temporary paths replaced with <workspace>, <host-home>, <host-temporary>; Docker/container paths are retained.",
-        "Original bytes remain in the local jobs evidence; this publication is not a replayable raw proof.",
-        "The macOS Docker CLI executable path is replaced with <host-docker-cli>; container executable paths remain unchanged."
-      ],
-      "sanitizedCopyBytes": 31190,
-      "sanitizedCopySha256": "b25e89623005452362947ff9b778b394598d8b17ae6d780511552d5df5ff1fa8",
-      "sourcePath": "jobs/checkpoint-storage-helper-build-20261027-02/build-evidence.json"
-    },
-    {
-      "mode": "sanitized-copy",
-      "omittedFields": [],
-      "originalBytes": 33571,
-      "originalSha256": "837f429d61b82e0bd0f27ff066553a792a1563e6ae6319b75bf382273384ef80",
-      "publishedPath": "docs/evidence/checkpoint-storage-helper-build-20261027-03/build-evidence.json",
-      "sanitizationNotes": [
-        "Host workspace/home/temporary paths replaced with <workspace>, <host-home>, <host-temporary>; Docker/container paths are retained.",
-        "Original bytes remain in the local jobs evidence; this publication is not a replayable raw proof.",
-        "The macOS Docker CLI executable path is replaced with <host-docker-cli>; container executable paths remain unchanged."
-      ],
-      "sanitizedCopyBytes": 31188,
-      "sanitizedCopySha256": "3ad63ce39972abb1693a272abb43c01cbcc870b9cd8d5164fa0c3ddade34490a",
-      "sourcePath": "jobs/checkpoint-storage-helper-build-20261027-03/build-evidence.json"
-    },
-    {
-      "mode": "sanitized-copy",
-      "omittedFields": [],
-      "originalBytes": 34517,
-      "originalSha256": "9ab2001ccc55e700a76c12d0ba64d4824d1089d21e85adffa5216d75d8582ecf",
-      "publishedPath": "docs/evidence/checkpoint-storage-helper-build-20261027-04/build-evidence.json",
-      "sanitizationNotes": [
-        "Host workspace/home/temporary paths replaced with <workspace>, <host-home>, <host-temporary>; Docker/container paths are retained.",
-        "Original bytes remain in the local jobs evidence; this publication is not a replayable raw proof.",
-        "The macOS Docker CLI executable path is replaced with <host-docker-cli>; container executable paths remain unchanged."
-      ],
-      "sanitizedCopyBytes": 31934,
-      "sanitizedCopySha256": "2ccfaad7e6749532f53103958945b772473be394e1bd04618b52a63266a1179f",
-      "sourcePath": "jobs/checkpoint-storage-helper-build-20261027-04/build-evidence.json"
-    },
-    {
-      "mode": "sanitized-copy",
-      "omittedFields": [],
-      "originalBytes": 10384,
-      "originalSha256": "ed5814fdee87ce6c0057b5987133dac9d1b15db92cd00b4b6e341e7b6bdb2487",
-      "publishedPath": "docs/evidence/checkpoint-storage-integration-checks-20261027-01/cleanup-check.json",
       "sanitizationNotes": [
         "Host workspace/home/temporary paths replaced with <workspace>, <host-home>, <host-temporary>; Docker/container paths are retained.",
         "Original bytes remain in the local jobs evidence; this publication is not a replayable raw proof."
       ],
-      "sanitizedCopyBytes": 10967,
-      "sanitizedCopySha256": "2fefdd1981f664fda1a45f38e8c6941420f14e2eb3cb2c4b33a2eca2c41dc327",
-      "sourcePath": "jobs/checkpoint-storage-integration-checks-20261027-01/cleanup-check.json"
+      "omittedFields": []
     },
     {
-      "mode": "log-summary",
-      "omittedFields": [],
-      "originalBytes": 56814,
-      "originalSha256": "83cf995849b03dc533bc42e448799cdad9ab01b898ce59560140b43582725fbd",
-      "publishedPath": "docs/evidence/checkpoint-storage-integration-checks-20261027-01/maven-install-04.log.summary.json",
-      "sanitizationNotes": [
-        "Host workspace/home/temporary paths replaced with <workspace>, <host-home>, <host-temporary>; Docker/container paths are retained.",
-        "Original bytes remain in the local jobs evidence; this publication is not a replayable raw proof.",
-        "Only numbered aggregate test/build summary lines are included; no raw Maven/Python/native log is copied."
-      ],
-      "sanitizedCopyBytes": 31049,
-      "sanitizedCopySha256": "eaf974693732400980eb5fcec10e41a78c233ad2fe5d9009e28a6e882d2889d0",
-      "sourcePath": "jobs/checkpoint-storage-integration-checks-20261027-01/maven-install-04.log"
-    },
-    {
-      "mode": "log-summary",
-      "omittedFields": [],
-      "originalBytes": 16571,
-      "originalSha256": "8f2958ac3f1310903d1eb31288ccb0fa533f27e67ac4ff07ede5fe5336b4ba64",
-      "publishedPath": "docs/evidence/checkpoint-storage-integration-checks-20261027-01/maven-install-05.log.summary.json",
-      "sanitizationNotes": [
-        "Host workspace/home/temporary paths replaced with <workspace>, <host-home>, <host-temporary>; Docker/container paths are retained.",
-        "Original bytes remain in the local jobs evidence; this publication is not a replayable raw proof.",
-        "Only numbered aggregate test/build summary lines are included; no raw Maven/Python/native log is copied."
-      ],
-      "sanitizedCopyBytes": 1619,
-      "sanitizedCopySha256": "6763748dc16d71ed59cdd0fdf3447e56755f39602030f0e631a3e712a8b38f6f",
-      "sourcePath": "jobs/checkpoint-storage-integration-checks-20261027-01/maven-install-05.log"
-    },
-    {
-      "mode": "log-summary",
-      "omittedFields": [],
-      "originalBytes": 16045,
-      "originalSha256": "991a45169d4568de71ad92086998570f0c933f39e5b32febefaab82724d4fc0f",
-      "publishedPath": "docs/evidence/checkpoint-storage-integration-checks-20261027-01/maven-install-06.log.summary.json",
-      "sanitizationNotes": [
-        "Host workspace/home/temporary paths replaced with <workspace>, <host-home>, <host-temporary>; Docker/container paths are retained.",
-        "Original bytes remain in the local jobs evidence; this publication is not a replayable raw proof.",
-        "Only numbered aggregate test/build summary lines are included; no raw Maven/Python/native log is copied."
-      ],
-      "sanitizedCopyBytes": 1422,
-      "sanitizedCopySha256": "590a6674bd7789273e4f6bfe7a4b4358cc713a4cf0f8692f49cb5a6b70d5320e",
-      "sourcePath": "jobs/checkpoint-storage-integration-checks-20261027-01/maven-install-06.log"
-    },
-    {
-      "mode": "log-summary",
-      "omittedFields": [],
-      "originalBytes": 16802,
-      "originalSha256": "57b38242ef361338ce3ea9945fc058cf5ede06e8577017cf5ae55922b6b8c322",
-      "publishedPath": "docs/evidence/checkpoint-storage-integration-checks-20261027-01/maven-install-07.log.summary.json",
-      "sanitizationNotes": [
-        "Host workspace/home/temporary paths replaced with <workspace>, <host-home>, <host-temporary>; Docker/container paths are retained.",
-        "Original bytes remain in the local jobs evidence; this publication is not a replayable raw proof.",
-        "Only numbered aggregate test/build summary lines are included; no raw Maven/Python/native log is copied."
-      ],
-      "sanitizedCopyBytes": 1817,
-      "sanitizedCopySha256": "0b9b12b023b98cc5ad66d6301dacc14bccb1fe20a61fa7e26b4fb813b0b3add8",
-      "sourcePath": "jobs/checkpoint-storage-integration-checks-20261027-01/maven-install-07.log"
-    },
-    {
-      "mode": "log-summary",
-      "omittedFields": [],
-      "originalBytes": 51277,
-      "originalSha256": "7d14d4570c493b7f3b0de11ee70abde26f941d98f4426b0657da274c3a92ccae",
-      "publishedPath": "docs/evidence/checkpoint-storage-integration-checks-20261027-01/maven-verify-final.log.summary.json",
-      "sanitizationNotes": [
-        "Host workspace/home/temporary paths replaced with <workspace>, <host-home>, <host-temporary>; Docker/container paths are retained.",
-        "Original bytes remain in the local jobs evidence; this publication is not a replayable raw proof.",
-        "Only numbered aggregate test/build summary lines are included; no raw Maven/Python/native log is copied."
-      ],
-      "sanitizedCopyBytes": 31039,
-      "sanitizedCopySha256": "b58703f46d4a647586c25d6c90d7a33f9a2e23182e1c97252f8bd9cc1339b78b",
-      "sourcePath": "jobs/checkpoint-storage-integration-checks-20261027-01/maven-verify-final.log"
-    },
-    {
-      "mode": "log-summary",
-      "omittedFields": [],
-      "originalBytes": 57496,
-      "originalSha256": "57aa524d1750113a2e84fcbfbd6c8849b84fce97b2ae1f0f9ff96d4be853d3d9",
-      "publishedPath": "docs/evidence/checkpoint-storage-integration-checks-20261027-01/python-unittest.log.summary.json",
-      "sanitizationNotes": [
-        "Host workspace/home/temporary paths replaced with <workspace>, <host-home>, <host-temporary>; Docker/container paths are retained.",
-        "Original bytes remain in the local jobs evidence; this publication is not a replayable raw proof.",
-        "Only numbered aggregate test/build summary lines are included; no raw Maven/Python/native log is copied."
-      ],
-      "sanitizedCopyBytes": 1085,
-      "sanitizedCopySha256": "14aad39af738c86da7e8af8b9921f643d36ca43664a76fa38304d21ccc6ef8c1",
-      "sourcePath": "jobs/checkpoint-storage-integration-checks-20261027-01/python-unittest.log"
-    },
-    {
+      "sourcePath": "jobs/checkpoint-storage-direct-java-pilot-20261027-02/run/stdout.json",
+      "originalSha256": "5aa949dd37be70a691981fab82ce575592c3a38b9e186e4662580aeed41f511c",
+      "originalBytes": 8035044,
+      "publishedPath": "docs/evidence/checkpoint-storage-direct-java-pilot-20261027-02/run/stdout.summary.json",
+      "sanitizedCopySha256": "7ffad2e98f55d3f0bbf869237ec3e9460e88467b756362de3b5413247ea19297",
+      "sanitizedCopyBytes": 32605,
       "mode": "sanitized-projection",
-      "omittedFields": [
-        {
-          "jsonPointer": "/evidence/kafkaLogs",
-          "kind": "non-selected-evidence"
-        },
-        {
-          "jsonPointer": "/evidence/savepointRestores",
-          "kind": "non-selected-evidence"
-        },
-        {
-          "jsonPointer": "/evidence/flinkHa",
-          "kind": "non-selected-evidence"
-        },
-        {
-          "jsonPointer": "/evidence/kafkaTransactionVersion",
-          "kind": "non-selected-evidence"
-        },
-        {
-          "jsonPointer": "/evidence/packetFaults",
-          "kind": "non-selected-evidence"
-        },
-        {
-          "jsonPointer": "/evidence/brokerOperations",
-          "kind": "non-selected-evidence"
-        },
-        {
-          "jsonPointer": "/evidence/networkFaults",
-          "kind": "non-selected-evidence"
-        },
-        {
-          "items": 0,
-          "jsonPointer": "/evidence/stateRecovery/trace/markers",
-          "kind": "array"
-        },
-        {
-          "items": 0,
-          "jsonPointer": "/evidence/stateRecovery/readinessAttempts",
-          "kind": "detailed-readiness"
-        },
-        {
-          "items": 10,
-          "jsonPointer": "/evidence/checkpointStorage/instances/0/operations",
-          "kind": "array"
-        },
-        {
-          "items": 0,
-          "jsonPointer": "/evidence/checkpointStorage/instances/0/commands",
-          "kind": "array"
-        }
-      ],
-      "originalBytes": 16950,
-      "originalSha256": "c86d2d7df20985ee0bf4e36df83cdfc4b5eb8e114021d15557b2c0ca887a2617",
-      "publishedPath": "docs/evidence/checkpoint-storage-integration-pilots-20261027-01/attempts/healthy-fuse/run/pilot-01/stdout.summary.json",
       "sanitizationNotes": [
         "Host workspace/home/temporary paths replaced with <workspace>, <host-home>, <host-temporary>; Docker/container paths are retained.",
         "Original bytes remain in the local jobs evidence; this publication is not a replayable raw proof.",
         "Detailed omitted fields are listed in publicationOmissions; counts, verdicts, diagnostics and component events are retained."
       ],
-      "sanitizedCopyBytes": 15662,
-      "sanitizedCopySha256": "d8d8052b89dc6adf0b9cfa2bfc74ee74f91530366b7f34f0ad604c28ddd1fe32",
-      "sourcePath": "jobs/checkpoint-storage-integration-pilots-20261027-01/attempts/healthy-fuse/run/pilot-01/stdout.json"
-    },
-    {
-      "mode": "sanitized-projection",
       "omittedFields": [
         {
           "jsonPointer": "/evidence/kafkaLogs",
@@ -382,34 +88,34 @@
           "kind": "non-selected-evidence"
         },
         {
-          "items": 36,
           "jsonPointer": "/evidence/stateRecovery/trace/markers",
-          "kind": "array"
+          "kind": "array",
+          "items": 42
         },
         {
-          "items": 0,
           "jsonPointer": "/evidence/stateRecovery/readinessAttempts",
-          "kind": "detailed-readiness"
+          "kind": "detailed-readiness",
+          "items": 0
         },
         {
-          "items": 9187,
           "jsonPointer": "/evidence/checkpointStorage/instances/0/operations",
-          "kind": "array"
+          "kind": "array",
+          "items": 10371
         },
         {
-          "items": 1,
           "jsonPointer": "/evidence/checkpointStorage/instances/0/commands",
-          "kind": "array"
+          "kind": "array",
+          "items": 1
         },
         {
-          "items": 2369,
           "jsonPointer": "/evidence/checkpointStorage/instances/1/operations",
-          "kind": "array"
+          "kind": "array",
+          "items": 2630
         },
         {
-          "items": 1,
           "jsonPointer": "/evidence/checkpointStorage/instances/1/commands",
-          "kind": "array"
+          "kind": "array",
+          "items": 1
         },
         {
           "jsonPointer": "/evidence/checkpointStorage/instances/1/verification/jvmCommand",
@@ -417,21 +123,185 @@
           "originalCharacters": 4241,
           "publishedCharacters": 2048
         }
+      ]
+    },
+    {
+      "sourcePath": "jobs/checkpoint-storage-helper-build-20261027-01/build-evidence.json",
+      "originalSha256": "6e9ba4ad5624542ae6106ef061ef877ccf2f98958163e08d5e823a1c2296d948",
+      "originalBytes": 33573,
+      "publishedPath": "docs/evidence/checkpoint-storage-helper-build-20261027-01/build-evidence.json",
+      "sanitizedCopySha256": "ced5b6894dc3d7f90c83d4c61d89643f0f3dc33970a84cde259c963af4b23ed8",
+      "sanitizedCopyBytes": 31190,
+      "mode": "sanitized-copy",
+      "sanitizationNotes": [
+        "Host workspace/home/temporary paths replaced with <workspace>, <host-home>, <host-temporary>; Docker/container paths are retained.",
+        "Original bytes remain in the local jobs evidence; this publication is not a replayable raw proof.",
+        "The macOS Docker CLI executable path is replaced with <host-docker-cli>; container executable paths remain unchanged."
       ],
-      "originalBytes": 7135084,
-      "originalSha256": "6187de79a2bba3b404ea12417ed39314ea75d952a06bfc61aac3bfecbf9576e3",
-      "publishedPath": "docs/evidence/checkpoint-storage-integration-pilots-20261027-01/attempts/healthy-fuse/run/pilot-02/stdout.summary.json",
+      "omittedFields": []
+    },
+    {
+      "sourcePath": "jobs/checkpoint-storage-helper-build-20261027-02/build-evidence.json",
+      "originalSha256": "20b50a0fce2bd25a9cd5fb3ecd1ab58d0d30ac74713f17426a7655eaf795ac26",
+      "originalBytes": 33573,
+      "publishedPath": "docs/evidence/checkpoint-storage-helper-build-20261027-02/build-evidence.json",
+      "sanitizedCopySha256": "b25e89623005452362947ff9b778b394598d8b17ae6d780511552d5df5ff1fa8",
+      "sanitizedCopyBytes": 31190,
+      "mode": "sanitized-copy",
+      "sanitizationNotes": [
+        "Host workspace/home/temporary paths replaced with <workspace>, <host-home>, <host-temporary>; Docker/container paths are retained.",
+        "Original bytes remain in the local jobs evidence; this publication is not a replayable raw proof.",
+        "The macOS Docker CLI executable path is replaced with <host-docker-cli>; container executable paths remain unchanged."
+      ],
+      "omittedFields": []
+    },
+    {
+      "sourcePath": "jobs/checkpoint-storage-helper-build-20261027-03/build-evidence.json",
+      "originalSha256": "837f429d61b82e0bd0f27ff066553a792a1563e6ae6319b75bf382273384ef80",
+      "originalBytes": 33571,
+      "publishedPath": "docs/evidence/checkpoint-storage-helper-build-20261027-03/build-evidence.json",
+      "sanitizedCopySha256": "3ad63ce39972abb1693a272abb43c01cbcc870b9cd8d5164fa0c3ddade34490a",
+      "sanitizedCopyBytes": 31188,
+      "mode": "sanitized-copy",
+      "sanitizationNotes": [
+        "Host workspace/home/temporary paths replaced with <workspace>, <host-home>, <host-temporary>; Docker/container paths are retained.",
+        "Original bytes remain in the local jobs evidence; this publication is not a replayable raw proof.",
+        "The macOS Docker CLI executable path is replaced with <host-docker-cli>; container executable paths remain unchanged."
+      ],
+      "omittedFields": []
+    },
+    {
+      "sourcePath": "jobs/checkpoint-storage-helper-build-20261027-04/build-evidence.json",
+      "originalSha256": "9ab2001ccc55e700a76c12d0ba64d4824d1089d21e85adffa5216d75d8582ecf",
+      "originalBytes": 34517,
+      "publishedPath": "docs/evidence/checkpoint-storage-helper-build-20261027-04/build-evidence.json",
+      "sanitizedCopySha256": "2ccfaad7e6749532f53103958945b772473be394e1bd04618b52a63266a1179f",
+      "sanitizedCopyBytes": 31934,
+      "mode": "sanitized-copy",
+      "sanitizationNotes": [
+        "Host workspace/home/temporary paths replaced with <workspace>, <host-home>, <host-temporary>; Docker/container paths are retained.",
+        "Original bytes remain in the local jobs evidence; this publication is not a replayable raw proof.",
+        "The macOS Docker CLI executable path is replaced with <host-docker-cli>; container executable paths remain unchanged."
+      ],
+      "omittedFields": []
+    },
+    {
+      "sourcePath": "jobs/checkpoint-storage-integration-checks-20261027-01/cleanup-check.json",
+      "originalSha256": "ed5814fdee87ce6c0057b5987133dac9d1b15db92cd00b4b6e341e7b6bdb2487",
+      "originalBytes": 10384,
+      "publishedPath": "docs/evidence/checkpoint-storage-integration-checks-20261027-01/cleanup-check.json",
+      "sanitizedCopySha256": "2fefdd1981f664fda1a45f38e8c6941420f14e2eb3cb2c4b33a2eca2c41dc327",
+      "sanitizedCopyBytes": 10967,
+      "mode": "sanitized-copy",
+      "sanitizationNotes": [
+        "Host workspace/home/temporary paths replaced with <workspace>, <host-home>, <host-temporary>; Docker/container paths are retained.",
+        "Original bytes remain in the local jobs evidence; this publication is not a replayable raw proof."
+      ],
+      "omittedFields": []
+    },
+    {
+      "sourcePath": "jobs/checkpoint-storage-integration-checks-20261027-01/maven-install-04.log",
+      "originalSha256": "83cf995849b03dc533bc42e448799cdad9ab01b898ce59560140b43582725fbd",
+      "originalBytes": 56814,
+      "publishedPath": "docs/evidence/checkpoint-storage-integration-checks-20261027-01/maven-install-04.log.summary.json",
+      "sanitizedCopySha256": "eaf974693732400980eb5fcec10e41a78c233ad2fe5d9009e28a6e882d2889d0",
+      "sanitizedCopyBytes": 31049,
+      "mode": "log-summary",
+      "sanitizationNotes": [
+        "Host workspace/home/temporary paths replaced with <workspace>, <host-home>, <host-temporary>; Docker/container paths are retained.",
+        "Original bytes remain in the local jobs evidence; this publication is not a replayable raw proof.",
+        "Only numbered aggregate test/build summary lines are included; no raw Maven/Python/native log is copied."
+      ],
+      "omittedFields": []
+    },
+    {
+      "sourcePath": "jobs/checkpoint-storage-integration-checks-20261027-01/maven-install-05.log",
+      "originalSha256": "8f2958ac3f1310903d1eb31288ccb0fa533f27e67ac4ff07ede5fe5336b4ba64",
+      "originalBytes": 16571,
+      "publishedPath": "docs/evidence/checkpoint-storage-integration-checks-20261027-01/maven-install-05.log.summary.json",
+      "sanitizedCopySha256": "6763748dc16d71ed59cdd0fdf3447e56755f39602030f0e631a3e712a8b38f6f",
+      "sanitizedCopyBytes": 1619,
+      "mode": "log-summary",
+      "sanitizationNotes": [
+        "Host workspace/home/temporary paths replaced with <workspace>, <host-home>, <host-temporary>; Docker/container paths are retained.",
+        "Original bytes remain in the local jobs evidence; this publication is not a replayable raw proof.",
+        "Only numbered aggregate test/build summary lines are included; no raw Maven/Python/native log is copied."
+      ],
+      "omittedFields": []
+    },
+    {
+      "sourcePath": "jobs/checkpoint-storage-integration-checks-20261027-01/maven-install-06.log",
+      "originalSha256": "991a45169d4568de71ad92086998570f0c933f39e5b32febefaab82724d4fc0f",
+      "originalBytes": 16045,
+      "publishedPath": "docs/evidence/checkpoint-storage-integration-checks-20261027-01/maven-install-06.log.summary.json",
+      "sanitizedCopySha256": "590a6674bd7789273e4f6bfe7a4b4358cc713a4cf0f8692f49cb5a6b70d5320e",
+      "sanitizedCopyBytes": 1422,
+      "mode": "log-summary",
+      "sanitizationNotes": [
+        "Host workspace/home/temporary paths replaced with <workspace>, <host-home>, <host-temporary>; Docker/container paths are retained.",
+        "Original bytes remain in the local jobs evidence; this publication is not a replayable raw proof.",
+        "Only numbered aggregate test/build summary lines are included; no raw Maven/Python/native log is copied."
+      ],
+      "omittedFields": []
+    },
+    {
+      "sourcePath": "jobs/checkpoint-storage-integration-checks-20261027-01/maven-install-07.log",
+      "originalSha256": "57b38242ef361338ce3ea9945fc058cf5ede06e8577017cf5ae55922b6b8c322",
+      "originalBytes": 16802,
+      "publishedPath": "docs/evidence/checkpoint-storage-integration-checks-20261027-01/maven-install-07.log.summary.json",
+      "sanitizedCopySha256": "0b9b12b023b98cc5ad66d6301dacc14bccb1fe20a61fa7e26b4fb813b0b3add8",
+      "sanitizedCopyBytes": 1817,
+      "mode": "log-summary",
+      "sanitizationNotes": [
+        "Host workspace/home/temporary paths replaced with <workspace>, <host-home>, <host-temporary>; Docker/container paths are retained.",
+        "Original bytes remain in the local jobs evidence; this publication is not a replayable raw proof.",
+        "Only numbered aggregate test/build summary lines are included; no raw Maven/Python/native log is copied."
+      ],
+      "omittedFields": []
+    },
+    {
+      "sourcePath": "jobs/checkpoint-storage-integration-checks-20261027-01/maven-verify-final.log",
+      "originalSha256": "7d14d4570c493b7f3b0de11ee70abde26f941d98f4426b0657da274c3a92ccae",
+      "originalBytes": 51277,
+      "publishedPath": "docs/evidence/checkpoint-storage-integration-checks-20261027-01/maven-verify-final.log.summary.json",
+      "sanitizedCopySha256": "b58703f46d4a647586c25d6c90d7a33f9a2e23182e1c97252f8bd9cc1339b78b",
+      "sanitizedCopyBytes": 31039,
+      "mode": "log-summary",
+      "sanitizationNotes": [
+        "Host workspace/home/temporary paths replaced with <workspace>, <host-home>, <host-temporary>; Docker/container paths are retained.",
+        "Original bytes remain in the local jobs evidence; this publication is not a replayable raw proof.",
+        "Only numbered aggregate test/build summary lines are included; no raw Maven/Python/native log is copied."
+      ],
+      "omittedFields": []
+    },
+    {
+      "sourcePath": "jobs/checkpoint-storage-integration-checks-20261027-01/python-unittest.log",
+      "originalSha256": "57aa524d1750113a2e84fcbfbd6c8849b84fce97b2ae1f0f9ff96d4be853d3d9",
+      "originalBytes": 57496,
+      "publishedPath": "docs/evidence/checkpoint-storage-integration-checks-20261027-01/python-unittest.log.summary.json",
+      "sanitizedCopySha256": "14aad39af738c86da7e8af8b9921f643d36ca43664a76fa38304d21ccc6ef8c1",
+      "sanitizedCopyBytes": 1085,
+      "mode": "log-summary",
+      "sanitizationNotes": [
+        "Host workspace/home/temporary paths replaced with <workspace>, <host-home>, <host-temporary>; Docker/container paths are retained.",
+        "Original bytes remain in the local jobs evidence; this publication is not a replayable raw proof.",
+        "Only numbered aggregate test/build summary lines are included; no raw Maven/Python/native log is copied."
+      ],
+      "omittedFields": []
+    },
+    {
+      "sourcePath": "jobs/checkpoint-storage-integration-pilots-20261027-01/attempts/healthy-fuse/run/pilot-01/stdout.json",
+      "originalSha256": "c86d2d7df20985ee0bf4e36df83cdfc4b5eb8e114021d15557b2c0ca887a2617",
+      "originalBytes": 16950,
+      "publishedPath": "docs/evidence/checkpoint-storage-integration-pilots-20261027-01/attempts/healthy-fuse/run/pilot-01/stdout.summary.json",
+      "sanitizedCopySha256": "d8d8052b89dc6adf0b9cfa2bfc74ee74f91530366b7f34f0ad604c28ddd1fe32",
+      "sanitizedCopyBytes": 15662,
+      "mode": "sanitized-projection",
       "sanitizationNotes": [
         "Host workspace/home/temporary paths replaced with <workspace>, <host-home>, <host-temporary>; Docker/container paths are retained.",
         "Original bytes remain in the local jobs evidence; this publication is not a replayable raw proof.",
         "Detailed omitted fields are listed in publicationOmissions; counts, verdicts, diagnostics and component events are retained."
       ],
-      "sanitizedCopyBytes": 30692,
-      "sanitizedCopySha256": "3a0da2423e5d6d1858e61cf306f8a82291ca8c4ddeb631f1295472f3b361c96f",
-      "sourcePath": "jobs/checkpoint-storage-integration-pilots-20261027-01/attempts/healthy-fuse/run/pilot-02/stdout.json"
-    },
-    {
-      "mode": "sanitized-projection",
       "omittedFields": [
         {
           "jsonPointer": "/evidence/kafkaLogs",
@@ -462,94 +332,238 @@
           "kind": "non-selected-evidence"
         },
         {
-          "items": 84,
           "jsonPointer": "/evidence/stateRecovery/trace/markers",
-          "kind": "array"
+          "kind": "array",
+          "items": 0
         },
         {
-          "items": 1,
           "jsonPointer": "/evidence/stateRecovery/readinessAttempts",
-          "kind": "detailed-readiness"
+          "kind": "detailed-readiness",
+          "items": 0
         },
         {
-          "items": 3287,
           "jsonPointer": "/evidence/checkpointStorage/instances/0/operations",
-          "kind": "array"
+          "kind": "array",
+          "items": 10
         },
         {
-          "items": 6,
           "jsonPointer": "/evidence/checkpointStorage/instances/0/commands",
-          "kind": "array"
+          "kind": "array",
+          "items": 0
+        }
+      ]
+    },
+    {
+      "sourcePath": "jobs/checkpoint-storage-integration-pilots-20261027-01/attempts/healthy-fuse/run/pilot-02/stdout.json",
+      "originalSha256": "6187de79a2bba3b404ea12417ed39314ea75d952a06bfc61aac3bfecbf9576e3",
+      "originalBytes": 7135084,
+      "publishedPath": "docs/evidence/checkpoint-storage-integration-pilots-20261027-01/attempts/healthy-fuse/run/pilot-02/stdout.summary.json",
+      "sanitizedCopySha256": "3a0da2423e5d6d1858e61cf306f8a82291ca8c4ddeb631f1295472f3b361c96f",
+      "sanitizedCopyBytes": 30692,
+      "mode": "sanitized-projection",
+      "sanitizationNotes": [
+        "Host workspace/home/temporary paths replaced with <workspace>, <host-home>, <host-temporary>; Docker/container paths are retained.",
+        "Original bytes remain in the local jobs evidence; this publication is not a replayable raw proof.",
+        "Detailed omitted fields are listed in publicationOmissions; counts, verdicts, diagnostics and component events are retained."
+      ],
+      "omittedFields": [
+        {
+          "jsonPointer": "/evidence/kafkaLogs",
+          "kind": "non-selected-evidence"
         },
         {
-          "items": 19484,
+          "jsonPointer": "/evidence/savepointRestores",
+          "kind": "non-selected-evidence"
+        },
+        {
+          "jsonPointer": "/evidence/flinkHa",
+          "kind": "non-selected-evidence"
+        },
+        {
+          "jsonPointer": "/evidence/kafkaTransactionVersion",
+          "kind": "non-selected-evidence"
+        },
+        {
+          "jsonPointer": "/evidence/packetFaults",
+          "kind": "non-selected-evidence"
+        },
+        {
+          "jsonPointer": "/evidence/brokerOperations",
+          "kind": "non-selected-evidence"
+        },
+        {
+          "jsonPointer": "/evidence/networkFaults",
+          "kind": "non-selected-evidence"
+        },
+        {
+          "jsonPointer": "/evidence/stateRecovery/trace/markers",
+          "kind": "array",
+          "items": 36
+        },
+        {
+          "jsonPointer": "/evidence/stateRecovery/readinessAttempts",
+          "kind": "detailed-readiness",
+          "items": 0
+        },
+        {
+          "jsonPointer": "/evidence/checkpointStorage/instances/0/operations",
+          "kind": "array",
+          "items": 9187
+        },
+        {
+          "jsonPointer": "/evidence/checkpointStorage/instances/0/commands",
+          "kind": "array",
+          "items": 1
+        },
+        {
           "jsonPointer": "/evidence/checkpointStorage/instances/1/operations",
-          "kind": "array"
+          "kind": "array",
+          "items": 2369
         },
         {
-          "items": 6,
           "jsonPointer": "/evidence/checkpointStorage/instances/1/commands",
-          "kind": "array"
+          "kind": "array",
+          "items": 1
         },
         {
-          "items": 1206,
+          "jsonPointer": "/evidence/checkpointStorage/instances/1/verification/jvmCommand",
+          "kind": "long-text-excerpt",
+          "originalCharacters": 4241,
+          "publishedCharacters": 2048
+        }
+      ]
+    },
+    {
+      "sourcePath": "jobs/checkpoint-storage-integration-pilots-20261027-02/attempts/correct-eio/run/pilot-01/stdout.json",
+      "originalSha256": "f145b0c07873a7ed839fdaedd6dd9d7dd7abe174e5d529dc0cdbc91b2381deee",
+      "originalBytes": 17553981,
+      "publishedPath": "docs/evidence/checkpoint-storage-integration-pilots-20261027-02/attempts/correct-eio/run/pilot-01/stdout.summary.json",
+      "sanitizedCopySha256": "a8e24fdfdd3246874dcb39cef870211cc3676fbe51e51bd2ff12527a302c2b93",
+      "sanitizedCopyBytes": 76304,
+      "mode": "sanitized-projection",
+      "sanitizationNotes": [
+        "Host workspace/home/temporary paths replaced with <workspace>, <host-home>, <host-temporary>; Docker/container paths are retained.",
+        "Original bytes remain in the local jobs evidence; this publication is not a replayable raw proof.",
+        "Detailed omitted fields are listed in publicationOmissions; counts, verdicts, diagnostics and component events are retained."
+      ],
+      "omittedFields": [
+        {
+          "jsonPointer": "/evidence/kafkaLogs",
+          "kind": "non-selected-evidence"
+        },
+        {
+          "jsonPointer": "/evidence/savepointRestores",
+          "kind": "non-selected-evidence"
+        },
+        {
+          "jsonPointer": "/evidence/flinkHa",
+          "kind": "non-selected-evidence"
+        },
+        {
+          "jsonPointer": "/evidence/kafkaTransactionVersion",
+          "kind": "non-selected-evidence"
+        },
+        {
+          "jsonPointer": "/evidence/packetFaults",
+          "kind": "non-selected-evidence"
+        },
+        {
+          "jsonPointer": "/evidence/brokerOperations",
+          "kind": "non-selected-evidence"
+        },
+        {
+          "jsonPointer": "/evidence/networkFaults",
+          "kind": "non-selected-evidence"
+        },
+        {
+          "jsonPointer": "/evidence/stateRecovery/trace/markers",
+          "kind": "array",
+          "items": 84
+        },
+        {
+          "jsonPointer": "/evidence/stateRecovery/readinessAttempts",
+          "kind": "detailed-readiness",
+          "items": 1
+        },
+        {
+          "jsonPointer": "/evidence/checkpointStorage/instances/0/operations",
+          "kind": "array",
+          "items": 3287
+        },
+        {
+          "jsonPointer": "/evidence/checkpointStorage/instances/0/commands",
+          "kind": "array",
+          "items": 6
+        },
+        {
+          "jsonPointer": "/evidence/checkpointStorage/instances/1/operations",
+          "kind": "array",
+          "items": 19484
+        },
+        {
+          "jsonPointer": "/evidence/checkpointStorage/instances/1/commands",
+          "kind": "array",
+          "items": 6
+        },
+        {
           "jsonPointer": "/evidence/checkpointStorageFaults/0/samples/0/storage/instances/0/operations",
-          "kind": "array"
+          "kind": "array",
+          "items": 1206
         },
         {
-          "items": 2,
           "jsonPointer": "/evidence/checkpointStorageFaults/0/samples/0/storage/instances/0/commands",
-          "kind": "array"
+          "kind": "array",
+          "items": 2
         },
         {
-          "items": 274,
           "jsonPointer": "/evidence/checkpointStorageFaults/0/samples/0/storage/instances/1/operations",
-          "kind": "array"
+          "kind": "array",
+          "items": 274
         },
         {
-          "items": 2,
           "jsonPointer": "/evidence/checkpointStorageFaults/0/samples/0/storage/instances/1/commands",
-          "kind": "array"
+          "kind": "array",
+          "items": 2
         },
         {
-          "items": 1208,
           "jsonPointer": "/evidence/checkpointStorageFaults/0/samples/1/storage/instances/0/operations",
-          "kind": "array"
+          "kind": "array",
+          "items": 1208
         },
         {
-          "items": 4,
           "jsonPointer": "/evidence/checkpointStorageFaults/0/samples/1/storage/instances/0/commands",
-          "kind": "array"
+          "kind": "array",
+          "items": 4
         },
         {
-          "items": 276,
           "jsonPointer": "/evidence/checkpointStorageFaults/0/samples/1/storage/instances/1/operations",
-          "kind": "array"
+          "kind": "array",
+          "items": 276
         },
         {
-          "items": 4,
           "jsonPointer": "/evidence/checkpointStorageFaults/0/samples/1/storage/instances/1/commands",
-          "kind": "array"
+          "kind": "array",
+          "items": 4
         },
         {
-          "items": 1276,
           "jsonPointer": "/evidence/checkpointStorageFaults/0/samples/2/storage/instances/0/operations",
-          "kind": "array"
+          "kind": "array",
+          "items": 1276
         },
         {
-          "items": 5,
           "jsonPointer": "/evidence/checkpointStorageFaults/0/samples/2/storage/instances/0/commands",
-          "kind": "array"
+          "kind": "array",
+          "items": 5
         },
         {
-          "items": 777,
           "jsonPointer": "/evidence/checkpointStorageFaults/0/samples/2/storage/instances/1/operations",
-          "kind": "array"
+          "kind": "array",
+          "items": 777
         },
         {
-          "items": 5,
           "jsonPointer": "/evidence/checkpointStorageFaults/0/samples/2/storage/instances/1/commands",
-          "kind": "array"
+          "kind": "array",
+          "items": 5
         },
         {
           "jsonPointer": "/evidence/checkpointStorage/instances/1/verification/jvmCommand",
@@ -578,21 +592,21 @@
           "kind": "stage-storage-summary",
           "omitted": "duplicate verification, paths, materialization and command/operation arrays"
         }
-      ],
-      "originalBytes": 17553981,
-      "originalSha256": "f145b0c07873a7ed839fdaedd6dd9d7dd7abe174e5d529dc0cdbc91b2381deee",
-      "publishedPath": "docs/evidence/checkpoint-storage-integration-pilots-20261027-02/attempts/correct-eio/run/pilot-01/stdout.summary.json",
+      ]
+    },
+    {
+      "sourcePath": "jobs/checkpoint-storage-integration-pilots-20261027-02/attempts/correct-eio/run/pilot-02/stdout.json",
+      "originalSha256": "3488c465a17f86444b80106fac70d2e06511b3b9cf9d2a9fabd77b22c29e0ca8",
+      "originalBytes": 4265545,
+      "publishedPath": "docs/evidence/checkpoint-storage-integration-pilots-20261027-02/attempts/correct-eio/run/pilot-02/stdout.summary.json",
+      "sanitizedCopySha256": "97f739d6f1ed8f67adde8d5c4dda187378eff58de527712877402db70821ac84",
+      "sanitizedCopyBytes": 90230,
+      "mode": "sanitized-projection",
       "sanitizationNotes": [
         "Host workspace/home/temporary paths replaced with <workspace>, <host-home>, <host-temporary>; Docker/container paths are retained.",
         "Original bytes remain in the local jobs evidence; this publication is not a replayable raw proof.",
         "Detailed omitted fields are listed in publicationOmissions; counts, verdicts, diagnostics and component events are retained."
       ],
-      "sanitizedCopyBytes": 76304,
-      "sanitizedCopySha256": "a8e24fdfdd3246874dcb39cef870211cc3676fbe51e51bd2ff12527a302c2b93",
-      "sourcePath": "jobs/checkpoint-storage-integration-pilots-20261027-02/attempts/correct-eio/run/pilot-01/stdout.json"
-    },
-    {
-      "mode": "sanitized-projection",
       "omittedFields": [
         {
           "jsonPointer": "/evidence/kafkaLogs",
@@ -623,123 +637,123 @@
           "kind": "non-selected-evidence"
         },
         {
-          "items": 6,
           "jsonPointer": "/evidence/stateRecovery/trace/markers",
-          "kind": "array"
+          "kind": "array",
+          "items": 6
         },
         {
-          "items": 1,
           "jsonPointer": "/evidence/stateRecovery/readinessAttempts",
-          "kind": "detailed-readiness"
+          "kind": "detailed-readiness",
+          "items": 1
         },
         {
           "jsonPointer": "/evidence/stateRecovery/recoveries/0/readiness",
           "kind": "duplicate-readiness"
         },
         {
-          "items": 1032,
           "jsonPointer": "/evidence/checkpointStorage/instances/0/operations",
-          "kind": "array"
+          "kind": "array",
+          "items": 1032
         },
         {
-          "items": 8,
           "jsonPointer": "/evidence/checkpointStorage/instances/0/commands",
-          "kind": "array"
+          "kind": "array",
+          "items": 8
         },
         {
-          "items": 647,
           "jsonPointer": "/evidence/checkpointStorage/instances/1/operations",
-          "kind": "array"
+          "kind": "array",
+          "items": 647
         },
         {
-          "items": 6,
           "jsonPointer": "/evidence/checkpointStorage/instances/1/commands",
-          "kind": "array"
+          "kind": "array",
+          "items": 6
         },
         {
-          "items": 6,
           "jsonPointer": "/evidence/checkpointStorageFaults/0/failureTrace/markers",
-          "kind": "array"
+          "kind": "array",
+          "items": 6
         },
         {
-          "items": 691,
           "jsonPointer": "/evidence/checkpointStorageFaults/0/samples/0/storage/instances/0/operations",
-          "kind": "array"
+          "kind": "array",
+          "items": 691
         },
         {
-          "items": 2,
           "jsonPointer": "/evidence/checkpointStorageFaults/0/samples/0/storage/instances/0/commands",
-          "kind": "array"
+          "kind": "array",
+          "items": 2
         },
         {
-          "items": 143,
           "jsonPointer": "/evidence/checkpointStorageFaults/0/samples/0/storage/instances/1/operations",
-          "kind": "array"
+          "kind": "array",
+          "items": 143
         },
         {
-          "items": 2,
           "jsonPointer": "/evidence/checkpointStorageFaults/0/samples/0/storage/instances/1/commands",
-          "kind": "array"
+          "kind": "array",
+          "items": 2
         },
         {
-          "items": 693,
           "jsonPointer": "/evidence/checkpointStorageFaults/0/samples/1/storage/instances/0/operations",
-          "kind": "array"
+          "kind": "array",
+          "items": 693
         },
         {
-          "items": 4,
           "jsonPointer": "/evidence/checkpointStorageFaults/0/samples/1/storage/instances/0/commands",
-          "kind": "array"
+          "kind": "array",
+          "items": 4
         },
         {
-          "items": 145,
           "jsonPointer": "/evidence/checkpointStorageFaults/0/samples/1/storage/instances/1/operations",
-          "kind": "array"
+          "kind": "array",
+          "items": 145
         },
         {
-          "items": 4,
           "jsonPointer": "/evidence/checkpointStorageFaults/0/samples/1/storage/instances/1/commands",
-          "kind": "array"
+          "kind": "array",
+          "items": 4
         },
         {
-          "items": 762,
           "jsonPointer": "/evidence/checkpointStorageFaults/0/samples/2/storage/instances/0/operations",
-          "kind": "array"
+          "kind": "array",
+          "items": 762
         },
         {
-          "items": 6,
           "jsonPointer": "/evidence/checkpointStorageFaults/0/samples/2/storage/instances/0/commands",
-          "kind": "array"
+          "kind": "array",
+          "items": 6
         },
         {
-          "items": 647,
           "jsonPointer": "/evidence/checkpointStorageFaults/0/samples/2/storage/instances/1/operations",
-          "kind": "array"
+          "kind": "array",
+          "items": 647
         },
         {
-          "items": 6,
           "jsonPointer": "/evidence/checkpointStorageFaults/0/samples/2/storage/instances/1/commands",
-          "kind": "array"
+          "kind": "array",
+          "items": 6
         },
         {
-          "items": 1031,
           "jsonPointer": "/evidence/checkpointStorageFaults/0/samples/3/storage/instances/0/operations",
-          "kind": "array"
+          "kind": "array",
+          "items": 1031
         },
         {
-          "items": 7,
           "jsonPointer": "/evidence/checkpointStorageFaults/0/samples/3/storage/instances/0/commands",
-          "kind": "array"
+          "kind": "array",
+          "items": 7
         },
         {
-          "items": 647,
           "jsonPointer": "/evidence/checkpointStorageFaults/0/samples/3/storage/instances/1/operations",
-          "kind": "array"
+          "kind": "array",
+          "items": 647
         },
         {
-          "items": 6,
           "jsonPointer": "/evidence/checkpointStorageFaults/0/samples/3/storage/instances/1/commands",
-          "kind": "array"
+          "kind": "array",
+          "items": 6
         },
         {
           "jsonPointer": "/evidence/checkpointStorage/instances/1/verification/jvmCommand",
@@ -773,46 +787,46 @@
           "kind": "stage-storage-summary",
           "omitted": "duplicate verification, paths, materialization and command/operation arrays"
         }
+      ]
+    },
+    {
+      "sourcePath": "jobs/checkpoint-storage-integration-pilots-20261027-02/attempts/correct-eio/run/pilot-03/framework/manifest.json",
+      "originalSha256": "13a7a79f53b0420a879ee050c7a2f7ccf0da9bcf5f80194a860c1755261b2f7c",
+      "originalBytes": 185615,
+      "publishedPath": "docs/evidence/checkpoint-storage-integration-pilots-20261027-02/attempts/correct-eio/run/pilot-03/framework/manifest.summary.json",
+      "sanitizedCopySha256": "808e7f081a872768cc5603911c027edd397e8115e904efe0294227c98543bd3e",
+      "sanitizedCopyBytes": 3348,
+      "mode": "sanitized-projection",
+      "sanitizationNotes": [
+        "Host workspace/home/temporary paths replaced with <workspace>, <host-home>, <host-temporary>; Docker/container paths are retained.",
+        "Original bytes remain in the local jobs evidence; this publication is not a replayable raw proof."
       ],
-      "originalBytes": 4265545,
-      "originalSha256": "3488c465a17f86444b80106fac70d2e06511b3b9cf9d2a9fabd77b22c29e0ca8",
-      "publishedPath": "docs/evidence/checkpoint-storage-integration-pilots-20261027-02/attempts/correct-eio/run/pilot-02/stdout.summary.json",
+      "omittedFields": [
+        {
+          "jsonPointer": "/sourceSha256",
+          "kind": "hash-inventory",
+          "entries": 295
+        },
+        {
+          "jsonPointer": "/targetClassesSha256",
+          "kind": "hash-inventory",
+          "entries": 752
+        }
+      ]
+    },
+    {
+      "sourcePath": "jobs/checkpoint-storage-integration-pilots-20261027-02/attempts/correct-eio/run/pilot-03/stdout.json",
+      "originalSha256": "e9625a6a0cfe4f5e828a5b251479c0dad01d608e07c9711682a21fa472aab03a",
+      "originalBytes": 17659385,
+      "publishedPath": "docs/evidence/checkpoint-storage-integration-pilots-20261027-02/attempts/correct-eio/run/pilot-03/stdout.summary.json",
+      "sanitizedCopySha256": "fe2062040ebb2abe59264f3315e2da8b3e96294edd91f32469ee372f4a731b2a",
+      "sanitizedCopyBytes": 146938,
+      "mode": "sanitized-projection",
       "sanitizationNotes": [
         "Host workspace/home/temporary paths replaced with <workspace>, <host-home>, <host-temporary>; Docker/container paths are retained.",
         "Original bytes remain in the local jobs evidence; this publication is not a replayable raw proof.",
         "Detailed omitted fields are listed in publicationOmissions; counts, verdicts, diagnostics and component events are retained."
       ],
-      "sanitizedCopyBytes": 90230,
-      "sanitizedCopySha256": "97f739d6f1ed8f67adde8d5c4dda187378eff58de527712877402db70821ac84",
-      "sourcePath": "jobs/checkpoint-storage-integration-pilots-20261027-02/attempts/correct-eio/run/pilot-02/stdout.json"
-    },
-    {
-      "mode": "sanitized-projection",
-      "omittedFields": [
-        {
-          "entries": 295,
-          "jsonPointer": "/sourceSha256",
-          "kind": "hash-inventory"
-        },
-        {
-          "entries": 752,
-          "jsonPointer": "/targetClassesSha256",
-          "kind": "hash-inventory"
-        }
-      ],
-      "originalBytes": 185615,
-      "originalSha256": "13a7a79f53b0420a879ee050c7a2f7ccf0da9bcf5f80194a860c1755261b2f7c",
-      "publishedPath": "docs/evidence/checkpoint-storage-integration-pilots-20261027-02/attempts/correct-eio/run/pilot-03/framework/manifest.summary.json",
-      "sanitizationNotes": [
-        "Host workspace/home/temporary paths replaced with <workspace>, <host-home>, <host-temporary>; Docker/container paths are retained.",
-        "Original bytes remain in the local jobs evidence; this publication is not a replayable raw proof."
-      ],
-      "sanitizedCopyBytes": 3348,
-      "sanitizedCopySha256": "808e7f081a872768cc5603911c027edd397e8115e904efe0294227c98543bd3e",
-      "sourcePath": "jobs/checkpoint-storage-integration-pilots-20261027-02/attempts/correct-eio/run/pilot-03/framework/manifest.json"
-    },
-    {
-      "mode": "sanitized-projection",
       "omittedFields": [
         {
           "jsonPointer": "/evidence/kafkaLogs",
@@ -843,188 +857,188 @@
           "kind": "non-selected-evidence"
         },
         {
-          "items": 58,
           "jsonPointer": "/evidence/stateRecovery/trace/markers",
-          "kind": "array"
+          "kind": "array",
+          "items": 58
         },
         {
-          "items": 1,
           "jsonPointer": "/evidence/stateRecovery/readinessAttempts",
-          "kind": "detailed-readiness"
+          "kind": "detailed-readiness",
+          "items": 1
         },
         {
           "jsonPointer": "/evidence/stateRecovery/recoveries/0/readiness",
           "kind": "duplicate-readiness"
         },
         {
-          "items": 11932,
           "jsonPointer": "/evidence/checkpointStorage/instances/0/operations",
-          "kind": "array"
+          "kind": "array",
+          "items": 11932
         },
         {
-          "items": 10,
           "jsonPointer": "/evidence/checkpointStorage/instances/0/commands",
-          "kind": "array"
+          "kind": "array",
+          "items": 10
         },
         {
-          "items": 647,
           "jsonPointer": "/evidence/checkpointStorage/instances/1/operations",
-          "kind": "array"
+          "kind": "array",
+          "items": 647
         },
         {
-          "items": 6,
           "jsonPointer": "/evidence/checkpointStorage/instances/1/commands",
-          "kind": "array"
+          "kind": "array",
+          "items": 6
         },
         {
-          "items": 4612,
           "jsonPointer": "/evidence/checkpointStorage/instances/2/operations",
-          "kind": "array"
+          "kind": "array",
+          "items": 4612
         },
         {
-          "items": 1,
           "jsonPointer": "/evidence/checkpointStorage/instances/2/commands",
-          "kind": "array"
+          "kind": "array",
+          "items": 1
         },
         {
-          "items": 6,
           "jsonPointer": "/evidence/checkpointStorageFaults/0/failureTrace/markers",
-          "kind": "array"
+          "kind": "array",
+          "items": 6
         },
         {
-          "items": 18,
           "jsonPointer": "/evidence/checkpointStorageFaults/0/recoveryTrace/markers",
-          "kind": "array"
+          "kind": "array",
+          "items": 18
         },
         {
-          "items": 691,
           "jsonPointer": "/evidence/checkpointStorageFaults/0/samples/0/storage/instances/0/operations",
-          "kind": "array"
+          "kind": "array",
+          "items": 691
         },
         {
-          "items": 2,
           "jsonPointer": "/evidence/checkpointStorageFaults/0/samples/0/storage/instances/0/commands",
-          "kind": "array"
+          "kind": "array",
+          "items": 2
         },
         {
-          "items": 143,
           "jsonPointer": "/evidence/checkpointStorageFaults/0/samples/0/storage/instances/1/operations",
-          "kind": "array"
+          "kind": "array",
+          "items": 143
         },
         {
-          "items": 2,
           "jsonPointer": "/evidence/checkpointStorageFaults/0/samples/0/storage/instances/1/commands",
-          "kind": "array"
+          "kind": "array",
+          "items": 2
         },
         {
-          "items": 693,
           "jsonPointer": "/evidence/checkpointStorageFaults/0/samples/1/storage/instances/0/operations",
-          "kind": "array"
+          "kind": "array",
+          "items": 693
         },
         {
-          "items": 4,
           "jsonPointer": "/evidence/checkpointStorageFaults/0/samples/1/storage/instances/0/commands",
-          "kind": "array"
+          "kind": "array",
+          "items": 4
         },
         {
-          "items": 145,
           "jsonPointer": "/evidence/checkpointStorageFaults/0/samples/1/storage/instances/1/operations",
-          "kind": "array"
+          "kind": "array",
+          "items": 145
         },
         {
-          "items": 4,
           "jsonPointer": "/evidence/checkpointStorageFaults/0/samples/1/storage/instances/1/commands",
-          "kind": "array"
+          "kind": "array",
+          "items": 4
         },
         {
-          "items": 762,
           "jsonPointer": "/evidence/checkpointStorageFaults/0/samples/2/storage/instances/0/operations",
-          "kind": "array"
+          "kind": "array",
+          "items": 762
         },
         {
-          "items": 6,
           "jsonPointer": "/evidence/checkpointStorageFaults/0/samples/2/storage/instances/0/commands",
-          "kind": "array"
+          "kind": "array",
+          "items": 6
         },
         {
-          "items": 647,
           "jsonPointer": "/evidence/checkpointStorageFaults/0/samples/2/storage/instances/1/operations",
-          "kind": "array"
+          "kind": "array",
+          "items": 647
         },
         {
-          "items": 6,
           "jsonPointer": "/evidence/checkpointStorageFaults/0/samples/2/storage/instances/1/commands",
-          "kind": "array"
+          "kind": "array",
+          "items": 6
         },
         {
-          "items": 897,
           "jsonPointer": "/evidence/checkpointStorageFaults/0/samples/3/storage/instances/0/operations",
-          "kind": "array"
+          "kind": "array",
+          "items": 897
         },
         {
-          "items": 7,
           "jsonPointer": "/evidence/checkpointStorageFaults/0/samples/3/storage/instances/0/commands",
-          "kind": "array"
+          "kind": "array",
+          "items": 7
         },
         {
-          "items": 647,
           "jsonPointer": "/evidence/checkpointStorageFaults/0/samples/3/storage/instances/1/operations",
-          "kind": "array"
+          "kind": "array",
+          "items": 647
         },
         {
-          "items": 6,
           "jsonPointer": "/evidence/checkpointStorageFaults/0/samples/3/storage/instances/1/commands",
-          "kind": "array"
+          "kind": "array",
+          "items": 6
         },
         {
-          "items": 899,
           "jsonPointer": "/evidence/checkpointStorageFaults/0/samples/4/storage/instances/0/operations",
-          "kind": "array"
+          "kind": "array",
+          "items": 899
         },
         {
-          "items": 9,
           "jsonPointer": "/evidence/checkpointStorageFaults/0/samples/4/storage/instances/0/commands",
-          "kind": "array"
+          "kind": "array",
+          "items": 9
         },
         {
-          "items": 647,
           "jsonPointer": "/evidence/checkpointStorageFaults/0/samples/4/storage/instances/1/operations",
-          "kind": "array"
+          "kind": "array",
+          "items": 647
         },
         {
-          "items": 6,
           "jsonPointer": "/evidence/checkpointStorageFaults/0/samples/4/storage/instances/1/commands",
-          "kind": "array"
+          "kind": "array",
+          "items": 6
         },
         {
-          "items": 1418,
           "jsonPointer": "/evidence/checkpointStorageFaults/0/samples/5/storage/instances/0/operations",
-          "kind": "array"
+          "kind": "array",
+          "items": 1418
         },
         {
-          "items": 10,
           "jsonPointer": "/evidence/checkpointStorageFaults/0/samples/5/storage/instances/0/commands",
-          "kind": "array"
+          "kind": "array",
+          "items": 10
         },
         {
-          "items": 647,
           "jsonPointer": "/evidence/checkpointStorageFaults/0/samples/5/storage/instances/1/operations",
-          "kind": "array"
+          "kind": "array",
+          "items": 647
         },
         {
-          "items": 6,
           "jsonPointer": "/evidence/checkpointStorageFaults/0/samples/5/storage/instances/1/commands",
-          "kind": "array"
+          "kind": "array",
+          "items": 6
         },
         {
-          "items": 1993,
           "jsonPointer": "/evidence/checkpointStorageFaults/0/samples/5/storage/instances/2/operations",
-          "kind": "array"
+          "kind": "array",
+          "items": 1993
         },
         {
-          "items": 1,
           "jsonPointer": "/evidence/checkpointStorageFaults/0/samples/5/storage/instances/2/commands",
-          "kind": "array"
+          "kind": "array",
+          "items": 1
         },
         {
           "jsonPointer": "/evidence/checkpointStorage/instances/1/verification/jvmCommand",
@@ -1074,46 +1088,46 @@
           "kind": "stage-storage-summary",
           "omitted": "duplicate verification, paths, materialization and command/operation arrays"
         }
+      ]
+    },
+    {
+      "sourcePath": "jobs/checkpoint-storage-integration-pilots-20261027-02/attempts/healthy-fuse/run/pilot-01/framework/manifest.json",
+      "originalSha256": "be8fca98347dd11df538dc701bac14a7028de62df97ac320037ac3eb6d117b2c",
+      "originalBytes": 185615,
+      "publishedPath": "docs/evidence/checkpoint-storage-integration-pilots-20261027-02/attempts/healthy-fuse/run/pilot-01/framework/manifest.summary.json",
+      "sanitizedCopySha256": "578948e91aee9063710ca8996e953e7e9d971d2ba7029a4d27e3c846ca60711e",
+      "sanitizedCopyBytes": 3349,
+      "mode": "sanitized-projection",
+      "sanitizationNotes": [
+        "Host workspace/home/temporary paths replaced with <workspace>, <host-home>, <host-temporary>; Docker/container paths are retained.",
+        "Original bytes remain in the local jobs evidence; this publication is not a replayable raw proof."
       ],
-      "originalBytes": 17659385,
-      "originalSha256": "e9625a6a0cfe4f5e828a5b251479c0dad01d608e07c9711682a21fa472aab03a",
-      "publishedPath": "docs/evidence/checkpoint-storage-integration-pilots-20261027-02/attempts/correct-eio/run/pilot-03/stdout.summary.json",
+      "omittedFields": [
+        {
+          "jsonPointer": "/sourceSha256",
+          "kind": "hash-inventory",
+          "entries": 295
+        },
+        {
+          "jsonPointer": "/targetClassesSha256",
+          "kind": "hash-inventory",
+          "entries": 752
+        }
+      ]
+    },
+    {
+      "sourcePath": "jobs/checkpoint-storage-integration-pilots-20261027-02/attempts/healthy-fuse/run/pilot-01/stdout.json",
+      "originalSha256": "e17a408c9f0f6f5ecd39b0bd99129e2fff67ab9ce2b89b15780606aaa0d73db4",
+      "originalBytes": 8420058,
+      "publishedPath": "docs/evidence/checkpoint-storage-integration-pilots-20261027-02/attempts/healthy-fuse/run/pilot-01/stdout.summary.json",
+      "sanitizedCopySha256": "b7483f5a2864d91af2f28562e266288e2eb2deb4bcaf7e05547304a3b0da80cc",
+      "sanitizedCopyBytes": 32463,
+      "mode": "sanitized-projection",
       "sanitizationNotes": [
         "Host workspace/home/temporary paths replaced with <workspace>, <host-home>, <host-temporary>; Docker/container paths are retained.",
         "Original bytes remain in the local jobs evidence; this publication is not a replayable raw proof.",
         "Detailed omitted fields are listed in publicationOmissions; counts, verdicts, diagnostics and component events are retained."
       ],
-      "sanitizedCopyBytes": 146938,
-      "sanitizedCopySha256": "fe2062040ebb2abe59264f3315e2da8b3e96294edd91f32469ee372f4a731b2a",
-      "sourcePath": "jobs/checkpoint-storage-integration-pilots-20261027-02/attempts/correct-eio/run/pilot-03/stdout.json"
-    },
-    {
-      "mode": "sanitized-projection",
-      "omittedFields": [
-        {
-          "entries": 295,
-          "jsonPointer": "/sourceSha256",
-          "kind": "hash-inventory"
-        },
-        {
-          "entries": 752,
-          "jsonPointer": "/targetClassesSha256",
-          "kind": "hash-inventory"
-        }
-      ],
-      "originalBytes": 185615,
-      "originalSha256": "be8fca98347dd11df538dc701bac14a7028de62df97ac320037ac3eb6d117b2c",
-      "publishedPath": "docs/evidence/checkpoint-storage-integration-pilots-20261027-02/attempts/healthy-fuse/run/pilot-01/framework/manifest.summary.json",
-      "sanitizationNotes": [
-        "Host workspace/home/temporary paths replaced with <workspace>, <host-home>, <host-temporary>; Docker/container paths are retained.",
-        "Original bytes remain in the local jobs evidence; this publication is not a replayable raw proof."
-      ],
-      "sanitizedCopyBytes": 3349,
-      "sanitizedCopySha256": "578948e91aee9063710ca8996e953e7e9d971d2ba7029a4d27e3c846ca60711e",
-      "sourcePath": "jobs/checkpoint-storage-integration-pilots-20261027-02/attempts/healthy-fuse/run/pilot-01/framework/manifest.json"
-    },
-    {
-      "mode": "sanitized-projection",
       "omittedFields": [
         {
           "jsonPointer": "/evidence/kafkaLogs",
@@ -1144,34 +1158,34 @@
           "kind": "non-selected-evidence"
         },
         {
-          "items": 44,
           "jsonPointer": "/evidence/stateRecovery/trace/markers",
-          "kind": "array"
+          "kind": "array",
+          "items": 44
         },
         {
-          "items": 0,
           "jsonPointer": "/evidence/stateRecovery/readinessAttempts",
-          "kind": "detailed-readiness"
+          "kind": "detailed-readiness",
+          "items": 0
         },
         {
-          "items": 10886,
           "jsonPointer": "/evidence/checkpointStorage/instances/0/operations",
-          "kind": "array"
+          "kind": "array",
+          "items": 10886
         },
         {
-          "items": 1,
           "jsonPointer": "/evidence/checkpointStorage/instances/0/commands",
-          "kind": "array"
+          "kind": "array",
+          "items": 1
         },
         {
-          "items": 2761,
           "jsonPointer": "/evidence/checkpointStorage/instances/1/operations",
-          "kind": "array"
+          "kind": "array",
+          "items": 2761
         },
         {
-          "items": 1,
           "jsonPointer": "/evidence/checkpointStorage/instances/1/commands",
-          "kind": "array"
+          "kind": "array",
+          "items": 1
         },
         {
           "jsonPointer": "/evidence/checkpointStorage/instances/1/verification/jvmCommand",
@@ -1179,21 +1193,21 @@
           "originalCharacters": 4241,
           "publishedCharacters": 2048
         }
-      ],
-      "originalBytes": 8420058,
-      "originalSha256": "e17a408c9f0f6f5ecd39b0bd99129e2fff67ab9ce2b89b15780606aaa0d73db4",
-      "publishedPath": "docs/evidence/checkpoint-storage-integration-pilots-20261027-02/attempts/healthy-fuse/run/pilot-01/stdout.summary.json",
+      ]
+    },
+    {
+      "sourcePath": "jobs/checkpoint-storage-integration-pilots-20261027-02/attempts/mutant-eio/run/pilot-01/stdout.json",
+      "originalSha256": "b7642c06315649293e444a71b575749b65eba3e227a3f5347b92e13537bf6d25",
+      "originalBytes": 17273318,
+      "publishedPath": "docs/evidence/checkpoint-storage-integration-pilots-20261027-02/attempts/mutant-eio/run/pilot-01/stdout.summary.json",
+      "sanitizedCopySha256": "91f9f7ec5766e77c217536e5a4771f5d5570cf21b0f695a60265adfa9039455d",
+      "sanitizedCopyBytes": 163104,
+      "mode": "sanitized-projection",
       "sanitizationNotes": [
         "Host workspace/home/temporary paths replaced with <workspace>, <host-home>, <host-temporary>; Docker/container paths are retained.",
         "Original bytes remain in the local jobs evidence; this publication is not a replayable raw proof.",
         "Detailed omitted fields are listed in publicationOmissions; counts, verdicts, diagnostics and component events are retained."
       ],
-      "sanitizedCopyBytes": 32463,
-      "sanitizedCopySha256": "b7483f5a2864d91af2f28562e266288e2eb2deb4bcaf7e05547304a3b0da80cc",
-      "sourcePath": "jobs/checkpoint-storage-integration-pilots-20261027-02/attempts/healthy-fuse/run/pilot-01/stdout.json"
-    },
-    {
-      "mode": "sanitized-projection",
       "omittedFields": [
         {
           "jsonPointer": "/evidence/kafkaLogs",
@@ -1224,188 +1238,188 @@
           "kind": "non-selected-evidence"
         },
         {
-          "items": 64,
           "jsonPointer": "/evidence/stateRecovery/trace/markers",
-          "kind": "array"
+          "kind": "array",
+          "items": 64
         },
         {
-          "items": 1,
           "jsonPointer": "/evidence/stateRecovery/readinessAttempts",
-          "kind": "detailed-readiness"
+          "kind": "detailed-readiness",
+          "items": 1
         },
         {
           "jsonPointer": "/evidence/stateRecovery/recoveries/0/readiness",
           "kind": "duplicate-readiness"
         },
         {
-          "items": 11414,
           "jsonPointer": "/evidence/checkpointStorage/instances/0/operations",
-          "kind": "array"
+          "kind": "array",
+          "items": 11414
         },
         {
-          "items": 10,
           "jsonPointer": "/evidence/checkpointStorage/instances/0/commands",
-          "kind": "array"
+          "kind": "array",
+          "items": 10
         },
         {
-          "items": 647,
           "jsonPointer": "/evidence/checkpointStorage/instances/1/operations",
-          "kind": "array"
+          "kind": "array",
+          "items": 647
         },
         {
-          "items": 6,
           "jsonPointer": "/evidence/checkpointStorage/instances/1/commands",
-          "kind": "array"
+          "kind": "array",
+          "items": 6
         },
         {
-          "items": 4481,
           "jsonPointer": "/evidence/checkpointStorage/instances/2/operations",
-          "kind": "array"
+          "kind": "array",
+          "items": 4481
         },
         {
-          "items": 1,
           "jsonPointer": "/evidence/checkpointStorage/instances/2/commands",
-          "kind": "array"
+          "kind": "array",
+          "items": 1
         },
         {
-          "items": 6,
           "jsonPointer": "/evidence/checkpointStorageFaults/0/failureTrace/markers",
-          "kind": "array"
+          "kind": "array",
+          "items": 6
         },
         {
-          "items": 26,
           "jsonPointer": "/evidence/checkpointStorageFaults/0/recoveryTrace/markers",
-          "kind": "array"
+          "kind": "array",
+          "items": 26
         },
         {
-          "items": 691,
           "jsonPointer": "/evidence/checkpointStorageFaults/0/samples/0/storage/instances/0/operations",
-          "kind": "array"
+          "kind": "array",
+          "items": 691
         },
         {
-          "items": 2,
           "jsonPointer": "/evidence/checkpointStorageFaults/0/samples/0/storage/instances/0/commands",
-          "kind": "array"
+          "kind": "array",
+          "items": 2
         },
         {
-          "items": 143,
           "jsonPointer": "/evidence/checkpointStorageFaults/0/samples/0/storage/instances/1/operations",
-          "kind": "array"
+          "kind": "array",
+          "items": 143
         },
         {
-          "items": 2,
           "jsonPointer": "/evidence/checkpointStorageFaults/0/samples/0/storage/instances/1/commands",
-          "kind": "array"
+          "kind": "array",
+          "items": 2
         },
         {
-          "items": 693,
           "jsonPointer": "/evidence/checkpointStorageFaults/0/samples/1/storage/instances/0/operations",
-          "kind": "array"
+          "kind": "array",
+          "items": 693
         },
         {
-          "items": 4,
           "jsonPointer": "/evidence/checkpointStorageFaults/0/samples/1/storage/instances/0/commands",
-          "kind": "array"
+          "kind": "array",
+          "items": 4
         },
         {
-          "items": 145,
           "jsonPointer": "/evidence/checkpointStorageFaults/0/samples/1/storage/instances/1/operations",
-          "kind": "array"
+          "kind": "array",
+          "items": 145
         },
         {
-          "items": 4,
           "jsonPointer": "/evidence/checkpointStorageFaults/0/samples/1/storage/instances/1/commands",
-          "kind": "array"
+          "kind": "array",
+          "items": 4
         },
         {
-          "items": 762,
           "jsonPointer": "/evidence/checkpointStorageFaults/0/samples/2/storage/instances/0/operations",
-          "kind": "array"
+          "kind": "array",
+          "items": 762
         },
         {
-          "items": 6,
           "jsonPointer": "/evidence/checkpointStorageFaults/0/samples/2/storage/instances/0/commands",
-          "kind": "array"
+          "kind": "array",
+          "items": 6
         },
         {
-          "items": 647,
           "jsonPointer": "/evidence/checkpointStorageFaults/0/samples/2/storage/instances/1/operations",
-          "kind": "array"
+          "kind": "array",
+          "items": 647
         },
         {
-          "items": 6,
           "jsonPointer": "/evidence/checkpointStorageFaults/0/samples/2/storage/instances/1/commands",
-          "kind": "array"
+          "kind": "array",
+          "items": 6
         },
         {
-          "items": 897,
           "jsonPointer": "/evidence/checkpointStorageFaults/0/samples/3/storage/instances/0/operations",
-          "kind": "array"
+          "kind": "array",
+          "items": 897
         },
         {
-          "items": 7,
           "jsonPointer": "/evidence/checkpointStorageFaults/0/samples/3/storage/instances/0/commands",
-          "kind": "array"
+          "kind": "array",
+          "items": 7
         },
         {
-          "items": 647,
           "jsonPointer": "/evidence/checkpointStorageFaults/0/samples/3/storage/instances/1/operations",
-          "kind": "array"
+          "kind": "array",
+          "items": 647
         },
         {
-          "items": 6,
           "jsonPointer": "/evidence/checkpointStorageFaults/0/samples/3/storage/instances/1/commands",
-          "kind": "array"
+          "kind": "array",
+          "items": 6
         },
         {
-          "items": 899,
           "jsonPointer": "/evidence/checkpointStorageFaults/0/samples/4/storage/instances/0/operations",
-          "kind": "array"
+          "kind": "array",
+          "items": 899
         },
         {
-          "items": 9,
           "jsonPointer": "/evidence/checkpointStorageFaults/0/samples/4/storage/instances/0/commands",
-          "kind": "array"
+          "kind": "array",
+          "items": 9
         },
         {
-          "items": 647,
           "jsonPointer": "/evidence/checkpointStorageFaults/0/samples/4/storage/instances/1/operations",
-          "kind": "array"
+          "kind": "array",
+          "items": 647
         },
         {
-          "items": 6,
           "jsonPointer": "/evidence/checkpointStorageFaults/0/samples/4/storage/instances/1/commands",
-          "kind": "array"
+          "kind": "array",
+          "items": 6
         },
         {
-          "items": 1418,
           "jsonPointer": "/evidence/checkpointStorageFaults/0/samples/5/storage/instances/0/operations",
-          "kind": "array"
+          "kind": "array",
+          "items": 1418
         },
         {
-          "items": 10,
           "jsonPointer": "/evidence/checkpointStorageFaults/0/samples/5/storage/instances/0/commands",
-          "kind": "array"
+          "kind": "array",
+          "items": 10
         },
         {
-          "items": 647,
           "jsonPointer": "/evidence/checkpointStorageFaults/0/samples/5/storage/instances/1/operations",
-          "kind": "array"
+          "kind": "array",
+          "items": 647
         },
         {
-          "items": 6,
           "jsonPointer": "/evidence/checkpointStorageFaults/0/samples/5/storage/instances/1/commands",
-          "kind": "array"
+          "kind": "array",
+          "items": 6
         },
         {
-          "items": 1993,
           "jsonPointer": "/evidence/checkpointStorageFaults/0/samples/5/storage/instances/2/operations",
-          "kind": "array"
+          "kind": "array",
+          "items": 1993
         },
         {
-          "items": 1,
           "jsonPointer": "/evidence/checkpointStorageFaults/0/samples/5/storage/instances/2/commands",
-          "kind": "array"
+          "kind": "array",
+          "items": 1
         },
         {
           "jsonPointer": "/evidence/terminalValidation/statePrefix/mismatchSamples",
@@ -1461,390 +1475,391 @@
           "kind": "stage-storage-summary",
           "omitted": "duplicate verification, paths, materialization and command/operation arrays"
         }
-      ],
-      "originalBytes": 17273318,
-      "originalSha256": "b7642c06315649293e444a71b575749b65eba3e227a3f5347b92e13537bf6d25",
-      "publishedPath": "docs/evidence/checkpoint-storage-integration-pilots-20261027-02/attempts/mutant-eio/run/pilot-01/stdout.summary.json",
-      "sanitizationNotes": [
-        "Host workspace/home/temporary paths replaced with <workspace>, <host-home>, <host-temporary>; Docker/container paths are retained.",
-        "Original bytes remain in the local jobs evidence; this publication is not a replayable raw proof.",
-        "Detailed omitted fields are listed in publicationOmissions; counts, verdicts, diagnostics and component events are retained."
-      ],
-      "sanitizedCopyBytes": 163104,
-      "sanitizedCopySha256": "91f9f7ec5766e77c217536e5a4771f5d5570cf21b0f695a60265adfa9039455d",
-      "sourcePath": "jobs/checkpoint-storage-integration-pilots-20261027-02/attempts/mutant-eio/run/pilot-01/stdout.json"
+      ]
     },
     {
-      "mode": "sanitized-copy",
-      "omittedFields": [],
-      "originalBytes": 2823,
+      "sourcePath": "jobs/checkpoint-storage-integration-pilots-20261027-02/evidence/derivation.json",
       "originalSha256": "27089c383481bdae284a1ee3d5d64f27851fa7d6223f8daaf1afd6021852c138",
+      "originalBytes": 2823,
       "publishedPath": "docs/evidence/checkpoint-storage-integration-pilots-20261027-02/evidence/derivation.json",
-      "sanitizationNotes": [
-        "Host workspace/home/temporary paths replaced with <workspace>, <host-home>, <host-temporary>; Docker/container paths are retained.",
-        "Original bytes remain in the local jobs evidence; this publication is not a replayable raw proof."
-      ],
-      "sanitizedCopyBytes": 3411,
       "sanitizedCopySha256": "e8742fea90889170d91aae624e798b23a29e34c6fde68dd7999144243ddba60a",
-      "sourcePath": "jobs/checkpoint-storage-integration-pilots-20261027-02/evidence/derivation.json"
-    },
-    {
+      "sanitizedCopyBytes": 3411,
       "mode": "sanitized-copy",
-      "omittedFields": [],
-      "originalBytes": 9019,
-      "originalSha256": "dc211ef90d5f4ac3cbcc720d73dfb5a4455a511fbe56724cfc625cd0b009fb99",
-      "publishedPath": "docs/evidence/checkpoint-storage-integration-pilots-20261027-02/manifest.json",
       "sanitizationNotes": [
         "Host workspace/home/temporary paths replaced with <workspace>, <host-home>, <host-temporary>; Docker/container paths are retained.",
         "Original bytes remain in the local jobs evidence; this publication is not a replayable raw proof."
       ],
-      "sanitizedCopyBytes": 9596,
+      "omittedFields": []
+    },
+    {
+      "sourcePath": "jobs/checkpoint-storage-integration-pilots-20261027-02/manifest.json",
+      "originalSha256": "dc211ef90d5f4ac3cbcc720d73dfb5a4455a511fbe56724cfc625cd0b009fb99",
+      "originalBytes": 9019,
+      "publishedPath": "docs/evidence/checkpoint-storage-integration-pilots-20261027-02/manifest.json",
       "sanitizedCopySha256": "26fb4d267c3b2f484b0db0f60025f79aa3f9ce9b81384ec8ad6e72f0bf203a9f",
-      "sourcePath": "jobs/checkpoint-storage-integration-pilots-20261027-02/manifest.json"
-    },
-    {
-      "mode": "sanitized-projection",
-      "omittedFields": [
-        {
-          "items": 82,
-          "jsonPointer": "/observations",
-          "kind": "I/O-transcript"
-        },
-        {
-          "jsonPointer": "/instances/*",
-          "kind": "mount-inspection-and-process-transcript"
-        },
-        {
-          "jsonPointer": "/bundle/commands",
-          "kind": "build-command-transcript"
-        }
-      ],
-      "originalBytes": 154125,
-      "originalSha256": "a1002eb35641adb4da348dac50e355b15aa0c9bc9588a72bf7b7880f4f2c8ea7",
-      "publishedPath": "docs/evidence/checkpoint-storage-probe-20261027-01/result.summary.json",
-      "sanitizationNotes": [
-        "Host workspace/home/temporary paths replaced with <workspace>, <host-home>, <host-temporary>; Docker/container paths are retained.",
-        "Original bytes remain in the local jobs evidence; this publication is not a replayable raw proof.",
-        "Detailed omitted fields are listed in publicationOmissions; counts, verdicts, diagnostics and component events are retained."
-      ],
-      "sanitizedCopyBytes": 12224,
-      "sanitizedCopySha256": "99c11181e3f37d28d9724522735b4af3e951cc4439d7492484d0c7cf7d4f50e0",
-      "sourcePath": "jobs/checkpoint-storage-probe-20261027-01/result.json"
-    },
-    {
-      "mode": "sanitized-projection",
-      "omittedFields": [
-        {
-          "items": 82,
-          "jsonPointer": "/observations",
-          "kind": "I/O-transcript"
-        },
-        {
-          "jsonPointer": "/instances/*",
-          "kind": "mount-inspection-and-process-transcript"
-        },
-        {
-          "jsonPointer": "/bundle/commands",
-          "kind": "build-command-transcript"
-        }
-      ],
-      "originalBytes": 154317,
-      "originalSha256": "475a8e58309dd466092e1a0668fbdfb6fddbcf1cff5bc53125705341856da794",
-      "publishedPath": "docs/evidence/checkpoint-storage-probe-20261027-02/result.summary.json",
-      "sanitizationNotes": [
-        "Host workspace/home/temporary paths replaced with <workspace>, <host-home>, <host-temporary>; Docker/container paths are retained.",
-        "Original bytes remain in the local jobs evidence; this publication is not a replayable raw proof.",
-        "Detailed omitted fields are listed in publicationOmissions; counts, verdicts, diagnostics and component events are retained."
-      ],
-      "sanitizedCopyBytes": 12415,
-      "sanitizedCopySha256": "bef0efcba3f6808174059977d243ef4c952c0770f4b37c81a59614c802c88bd4",
-      "sourcePath": "jobs/checkpoint-storage-probe-20261027-02/result.json"
-    },
-    {
-      "mode": "sanitized-projection",
-      "omittedFields": [
-        {
-          "items": 0,
-          "jsonPointer": "/observations",
-          "kind": "I/O-transcript"
-        },
-        {
-          "jsonPointer": "/instances/*",
-          "kind": "mount-inspection-and-process-transcript"
-        },
-        {
-          "jsonPointer": "/bundle/commands",
-          "kind": "build-command-transcript"
-        }
-      ],
-      "originalBytes": 46969,
-      "originalSha256": "6cb7cc0d23cd048c5508f349795fbe2f9b609a862a787a8b31d109d81a7b0fdb",
-      "publishedPath": "docs/evidence/checkpoint-storage-probe-pilot-20261027-01/result.summary.json",
-      "sanitizationNotes": [
-        "Host workspace/home/temporary paths replaced with <workspace>, <host-home>, <host-temporary>; Docker/container paths are retained.",
-        "Original bytes remain in the local jobs evidence; this publication is not a replayable raw proof.",
-        "Detailed omitted fields are listed in publicationOmissions; counts, verdicts, diagnostics and component events are retained."
-      ],
-      "sanitizedCopyBytes": 8061,
-      "sanitizedCopySha256": "28a04d855753fce097633f3b701f72ad67340da51a46b0d90bda227cb9e1ae31",
-      "sourcePath": "jobs/checkpoint-storage-probe-pilot-20261027-01/result.json"
-    },
-    {
-      "mode": "sanitized-projection",
-      "omittedFields": [
-        {
-          "items": 72,
-          "jsonPointer": "/observations",
-          "kind": "I/O-transcript"
-        },
-        {
-          "jsonPointer": "/instances/*",
-          "kind": "mount-inspection-and-process-transcript"
-        },
-        {
-          "jsonPointer": "/bundle/commands",
-          "kind": "build-command-transcript"
-        }
-      ],
-      "originalBytes": 133040,
-      "originalSha256": "24f82e6270bfdc04c521a7762091983ca6ec0feb0a2e9c50a4ae2b07388c88b3",
-      "publishedPath": "docs/evidence/checkpoint-storage-probe-pilot-20261027-02/result.summary.json",
-      "sanitizationNotes": [
-        "Host workspace/home/temporary paths replaced with <workspace>, <host-home>, <host-temporary>; Docker/container paths are retained.",
-        "Original bytes remain in the local jobs evidence; this publication is not a replayable raw proof.",
-        "Detailed omitted fields are listed in publicationOmissions; counts, verdicts, diagnostics and component events are retained."
-      ],
-      "sanitizedCopyBytes": 11194,
-      "sanitizedCopySha256": "39a2585f4166b1c1200f4b247d87988f71c923fb6a2ad3d6ff72c52c888296ab",
-      "sourcePath": "jobs/checkpoint-storage-probe-pilot-20261027-02/result.json"
-    },
-    {
+      "sanitizedCopyBytes": 9596,
       "mode": "sanitized-copy",
-      "omittedFields": [],
-      "originalBytes": 690,
+      "sanitizationNotes": [
+        "Host workspace/home/temporary paths replaced with <workspace>, <host-home>, <host-temporary>; Docker/container paths are retained.",
+        "Original bytes remain in the local jobs evidence; this publication is not a replayable raw proof."
+      ],
+      "omittedFields": []
+    },
+    {
+      "sourcePath": "jobs/checkpoint-storage-probe-20261027-01/result.json",
+      "originalSha256": "a1002eb35641adb4da348dac50e355b15aa0c9bc9588a72bf7b7880f4f2c8ea7",
+      "originalBytes": 154125,
+      "publishedPath": "docs/evidence/checkpoint-storage-probe-20261027-01/result.summary.json",
+      "sanitizedCopySha256": "99c11181e3f37d28d9724522735b4af3e951cc4439d7492484d0c7cf7d4f50e0",
+      "sanitizedCopyBytes": 12224,
+      "mode": "sanitized-projection",
+      "sanitizationNotes": [
+        "Host workspace/home/temporary paths replaced with <workspace>, <host-home>, <host-temporary>; Docker/container paths are retained.",
+        "Original bytes remain in the local jobs evidence; this publication is not a replayable raw proof.",
+        "Detailed omitted fields are listed in publicationOmissions; counts, verdicts, diagnostics and component events are retained."
+      ],
+      "omittedFields": [
+        {
+          "jsonPointer": "/observations",
+          "kind": "I/O-transcript",
+          "items": 82
+        },
+        {
+          "jsonPointer": "/instances/*",
+          "kind": "mount-inspection-and-process-transcript"
+        },
+        {
+          "jsonPointer": "/bundle/commands",
+          "kind": "build-command-transcript"
+        }
+      ]
+    },
+    {
+      "sourcePath": "jobs/checkpoint-storage-probe-20261027-02/result.json",
+      "originalSha256": "475a8e58309dd466092e1a0668fbdfb6fddbcf1cff5bc53125705341856da794",
+      "originalBytes": 154317,
+      "publishedPath": "docs/evidence/checkpoint-storage-probe-20261027-02/result.summary.json",
+      "sanitizedCopySha256": "bef0efcba3f6808174059977d243ef4c952c0770f4b37c81a59614c802c88bd4",
+      "sanitizedCopyBytes": 12415,
+      "mode": "sanitized-projection",
+      "sanitizationNotes": [
+        "Host workspace/home/temporary paths replaced with <workspace>, <host-home>, <host-temporary>; Docker/container paths are retained.",
+        "Original bytes remain in the local jobs evidence; this publication is not a replayable raw proof.",
+        "Detailed omitted fields are listed in publicationOmissions; counts, verdicts, diagnostics and component events are retained."
+      ],
+      "omittedFields": [
+        {
+          "jsonPointer": "/observations",
+          "kind": "I/O-transcript",
+          "items": 82
+        },
+        {
+          "jsonPointer": "/instances/*",
+          "kind": "mount-inspection-and-process-transcript"
+        },
+        {
+          "jsonPointer": "/bundle/commands",
+          "kind": "build-command-transcript"
+        }
+      ]
+    },
+    {
+      "sourcePath": "jobs/checkpoint-storage-probe-pilot-20261027-01/result.json",
+      "originalSha256": "6cb7cc0d23cd048c5508f349795fbe2f9b609a862a787a8b31d109d81a7b0fdb",
+      "originalBytes": 46969,
+      "publishedPath": "docs/evidence/checkpoint-storage-probe-pilot-20261027-01/result.summary.json",
+      "sanitizedCopySha256": "28a04d855753fce097633f3b701f72ad67340da51a46b0d90bda227cb9e1ae31",
+      "sanitizedCopyBytes": 8061,
+      "mode": "sanitized-projection",
+      "sanitizationNotes": [
+        "Host workspace/home/temporary paths replaced with <workspace>, <host-home>, <host-temporary>; Docker/container paths are retained.",
+        "Original bytes remain in the local jobs evidence; this publication is not a replayable raw proof.",
+        "Detailed omitted fields are listed in publicationOmissions; counts, verdicts, diagnostics and component events are retained."
+      ],
+      "omittedFields": [
+        {
+          "jsonPointer": "/observations",
+          "kind": "I/O-transcript",
+          "items": 0
+        },
+        {
+          "jsonPointer": "/instances/*",
+          "kind": "mount-inspection-and-process-transcript"
+        },
+        {
+          "jsonPointer": "/bundle/commands",
+          "kind": "build-command-transcript"
+        }
+      ]
+    },
+    {
+      "sourcePath": "jobs/checkpoint-storage-probe-pilot-20261027-02/result.json",
+      "originalSha256": "24f82e6270bfdc04c521a7762091983ca6ec0feb0a2e9c50a4ae2b07388c88b3",
+      "originalBytes": 133040,
+      "publishedPath": "docs/evidence/checkpoint-storage-probe-pilot-20261027-02/result.summary.json",
+      "sanitizedCopySha256": "39a2585f4166b1c1200f4b247d87988f71c923fb6a2ad3d6ff72c52c888296ab",
+      "sanitizedCopyBytes": 11194,
+      "mode": "sanitized-projection",
+      "sanitizationNotes": [
+        "Host workspace/home/temporary paths replaced with <workspace>, <host-home>, <host-temporary>; Docker/container paths are retained.",
+        "Original bytes remain in the local jobs evidence; this publication is not a replayable raw proof.",
+        "Detailed omitted fields are listed in publicationOmissions; counts, verdicts, diagnostics and component events are retained."
+      ],
+      "omittedFields": [
+        {
+          "jsonPointer": "/observations",
+          "kind": "I/O-transcript",
+          "items": 72
+        },
+        {
+          "jsonPointer": "/instances/*",
+          "kind": "mount-inspection-and-process-transcript"
+        },
+        {
+          "jsonPointer": "/bundle/commands",
+          "kind": "build-command-transcript"
+        }
+      ]
+    },
+    {
+      "sourcePath": "jobs/checkpoint-storage-qualification-20261027-01/evidence/platform.json",
       "originalSha256": "979f1decd92cd412925ce4074554708f7689f3de765f14d383bbd1e8a467d465",
+      "originalBytes": 690,
       "publishedPath": "docs/evidence/checkpoint-storage-qualification-20261027-01/evidence/platform.json",
+      "sanitizedCopySha256": "2833d98145083ede9a39c3f5dc864ad05cb0898d8dacac2343f2a1301ebbbe96",
+      "sanitizedCopyBytes": 1360,
+      "mode": "sanitized-copy",
       "sanitizationNotes": [
         "Host workspace/home/temporary paths replaced with <workspace>, <host-home>, <host-temporary>; Docker/container paths are retained.",
         "Original bytes remain in the local jobs evidence; this publication is not a replayable raw proof.",
         "The macOS Docker CLI executable path is replaced with <host-docker-cli>; container executable paths remain unchanged."
       ],
-      "sanitizedCopyBytes": 1360,
-      "sanitizedCopySha256": "2833d98145083ede9a39c3f5dc864ad05cb0898d8dacac2343f2a1301ebbbe96",
-      "sourcePath": "jobs/checkpoint-storage-qualification-20261027-01/evidence/platform.json"
+      "omittedFields": []
     },
     {
-      "mode": "sanitized-copy",
-      "omittedFields": [],
-      "originalBytes": 354,
+      "sourcePath": "jobs/checkpoint-storage-qualification-20261027-01/execution-started.json",
       "originalSha256": "1fc24f57c9d37d49218dc0f8615423f0438705751cfa618f43d8af1b27f527fe",
+      "originalBytes": 354,
       "publishedPath": "docs/evidence/checkpoint-storage-qualification-20261027-01/execution-started.json",
-      "sanitizationNotes": [
-        "Host workspace/home/temporary paths replaced with <workspace>, <host-home>, <host-temporary>; Docker/container paths are retained.",
-        "Original bytes remain in the local jobs evidence; this publication is not a replayable raw proof."
-      ],
-      "sanitizedCopyBytes": 929,
       "sanitizedCopySha256": "e1b24b6362b0e6c0d77660a202cf7c798c4cec1cbeea52fcb11ea20e4b725911",
-      "sourcePath": "jobs/checkpoint-storage-qualification-20261027-01/execution-started.json"
-    },
-    {
-      "mode": "sanitized-projection",
-      "omittedFields": [
-        {
-          "entries": 517,
-          "jsonPointer": "/files",
-          "kind": "hash-inventory"
-        },
-        {
-          "entries": 295,
-          "jsonPointer": "/sourceSha256",
-          "kind": "hash-inventory"
-        },
-        {
-          "entries": 752,
-          "jsonPointer": "/targetClassesSha256",
-          "kind": "hash-inventory"
-        }
-      ],
-      "originalBytes": 317220,
-      "originalSha256": "dab6678930cf0e5b40af97748bd431a39ccc5968ed4ff5523c1572be09242cac",
-      "publishedPath": "docs/evidence/checkpoint-storage-qualification-20261027-01/framework/manifest.summary.json",
-      "sanitizationNotes": [
-        "Host workspace/home/temporary paths replaced with <workspace>, <host-home>, <host-temporary>; Docker/container paths are retained.",
-        "Original bytes remain in the local jobs evidence; this publication is not a replayable raw proof."
-      ],
-      "sanitizedCopyBytes": 27301,
-      "sanitizedCopySha256": "9ca85e6931d5c4dcbed066a366c2b67e9e2411742a307f97ce76542cad0ef36c",
-      "sourcePath": "jobs/checkpoint-storage-qualification-20261027-01/framework/manifest.json"
-    },
-    {
+      "sanitizedCopyBytes": 929,
       "mode": "sanitized-copy",
-      "omittedFields": [],
-      "originalBytes": 30891,
-      "originalSha256": "c9f673f7cd883796b58e8a4dd70e61646e50a8bfaab026cc07bf4d7d1448d945",
-      "publishedPath": "docs/evidence/checkpoint-storage-qualification-20261027-01/manifest.json",
       "sanitizationNotes": [
         "Host workspace/home/temporary paths replaced with <workspace>, <host-home>, <host-temporary>; Docker/container paths are retained.",
         "Original bytes remain in the local jobs evidence; this publication is not a replayable raw proof."
       ],
-      "sanitizedCopyBytes": 31464,
-      "sanitizedCopySha256": "dbae20e3e704b66491c1ff4e8dde3bdc1fa01e0459c99308fc7e7dcad418c90c",
-      "sourcePath": "jobs/checkpoint-storage-qualification-20261027-01/manifest.json"
+      "omittedFields": []
     },
     {
+      "sourcePath": "jobs/checkpoint-storage-qualification-20261027-01/framework/manifest.json",
+      "originalSha256": "dab6678930cf0e5b40af97748bd431a39ccc5968ed4ff5523c1572be09242cac",
+      "originalBytes": 317220,
+      "publishedPath": "docs/evidence/checkpoint-storage-qualification-20261027-01/framework/manifest.summary.json",
+      "sanitizedCopySha256": "9ca85e6931d5c4dcbed066a366c2b67e9e2411742a307f97ce76542cad0ef36c",
+      "sanitizedCopyBytes": 27301,
       "mode": "sanitized-projection",
+      "sanitizationNotes": [
+        "Host workspace/home/temporary paths replaced with <workspace>, <host-home>, <host-temporary>; Docker/container paths are retained.",
+        "Original bytes remain in the local jobs evidence; this publication is not a replayable raw proof."
+      ],
       "omittedFields": [
         {
-          "items": 42,
+          "jsonPointer": "/files",
+          "kind": "hash-inventory",
+          "entries": 517
+        },
+        {
+          "jsonPointer": "/sourceSha256",
+          "kind": "hash-inventory",
+          "entries": 295
+        },
+        {
+          "jsonPointer": "/targetClassesSha256",
+          "kind": "hash-inventory",
+          "entries": 752
+        }
+      ]
+    },
+    {
+      "sourcePath": "jobs/checkpoint-storage-qualification-20261027-01/manifest.json",
+      "originalSha256": "c9f673f7cd883796b58e8a4dd70e61646e50a8bfaab026cc07bf4d7d1448d945",
+      "originalBytes": 30891,
+      "publishedPath": "docs/evidence/checkpoint-storage-qualification-20261027-01/manifest.json",
+      "sanitizedCopySha256": "dbae20e3e704b66491c1ff4e8dde3bdc1fa01e0459c99308fc7e7dcad418c90c",
+      "sanitizedCopyBytes": 31464,
+      "mode": "sanitized-copy",
+      "sanitizationNotes": [
+        "Host workspace/home/temporary paths replaced with <workspace>, <host-home>, <host-temporary>; Docker/container paths are retained.",
+        "Original bytes remain in the local jobs evidence; this publication is not a replayable raw proof."
+      ],
+      "omittedFields": []
+    },
+    {
+      "sourcePath": "jobs/checkpoint-storage-qualification-20261027-01/reports/final/qualification.json",
+      "originalSha256": "ed45ddf31f7af59e0c838f7a301cf1af8037c7b35c6f0df730cdcacce7f4a1c5",
+      "originalBytes": 965303,
+      "publishedPath": "docs/evidence/checkpoint-storage-qualification-20261027-01/reports/final/qualification.summary.json",
+      "sanitizedCopySha256": "dae9ab85a30f0212cf18f3fc956064581f5e1f6220bd53c8eafb6fa084b71af7",
+      "sanitizedCopyBytes": 255596,
+      "mode": "sanitized-projection",
+      "sanitizationNotes": [
+        "Host workspace/home/temporary paths replaced with <workspace>, <host-home>, <host-temporary>; Docker/container paths are retained.",
+        "Original bytes remain in the local jobs evidence; this publication is not a replayable raw proof.",
+        "Detailed omitted fields are listed in publicationOmissions; counts, verdicts, diagnostics and component events are retained.",
+        "The macOS Docker CLI executable path is replaced with <host-docker-cli>; container executable paths remain unchanged."
+      ],
+      "omittedFields": [
+        {
           "jsonPointer": "/attempts/0/stateRecovery/trace/markers",
-          "kind": "array"
+          "kind": "array",
+          "items": 42
         },
         {
-          "items": 0,
           "jsonPointer": "/attempts/0/stateRecovery/readinessAttempts",
-          "kind": "detailed-readiness"
+          "kind": "detailed-readiness",
+          "items": 0
         },
         {
-          "items": 42,
           "jsonPointer": "/attempts/1/stateRecovery/trace/markers",
-          "kind": "array"
+          "kind": "array",
+          "items": 42
         },
         {
-          "items": 0,
           "jsonPointer": "/attempts/1/stateRecovery/readinessAttempts",
-          "kind": "detailed-readiness"
+          "kind": "detailed-readiness",
+          "items": 0
         },
         {
-          "items": 42,
           "jsonPointer": "/attempts/2/stateRecovery/trace/markers",
-          "kind": "array"
+          "kind": "array",
+          "items": 42
         },
         {
-          "items": 0,
           "jsonPointer": "/attempts/2/stateRecovery/readinessAttempts",
-          "kind": "detailed-readiness"
+          "kind": "detailed-readiness",
+          "items": 0
         },
         {
-          "items": 54,
           "jsonPointer": "/attempts/3/stateRecovery/trace/markers",
-          "kind": "array"
+          "kind": "array",
+          "items": 54
         },
         {
-          "items": 1,
           "jsonPointer": "/attempts/3/stateRecovery/readinessAttempts",
-          "kind": "detailed-readiness"
+          "kind": "detailed-readiness",
+          "items": 1
         },
         {
           "jsonPointer": "/attempts/3/stateRecovery/recoveries/0/readiness",
           "kind": "duplicate-readiness"
         },
         {
-          "items": 54,
           "jsonPointer": "/attempts/4/stateRecovery/trace/markers",
-          "kind": "array"
+          "kind": "array",
+          "items": 54
         },
         {
-          "items": 1,
           "jsonPointer": "/attempts/4/stateRecovery/readinessAttempts",
-          "kind": "detailed-readiness"
+          "kind": "detailed-readiness",
+          "items": 1
         },
         {
           "jsonPointer": "/attempts/4/stateRecovery/recoveries/0/readiness",
           "kind": "duplicate-readiness"
         },
         {
-          "items": 56,
           "jsonPointer": "/attempts/5/stateRecovery/trace/markers",
-          "kind": "array"
+          "kind": "array",
+          "items": 56
         },
         {
-          "items": 1,
           "jsonPointer": "/attempts/5/stateRecovery/readinessAttempts",
-          "kind": "detailed-readiness"
+          "kind": "detailed-readiness",
+          "items": 1
         },
         {
           "jsonPointer": "/attempts/5/stateRecovery/recoveries/0/readiness",
           "kind": "duplicate-readiness"
         },
         {
-          "items": 58,
           "jsonPointer": "/attempts/6/stateRecovery/trace/markers",
-          "kind": "array"
+          "kind": "array",
+          "items": 58
         },
         {
-          "items": 1,
           "jsonPointer": "/attempts/6/stateRecovery/readinessAttempts",
-          "kind": "detailed-readiness"
+          "kind": "detailed-readiness",
+          "items": 1
         },
         {
           "jsonPointer": "/attempts/6/stateRecovery/recoveries/0/readiness",
           "kind": "duplicate-readiness"
         },
         {
-          "items": 58,
           "jsonPointer": "/attempts/7/stateRecovery/trace/markers",
-          "kind": "array"
+          "kind": "array",
+          "items": 58
         },
         {
-          "items": 1,
           "jsonPointer": "/attempts/7/stateRecovery/readinessAttempts",
-          "kind": "detailed-readiness"
+          "kind": "detailed-readiness",
+          "items": 1
         },
         {
           "jsonPointer": "/attempts/7/stateRecovery/recoveries/0/readiness",
           "kind": "duplicate-readiness"
         },
         {
-          "items": 58,
           "jsonPointer": "/attempts/8/stateRecovery/trace/markers",
-          "kind": "array"
+          "kind": "array",
+          "items": 58
         },
         {
-          "items": 1,
           "jsonPointer": "/attempts/8/stateRecovery/readinessAttempts",
-          "kind": "detailed-readiness"
+          "kind": "detailed-readiness",
+          "items": 1
         },
         {
           "jsonPointer": "/attempts/8/stateRecovery/recoveries/0/readiness",
           "kind": "duplicate-readiness"
         },
         {
-          "items": 66,
           "jsonPointer": "/attempts/9/stateRecovery/trace/markers",
-          "kind": "array"
+          "kind": "array",
+          "items": 66
         },
         {
-          "items": 1,
           "jsonPointer": "/attempts/9/stateRecovery/readinessAttempts",
-          "kind": "detailed-readiness"
+          "kind": "detailed-readiness",
+          "items": 1
         },
         {
           "jsonPointer": "/attempts/9/stateRecovery/recoveries/0/readiness",
           "kind": "duplicate-readiness"
         },
         {
-          "items": 66,
           "jsonPointer": "/attempts/10/stateRecovery/trace/markers",
-          "kind": "array"
+          "kind": "array",
+          "items": 66
         },
         {
-          "items": 1,
           "jsonPointer": "/attempts/10/stateRecovery/readinessAttempts",
-          "kind": "detailed-readiness"
+          "kind": "detailed-readiness",
+          "items": 1
         },
         {
           "jsonPointer": "/attempts/10/stateRecovery/recoveries/0/readiness",
           "kind": "duplicate-readiness"
         },
         {
-          "items": 66,
           "jsonPointer": "/attempts/11/stateRecovery/trace/markers",
-          "kind": "array"
+          "kind": "array",
+          "items": 66
         },
         {
-          "items": 1,
           "jsonPointer": "/attempts/11/stateRecovery/readinessAttempts",
-          "kind": "detailed-readiness"
+          "kind": "detailed-readiness",
+          "items": 1
         },
         {
           "jsonPointer": "/attempts/11/stateRecovery/recoveries/0/readiness",
@@ -1868,64 +1883,63 @@
           "originalItems": 100,
           "publishedItems": 3
         }
+      ]
+    },
+    {
+      "sourcePath": "jobs/checkpoint-storage-qualification-20261027-01/reports/final/qualification.md",
+      "originalSha256": "30f96ec95304dd144c3ae246f5a0346e80669ac36b5c299b261b79bb3ee5ce11",
+      "originalBytes": 9119,
+      "publishedPath": "docs/evidence/checkpoint-storage-qualification-20261027-01/reports/final/qualification.md",
+      "sanitizedCopySha256": "3dcc9e54620ba0764e78e8fe82d970406a1228839a9965d0131951c10a47cb7a",
+      "sanitizedCopyBytes": 9483,
+      "mode": "sanitized-copy",
+      "sanitizationNotes": [
+        "Host workspace/home/temporary paths replaced with <workspace>, <host-home>, <host-temporary>; Docker/container paths are retained.",
+        "Original bytes remain in the local jobs evidence; this publication is not a replayable raw proof."
       ],
-      "originalBytes": 965303,
-      "originalSha256": "ed45ddf31f7af59e0c838f7a301cf1af8037c7b35c6f0df730cdcacce7f4a1c5",
-      "publishedPath": "docs/evidence/checkpoint-storage-qualification-20261027-01/reports/final/qualification.summary.json",
+      "omittedFields": []
+    },
+    {
+      "sourcePath": "jobs/checkpoint-storage-qualification-20261027-01/reports/reproduction.json",
+      "originalSha256": "86d40306f67496f8408b3be5a501824ff935ef225c6c70853550f4a62d816bf5",
+      "originalBytes": 829,
+      "publishedPath": "docs/evidence/checkpoint-storage-qualification-20261027-01/reports/reproduction.json",
+      "sanitizedCopySha256": "f71d0e66f6ebfb27f3f4774f93bc0b41d04fae1ae0a8c24a0b46dfb602573d29",
+      "sanitizedCopyBytes": 1412,
+      "mode": "sanitized-copy",
+      "sanitizationNotes": [
+        "Host workspace/home/temporary paths replaced with <workspace>, <host-home>, <host-temporary>; Docker/container paths are retained.",
+        "Original bytes remain in the local jobs evidence; this publication is not a replayable raw proof."
+      ],
+      "omittedFields": []
+    },
+    {
+      "sourcePath": "jobs/checkpoint-storage-qualification-20261027-01/validation-finished.json",
+      "originalSha256": "faaecca77664d1b08402cf668dea44c701c58a00957410cb0020333eb7bd3619",
+      "originalBytes": 149,
+      "publishedPath": "docs/evidence/checkpoint-storage-qualification-20261027-01/validation-finished.json",
+      "sanitizedCopySha256": "a0c0bde87f942035744acb414873bf6c9bc458cb61bde9b12ebe282b4ae74127",
+      "sanitizedCopyBytes": 731,
+      "mode": "sanitized-copy",
+      "sanitizationNotes": [
+        "Host workspace/home/temporary paths replaced with <workspace>, <host-home>, <host-temporary>; Docker/container paths are retained.",
+        "Original bytes remain in the local jobs evidence; this publication is not a replayable raw proof."
+      ],
+      "omittedFields": []
+    },
+    {
+      "sourcePath": "jobs/checkpoint-storage-qualification-pilots-20261027-01/attempts/healthy-restart/run/pilot-01/stdout.json",
+      "originalSha256": "49da248550df5b46bab26df1b46777efb775e99779f42d7686786ed5bf843e37",
+      "originalBytes": 9714417,
+      "publishedPath": "docs/evidence/checkpoint-storage-qualification-pilots-20261027-01/attempts/healthy-restart/run/pilot-01/stdout.summary.json",
+      "sanitizedCopySha256": "0b551ad2901419b1b60c2d1abb2635b34b29f293f599760c40d88a7383c492cc",
+      "sanitizedCopyBytes": 56156,
+      "mode": "sanitized-projection",
       "sanitizationNotes": [
         "Host workspace/home/temporary paths replaced with <workspace>, <host-home>, <host-temporary>; Docker/container paths are retained.",
         "Original bytes remain in the local jobs evidence; this publication is not a replayable raw proof.",
-        "Detailed omitted fields are listed in publicationOmissions; counts, verdicts, diagnostics and component events are retained.",
-        "The macOS Docker CLI executable path is replaced with <host-docker-cli>; container executable paths remain unchanged."
+        "Detailed omitted fields are listed in publicationOmissions; counts, verdicts, diagnostics and component events are retained."
       ],
-      "sanitizedCopyBytes": 255596,
-      "sanitizedCopySha256": "dae9ab85a30f0212cf18f3fc956064581f5e1f6220bd53c8eafb6fa084b71af7",
-      "sourcePath": "jobs/checkpoint-storage-qualification-20261027-01/reports/final/qualification.json"
-    },
-    {
-      "mode": "sanitized-copy",
-      "omittedFields": [],
-      "originalBytes": 9119,
-      "originalSha256": "30f96ec95304dd144c3ae246f5a0346e80669ac36b5c299b261b79bb3ee5ce11",
-      "publishedPath": "docs/evidence/checkpoint-storage-qualification-20261027-01/reports/final/qualification.md",
-      "sanitizationNotes": [
-        "Host workspace/home/temporary paths replaced with <workspace>, <host-home>, <host-temporary>; Docker/container paths are retained.",
-        "Original bytes remain in the local jobs evidence; this publication is not a replayable raw proof."
-      ],
-      "sanitizedCopyBytes": 9483,
-      "sanitizedCopySha256": "3dcc9e54620ba0764e78e8fe82d970406a1228839a9965d0131951c10a47cb7a",
-      "sourcePath": "jobs/checkpoint-storage-qualification-20261027-01/reports/final/qualification.md"
-    },
-    {
-      "mode": "sanitized-copy",
-      "omittedFields": [],
-      "originalBytes": 829,
-      "originalSha256": "86d40306f67496f8408b3be5a501824ff935ef225c6c70853550f4a62d816bf5",
-      "publishedPath": "docs/evidence/checkpoint-storage-qualification-20261027-01/reports/reproduction.json",
-      "sanitizationNotes": [
-        "Host workspace/home/temporary paths replaced with <workspace>, <host-home>, <host-temporary>; Docker/container paths are retained.",
-        "Original bytes remain in the local jobs evidence; this publication is not a replayable raw proof."
-      ],
-      "sanitizedCopyBytes": 1412,
-      "sanitizedCopySha256": "f71d0e66f6ebfb27f3f4774f93bc0b41d04fae1ae0a8c24a0b46dfb602573d29",
-      "sourcePath": "jobs/checkpoint-storage-qualification-20261027-01/reports/reproduction.json"
-    },
-    {
-      "mode": "sanitized-copy",
-      "omittedFields": [],
-      "originalBytes": 149,
-      "originalSha256": "faaecca77664d1b08402cf668dea44c701c58a00957410cb0020333eb7bd3619",
-      "publishedPath": "docs/evidence/checkpoint-storage-qualification-20261027-01/validation-finished.json",
-      "sanitizationNotes": [
-        "Host workspace/home/temporary paths replaced with <workspace>, <host-home>, <host-temporary>; Docker/container paths are retained.",
-        "Original bytes remain in the local jobs evidence; this publication is not a replayable raw proof."
-      ],
-      "sanitizedCopyBytes": 731,
-      "sanitizedCopySha256": "a0c0bde87f942035744acb414873bf6c9bc458cb61bde9b12ebe282b4ae74127",
-      "sourcePath": "jobs/checkpoint-storage-qualification-20261027-01/validation-finished.json"
-    },
-    {
-      "mode": "sanitized-projection",
       "omittedFields": [
         {
           "jsonPointer": "/evidence/kafkaLogs",
@@ -1956,48 +1970,48 @@
           "kind": "non-selected-evidence"
         },
         {
-          "items": 54,
           "jsonPointer": "/evidence/stateRecovery/trace/markers",
-          "kind": "array"
+          "kind": "array",
+          "items": 54
         },
         {
-          "items": 1,
           "jsonPointer": "/evidence/stateRecovery/readinessAttempts",
-          "kind": "detailed-readiness"
+          "kind": "detailed-readiness",
+          "items": 1
         },
         {
           "jsonPointer": "/evidence/stateRecovery/recoveries/0/readiness",
           "kind": "duplicate-readiness"
         },
         {
-          "items": 11013,
           "jsonPointer": "/evidence/checkpointStorage/instances/0/operations",
-          "kind": "array"
+          "kind": "array",
+          "items": 11013
         },
         {
-          "items": 1,
           "jsonPointer": "/evidence/checkpointStorage/instances/0/commands",
-          "kind": "array"
+          "kind": "array",
+          "items": 1
         },
         {
-          "items": 142,
           "jsonPointer": "/evidence/checkpointStorage/instances/1/operations",
-          "kind": "array"
+          "kind": "array",
+          "items": 142
         },
         {
-          "items": 1,
           "jsonPointer": "/evidence/checkpointStorage/instances/1/commands",
-          "kind": "array"
+          "kind": "array",
+          "items": 1
         },
         {
-          "items": 4480,
           "jsonPointer": "/evidence/checkpointStorage/instances/2/operations",
-          "kind": "array"
+          "kind": "array",
+          "items": 4480
         },
         {
-          "items": 0,
           "jsonPointer": "/evidence/checkpointStorage/instances/2/commands",
-          "kind": "array"
+          "kind": "array",
+          "items": 0
         },
         {
           "jsonPointer": "/evidence/checkpointStorage/instances/1/verification/jvmCommand",
@@ -2011,316 +2025,317 @@
           "originalCharacters": 4241,
           "publishedCharacters": 2048
         }
-      ],
-      "originalBytes": 9714417,
-      "originalSha256": "49da248550df5b46bab26df1b46777efb775e99779f42d7686786ed5bf843e37",
-      "publishedPath": "docs/evidence/checkpoint-storage-qualification-pilots-20261027-01/attempts/healthy-restart/run/pilot-01/stdout.summary.json",
-      "sanitizationNotes": [
-        "Host workspace/home/temporary paths replaced with <workspace>, <host-home>, <host-temporary>; Docker/container paths are retained.",
-        "Original bytes remain in the local jobs evidence; this publication is not a replayable raw proof.",
-        "Detailed omitted fields are listed in publicationOmissions; counts, verdicts, diagnostics and component events are retained."
-      ],
-      "sanitizedCopyBytes": 56156,
-      "sanitizedCopySha256": "0b551ad2901419b1b60c2d1abb2635b34b29f293f599760c40d88a7383c492cc",
-      "sourcePath": "jobs/checkpoint-storage-qualification-pilots-20261027-01/attempts/healthy-restart/run/pilot-01/stdout.json"
+      ]
     },
     {
-      "mode": "sanitized-copy",
-      "omittedFields": [],
-      "originalBytes": 1568,
+      "sourcePath": "jobs/checkpoint-storage-qualification-pilots-20261027-01/attempts/healthy-restart/validate/pilot-01/command.json",
       "originalSha256": "3f258ccdf20fb8fc4d59b7d31c4d1e3fbf4d11ba6690f4635ce29ea491da0940",
+      "originalBytes": 1568,
       "publishedPath": "docs/evidence/checkpoint-storage-qualification-pilots-20261027-01/attempts/healthy-restart/validate/pilot-01/command.json",
+      "sanitizedCopySha256": "83e5c79b65e61e3797ba9793eb9fa71438ecffa896865a5777f094aaa628a943",
+      "sanitizedCopyBytes": 1874,
+      "mode": "sanitized-copy",
       "sanitizationNotes": [
         "Host workspace/home/temporary paths replaced with <workspace>, <host-home>, <host-temporary>; Docker/container paths are retained.",
         "Original bytes remain in the local jobs evidence; this publication is not a replayable raw proof."
       ],
-      "sanitizedCopyBytes": 1874,
-      "sanitizedCopySha256": "83e5c79b65e61e3797ba9793eb9fa71438ecffa896865a5777f094aaa628a943",
-      "sourcePath": "jobs/checkpoint-storage-qualification-pilots-20261027-01/attempts/healthy-restart/validate/pilot-01/command.json"
+      "omittedFields": []
     },
     {
-      "mode": "log-summary",
-      "omittedFields": [],
-      "originalBytes": 69416,
+      "sourcePath": "jobs/checkpoint-storage-qualification-preparation-20261027-03/python-unittest-final.log",
       "originalSha256": "6615c797f7e63c22d492b839d3c2d21f0749a8bbaac2514edeb3c0f4ee0e7b28",
+      "originalBytes": 69416,
       "publishedPath": "docs/evidence/checkpoint-storage-qualification-preparation-20261027-03/python-unittest-final.log.summary.json",
+      "sanitizedCopySha256": "2f2579c71e345a6287e3391bf31aff7e1f88dbc7243af9ffa1919e4ab9c240a3",
+      "sanitizedCopyBytes": 1098,
+      "mode": "log-summary",
       "sanitizationNotes": [
         "Host workspace/home/temporary paths replaced with <workspace>, <host-home>, <host-temporary>; Docker/container paths are retained.",
         "Original bytes remain in the local jobs evidence; this publication is not a replayable raw proof.",
         "Only numbered aggregate test/build summary lines are included; no raw Maven/Python/native log is copied."
       ],
-      "sanitizedCopyBytes": 1098,
-      "sanitizedCopySha256": "2f2579c71e345a6287e3391bf31aff7e1f88dbc7243af9ffa1919e4ab9c240a3",
-      "sourcePath": "jobs/checkpoint-storage-qualification-preparation-20261027-03/python-unittest-final.log"
+      "omittedFields": []
     },
     {
-      "mode": "sanitized-copy",
-      "omittedFields": [],
-      "originalBytes": 484,
+      "sourcePath": "jobs/checkpoint-storage-qualification-review-20261027-01/review-finished.json",
       "originalSha256": "9d12741a99e800bd65fe3c924ad9682b2a0789bb2ca6b77ba389e31991148f06",
+      "originalBytes": 484,
       "publishedPath": "docs/evidence/checkpoint-storage-qualification-review-20261027-01/review-finished.json",
-      "sanitizationNotes": [
-        "Host workspace/home/temporary paths replaced with <workspace>, <host-home>, <host-temporary>; Docker/container paths are retained.",
-        "Original bytes remain in the local jobs evidence; this publication is not a replayable raw proof."
-      ],
-      "sanitizedCopyBytes": 1069,
       "sanitizedCopySha256": "d4601b59b26de06d417f67e1ee7b11732ed8a379a0c9739bf807408f0d4f338d",
-      "sourcePath": "jobs/checkpoint-storage-qualification-review-20261027-01/review-finished.json"
+      "sanitizedCopyBytes": 1069,
+      "mode": "sanitized-copy",
+      "sanitizationNotes": [
+        "Host workspace/home/temporary paths replaced with <workspace>, <host-home>, <host-temporary>; Docker/container paths are retained.",
+        "Original bytes remain in the local jobs evidence; this publication is not a replayable raw proof."
+      ],
+      "omittedFields": []
     },
     {
-      "mode": "sanitized-copy",
-      "omittedFields": [],
-      "originalBytes": 2852,
+      "sourcePath": "jobs/checkpoint-storage-qualification-review-20261027-01/supplemental-summary.json",
       "originalSha256": "8f12d0a1ab203e1764501da885c8d9f1b99c2c7a02ac763898d1f5ceb4c0b921",
+      "originalBytes": 2852,
       "publishedPath": "docs/evidence/checkpoint-storage-qualification-review-20261027-01/supplemental-summary.json",
-      "sanitizationNotes": [
-        "Host workspace/home/temporary paths replaced with <workspace>, <host-home>, <host-temporary>; Docker/container paths are retained.",
-        "Original bytes remain in the local jobs evidence; this publication is not a replayable raw proof."
-      ],
-      "sanitizedCopyBytes": 3443,
       "sanitizedCopySha256": "c86f7b26fa409f6d9c82076b7b2a13ccae4a92dcee812a05067f3af33ed43719",
-      "sourcePath": "jobs/checkpoint-storage-qualification-review-20261027-01/supplemental-summary.json"
-    },
-    {
+      "sanitizedCopyBytes": 3443,
       "mode": "sanitized-copy",
-      "omittedFields": [],
-      "originalBytes": 4675,
-      "originalSha256": "ab602b5aa6f978a9257776a3c96883796026fdff059f0cfb918c983c681df4c0",
-      "publishedPath": "docs/evidence/checkpoint-storage-review-fixes-20261027-01/counterexamples.json",
       "sanitizationNotes": [
         "Host workspace/home/temporary paths replaced with <workspace>, <host-home>, <host-temporary>; Docker/container paths are retained.",
         "Original bytes remain in the local jobs evidence; this publication is not a replayable raw proof."
       ],
-      "sanitizedCopyBytes": 5254,
-      "sanitizedCopySha256": "3939647c58f527059734266b2e4e02056999f7cdf789ab1f149e2764289e779b",
-      "sourcePath": "jobs/checkpoint-storage-review-fixes-20261027-01/counterexamples.json"
+      "omittedFields": []
     },
     {
-      "mode": "sanitized-projection",
-      "omittedFields": [
-        {
-          "items": 1,
-          "jsonPointer": "/audit/stateRecovery/readinessAttempts",
-          "kind": "detailed-readiness"
-        },
-        {
-          "items": 58,
-          "jsonPointer": "/audit/stateRecovery/trace/markers",
-          "kind": "array"
-        }
+      "sourcePath": "jobs/checkpoint-storage-review-fixes-20261027-01/counterexamples.json",
+      "originalSha256": "ab602b5aa6f978a9257776a3c96883796026fdff059f0cfb918c983c681df4c0",
+      "originalBytes": 4675,
+      "publishedPath": "docs/evidence/checkpoint-storage-review-fixes-20261027-01/counterexamples.json",
+      "sanitizedCopySha256": "3939647c58f527059734266b2e4e02056999f7cdf789ab1f149e2764289e779b",
+      "sanitizedCopyBytes": 5254,
+      "mode": "sanitized-copy",
+      "sanitizationNotes": [
+        "Host workspace/home/temporary paths replaced with <workspace>, <host-home>, <host-temporary>; Docker/container paths are retained.",
+        "Original bytes remain in the local jobs evidence; this publication is not a replayable raw proof."
       ],
-      "originalBytes": 80018,
+      "omittedFields": []
+    },
+    {
+      "sourcePath": "jobs/checkpoint-storage-review-fixes-20261027-01/live-smoke-02/smoke-finished.json",
       "originalSha256": "06290a990341ab9cfb700e5ea8671a14568f6beb0d22d8c442a6910de93f94fb",
+      "originalBytes": 80018,
       "publishedPath": "docs/evidence/checkpoint-storage-review-fixes-20261027-01/live-smoke-02/smoke-finished.summary.json",
+      "sanitizedCopySha256": "7de1aaefcf3f9304c04cbf70d1f326577fc1d849666201ec8616e7d2a053f2ac",
+      "sanitizedCopyBytes": 32317,
+      "mode": "sanitized-projection",
       "sanitizationNotes": [
         "Host workspace/home/temporary paths replaced with <workspace>, <host-home>, <host-temporary>; Docker/container paths are retained.",
         "Original bytes remain in the local jobs evidence; this publication is not a replayable raw proof.",
         "Detailed omitted fields are listed in publicationOmissions; counts, verdicts, diagnostics and component events are retained.",
         "The macOS Docker CLI executable path is replaced with <host-docker-cli>; container executable paths remain unchanged."
       ],
-      "sanitizedCopyBytes": 32317,
-      "sanitizedCopySha256": "7de1aaefcf3f9304c04cbf70d1f326577fc1d849666201ec8616e7d2a053f2ac",
-      "sourcePath": "jobs/checkpoint-storage-review-fixes-20261027-01/live-smoke-02/smoke-finished.json"
-    },
-    {
-      "mode": "log-summary",
-      "omittedFields": [],
-      "originalBytes": 55945,
-      "originalSha256": "8e30bf246522af2bcae810c96f7b28d2a711adcf7f1be9aea2fea38209dd8bc6",
-      "publishedPath": "docs/evidence/checkpoint-storage-review-fixes-20261027-01/maven-install-02.log.summary.json",
-      "sanitizationNotes": [
-        "Host workspace/home/temporary paths replaced with <workspace>, <host-home>, <host-temporary>; Docker/container paths are retained.",
-        "Original bytes remain in the local jobs evidence; this publication is not a replayable raw proof.",
-        "Only numbered aggregate test/build summary lines are included; no raw Maven/Python/native log is copied."
-      ],
-      "sanitizedCopyBytes": 31238,
-      "sanitizedCopySha256": "38cddf7b6a40705553a63a29867e60b98cad72456da9d38bbf1edffd28a41d6e",
-      "sourcePath": "jobs/checkpoint-storage-review-fixes-20261027-01/maven-install-02.log"
-    },
-    {
-      "mode": "log-summary",
-      "omittedFields": [],
-      "originalBytes": 10231,
-      "originalSha256": "016e688a1be14eae6030a6a0aa880515dffac896e5c7de08bc676cb692eb7958",
-      "publishedPath": "docs/evidence/checkpoint-storage-review-fixes-20261027-01/native-tests-02.log.summary.json",
-      "sanitizationNotes": [
-        "Host workspace/home/temporary paths replaced with <workspace>, <host-home>, <host-temporary>; Docker/container paths are retained.",
-        "Original bytes remain in the local jobs evidence; this publication is not a replayable raw proof.",
-        "Only numbered aggregate test/build summary lines are included; no raw Maven/Python/native log is copied."
-      ],
-      "sanitizedCopyBytes": 2054,
-      "sanitizedCopySha256": "b4a4f5e09d162285ad932ee2bc564b57f28c1c4de180d9910d42ee05a6f3ac2a",
-      "sourcePath": "jobs/checkpoint-storage-review-fixes-20261027-01/native-tests-02.log"
-    },
-    {
-      "mode": "log-summary",
-      "omittedFields": [],
-      "originalBytes": 78077,
-      "originalSha256": "d16d4380efaa5514488c0c4e99ad644997caaa5c774dce1d9c2335fae5b2e94e",
-      "publishedPath": "docs/evidence/checkpoint-storage-review-fixes-20261027-01/python-unittest-final.log.summary.json",
-      "sanitizationNotes": [
-        "Host workspace/home/temporary paths replaced with <workspace>, <host-home>, <host-temporary>; Docker/container paths are retained.",
-        "Original bytes remain in the local jobs evidence; this publication is not a replayable raw proof.",
-        "Only numbered aggregate test/build summary lines are included; no raw Maven/Python/native log is copied."
-      ],
-      "sanitizedCopyBytes": 1085,
-      "sanitizedCopySha256": "613b4940f3a7a913860840b0c3462a8eb537d4432e6797a418513ee8d7afa461",
-      "sourcePath": "jobs/checkpoint-storage-review-fixes-20261027-01/python-unittest-final.log"
-    },
-    {
-      "mode": "sanitized-projection",
       "omittedFields": [
         {
-          "items": 42,
+          "jsonPointer": "/audit/stateRecovery/readinessAttempts",
+          "kind": "detailed-readiness",
+          "items": 1
+        },
+        {
+          "jsonPointer": "/audit/stateRecovery/trace/markers",
+          "kind": "array",
+          "items": 58
+        }
+      ]
+    },
+    {
+      "sourcePath": "jobs/checkpoint-storage-review-fixes-20261027-01/maven-install-02.log",
+      "originalSha256": "8e30bf246522af2bcae810c96f7b28d2a711adcf7f1be9aea2fea38209dd8bc6",
+      "originalBytes": 55945,
+      "publishedPath": "docs/evidence/checkpoint-storage-review-fixes-20261027-01/maven-install-02.log.summary.json",
+      "sanitizedCopySha256": "38cddf7b6a40705553a63a29867e60b98cad72456da9d38bbf1edffd28a41d6e",
+      "sanitizedCopyBytes": 31238,
+      "mode": "log-summary",
+      "sanitizationNotes": [
+        "Host workspace/home/temporary paths replaced with <workspace>, <host-home>, <host-temporary>; Docker/container paths are retained.",
+        "Original bytes remain in the local jobs evidence; this publication is not a replayable raw proof.",
+        "Only numbered aggregate test/build summary lines are included; no raw Maven/Python/native log is copied."
+      ],
+      "omittedFields": []
+    },
+    {
+      "sourcePath": "jobs/checkpoint-storage-review-fixes-20261027-01/native-tests-02.log",
+      "originalSha256": "016e688a1be14eae6030a6a0aa880515dffac896e5c7de08bc676cb692eb7958",
+      "originalBytes": 10231,
+      "publishedPath": "docs/evidence/checkpoint-storage-review-fixes-20261027-01/native-tests-02.log.summary.json",
+      "sanitizedCopySha256": "b4a4f5e09d162285ad932ee2bc564b57f28c1c4de180d9910d42ee05a6f3ac2a",
+      "sanitizedCopyBytes": 2054,
+      "mode": "log-summary",
+      "sanitizationNotes": [
+        "Host workspace/home/temporary paths replaced with <workspace>, <host-home>, <host-temporary>; Docker/container paths are retained.",
+        "Original bytes remain in the local jobs evidence; this publication is not a replayable raw proof.",
+        "Only numbered aggregate test/build summary lines are included; no raw Maven/Python/native log is copied."
+      ],
+      "omittedFields": []
+    },
+    {
+      "sourcePath": "jobs/checkpoint-storage-review-fixes-20261027-01/python-unittest-final.log",
+      "originalSha256": "d16d4380efaa5514488c0c4e99ad644997caaa5c774dce1d9c2335fae5b2e94e",
+      "originalBytes": 78077,
+      "publishedPath": "docs/evidence/checkpoint-storage-review-fixes-20261027-01/python-unittest-final.log.summary.json",
+      "sanitizedCopySha256": "613b4940f3a7a913860840b0c3462a8eb537d4432e6797a418513ee8d7afa461",
+      "sanitizedCopyBytes": 1085,
+      "mode": "log-summary",
+      "sanitizationNotes": [
+        "Host workspace/home/temporary paths replaced with <workspace>, <host-home>, <host-temporary>; Docker/container paths are retained.",
+        "Original bytes remain in the local jobs evidence; this publication is not a replayable raw proof.",
+        "Only numbered aggregate test/build summary lines are included; no raw Maven/Python/native log is copied."
+      ],
+      "omittedFields": []
+    },
+    {
+      "sourcePath": "jobs/checkpoint-storage-review-fixes-20261027-01/re-audit-final.json",
+      "originalSha256": "f072e30fe7d0277e58c9335ebb43dd233ea2628cc21f34fa5cc9fbe0e2cfd226",
+      "originalBytes": 1010430,
+      "publishedPath": "docs/evidence/checkpoint-storage-review-fixes-20261027-01/re-audit-final.summary.json",
+      "sanitizedCopySha256": "93766eb7f27474d0422760c8da797bba6eb061ca735b49570f235671517ae9ea",
+      "sanitizedCopyBytes": 300710,
+      "mode": "sanitized-projection",
+      "sanitizationNotes": [
+        "Host workspace/home/temporary paths replaced with <workspace>, <host-home>, <host-temporary>; Docker/container paths are retained.",
+        "Original bytes remain in the local jobs evidence; this publication is not a replayable raw proof.",
+        "Detailed omitted fields are listed in publicationOmissions; counts, verdicts, diagnostics and component events are retained.",
+        "The macOS Docker CLI executable path is replaced with <host-docker-cli>; container executable paths remain unchanged."
+      ],
+      "omittedFields": [
+        {
           "jsonPointer": "/attempts/0/stateRecovery/trace/markers",
-          "kind": "array"
+          "kind": "array",
+          "items": 42
         },
         {
-          "items": 0,
           "jsonPointer": "/attempts/0/stateRecovery/readinessAttempts",
-          "kind": "detailed-readiness"
+          "kind": "detailed-readiness",
+          "items": 0
         },
         {
-          "items": 42,
           "jsonPointer": "/attempts/1/stateRecovery/trace/markers",
-          "kind": "array"
+          "kind": "array",
+          "items": 42
         },
         {
-          "items": 0,
           "jsonPointer": "/attempts/1/stateRecovery/readinessAttempts",
-          "kind": "detailed-readiness"
+          "kind": "detailed-readiness",
+          "items": 0
         },
         {
-          "items": 42,
           "jsonPointer": "/attempts/2/stateRecovery/trace/markers",
-          "kind": "array"
+          "kind": "array",
+          "items": 42
         },
         {
-          "items": 0,
           "jsonPointer": "/attempts/2/stateRecovery/readinessAttempts",
-          "kind": "detailed-readiness"
+          "kind": "detailed-readiness",
+          "items": 0
         },
         {
-          "items": 54,
           "jsonPointer": "/attempts/3/stateRecovery/trace/markers",
-          "kind": "array"
+          "kind": "array",
+          "items": 54
         },
         {
-          "items": 1,
           "jsonPointer": "/attempts/3/stateRecovery/readinessAttempts",
-          "kind": "detailed-readiness"
+          "kind": "detailed-readiness",
+          "items": 1
         },
         {
           "jsonPointer": "/attempts/3/stateRecovery/recoveries/0/readiness",
           "kind": "duplicate-readiness"
         },
         {
-          "items": 54,
           "jsonPointer": "/attempts/4/stateRecovery/trace/markers",
-          "kind": "array"
+          "kind": "array",
+          "items": 54
         },
         {
-          "items": 1,
           "jsonPointer": "/attempts/4/stateRecovery/readinessAttempts",
-          "kind": "detailed-readiness"
+          "kind": "detailed-readiness",
+          "items": 1
         },
         {
           "jsonPointer": "/attempts/4/stateRecovery/recoveries/0/readiness",
           "kind": "duplicate-readiness"
         },
         {
-          "items": 56,
           "jsonPointer": "/attempts/5/stateRecovery/trace/markers",
-          "kind": "array"
+          "kind": "array",
+          "items": 56
         },
         {
-          "items": 1,
           "jsonPointer": "/attempts/5/stateRecovery/readinessAttempts",
-          "kind": "detailed-readiness"
+          "kind": "detailed-readiness",
+          "items": 1
         },
         {
           "jsonPointer": "/attempts/5/stateRecovery/recoveries/0/readiness",
           "kind": "duplicate-readiness"
         },
         {
-          "items": 58,
           "jsonPointer": "/attempts/6/stateRecovery/trace/markers",
-          "kind": "array"
+          "kind": "array",
+          "items": 58
         },
         {
-          "items": 1,
           "jsonPointer": "/attempts/6/stateRecovery/readinessAttempts",
-          "kind": "detailed-readiness"
+          "kind": "detailed-readiness",
+          "items": 1
         },
         {
           "jsonPointer": "/attempts/6/stateRecovery/recoveries/0/readiness",
           "kind": "duplicate-readiness"
         },
         {
-          "items": 58,
           "jsonPointer": "/attempts/7/stateRecovery/trace/markers",
-          "kind": "array"
+          "kind": "array",
+          "items": 58
         },
         {
-          "items": 1,
           "jsonPointer": "/attempts/7/stateRecovery/readinessAttempts",
-          "kind": "detailed-readiness"
+          "kind": "detailed-readiness",
+          "items": 1
         },
         {
           "jsonPointer": "/attempts/7/stateRecovery/recoveries/0/readiness",
           "kind": "duplicate-readiness"
         },
         {
-          "items": 58,
           "jsonPointer": "/attempts/8/stateRecovery/trace/markers",
-          "kind": "array"
+          "kind": "array",
+          "items": 58
         },
         {
-          "items": 1,
           "jsonPointer": "/attempts/8/stateRecovery/readinessAttempts",
-          "kind": "detailed-readiness"
+          "kind": "detailed-readiness",
+          "items": 1
         },
         {
           "jsonPointer": "/attempts/8/stateRecovery/recoveries/0/readiness",
           "kind": "duplicate-readiness"
         },
         {
-          "items": 66,
           "jsonPointer": "/attempts/9/stateRecovery/trace/markers",
-          "kind": "array"
+          "kind": "array",
+          "items": 66
         },
         {
-          "items": 1,
           "jsonPointer": "/attempts/9/stateRecovery/readinessAttempts",
-          "kind": "detailed-readiness"
+          "kind": "detailed-readiness",
+          "items": 1
         },
         {
           "jsonPointer": "/attempts/9/stateRecovery/recoveries/0/readiness",
           "kind": "duplicate-readiness"
         },
         {
-          "items": 66,
           "jsonPointer": "/attempts/10/stateRecovery/trace/markers",
-          "kind": "array"
+          "kind": "array",
+          "items": 66
         },
         {
-          "items": 1,
           "jsonPointer": "/attempts/10/stateRecovery/readinessAttempts",
-          "kind": "detailed-readiness"
+          "kind": "detailed-readiness",
+          "items": 1
         },
         {
           "jsonPointer": "/attempts/10/stateRecovery/recoveries/0/readiness",
           "kind": "duplicate-readiness"
         },
         {
-          "items": 66,
           "jsonPointer": "/attempts/11/stateRecovery/trace/markers",
-          "kind": "array"
+          "kind": "array",
+          "items": 66
         },
         {
-          "items": 1,
           "jsonPointer": "/attempts/11/stateRecovery/readinessAttempts",
-          "kind": "detailed-readiness"
+          "kind": "detailed-readiness",
+          "items": 1
         },
         {
           "jsonPointer": "/attempts/11/stateRecovery/recoveries/0/readiness",
@@ -2344,218 +2359,217 @@
           "originalItems": 100,
           "publishedItems": 3
         }
+      ]
+    },
+    {
+      "sourcePath": "jobs/checkpoint-storage-review-fixes-20261027-01/re-audit-final.md",
+      "originalSha256": "1b4d2cdd8e58c1e6408ce18c2c48317cc30645d8c66d26d8250d5e76c1100c22",
+      "originalBytes": 28227,
+      "publishedPath": "docs/evidence/checkpoint-storage-review-fixes-20261027-01/re-audit-final.md",
+      "sanitizedCopySha256": "b2e00e98ceed7a365b6c97b007c2d56907ad38112093bcc11923a4a7111350ae",
+      "sanitizedCopyBytes": 28577,
+      "mode": "sanitized-copy",
+      "sanitizationNotes": [
+        "Host workspace/home/temporary paths replaced with <workspace>, <host-home>, <host-temporary>; Docker/container paths are retained.",
+        "Original bytes remain in the local jobs evidence; this publication is not a replayable raw proof."
       ],
-      "originalBytes": 1010430,
-      "originalSha256": "f072e30fe7d0277e58c9335ebb43dd233ea2628cc21f34fa5cc9fbe0e2cfd226",
-      "publishedPath": "docs/evidence/checkpoint-storage-review-fixes-20261027-01/re-audit-final.summary.json",
+      "omittedFields": []
+    },
+    {
+      "sourcePath": "jobs/checkpoint-storage-review-fixes-20261027-01/re-audit-reproduction.json",
+      "originalSha256": "d00e893aee3d4000880448f48db70c35fb7e5ebdad58e4d0a7a0ccd353476374",
+      "originalBytes": 299,
+      "publishedPath": "docs/evidence/checkpoint-storage-review-fixes-20261027-01/re-audit-reproduction.json",
+      "sanitizedCopySha256": "26b220811612f8ec4d44950754afeb6e5c6852c3d1adac031e52ab46000fd2c7",
+      "sanitizedCopyBytes": 883,
+      "mode": "sanitized-copy",
+      "sanitizationNotes": [
+        "Host workspace/home/temporary paths replaced with <workspace>, <host-home>, <host-temporary>; Docker/container paths are retained.",
+        "Original bytes remain in the local jobs evidence; this publication is not a replayable raw proof."
+      ],
+      "omittedFields": []
+    },
+    {
+      "sourcePath": "jobs/checkpoint-storage-review-fixes-20261027-01/verification-summary.json",
+      "originalSha256": "42db3bd85032bf4a85efd34bc0116640a642121e674f0308fb63977fa9b0ce5a",
+      "originalBytes": 1417,
+      "publishedPath": "docs/evidence/checkpoint-storage-review-fixes-20261027-01/verification-summary.json",
+      "sanitizedCopySha256": "e8923cc7ffed174638ab27a4c22e0d446284da1db6798f07972e7c06f60f6a20",
+      "sanitizedCopyBytes": 2001,
+      "mode": "sanitized-copy",
+      "sanitizationNotes": [
+        "Host workspace/home/temporary paths replaced with <workspace>, <host-home>, <host-temporary>; Docker/container paths are retained.",
+        "Original bytes remain in the local jobs evidence; this publication is not a replayable raw proof."
+      ],
+      "omittedFields": []
+    },
+    {
+      "sourcePath": "jobs/state-recovery-build-20261026-02/build-evidence.json",
+      "originalSha256": "0b5553d8ba108112d919dccde6de8ecb0bd103b5963d3311ba3fcf9c02496456",
+      "originalBytes": 12574,
+      "publishedPath": "docs/evidence/state-recovery-build-20261026-02/build-evidence.json",
+      "sanitizedCopySha256": "529ce4fa14949b7ff58202e81f75488868084ba5d0b5004fd9745ef4e0f971fd",
+      "sanitizedCopyBytes": 12386,
+      "mode": "sanitized-copy",
+      "sanitizationNotes": [
+        "Host workspace/home/temporary paths replaced with <workspace>, <host-home>, <host-temporary>; Docker/container paths are retained.",
+        "Original bytes remain in the local jobs evidence; this publication is not a replayable raw proof."
+      ],
+      "omittedFields": []
+    },
+    {
+      "sourcePath": "jobs/state-recovery-qualification-20261026-01-report.json",
+      "originalSha256": "22d55cbe88e37458d9deed66a1f1033b9894545ea5cf6706d4f8466dcdc9d53f",
+      "originalBytes": 543957,
+      "publishedPath": "docs/evidence/state-recovery-qualification-20261026-01/final-report.summary.json",
+      "sanitizedCopySha256": "9a7ee57fae017c9175d090e5fa7a716734f39ff46d218b7b9e5ebe5f84b26f32",
+      "sanitizedCopyBytes": 132207,
+      "mode": "sanitized-projection",
       "sanitizationNotes": [
         "Host workspace/home/temporary paths replaced with <workspace>, <host-home>, <host-temporary>; Docker/container paths are retained.",
         "Original bytes remain in the local jobs evidence; this publication is not a replayable raw proof.",
-        "Detailed omitted fields are listed in publicationOmissions; counts, verdicts, diagnostics and component events are retained.",
-        "The macOS Docker CLI executable path is replaced with <host-docker-cli>; container executable paths remain unchanged."
+        "Detailed omitted fields are listed in publicationOmissions; counts, verdicts, diagnostics and component events are retained."
       ],
-      "sanitizedCopyBytes": 300710,
-      "sanitizedCopySha256": "93766eb7f27474d0422760c8da797bba6eb061ca735b49570f235671517ae9ea",
-      "sourcePath": "jobs/checkpoint-storage-review-fixes-20261027-01/re-audit-final.json"
-    },
-    {
-      "mode": "sanitized-copy",
-      "omittedFields": [],
-      "originalBytes": 28227,
-      "originalSha256": "1b4d2cdd8e58c1e6408ce18c2c48317cc30645d8c66d26d8250d5e76c1100c22",
-      "publishedPath": "docs/evidence/checkpoint-storage-review-fixes-20261027-01/re-audit-final.md",
-      "sanitizationNotes": [
-        "Host workspace/home/temporary paths replaced with <workspace>, <host-home>, <host-temporary>; Docker/container paths are retained.",
-        "Original bytes remain in the local jobs evidence; this publication is not a replayable raw proof."
-      ],
-      "sanitizedCopyBytes": 28577,
-      "sanitizedCopySha256": "b2e00e98ceed7a365b6c97b007c2d56907ad38112093bcc11923a4a7111350ae",
-      "sourcePath": "jobs/checkpoint-storage-review-fixes-20261027-01/re-audit-final.md"
-    },
-    {
-      "mode": "sanitized-copy",
-      "omittedFields": [],
-      "originalBytes": 299,
-      "originalSha256": "d00e893aee3d4000880448f48db70c35fb7e5ebdad58e4d0a7a0ccd353476374",
-      "publishedPath": "docs/evidence/checkpoint-storage-review-fixes-20261027-01/re-audit-reproduction.json",
-      "sanitizationNotes": [
-        "Host workspace/home/temporary paths replaced with <workspace>, <host-home>, <host-temporary>; Docker/container paths are retained.",
-        "Original bytes remain in the local jobs evidence; this publication is not a replayable raw proof."
-      ],
-      "sanitizedCopyBytes": 883,
-      "sanitizedCopySha256": "26b220811612f8ec4d44950754afeb6e5c6852c3d1adac031e52ab46000fd2c7",
-      "sourcePath": "jobs/checkpoint-storage-review-fixes-20261027-01/re-audit-reproduction.json"
-    },
-    {
-      "mode": "sanitized-copy",
-      "omittedFields": [],
-      "originalBytes": 1417,
-      "originalSha256": "42db3bd85032bf4a85efd34bc0116640a642121e674f0308fb63977fa9b0ce5a",
-      "publishedPath": "docs/evidence/checkpoint-storage-review-fixes-20261027-01/verification-summary.json",
-      "sanitizationNotes": [
-        "Host workspace/home/temporary paths replaced with <workspace>, <host-home>, <host-temporary>; Docker/container paths are retained.",
-        "Original bytes remain in the local jobs evidence; this publication is not a replayable raw proof."
-      ],
-      "sanitizedCopyBytes": 2001,
-      "sanitizedCopySha256": "e8923cc7ffed174638ab27a4c22e0d446284da1db6798f07972e7c06f60f6a20",
-      "sourcePath": "jobs/checkpoint-storage-review-fixes-20261027-01/verification-summary.json"
-    },
-    {
-      "mode": "sanitized-copy",
-      "omittedFields": [],
-      "originalBytes": 12574,
-      "originalSha256": "0b5553d8ba108112d919dccde6de8ecb0bd103b5963d3311ba3fcf9c02496456",
-      "publishedPath": "docs/evidence/state-recovery-build-20261026-02/build-evidence.json",
-      "sanitizationNotes": [
-        "Host workspace/home/temporary paths replaced with <workspace>, <host-home>, <host-temporary>; Docker/container paths are retained.",
-        "Original bytes remain in the local jobs evidence; this publication is not a replayable raw proof."
-      ],
-      "sanitizedCopyBytes": 12386,
-      "sanitizedCopySha256": "529ce4fa14949b7ff58202e81f75488868084ba5d0b5004fd9745ef4e0f971fd",
-      "sourcePath": "jobs/state-recovery-build-20261026-02/build-evidence.json"
-    },
-    {
-      "mode": "sanitized-projection",
       "omittedFields": [
         {
-          "items": 18,
           "jsonPointer": "/attempts/0/stateRecovery/trace/markers",
-          "kind": "array"
+          "kind": "array",
+          "items": 18
         },
         {
-          "items": 0,
           "jsonPointer": "/attempts/0/stateRecovery/readinessAttempts",
-          "kind": "detailed-readiness"
+          "kind": "detailed-readiness",
+          "items": 0
         },
         {
-          "items": 18,
           "jsonPointer": "/attempts/1/stateRecovery/trace/markers",
-          "kind": "array"
+          "kind": "array",
+          "items": 18
         },
         {
-          "items": 0,
           "jsonPointer": "/attempts/1/stateRecovery/readinessAttempts",
-          "kind": "detailed-readiness"
+          "kind": "detailed-readiness",
+          "items": 0
         },
         {
-          "items": 18,
           "jsonPointer": "/attempts/2/stateRecovery/trace/markers",
-          "kind": "array"
+          "kind": "array",
+          "items": 18
         },
         {
-          "items": 0,
           "jsonPointer": "/attempts/2/stateRecovery/readinessAttempts",
-          "kind": "detailed-readiness"
+          "kind": "detailed-readiness",
+          "items": 0
         },
         {
-          "items": 30,
           "jsonPointer": "/attempts/3/stateRecovery/trace/markers",
-          "kind": "array"
+          "kind": "array",
+          "items": 30
         },
         {
-          "items": 1,
           "jsonPointer": "/attempts/3/stateRecovery/readinessAttempts",
-          "kind": "detailed-readiness"
+          "kind": "detailed-readiness",
+          "items": 1
         },
         {
           "jsonPointer": "/attempts/3/stateRecovery/recoveries/0/readiness",
           "kind": "duplicate-readiness"
         },
         {
-          "items": 28,
           "jsonPointer": "/attempts/4/stateRecovery/trace/markers",
-          "kind": "array"
+          "kind": "array",
+          "items": 28
         },
         {
-          "items": 1,
           "jsonPointer": "/attempts/4/stateRecovery/readinessAttempts",
-          "kind": "detailed-readiness"
+          "kind": "detailed-readiness",
+          "items": 1
         },
         {
           "jsonPointer": "/attempts/4/stateRecovery/recoveries/0/readiness",
           "kind": "duplicate-readiness"
         },
         {
-          "items": 30,
           "jsonPointer": "/attempts/5/stateRecovery/trace/markers",
-          "kind": "array"
+          "kind": "array",
+          "items": 30
         },
         {
-          "items": 1,
           "jsonPointer": "/attempts/5/stateRecovery/readinessAttempts",
-          "kind": "detailed-readiness"
+          "kind": "detailed-readiness",
+          "items": 1
         },
         {
           "jsonPointer": "/attempts/5/stateRecovery/recoveries/0/readiness",
           "kind": "duplicate-readiness"
         },
         {
-          "items": 20,
           "jsonPointer": "/attempts/6/stateRecovery/trace/markers",
-          "kind": "array"
+          "kind": "array",
+          "items": 20
         },
         {
-          "items": 0,
           "jsonPointer": "/attempts/6/stateRecovery/readinessAttempts",
-          "kind": "detailed-readiness"
+          "kind": "detailed-readiness",
+          "items": 0
         },
         {
-          "items": 18,
           "jsonPointer": "/attempts/7/stateRecovery/trace/markers",
-          "kind": "array"
+          "kind": "array",
+          "items": 18
         },
         {
-          "items": 0,
           "jsonPointer": "/attempts/7/stateRecovery/readinessAttempts",
-          "kind": "detailed-readiness"
+          "kind": "detailed-readiness",
+          "items": 0
         },
         {
-          "items": 20,
           "jsonPointer": "/attempts/8/stateRecovery/trace/markers",
-          "kind": "array"
+          "kind": "array",
+          "items": 20
         },
         {
-          "items": 0,
           "jsonPointer": "/attempts/8/stateRecovery/readinessAttempts",
-          "kind": "detailed-readiness"
+          "kind": "detailed-readiness",
+          "items": 0
         },
         {
-          "items": 36,
           "jsonPointer": "/attempts/9/stateRecovery/trace/markers",
-          "kind": "array"
+          "kind": "array",
+          "items": 36
         },
         {
-          "items": 1,
           "jsonPointer": "/attempts/9/stateRecovery/readinessAttempts",
-          "kind": "detailed-readiness"
+          "kind": "detailed-readiness",
+          "items": 1
         },
         {
           "jsonPointer": "/attempts/9/stateRecovery/recoveries/0/readiness",
           "kind": "duplicate-readiness"
         },
         {
-          "items": 36,
           "jsonPointer": "/attempts/10/stateRecovery/trace/markers",
-          "kind": "array"
+          "kind": "array",
+          "items": 36
         },
         {
-          "items": 1,
           "jsonPointer": "/attempts/10/stateRecovery/readinessAttempts",
-          "kind": "detailed-readiness"
+          "kind": "detailed-readiness",
+          "items": 1
         },
         {
           "jsonPointer": "/attempts/10/stateRecovery/recoveries/0/readiness",
           "kind": "duplicate-readiness"
         },
         {
-          "items": 38,
           "jsonPointer": "/attempts/11/stateRecovery/trace/markers",
-          "kind": "array"
+          "kind": "array",
+          "items": 38
         },
         {
-          "items": 1,
           "jsonPointer": "/attempts/11/stateRecovery/readinessAttempts",
-          "kind": "detailed-readiness"
+          "kind": "detailed-readiness",
+          "items": 1
         },
         {
           "jsonPointer": "/attempts/11/stateRecovery/recoveries/0/readiness",
@@ -2579,75 +2593,61 @@
           "originalItems": 100,
           "publishedItems": 3
         }
-      ],
-      "originalBytes": 543957,
-      "originalSha256": "22d55cbe88e37458d9deed66a1f1033b9894545ea5cf6706d4f8466dcdc9d53f",
-      "publishedPath": "docs/evidence/state-recovery-qualification-20261026-01/final-report.summary.json",
-      "sanitizationNotes": [
-        "Host workspace/home/temporary paths replaced with <workspace>, <host-home>, <host-temporary>; Docker/container paths are retained.",
-        "Original bytes remain in the local jobs evidence; this publication is not a replayable raw proof.",
-        "Detailed omitted fields are listed in publicationOmissions; counts, verdicts, diagnostics and component events are retained."
-      ],
-      "sanitizedCopyBytes": 132207,
-      "sanitizedCopySha256": "9a7ee57fae017c9175d090e5fa7a716734f39ff46d218b7b9e5ebe5f84b26f32",
-      "sourcePath": "jobs/state-recovery-qualification-20261026-01-report.json"
+      ]
     },
     {
-      "mode": "sanitized-copy",
-      "omittedFields": [],
-      "originalBytes": 68,
+      "sourcePath": "jobs/state-recovery-qualification-20261026-01/execution-started.json",
       "originalSha256": "5151003599459d88361a89334ca0bd8c8b29c2aca2a09172aa5b2c3ab2841cbc",
+      "originalBytes": 68,
       "publishedPath": "docs/evidence/state-recovery-qualification-20261026-01/execution-started.json",
-      "sanitizationNotes": [
-        "Host workspace/home/temporary paths replaced with <workspace>, <host-home>, <host-temporary>; Docker/container paths are retained.",
-        "Original bytes remain in the local jobs evidence; this publication is not a replayable raw proof."
-      ],
-      "sanitizedCopyBytes": 651,
       "sanitizedCopySha256": "4abd5fe717d8cc3a10abdda845516229eeaf72c6065dd1a93076beeb591c8336",
-      "sourcePath": "jobs/state-recovery-qualification-20261026-01/execution-started.json"
-    },
-    {
+      "sanitizedCopyBytes": 651,
       "mode": "sanitized-copy",
-      "omittedFields": [],
-      "originalBytes": 10801,
-      "originalSha256": "e96821280b1d102e1972fb11f7ec0e2882e8a3c98b7614e1c65981e288a3e4a2",
-      "publishedPath": "docs/evidence/state-recovery-qualification-20261026-01/manifest.json",
       "sanitizationNotes": [
         "Host workspace/home/temporary paths replaced with <workspace>, <host-home>, <host-temporary>; Docker/container paths are retained.",
         "Original bytes remain in the local jobs evidence; this publication is not a replayable raw proof."
       ],
-      "sanitizedCopyBytes": 11370,
+      "omittedFields": []
+    },
+    {
+      "sourcePath": "jobs/state-recovery-qualification-20261026-01/manifest.json",
+      "originalSha256": "e96821280b1d102e1972fb11f7ec0e2882e8a3c98b7614e1c65981e288a3e4a2",
+      "originalBytes": 10801,
+      "publishedPath": "docs/evidence/state-recovery-qualification-20261026-01/manifest.json",
       "sanitizedCopySha256": "733c387cb35d4bac81ff6daabdbce611d9c718ae354d995b2afd38652e801fa7",
-      "sourcePath": "jobs/state-recovery-qualification-20261026-01/manifest.json"
+      "sanitizedCopyBytes": 11370,
+      "mode": "sanitized-copy",
+      "sanitizationNotes": [
+        "Host workspace/home/temporary paths replaced with <workspace>, <host-home>, <host-temporary>; Docker/container paths are retained.",
+        "Original bytes remain in the local jobs evidence; this publication is not a replayable raw proof."
+      ],
+      "omittedFields": []
     },
     {
-      "mode": "sanitized-copy",
-      "omittedFields": [],
-      "originalBytes": 24392,
+      "sourcePath": "jobs/checkpoint-storage-helper-build-20261029-01/build-evidence.json",
       "originalSha256": "69a5bf435ed9ed6d130372dceb7201d22e2f27697086919a037f2ecc4e88df6f",
+      "originalBytes": 24392,
       "publishedPath": "docs/evidence/checkpoint-storage-helper-build-20261029-01/build-evidence.json",
+      "sanitizedCopySha256": "1c01706ba6ed439b1cd3f1e738c1f84c581898ad0ef6e9c0006090d8d47887c1",
+      "sanitizedCopyBytes": 23032,
+      "mode": "sanitized-copy",
       "sanitizationNotes": [
         "Workspace/home/host-temp paths replaced; original retained unchanged."
       ],
-      "sanitizedCopyBytes": 23032,
-      "sanitizedCopySha256": "1c01706ba6ed439b1cd3f1e738c1f84c581898ad0ef6e9c0006090d8d47887c1",
-      "sourcePath": "jobs/checkpoint-storage-helper-build-20261029-01/build-evidence.json"
+      "omittedFields": []
     },
     {
-      "mode": "sanitized-copy",
-      "omittedFields": [],
-      "originalBytes": 38493,
+      "sourcePath": "jobs/checkpoint-storage-helper-build-20261029-02/build-evidence.json",
       "originalSha256": "50721e4f8f3bd515ca9f445f7a96aee0d3f04da21448a744088bdd4045454e2d",
+      "originalBytes": 38493,
       "publishedPath": "docs/evidence/checkpoint-storage-helper-build-20261029-02/build-evidence.json",
+      "sanitizedCopySha256": "c197c205f7baff7981b5eeb85edc816a7c530588b8a0d1cfc9fd7ae75e9768e6",
+      "sanitizedCopyBytes": 35873,
+      "mode": "sanitized-copy",
       "sanitizationNotes": [
         "Workspace/home/host-temp paths replaced; original retained unchanged."
       ],
-      "sanitizedCopyBytes": 35873,
-      "sanitizedCopySha256": "c197c205f7baff7981b5eeb85edc816a7c530588b8a0d1cfc9fd7ae75e9768e6",
-      "sourcePath": "jobs/checkpoint-storage-helper-build-20261029-02/build-evidence.json"
+      "omittedFields": []
     }
-  ],
-  "formatVersion": 1,
-  "generatedDate": "2026-10-29",
-  "scope": "Selected publication copies and compact summaries of retained state-recovery/checkpoint-storage evidence. These are not raw execution receipts and cannot independently rerun qualification. Original SHA-256 identifies immutable local evidence; sanitizedCopySha256 identifies the published bytes."
+  ]
 }

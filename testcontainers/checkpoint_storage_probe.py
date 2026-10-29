@@ -474,7 +474,7 @@ class Probe:
         try:
             checks = qualify(self.report, self.output)
             self.report.update(status="pass", checks=checks)
-        except (ValueError, KeyError, TypeError, OSError) as failure:
+        except Exception as failure:
             self.report["qualificationError"] = str(failure)
             if self.report["status"] == "observed": self.report["status"] = "failed"
         publish(self.output / "result.json", self.report)

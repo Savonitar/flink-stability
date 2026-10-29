@@ -7,6 +7,12 @@ report field. Older frozen batches predate this contract and remain historical
 qualification under their retained verifier; the current checker rejects them.
 Do not add fields to, regenerate, or relabel their retained receipts.
 
+The checker independently renders each catalog with the shared closed template
+contract. Both the scenario bytes and the fixed template identities must match;
+updating a manifest hash cannot authorize a different workload. Qualification
+also requires the twelve-attempt execution receipt, exactly the allocated attempt
+directories, and nonces distinct from the reference pilot and every other attempt.
+
 This recipe qualifies the state oracle before storage fault experiments. It uses
 the released Flink 2.2.0 distribution, Kafka 4.0.0 and Kafka connector 5.0.0-2.2,
 with one input partition, one output partition, parallelism one, eight keys and
@@ -26,19 +32,32 @@ attempts are fixed before qualification starts. Missing windows and infrastructu
 failures remain in the report and leave qualification incomplete. The runner
 never retries, resumes, replaces or removes an attempt.
 
+`run.py` is a pilot-only launcher: it does not yet impose an outer process
+deadline, isolate the full launch environment or handle SIGTERM cleanup. Use
+controlled foreground pilots; unattended qualification needs the bounded runner
+lifecycle listed in the [review follow-ups](../../docs/CHECKPOINT-STORAGE-REVIEW-FOLLOWUPS.md).
+The checker remains available for independently auditing a complete allocated matrix.
+
 ## Build and pilot
 
 Use JDK 21 and an explicit Maven artifact cache. `build.py` copies only permitted
 artifact-cache files to a fresh build directory, freezes its source inputs and
 builds both workload arms offline. It supplies empty Maven settings and does not
-read user settings or credentials. Select a fresh directory for every build:
+read user settings or credentials. The builder selects Maven once, supplies a
+fixed tool PATH and fresh HOME/TMPDIR, and regenerates `_remote.repositories`
+markers for its isolated offline resolver without reading or changing original
+marker contents. Select a fresh directory for every build:
 
 ```sh
-python3 calibration/state-recovery/build.py \
+python3 -B calibration/state-recovery/build.py \
   --java-home /path/to/jdk-21 \
   --maven-repo /path/to/repository \
   --output jobs/state-recovery-build
 ```
+
+Use `package` for `-Pstate-reset-on-restore`: its classified JAR becomes the
+module's main artifact for that invocation, so do not install/deploy that profile
+into the ordinary reactor cache.
 
 The two JARs have identical class bytes. Their only differences are the manifest
 and private `META-INF/flink-stability/keyed-prefix-build.properties` resource.
@@ -77,15 +96,15 @@ reference is the correct workload's uninterrupted state-oracle run and inserts
 both image IDs into every frozen cell catalog.
 
 ```sh
-python3 calibration/state-recovery/catalogs.py \
+python3 -B calibration/state-recovery/catalogs.py \
   --build-evidence jobs/state-recovery-build/build-evidence.json \
   --reference-result jobs/state-recovery-pilot/stdout.json \
   --output jobs/state-recovery-qualification
 
-python3 calibration/state-recovery/run.py jobs/state-recovery-qualification \
+python3 -B calibration/state-recovery/run.py jobs/state-recovery-qualification \
   --maven-repo /path/to/repository
 
-python3 calibration/state-recovery/check.py jobs/state-recovery-qualification \
+python3 -B calibration/state-recovery/check.py jobs/state-recovery-qualification \
   > jobs/state-recovery-qualification-report.json
 ```
 
@@ -142,7 +161,7 @@ checkpoint-storage faults.
 Offline checker tests:
 
 ```sh
-python3 -m unittest discover -s tools/tests -p test_state_recovery_calibration.py -v
+python3 -B -m unittest discover -s tools/tests -p test_state_recovery_calibration.py -v
 ```
 
 ## Qualified local batch
