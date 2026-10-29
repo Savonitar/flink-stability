@@ -63,7 +63,45 @@ class KafkaStatePrefixValidatorTest {
     @Test void missingDuplicateAndUnexpectedIdsHaveDistinctReasons() {
         assertEquals("validator.kafka.state-prefix.missing-ids", validate(List.of(json(0,0,1,1)),2,2).reason());
         assertEquals("validator.kafka.state-prefix.duplicate-ids", validate(List.of(json(0,0,1,1),json(0,0,1,1)),2,2).reason());
-        assertEquals("validator.kafka.state-prefix.unexpected-ids", validate(List.of(json(-1,0,1,1)),1,2).reason());
+        assertEquals("validator.kafka.state-prefix.unexpected-ids", validate(List.of(json(1,1,1,2)),1,2).reason());
+    }
+
+    @Test void outOfRangeStateFieldsAreMalformedBeforeIdAndStateClassification() {
+        for (String row : List.of(json(-1, 0, 1, 1), json(Long.MIN_VALUE, 0, 1, 1),
+                json(0, -1, 1, 1), json(0, 2, 1, 1), json(0, Long.MAX_VALUE, 1, 1),
+                json(0, 0, 0, 1), json(0, 0, -1, 1), json(0, 0, 1, 0), json(0, 0, 1, Long.MIN_VALUE),
+                json(99, 0, 0, 1))) {
+            var result = validate(List.of(row), 1, 2);
+            assertEquals("validator.kafka.state-prefix.malformed-records", result.reason(), row);
+            var totals = result.evidence().defectTotals().orElseThrow();
+            assertEquals(1, totals.malformedCount(), row);
+            assertEquals(0, totals.unexpectedCount(), row);
+            assertEquals(1, totals.missingCount(), row);
+            assertEquals(0, result.stateEvidence().mismatchCount().orElseThrow(), row);
+        }
+        assertEquals("validator.kafka.state-prefix.unexpected-ids", validate(List.of(json(Long.MAX_VALUE, 0, 1, 1)), 1, 2).reason());
+        assertEquals("validator.kafka.state-prefix.state-mismatch", validate(List.of(json(0, 0, Long.MAX_VALUE, Long.MAX_VALUE)), 1, 2).reason());
+    }
+
+    @Test void semanticJsonFormattingRemainsValidWithoutAByteCanonicalizationRequirement() {
+        for (String row : List.of(" { \"prefixSum\":1, \"count\":1, \"key\":0, \"id\":0, \"version\":1 }\n",
+                json(0, 0, 1, 1).replace("\"id\":0", "\"id\":-0"),
+                json(0, 0, 1, 1).replace("\"id\"", "\"\\u0069d\""))) {
+            assertEquals(KafkaIdSetValidationResult.Status.PASS, validate(List.of(row), 1, 2).status(), row);
+        }
+    }
+
+    @Test void everyFieldRequiresAnIntegralSignedLongAndEscapedDuplicatesRemainMalformed() {
+        String valid = json(0, 0, 1, 1);
+        for (String field : List.of("version", "id", "key", "count", "prefixSum")) {
+            long original = field.equals("id") || field.equals("key") ? 0 : 1;
+            for (String invalid : List.of("true", "1.0", "\"1\"", "9223372036854775808", "-9223372036854775809")) {
+                String row = valid.replace("\"" + field + "\":" + original, "\"" + field + "\":" + invalid);
+                assertEquals("validator.kafka.state-prefix.malformed-records", validate(List.of(row), 1, 2).reason(), row);
+            }
+        }
+        String escapedDuplicate = valid.replace("}", ",\"\\u0069d\":0}");
+        assertEquals("validator.kafka.state-prefix.malformed-records", validate(List.of(escapedDuplicate), 1, 2).reason());
     }
 
     @Test void rejectsMalformedAndAmbiguousJson() {
@@ -99,7 +137,7 @@ class KafkaStatePrefixValidatorTest {
     }
 
     @Test void boundsMismatchSamplesWithoutLosingTotals() {
-        var rows = IntStream.range(0,150).mapToObj(id -> json(id,0,0,0)).toList();
+        var rows = IntStream.range(0,150).mapToObj(id -> json(id,0,2,2)).toList();
         var result = validate(rows,150,1);
         assertEquals(150, result.stateEvidence().mismatchCount().orElseThrow());
         assertEquals(100, result.stateEvidence().mismatchSamples().size());
@@ -206,7 +244,7 @@ class KafkaStatePrefixValidatorTest {
         for (var failed : List.of(validate(List.of(),1,1),
                 validate(List.of("{}"),1,1), validate(List.of(json(1,0,1,1)),1,1),
                 validate(List.of(json(0,0,1,1),json(0,0,1,1)),1,1),
-                validate(List.of(json(0,0,0,0)),1,1))) {
+                validate(List.of(json(0,0,2,2)),1,1))) {
             assertEquals(KafkaIdSetValidationResult.Status.FAIL,failed.status());
             assertThrows(IllegalArgumentException.class, () -> new KafkaStatePrefixValidationResult(
                     KafkaIdSetValidationResult.Status.PASS,"validator.kafka.state-prefix.match","injected pass",

@@ -101,18 +101,14 @@ public final class KafkaStatePrefixValidator {
                             List.copyOf(mismatches));
                 }
                 var sample = new KafkaIdSetValidationResult.RecordSample(record.partition(), record.offset(), record.diagnosticValue());
-                var decoded = decode(record);
+                var decoded = decode(record, keyCount);
                 ids.accept(sample, decoded == null ? null : decoded.id());
-                if (decoded == null || decoded.id() < 0 || decoded.id() >= manifest.totalRecords()) continue;
-                long expectedKey = decoded.id() % keyCount;
-                long s = decoded.id() / keyCount;
-                long count = Math.addExact(s, 1);
-                long expectedSum = Math.addExact(Math.multiplyExact(count, expectedKey + 1),
-                        Math.multiplyExact(keyCount, Math.multiplyExact(s, count) / 2));
-                if (decoded.key() != expectedKey || decoded.count() != count || decoded.sum() != expectedSum) {
+                if (decoded == null || decoded.id() >= manifest.totalRecords()) continue;
+                var expected = expectedState(decoded.id(), keyCount);
+                if (decoded.key() != expected.key() || decoded.count() != expected.count() || decoded.sum() != expected.sum()) {
                     mismatchCount++;
                     mismatches.add(new KafkaStatePrefixValidationResult.StateMismatchSample(record.partition(), record.offset(),
-                            decoded.id(), expectedKey, decoded.key(), count, decoded.count(), expectedSum, decoded.sum()));
+                            decoded.id(), expected.key(), decoded.key(), expected.count(), decoded.count(), expected.sum(), decoded.sum()));
                     if (mismatches.size() > 100) mismatches.pollLast();
                 }
             }
@@ -150,7 +146,20 @@ public final class KafkaStatePrefixValidator {
         return true;
     }
 
-    private static Decoded decode(KafkaStateTopicSnapshot.ObservedRecord record) {
+    static ExpectedState expectedState(long id, int keyCount) {
+        if (id < 0 || id >= MAX_RECORDS || keyCount < 1 || keyCount > 1024)
+            throw new IllegalArgumentException("State expectation is outside the bounded input contract");
+        long key = id % keyCount;
+        long s = id / keyCount;
+        long count = Math.addExact(s, 1);
+        long sum = Math.addExact(Math.multiplyExact(count, key + 1),
+                Math.multiplyExact(keyCount, Math.multiplyExact(s, count) / 2));
+        return new ExpectedState(key, count, sum);
+    }
+
+    record ExpectedState(long key, long count, long sum) {}
+
+    private static Decoded decode(KafkaStateTopicSnapshot.ObservedRecord record, int keyCount) {
         if (record.originalSize() < 0 || record.originalSize() > KafkaStateTopicSnapshot.MAX_RECORD_BYTES) return null;
         try {
             String text = StandardCharsets.UTF_8.newDecoder().onMalformedInput(CodingErrorAction.REPORT)
@@ -163,8 +172,10 @@ public final class KafkaStatePrefixValidator {
                     if (value == null || !value.isIntegralNumber() || !value.canConvertToLong()) return null;
                 }
                 if (object.path("version").longValue() != 1) return null;
-                return new Decoded(object.path("id").longValue(), object.path("key").longValue(),
+                var decoded = new Decoded(object.path("id").longValue(), object.path("key").longValue(),
                         object.path("count").longValue(), object.path("prefixSum").longValue());
+                return decoded.id() < 0 || decoded.key() < 0 || decoded.key() >= keyCount
+                        || decoded.count() < 1 || decoded.sum() < 1 ? null : decoded;
             }
         } catch (IOException malformed) { return null; }
     }

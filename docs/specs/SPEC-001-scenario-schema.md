@@ -2409,7 +2409,12 @@ Connector pull-request gating is the same mechanism with one axis:
 
   Decoding requires strict UTF-8 and exactly the five JSON fields in R5.6c.1,
   version `1`, integral values in their declared numeric ranges, and no duplicate
-  fields. Tombstones, oversized records, unknown fields and invalid encodings
+  fields: `id >= 0`, `0 <= key < K`, `count >= 1`, and `prefixSum >= 1`, all
+  representable as signed 64-bit integers. Values outside these ranges are
+  malformed; a valid nonnegative ID absent from the manifest is unexpected.
+  JSON whitespace, field order and escaped spellings of known field names do
+  not alter their semantic values; no byte-canonical JSON encoding is required.
+  Tombstones, oversized records, unknown fields and invalid encodings
   count as malformed records. Complete evidence retains all defect totals, with
   stable precedence `malformed-records` > `unexpected-ids` > `duplicate-ids` >
   `missing-ids` > `state-mismatch`. State mismatch includes wrong keys, counts or

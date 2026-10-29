@@ -55,7 +55,7 @@ def cache_entry_allowed(name):
         return False
     return (name.endswith((".jar", ".pom", ".jar.sha1", ".pom.sha1", ".jar.sha256", ".pom.sha256",
                            ".jar.sha512", ".pom.sha512", ".jar.md5", ".pom.md5"))
-            or name in ("_remote.repositories", "resolver-status.properties")
+            or name == "_remote.repositories"
             or re.fullmatch(r"maven-metadata(?:-[A-Za-z0-9_.-]+)?\.xml(?:\.(?:sha1|sha256|sha512|md5))?", name)
             is not None)
 
@@ -83,7 +83,7 @@ def seed_cache(source, destination):
             original = directory / name
             if original.is_symlink():
                 raise ValueError("Symlink Maven cache entry is unsupported: " + str(original.relative_to(source)))
-            if not cache_entry_allowed(name) or not original.is_file():
+            if name == "_remote.repositories" or not cache_entry_allowed(name) or not original.is_file():
                 continue
             copied = destination / original.relative_to(source)
             copied.parent.mkdir(parents=True, exist_ok=True)
@@ -92,7 +92,16 @@ def seed_cache(source, destination):
             else:
                 shutil.copyfile(original, copied)
                 counts["copied"] += 1
-    return {"source": str(source), "path": str(destination), "files": sum(counts.values()), **counts}
+    generated = 0
+    for directory, unused, filenames in os.walk(destination):
+        artifacts = sorted(name for name in filenames if name.endswith((".jar", ".pom")))
+        if artifacts:
+            marker = Path(directory) / "_remote.repositories"
+            marker.write_text("# Generated for this isolated offline cache; source receipts are unchanged.\n"
+                              + "".join(name + ">=\n" + name + ">central=\n" for name in artifacts), encoding="utf-8")
+            generated += 1
+    return {"source": str(source), "path": str(destination), "files": sum(counts.values()) + generated,
+            "generatedRepositoryMarkers": generated, **counts}
 
 
 def source_inputs():
@@ -153,19 +162,25 @@ def main():
     if output == ROOT / "jobs":
         raise ValueError("Use a fresh child of jobs/")
     java_home = args.java_home.absolute()
-    environment = {"JAVA_HOME": str(java_home),
-                   "PATH": str(java_home / "bin") + os.pathsep + os.environ.get("PATH", "/usr/bin:/bin"),
+    maven = shutil.which("mvn")
+    if maven is None:
+        raise ValueError("Maven executable is required")
+    home = output / "home"
+    environment = {"JAVA_HOME": str(java_home), "HOME": str(home),
+                   "PATH": os.pathsep.join((str(java_home / "bin"), str(Path(maven).parent),
+                                            "/usr/bin", "/bin", "/usr/sbin", "/sbin")),
                    "MAVEN_SKIP_RC": "1"}
     version = subprocess.run([str(java_home / "bin/javac"), "-version"], check=True,
                              env=environment, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
-                             text=True).stdout.strip()
+                             text=True, timeout=30).stdout.strip()
     if not version.startswith("javac 21."):
         raise ValueError("JDK 21 is required; found " + version)
     output.mkdir(parents=True, exist_ok=False)
+    home.mkdir()
     temporary = output / "tmp"
     temporary.mkdir()
     environment["TMPDIR"] = str(temporary)
-    environment["MAVEN_OPTS"] = "-Djava.io.tmpdir=" + str(temporary)
+    environment["MAVEN_OPTS"] = "-Duser.home=" + str(home) + " -Djava.io.tmpdir=" + str(temporary)
     settings = output / "settings.xml"
     settings.write_text('<settings xmlns="http://maven.apache.org/SETTINGS/1.0.0"/>\n', encoding="utf-8")
     selected = source_inputs()
@@ -198,7 +213,7 @@ def main():
         build = output / "build" / arm
         if arm == "mutant":
             build = build / "state-reset-on-restore"
-        command = ["mvn", "-B", "-ntp", "-o", "-s", str(settings), "-gs", str(settings),
+        command = [maven, "-B", "-ntp", "-o", "-s", str(settings), "-gs", str(settings),
                    "-Dmaven.repo.local=" + str(repository), "-Dworkload.build.directory=" + str(build),
                    "-f", str(Path(snapshots[arm]["path"]) / MODULE / "pom.xml")]
         if arm == "mutant":
