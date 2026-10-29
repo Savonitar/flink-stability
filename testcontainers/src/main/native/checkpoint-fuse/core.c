@@ -220,6 +220,7 @@ int cf_init(struct cf_state *s, const char *attempt, const char *storage, const 
     pthread_mutex_lock(&s->mutex);
     int result = cf_record_locked(s, "START", NULL, ".", 0, 0, 0, 0, -1, "instance-created");
     pthread_mutex_unlock(&s->mutex);
+    if (result != 0) { pthread_mutex_destroy(&s->mutex); s->journal_fd = -1; }
     return result;
 }
 
@@ -271,7 +272,8 @@ static int response_locked(struct cf_state *s, bool ok, const char *error, char 
     return count > 0 && (size_t) count < capacity ? (ok ? 0 : -EINVAL) : -ENOSPC;
 }
 
-int cf_control(struct cf_state *s, const char *command, char *response, size_t capacity) {
+int cf_control_tracked(struct cf_state *s, const char *command, char *response, size_t capacity, bool *mutation_applied) {
+    if (mutation_applied) *mutation_applied = false;
     char copy[CF_COMMAND_MAX + 1], *tokens[9] = {0};
     size_t number = 0;
     const char *error = NULL;
@@ -302,8 +304,10 @@ int cf_control(struct cf_state *s, const char *command, char *response, size_t c
     if (!error && !strcmp(tokens[0], "ARM") &&
         (s->mode != CF_HEALTHY || !cf_uint(tokens[6], &lease) || lease < 1 || lease > CF_MAX_LEASE_MS ||
          strcmp(tokens[7], "create,write") || UINT64_MAX - s->monotonic(s->clock_context) < lease * UINT64_C(1000000))) error = "invalid-arm";
-    if (!error && (!strcmp(tokens[0], "HEAL") || !strcmp(tokens[0], "ABORT")) &&
-        (s->mode != CF_ARMED || strcmp(tokens[5], s->fault))) error = "fault-id-mismatch";
+    if (!error && (!strcmp(tokens[0], "HEAL") || !strcmp(tokens[0], "ABORT"))) {
+        if (s->mode != CF_ARMED) error = "not-armed";
+        else if (strcmp(tokens[5], s->fault)) error = "fault-id-mismatch";
+    }
     if (!error && !status && !stop && s->stop_requested) error = "terminal-state";
     /* Terminal status/stop remain available even when no further receipt can be stored. */
     if (s->mode == CF_FATAL && !status && !stop && !error) error = "journal-incomplete";
@@ -311,6 +315,7 @@ int cf_control(struct cf_state *s, const char *command, char *response, size_t c
     if (error) {
         if (s->mode != CF_FATAL) (void) cf_record_locked(s, "REJECT", NULL, ".", -1, EINVAL, 0, 0, -1, error);
     } else if (!status) {
+        if (mutation_applied) *mutation_applied = true;
         s->revision = revision;
         if (stop) {
             if (s->mode == CF_ARMED) {
@@ -330,4 +335,19 @@ int cf_control(struct cf_state *s, const char *command, char *response, size_t c
     int result = response_locked(s, !error, error, response, capacity);
     pthread_mutex_unlock(&s->mutex);
     return result;
+}
+
+int cf_control(struct cf_state *s, const char *command, char *response, size_t capacity) {
+    return cf_control_tracked(s, command, response, capacity, NULL);
+}
+
+void cf_control_response_lost(struct cf_state *s, bool mutation_applied) {
+    if (!mutation_applied) return;
+    pthread_mutex_lock(&s->mutex);
+    if (s->mode != CF_FATAL) {
+        if (s->mode != CF_EXPIRED) s->mode = CF_ABORTED;
+        (void) cf_record_locked(s, "ABORT", NULL, ".", -1, ECANCELED, 0, 0, -1, "control-response-lost");
+    }
+    s->stop_requested = true;
+    pthread_mutex_unlock(&s->mutex);
 }

@@ -6,6 +6,30 @@ under local `jobs/`. The [publication manifest](evidence/checkpoint-storage-publ
 records each copy's separate SHA-256 and omissions. Full journals, binaries and
 command transcripts are not included; the copies cannot rerun the raw audit.
 
+The review rebuild on 29 October 2026 is a new artifact:
+[build 02 receipt](evidence/checkpoint-storage-helper-build-20261029-02/build-evidence.json),
+original manifest SHA-256
+`50721e4f8f3bd515ca9f445f7a96aee0d3f04da21448a744088bdd4045454e2d`.
+It contains aggregate IO counters, read forwarding after journal exhaustion,
+and control-connection handling that aborts only after a lost accepted mutation
+acknowledgement. It passed strict Linux compilation, 100,357 native selftest
+checks and the unprivileged Java probe smoke in the pristine Flink image;
+both owned containers were removed. All 51 locked package receipts were checked
+before installation, with network disconnection verified before installation
+and before source copy. Its observed store was classic `overlay2`.
+
+| New artifact | SHA-256 |
+| --- | --- |
+| `checkpoint-fuse` | `aa2f74a87e73551c6ddb9c6e9285f33e1d14fbd476212fec18a024a9a33f6aef` |
+| `checkpoint-fuse-selftest` | `297b4070df3dfcfc6e82849f1024b55c4b4fd64f5cf61be997b46661876cc83a` |
+| `probe.jar` | `2fd880248a7515b08ee419e1ff875cc1edff8e0f784878aa55a0aaa0a1780983` |
+
+[Build 01](evidence/checkpoint-storage-helper-build-20261029-01/build-evidence.json)
+retains its selftest compilation failure and successful cleanup. The corrected
+build used a new directory. These build/smoke checks do not mount FUSE or qualify
+an integrated Flink campaign; the 27 October results below retain their original
+artifact identities and scope.
+
 The PR 3 prototype implements a bounded filesystem write-failure experiment
 using two FUSE views of one fresh Docker named volume and a standalone Java I/O
 probe. It does not yet provision a Flink job or inject a failure into a real

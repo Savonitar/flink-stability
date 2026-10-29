@@ -163,16 +163,16 @@ class CommandFailure(RuntimeError):
 
 def ensure_image(command):
     try:
-        raw = command.docker_run('image-inspect', ['image', 'inspect', IMAGE_ID])
+        raw = command.docker_run('image-inspect', ['image', 'inspect', IMAGE_DIGEST])
     except CommandFailure as error:
         missing = re.search(r'(?:^|\n)(?:Error(?: response from daemon)?: )?No such (?:image|object): '
-                            + re.escape(IMAGE_ID) + r'\s*$', error.stderr.read_text(), re.IGNORECASE)
+                            + re.escape(IMAGE_DIGEST) + r'\s*$', error.stderr.read_text(), re.IGNORECASE)
         if error.returncode != 1 or not missing:
             raise
         command.docker_run('pull-pinned-image', ['pull', '--platform', PLATFORM, IMAGE_DIGEST])
-        raw = command.docker_run('image-inspect-after-pull', ['image', 'inspect', IMAGE_ID])
+        raw = command.docker_run('image-inspect-after-pull', ['image', 'inspect', IMAGE_DIGEST])
     inspected = json.loads(raw)[0]
-    if (inspected.get('Id') != IMAGE_ID or inspected.get('Os') != 'linux'
+    if (inspected.get('Id') not in (IMAGE_ID, IMAGE_DIGEST.split('@')[1]) or inspected.get('Os') != 'linux'
             or inspected.get('Architecture') != 'arm64' or IMAGE_DIGEST not in inspected.get('RepoDigests', [])):
         raise RuntimeError('Local base image does not match dependency lock identity')
     return inspected
@@ -192,6 +192,7 @@ class Commands:
         (output / 'tmp').mkdir()
         self.deadline = time.monotonic() + timeout
         self.receipts = []
+        self.owned_images = {}
 
     def run(self, label, command, *, stdin=None, cleanup=False, limit=300):
         remaining = 40 if cleanup else self.deadline - time.monotonic()
@@ -225,9 +226,37 @@ class Commands:
     def remove_owned(self, name):
         result = self.docker_run('cleanup-inspect', ['inspect', name], cleanup=True)
         item = json.loads(result)[0]
-        if item.get('Config', {}).get('Labels', {}).get(LABEL) != name or item.get('Image') != IMAGE_ID:
+        expected = self.owned_images.get(name)
+        allowed = (expected,) if expected else (IMAGE_ID, IMAGE_DIGEST.split('@')[1])
+        if item.get('Config', {}).get('Labels', {}).get(LABEL) != name or item.get('Image') not in allowed:
             raise RuntimeError('Refusing to remove a container without exact build ownership')
         self.docker_run('cleanup-remove', ['rm', '-f', name], cleanup=True)
+
+    def bind_owned(self, name, inspected_image):
+        item = json.loads(self.docker_run('verify-created-image', ['inspect', name]))[0]
+        if (item.get('Config', {}).get('Labels', {}).get(LABEL) != name
+                or item.get('Config', {}).get('Image') != inspected_image['Id']
+                or item.get('Image') not in (IMAGE_ID, IMAGE_DIGEST.split('@')[1])):
+            raise RuntimeError('Created build container does not match pinned image ownership')
+        self.owned_images[name] = item['Image']
+        return {'container': name, 'containerImageId': item['Image'], 'inspectedImageId': inspected_image['Id'],
+                'repoDigests': inspected_image['RepoDigests']}
+
+
+def install_verified_packages(command, name, lock, packages, package_directory, frozen):
+    """No package installation or source transfer precedes complete receipt and network checks."""
+    validate_package_receipts(packages, lock)
+    validate_package_cache(package_directory, lock)
+    command.docker_run('disconnect-network', ['network', 'disconnect', 'bridge', name])
+    for stage in ('before-install', 'before-source'):
+        network = json.loads(command.docker_run('verify-network-' + stage, ['inspect', name]))[0]
+        if network.get('NetworkSettings', {}).get('Networks') != {}:
+            raise RuntimeError('Builder network isolation is unconfirmed before ' + stage)
+        if stage == 'before-install':
+            specs = [p['package'] + '=' + p['version'] for p in lock['packages']]
+            command.docker_run('apt-install-locked', ['exec', '-e', 'DEBIAN_FRONTEND=noninteractive', name,
+                               'apt-get', *APT_OPTIONS, '--yes', '--no-install-recommends', '--no-download', 'install', *specs])
+    command.docker_run('copy-frozen-source', ['cp', str(frozen), name + ':/work/source'])
 
 
 def freeze_sources(output, lock_path):
@@ -264,20 +293,32 @@ def build(args):
                 'imageDigest': IMAGE_DIGEST, 'platform': PLATFORM, 'files': {}, 'commands': command.receipts,
                 'dependencyLockSha256': sha256(lock_path), 'compilerFlags': list(FLAGS),
                 'linkage': 'static libfuse3; dynamic runtime libc', 'javaRelease': 17,
-                'dockerEndpoint': endpoint, 'cleanup': [], 'networkDisconnectedBeforeSourceCopy': False}
+                'dockerEndpoint': endpoint, 'cleanup': [], 'networkDisconnectedBeforeSourceCopy': False,
+                'networkDisconnectedBeforePackageInstall': False, 'containerImageIdentities': []}
     owned = []
     failure = None
     try:
         frozen, evidence['sourceHashes'] = freeze_sources(output, lock_path)
         inspected = ensure_image(command)
+        evidence['imageId'] = inspected['Id']
         evidence['imageInspection'] = {'Id': inspected['Id'], 'Os': inspected['Os'],
                                        'Architecture': inspected['Architecture'], 'RepoDigests': inspected['RepoDigests']}
+        store = json.loads(command.docker_run('image-store-backend', ['info', '--format',
+                            '{"Driver":{{json .Driver}},"DriverStatus":{{json .DriverStatus}}}']))
+        statuses = store.get('DriverStatus') or []
+        driver_type = [row[1] for row in statuses if isinstance(row, list) and len(row) == 2 and row[0] == 'driver-type']
+        if not isinstance(store.get('Driver'), str) or not store['Driver'] or len(driver_type) > 1:
+            raise RuntimeError('Docker image-store backend is unconfirmed')
+        evidence['imageIdentity'] = {'declaredConfigId': IMAGE_ID, 'inspectedImageId': inspected['Id'],
+                'repoDigests': inspected['RepoDigests'], 'matchForm': 'config-id' if inspected['Id'] == IMAGE_ID else 'repo-digest',
+                'storageDriver': store['Driver'], 'driverType': driver_type[0] if driver_type else None}
         name = 'checkpoint-fuse-build-' + uuid.uuid4().hex[:16]
         # Record ownership before create: an interrupted response can still create it.
         owned.append(name)
         command.docker_run('create-builder', ['create', '--name', name, '--label', LABEL + '=' + name,
                            '--network', 'bridge', '--user', '0:0', '--security-opt', 'no-new-privileges:true',
-                           '--entrypoint', '/bin/sleep', IMAGE_ID, str(args.timeout_seconds + 120)])
+                           '--platform', PLATFORM, '--entrypoint', '/bin/sleep', inspected['Id'], str(args.timeout_seconds + 120)])
+        evidence['containerImageIdentities'].append(command.bind_owned(name, inspected))
         command.docker_run('start-builder', ['start', name])
         command.docker_run('prepare-package-area', ['exec', name, 'mkdir', '-p', '/work/debs', '/work/receipts', '/work/bundle'])
         command.docker_run('apt-source', ['exec', '-i', name, '/bin/sh', '-c', 'cat > /work/ubuntu.sources'], stdin=SOURCES)
@@ -302,15 +343,9 @@ done
         validate_package_receipts(packages, lock)
         evidence['downloadedPackageCount'] = len(lock['packages'])
         command.docker_run('copy-public-packages', ['cp', name + ':/work/debs', str(output / 'packages')])
-        validate_package_cache(output / 'packages', lock)
-        command.docker_run('apt-install-locked', ['exec', '-e', 'DEBIAN_FRONTEND=noninteractive', name,
-                           'apt-get', *APT_OPTIONS, '--yes', '--no-install-recommends', '--no-download', 'install', *specs])
-        command.docker_run('disconnect-network', ['network', 'disconnect', 'bridge', name])
-        network = json.loads(command.docker_run('verify-network', ['inspect', name]))[0]
-        if network.get('NetworkSettings', {}).get('Networks'):
-            raise RuntimeError('Builder is still attached to a network')
+        install_verified_packages(command, name, lock, packages, output / 'packages', frozen)
+        evidence['networkDisconnectedBeforePackageInstall'] = True
         evidence['networkDisconnectedBeforeSourceCopy'] = True
-        command.docker_run('copy-frozen-source', ['cp', str(frozen), name + ':/work/source'])
         compile_script = '''set -eu
 cd /work/source
 gcc --version > /work/receipts/compiler.txt
@@ -353,7 +388,9 @@ readelf -d /work/bundle/checkpoint-fuse-selftest > /work/receipts/selftest-dynam
         owned.append(smoke)
         command.docker_run('create-smoke', ['create', '--name', smoke, '--label', LABEL + '=' + smoke,
                            '--network', 'none', '--cap-drop', 'ALL', '--user', '0:0',
-                           '--security-opt', 'no-new-privileges:true', '--entrypoint', '/bin/sleep', IMAGE_ID, '120'])
+                           '--security-opt', 'no-new-privileges:true', '--platform', PLATFORM,
+                           '--entrypoint', '/bin/sleep', inspected['Id'], '120'])
+        evidence['containerImageIdentities'].append(command.bind_owned(smoke, inspected))
         command.docker_run('start-smoke', ['start', smoke])
         command.docker_run('copy-smoke-bundle', ['cp', str(output / 'bundle'), smoke + ':/bundle'])
         evidence['pristineNativeSelftest'] = command.docker_run('pristine-native-selftest', ['exec', smoke, '/bundle/checkpoint-fuse-selftest']).strip()

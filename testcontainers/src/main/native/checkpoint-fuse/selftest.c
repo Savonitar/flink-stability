@@ -16,7 +16,7 @@ static unsigned int checks;
 
 struct time_source { uint64_t now; };
 static uint64_t fake_clock(void *context) { return ((struct time_source *) context)->now; }
-static char temporary[PATH_MAX] = "/tmp/checkpoint-fuse-selftest-XXXXXX";
+static char temporary[128] = "/tmp/checkpoint-fuse-selftest-XXXXXX";
 static unsigned int journal_number;
 
 static int new_state(struct cf_state *state, struct time_source *clock, uint64_t records, char path[PATH_MAX]) {
@@ -206,6 +206,44 @@ static void aggregate_reads_and_durability(void) {
     close(pipes[0]); close(fd); cf_destroy(&state); CHECK(unlink(path) == 0);
 }
 
+static void lost_control_responses(void) {
+    struct cf_state state; struct time_source clock = {.now = UINT64_C(1000000000)};
+    char path[PATH_MAX], response[CF_RESPONSE_MAX];
+    int fd = new_state(&state, &clock, 10000, path);
+    const char *readonly[] = {"STATUS attempt storage instance 0", "INVALID", "HEAL attempt storage instance 1 fault",
+                             "ARM attempt storage foreign 1 fault 500 create,write"};
+    for (size_t i = 0; i < sizeof(readonly) / sizeof(readonly[0]); ++i) {
+        bool applied = true;
+        (void) cf_control_tracked(&state, readonly[i], response, sizeof(response), &applied);
+        CHECK(!applied);
+        if (i == 2) CHECK(strstr(response, "not-armed") != NULL);
+        cf_control_response_lost(&state, applied);
+        CHECK(state.mode == CF_HEALTHY && !state.stop_requested && state.journal_complete);
+    }
+    CHECK(control(&state, "ARM attempt storage instance 1 fault 500 create,write", "\"ok\":true") == 0);
+    bool applied = true;
+    CHECK(cf_control_tracked(&state, "STATUS attempt storage instance 1", response, sizeof(response), &applied) == 0);
+    cf_control_response_lost(&state, applied); CHECK(!applied && state.mode == CF_ARMED && !state.stop_requested);
+    CHECK(cf_control_tracked(&state, "INVALID", response, sizeof(response), &applied) < 0);
+    cf_control_response_lost(&state, applied); CHECK(!applied && state.mode == CF_ARMED && !state.stop_requested);
+    close(fd); cf_destroy(&state); CHECK(unlink(path) == 0);
+
+    const char *mutations[] = {"ARM attempt storage instance 1 fault 500 create,write", "HEAL attempt storage instance 2 fault",
+                              "ABORT attempt storage instance 2 fault", "STOP attempt storage instance 1"};
+    for (size_t i = 0; i < sizeof(mutations) / sizeof(mutations[0]); ++i) {
+        fd = new_state(&state, &clock, 10000, path);
+        if (i == 1 || i == 2) CHECK(control(&state, "ARM attempt storage instance 1 fault 500 create,write", "\"ok\":true") == 0);
+        applied = false;
+        CHECK(cf_control_tracked(&state, mutations[i], response, sizeof(response), &applied) == 0);
+        CHECK(applied);
+        cf_control_response_lost(&state, applied);
+        CHECK(state.mode == CF_ABORTED && state.stop_requested && state.journal_complete);
+        char text[16384]; ssize_t size = pread(fd, text, sizeof(text) - 1, 0); CHECK(size > 0); text[size] = '\0';
+        CHECK(strstr(text, "control-response-lost") != NULL);
+        close(fd); cf_destroy(&state); CHECK(unlink(path) == 0);
+    }
+}
+
 static void jail_checks(void) {
     char backing[PATH_MAX], outside[PATH_MAX], secret_path[PATH_MAX];
     snprintf(backing, sizeof(backing), "%s/backing", temporary);
@@ -267,11 +305,12 @@ static void jail_checks(void) {
 
 int main(void) {
     CHECK(mkdtemp(temporary) != NULL);
-    char resolved[PATH_MAX]; CHECK(realpath(temporary, resolved) != NULL); strcpy(temporary, resolved);
+    char resolved[PATH_MAX]; CHECK(realpath(temporary, resolved) != NULL);
+    CHECK(strlen(resolved) < sizeof(temporary)); strcpy(temporary, resolved);
     CHECK(cf_identifier("attempt-01")); CHECK(!cf_identifier("../escape")); CHECK(!cf_identifier(""));
     uint64_t value; CHECK(cf_uint("0", &value) && value == 0); CHECK(!cf_uint("01", &value));
     CHECK(!cf_uint("18446744073709551616", &value)); CHECK(!cf_uint("-1", &value));
-    control_and_held_descriptor(); abort_and_bounds(); aggregate_reads_and_durability(); jail_checks();
+    control_and_held_descriptor(); abort_and_bounds(); aggregate_reads_and_durability(); lost_control_responses(); jail_checks();
     CHECK(rmdir(temporary) == 0);
     printf("{\"status\":\"pass\",\"tests\":%u,\"scope\":\"native-core-and-jail-no-fuse-mount\"}\n", checks);
     return 0;

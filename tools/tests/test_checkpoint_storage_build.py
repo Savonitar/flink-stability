@@ -44,13 +44,21 @@ class CheckpointStorageBuildTest(unittest.TestCase):
     def test_missing_image_downloads_only_pinned_digest_then_verifies(self):
         with tempfile.TemporaryDirectory() as directory:
             stderr = Path(directory) / 'stderr'
-            stderr.write_text('Error response from daemon: No such image: ' + build.IMAGE_ID + '\n')
+            stderr.write_text('Error response from daemon: No such image: ' + build.IMAGE_DIGEST + '\n')
             commands = Mock()
             commands.docker_run.side_effect = [build.CommandFailure('inspect', 1, stderr), '', self.image_receipt()]
             build.ensure_image(commands)
             self.assertEqual(['pull', '--platform', build.PLATFORM, build.IMAGE_DIGEST],
                              commands.docker_run.call_args_list[1].args[1])
-            self.assertEqual(['image', 'inspect', build.IMAGE_ID], commands.docker_run.call_args.args[1])
+            self.assertEqual(['image', 'inspect', build.IMAGE_DIGEST], commands.docker_run.call_args.args[1])
+
+    def test_containerd_index_identity_keeps_pinned_repository_and_platform(self):
+        image = json.loads(self.image_receipt())[0]
+        image['Id'] = build.IMAGE_DIGEST.split('@')[1]
+        commands = Mock()
+        commands.docker_run.return_value = json.dumps([image])
+        self.assertEqual(image, build.ensure_image(commands))
+        self.assertEqual(['image', 'inspect', build.IMAGE_DIGEST], commands.docker_run.call_args.args[1])
 
     def test_socket_failure_does_not_trigger_a_pull(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -146,6 +154,71 @@ class CheckpointStorageBuildTest(unittest.TestCase):
                 {'Image': build.IMAGE_ID, 'Config': {'Labels': {build.LABEL: 'owned'}}}]))
             commands.remove_owned('owned')
             self.assertEqual(['rm', '-f', 'owned'], commands.docker_run.call_args.args[1])
+
+    def test_created_container_identity_is_bound_before_start_and_cleanup_rejects_drift(self):
+        with tempfile.TemporaryDirectory() as directory:
+            commands = build.Commands(Path(directory), 'unix:///var/run/docker.sock', Path('/bin/docker'), 60)
+            image = json.loads(self.image_receipt())[0]
+            image['Id'] = build.IMAGE_DIGEST.split('@')[1]
+            container = {'Image': build.IMAGE_ID, 'Config': {'Image': image['Id'], 'Labels': {build.LABEL: 'owned'}}}
+            commands.docker_run = Mock(return_value=json.dumps([container]))
+            receipt = commands.bind_owned('owned', image)
+            self.assertEqual(build.IMAGE_ID, receipt['containerImageId'])
+            self.assertEqual(image['Id'], receipt['inspectedImageId'])
+            container['Image'] = image['Id']
+            commands.docker_run = Mock(return_value=json.dumps([container]))
+            with self.assertRaises(RuntimeError):
+                commands.remove_owned('owned')
+            self.assertEqual(1, commands.docker_run.call_count)
+
+    def test_package_install_and_source_copy_require_receipts_and_disconnected_network(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory).resolve()
+            packages = root / 'packages'
+            packages.mkdir()
+            package = packages / 'fixture.deb'
+            package.write_bytes(b'generated fixture package')
+            lock = {'packages': [{'package': 'fixture', 'version': '1', 'architecture': 'arm64',
+                                 'size': package.stat().st_size, 'sha256': build.sha256(package)}]}
+            receipt = '\t'.join(str(lock['packages'][0][key]) for key in
+                                ('package', 'version', 'architecture', 'size', 'sha256'))
+            command = Mock()
+            command.docker_run.return_value = json.dumps([{'NetworkSettings': {'Networks': {}}}])
+            build.install_verified_packages(command, 'owned', lock, receipt, packages, root / 'frozen')
+            self.assertEqual(['disconnect-network', 'verify-network-before-install', 'apt-install-locked',
+                              'verify-network-before-source', 'copy-frozen-source'],
+                             [call.args[0] for call in command.docker_run.call_args_list])
+            self.assertIn('--no-download', command.docker_run.call_args_list[2].args[1])
+            command.reset_mock()
+            with self.assertRaises(ValueError):
+                build.install_verified_packages(command, 'owned', lock, 'bad receipt', packages, root / 'frozen')
+            command.docker_run.assert_not_called()
+            package.write_bytes(b'changed')
+            with self.assertRaises(ValueError):
+                build.install_verified_packages(command, 'owned', lock, receipt, packages, root / 'frozen')
+            command.docker_run.assert_not_called()
+
+    def test_network_missing_connected_or_reappearing_prevents_next_sensitive_build_step(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory).resolve()
+            package = root / 'fixture.deb'
+            package.write_bytes(b'generated')
+            lock = {'packages': [{'package': 'fixture', 'version': '1', 'architecture': 'arm64',
+                                 'size': package.stat().st_size, 'sha256': build.sha256(package)}]}
+            receipt = '\t'.join(str(lock['packages'][0][key]) for key in
+                                ('package', 'version', 'architecture', 'size', 'sha256'))
+            for broken in ({}, {'NetworkSettings': {'Networks': {'bridge': {}}}}):
+                command = Mock()
+                command.docker_run.side_effect = ['', json.dumps([broken])]
+                with self.assertRaises(RuntimeError):
+                    build.install_verified_packages(command, 'owned', lock, receipt, root, root / 'frozen')
+                self.assertNotIn('apt-install-locked', [call.args[0] for call in command.docker_run.call_args_list])
+            command = Mock()
+            command.docker_run.side_effect = ['', json.dumps([{'NetworkSettings': {'Networks': {}}}]), '',
+                                              json.dumps([{'NetworkSettings': {'Networks': {'bridge': {}}}}])]
+            with self.assertRaises(RuntimeError):
+                build.install_verified_packages(command, 'owned', lock, receipt, root, root / 'frozen')
+            self.assertNotIn('copy-frozen-source', [call.args[0] for call in command.docker_run.call_args_list])
 
     def test_deadline_stops_new_work_before_subprocess(self):
         with tempfile.TemporaryDirectory() as directory:

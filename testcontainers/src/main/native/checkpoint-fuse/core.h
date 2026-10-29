@@ -54,5 +54,7 @@ int cf_record_locked(struct cf_state *state, const char *operation, const char *
                      const char *path, int64_t result, int error, uint64_t requested,
                      uint64_t returned, int datasync, const char *reason);
 int cf_control(struct cf_state *state, const char *command, char *response, size_t capacity);
+int cf_control_tracked(struct cf_state *state, const char *command, char *response, size_t capacity, bool *mutation_applied);
+void cf_control_response_lost(struct cf_state *state, bool mutation_applied);
 
 #endif

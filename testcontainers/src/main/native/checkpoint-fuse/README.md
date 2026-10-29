@@ -26,6 +26,13 @@ run. STATUS remains available without consuming the exhausted record budget.
 These are evidence-volume bounds, not a guaranteed experiment duration. An
 armed fault lease is independently limited to 120 seconds.
 
+A failed socket response aborts the daemon only after an accepted ARM, HEAL,
+ABORT or STOP changed its state. A disconnected STATUS client or an invalid,
+incomplete or rejected command cannot abort the mount. Rejections still have an
+individual journal receipt. STOP wakes the FUSE main loop; that main thread owns
+unmount and destruction. Partial startup failures close owned descriptors and
+remove only a control socket successfully bound by this process.
+
 Overlong paths return ENAMETOOLONG and record the bounded prefix with
 `pathTruncated=true`; this path error does not mark the whole journal incomplete.
 The parser preserves counters and the truncation flag, rejects malformed or

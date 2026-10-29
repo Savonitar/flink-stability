@@ -28,6 +28,7 @@ static struct fuse *filesystem;
 static atomic_bool mounted;
 static unsigned int view_uid, view_gid, handles;
 static int listener = -1;
+static pthread_t loop_thread;
 
 static const char *relative(const char *path) { return !path || !strcmp(path, "/") ? "." : path + 1; }
 static struct handle *handle_of(struct fuse_file_info *info) { return info ? (struct handle *) (uintptr_t) info->fh : NULL; }
@@ -405,12 +406,15 @@ static void *control_loop(void *unused) {
             }
         }
         if (!complete) strcpy(command, "INVALID");
-        (void) cf_control(&state, command, response, sizeof(response));
-        if (send_all(client, response) != 0) cf_shutdown(&state, "control-response-lost");
+        bool mutation_applied = false;
+        (void) cf_control_tracked(&state, command, response, sizeof(response), &mutation_applied);
+        if (send_all(client, response) != 0) cf_control_response_lost(&state, mutation_applied);
         close(client);
     }
     fuse_exit(filesystem);
-    unmount_once();
+    /* The registered libfuse SIGTERM handler interrupts the main thread's blocked
+       receive. Destruction and unmount stay exclusively on that main thread. */
+    (void) pthread_kill(loop_thread, SIGTERM);
     return NULL;
 }
 
@@ -509,37 +513,53 @@ int main(int argc, char **argv) {
     closedir(mount_entries);
     if (!empty || cj_init(&jail, backing, namespace_name) != 0) { fputs("Backing jail or empty mount validation failed\n", stderr); return 2; }
     char journal_leaf[NAME_MAX + 1], control_leaf[NAME_MAX + 1];
+    int exit_code = 2, journal_fd = -1, loop_result = -1;
+    bool core_initialized = false, socket_bound = false, signal_handlers = false, controller_started = false;
+    pthread_t controller;
+    struct fuse_args arguments = FUSE_ARGS_INIT(0, NULL);
     int journal_parent = private_parent(journal_path, journal_leaf), control_parent = private_parent(control, control_leaf);
-    if (journal_parent < 0 || control_parent < 0) { fputs("Control/evidence parents must be private root directories\n", stderr); return 2; }
-    int journal_fd = openat(journal_parent, journal_leaf, O_WRONLY | O_CREAT | O_EXCL | O_APPEND | O_CLOEXEC | O_NOFOLLOW, 0600);
-    close(journal_parent);
+    if (journal_parent < 0 || control_parent < 0) { fputs("Control/evidence parents must be private root directories\n", stderr); goto cleanup; }
+    journal_fd = openat(journal_parent, journal_leaf, O_WRONLY | O_CREAT | O_EXCL | O_APPEND | O_CLOEXEC | O_NOFOLLOW, 0600);
+    close(journal_parent); journal_parent = -1;
     if (journal_fd < 0 || cf_init(&state, attempt, storage, instance, namespace_name, journal_fd,
-            max_bytes, max_records, NULL, NULL, NULL) != 0) { fputs("Fresh bounded journal initialization failed\n", stderr); return 2; }
+            max_bytes, max_records, NULL, NULL, NULL) != 0) { fputs("Fresh bounded journal initialization failed\n", stderr); goto cleanup; }
+    core_initialized = true;
     listener = socket(AF_UNIX, SOCK_STREAM | SOCK_CLOEXEC, 0);
     struct sockaddr_un address = {.sun_family = AF_UNIX}; strcpy(address.sun_path, control);
-    if (listener < 0 || bind(listener, (struct sockaddr *) &address, sizeof(address)) != 0 || listen(listener, 4) != 0) {
-        cf_shutdown(&state, "control-bind-failed"); fputs("Control socket initialization failed\n", stderr); return 2;
+    if (listener >= 0 && bind(listener, (struct sockaddr *) &address, sizeof(address)) == 0) socket_bound = true;
+    if (!socket_bound || listen(listener, 4) != 0) {
+        cf_shutdown(&state, "control-bind-failed"); fputs("Control socket initialization failed\n", stderr); goto cleanup;
     }
     char *fuse_argv[] = {argv[0], "-o", "allow_other,default_permissions,entry_timeout=0,attr_timeout=0,negative_timeout=0", NULL};
-    struct fuse_args arguments = FUSE_ARGS_INIT(3, fuse_argv);
+    arguments.argc = 3; arguments.argv = fuse_argv;
     filesystem = fuse_new(&arguments, &operations, sizeof(operations), &state);
     if (!filesystem || fuse_mount(filesystem, mountpoint) != 0) {
         cf_shutdown(&state, "mount-unavailable"); fputs("FUSE mount unavailable\n", stderr);
-        if (filesystem) fuse_destroy(filesystem);
-        close(listener); unlinkat(control_parent, control_leaf, 0); close(control_parent); close(journal_fd); cj_destroy(&jail);
-        cf_destroy(&state); fuse_opt_free_args(&arguments); return 2;
+        goto cleanup;
     }
     atomic_store(&mounted, true);
-    if (fuse_set_signal_handlers(fuse_get_session(filesystem)) != 0) { cf_shutdown(&state, "signal-handlers-unavailable"); unmount_once(); return 2; }
-    pthread_t controller;
+    if (fuse_set_signal_handlers(fuse_get_session(filesystem)) != 0) { cf_shutdown(&state, "signal-handlers-unavailable"); goto cleanup; }
+    signal_handlers = true; loop_thread = pthread_self();
     int thread_error = pthread_create(&controller, NULL, control_loop, NULL);
-    if (thread_error) { cf_shutdown(&state, "control-thread-unavailable"); unmount_once(); return 2; }
-    int loop_result = fuse_loop(filesystem);
+    if (thread_error) { cf_shutdown(&state, "control-thread-unavailable"); goto cleanup; }
+    controller_started = true;
+    loop_result = fuse_loop(filesystem);
     cf_shutdown(&state, loop_result ? "fuse-loop-failed" : "loop-ended-without-stop");
-    pthread_join(controller, NULL);
-    unmount_once(); fuse_remove_signal_handlers(fuse_get_session(filesystem)); fuse_destroy(filesystem);
-    close(listener); unlinkat(control_parent, control_leaf, 0); close(control_parent);
-    bool success = state.journal_complete && state.mode == CF_STOPPED && loop_result == 0;
-    close(journal_fd); cf_destroy(&state); cj_destroy(&jail); fuse_opt_free_args(&arguments);
-    return success ? 0 : 1;
+    exit_code = 1;
+cleanup:
+    if (controller_started) pthread_join(controller, NULL);
+    if (controller_started && state.journal_complete && state.mode == CF_STOPPED && loop_result == 0) exit_code = 0;
+    if (filesystem) {
+        unmount_once();
+        if (signal_handlers) fuse_remove_signal_handlers(fuse_get_session(filesystem));
+        fuse_destroy(filesystem);
+    }
+    if (listener >= 0) close(listener);
+    if (socket_bound) unlinkat(control_parent, control_leaf, 0);
+    if (control_parent >= 0) close(control_parent);
+    if (journal_parent >= 0) close(journal_parent);
+    if (journal_fd >= 0) close(journal_fd);
+    if (core_initialized) cf_destroy(&state);
+    cj_destroy(&jail); fuse_opt_free_args(&arguments);
+    return exit_code;
 }

@@ -19,7 +19,7 @@ are represented by numbered summary lines with their source filename and hash.
 These files support inspection of the reported observations; they are insufficient
 for independently rerunning the full raw-evidence checker.
 
-The publication contains 56 selected receipts from 21 batches. All 50 previously
+The publication contains 58 selected receipts from 23 batches. All 50 previously
 linked local targets were available (49 files and one directory); no missing
 receipt was substituted or presented as observed. Original and published hashes
 were checked for every copy, and 90 result/report objects were checked for unchanged
@@ -64,3 +64,6 @@ Targets must exist inside the repository and be tracked; an ignored local
 - [state-recovery-qualification-20261026-01](state-recovery-qualification-20261026-01/README.md)
 
 The previously published [Kafka lifecycle receipts](kafka-lifecycle/2026-10-11/README.md) have their own provenance and are unchanged.
+
+- [Review helper build 01](checkpoint-storage-helper-build-20261029-01/README.md)
+- [Review helper build 02](checkpoint-storage-helper-build-20261029-02/README.md)
