@@ -38,6 +38,7 @@ import org.savonitar.flink.stability.runtime.api.TaskManagerControl;
 import org.savonitar.flink.stability.runtime.api.FlinkComponentProvisioningEvidence;
 import org.savonitar.flink.stability.runtime.api.FlinkProcessWriteFenceEvidence;
 import org.savonitar.flink.stability.runtime.api.FlinkRuntimeTarget;
+import org.savonitar.flink.stability.runtime.api.ImageIdentityEvidence;
 import org.savonitar.flink.stability.runtime.api.KafkaProxyEndpoint;
 import org.savonitar.flink.stability.runtime.api.KafkaProxyTarget;
 import org.savonitar.flink.stability.runtime.api.KafkaRuntimeEndpoints;
@@ -1110,7 +1111,16 @@ class V1ScenarioExecutorTest {
         List<String> events = new ArrayList<>();
         try (Fixture fixture = fixture(document -> ((ObjectNode) document.at("/setup/flink"))
                 .put("image_id", FlinkRuntimeIdentityTest.OTHER_IMAGE_ID))) {
-            V1ScenarioExecutionResult result = executor(events, new FakeRuntime(events),
+            FakeRuntime runtime = new FakeRuntime(events);
+            // Retain complete inspection proof for the wrong image, rather than missing proof.
+            runtime.provisioningOverride = FlinkRuntimeIdentityTest.provisioning(1).stream()
+                    .map(component -> component.withImageIdentityEvidence(new ImageIdentityEvidence(
+                            component.imageId(), component.imageId(),
+                            List.of("flink@" + component.imageId()), Optional.of(component.imageId()),
+                            Optional.empty(), ImageIdentityEvidence.MatchForm.CONTAINER_IMAGE_ID,
+                            "overlay2", Optional.empty())))
+                    .toList();
+            V1ScenarioExecutionResult result = executor(events, runtime,
                     new FakeFlink(events), (bootstrap, topic, ids, timeout) -> missingResult())
                     .execute(fixture.bound(), attemptContext());
 
