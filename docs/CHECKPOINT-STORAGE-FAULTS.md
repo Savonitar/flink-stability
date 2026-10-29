@@ -289,10 +289,29 @@ rules cannot be healed into a successful experiment. The adapter captures the
 stopped incarnation's journal before removing its container and preserves
 contiguous prefixes across later captures. The integrated adapter explicitly
 sets journal bounds of 16 MiB and 25,000 records per incarnation; the retained
-journal-copy budget is 128 MiB. These are invocation limits within the existing
-helper contract, so the helper binary remains unchanged. Exact
-owned-volume cleanup is attempted even after an uncertain creation response.
-Cleanup failure remains visible in the completed result.
+journal-copy budget is 128 MiB. The helper's minimum configurable limits are
+64 KiB and 10 records. Individual records cover mutations, errors,
+control/lifecycle events and checkpoint-file reads. Successful ordinary reads,
+getattr, readdir, access, flush and release instead accumulate per-instance
+counters; STATUS reports these without consuming a journal record, and SUMMARY
+records flush pending counters after 1,000 aggregated operations or one second
+of activity. Fault-family results and control acknowledgements are synced before
+reply; aggregate summaries do not force a sync per read.
+
+These caps imply a workload-dependent duration limit: available records divided
+by journal records/second, or available bytes divided by journal bytes/second,
+whichever runs out first. At 100 records/second averaging 1 KiB, 16 MiB allows
+less than 164 seconds after control/reserved overhead; 25,000 records alone would
+allow less than 250 seconds. Aggregation reduces metadata traffic but does not
+remove the duration limit for frequent writes. Exhaustion emits a terminal
+incomplete receipt, refuses mutations with EIO and continues forwarding reads
+and metadata; it can never qualify a successful experiment. An EXPIRED rule also
+continues injecting EIO until cleanup; expiry does not heal the view.
+
+This journaling revision requires a new helper build. Historical helper hashes
+and retained attempts remain unchanged. Exact owned-volume cleanup is attempted
+even after an uncertain creation response. Cleanup failure remains visible in
+the completed result.
 
 Storage operations create their deadline before acquiring the timed evidence
 lock. Docker copy, inspection and exec calls run through a bounded driver-call

@@ -76,9 +76,11 @@ def read(root, relative, expected=None, maximum=FILE_BYTES):
     return data
 
 
-def projected_operation(row, identity):
+def projected_operation(row, identity, extended=False):
     expected = {key: row[key] for key in PROJECTED}
     expected.update(instance=identity, timestampMillis=row["timestampMs"], monotonicNanos=row["monotonicNs"])
+    if extended:
+        expected.update(counters=row.get("counters", {}), pathTruncated=row.get("pathTruncated", False))
     return expected
 
 
@@ -94,7 +96,8 @@ def bound_operation(row, storage):
 
 
 def verify_operation_projection(instance, storage, rows):
-    projected = [projected_operation(row, instance["instance"]) for row in rows]
+    extended = any("counters" in row for row in rows) or any("counters" in row or "pathTruncated" in row for row in instance["operations"])
+    projected = [projected_operation(row, instance["instance"], extended) for row in rows]
     representation = instance.get("operationsRepresentation")
     if representation is None:
         require(json.dumps(instance["operations"], sort_keys=True) == json.dumps(projected, sort_keys=True),
@@ -111,6 +114,24 @@ def verify_operation_projection(instance, storage, rows):
     expected = [value for row, value in zip(rows, projected) if bound_operation(row, storage)]
     require(json.dumps(instance["operations"], sort_keys=True) == json.dumps(expected, sort_keys=True),
             "Bound native operation subset differs from raw journal")
+
+
+IO_OPERATIONS = {"read", "getattr", "readdir", "access", "flush", "release"}
+
+
+def io_counters(value):
+    require(isinstance(value, dict) and set(value) == IO_OPERATIONS, "Incomplete native IO counters")
+    for operation, counter in value.items():
+        require(isinstance(counter, dict) and set(counter) == {"count", "bytes"}
+                and all(integer(counter[key]) and counter[key] <= 2**63 - 1 for key in counter)
+                and (counter["count"] > 0 or counter["bytes"] == 0)
+                and (operation == "read" or counter["bytes"] == 0), "Invalid native IO counter")
+    return value
+
+
+def counters_advance(previous, current):
+    return all(current[operation][key] >= previous[operation][key]
+               for operation in previous for key in ("count", "bytes"))
 
 
 class RetainedEvidence:
@@ -156,12 +177,28 @@ class RetainedEvidence:
                 and rows[1]["operation"] == "READY" and rows[1]["state"] == "HEALTHY" and rows[1]["reason"] == READY
                 and sum(row["operation"] == "READY" for row in rows) == 1, "Native mount readiness/cache-policy receipt is missing")
         previous = 0
+        previous_counters = {}
+        counter_samples = []
         verify_operation_projection(instance, storage, rows)
         for sequence, row in enumerate(rows, 1):
             require(row["version"] == 1 and row["sequence"] == sequence and row["journalComplete"] is True
                     and row["state"] in ("STARTING", "HEALTHY", "ARMED")
                     and integer(row["monotonicNs"], previous), "Invalid, expired, aborted or incomplete native journal")
             previous = row["monotonicNs"]
+            counters = io_counters(row["counters"]) if "counters" in row else {}
+            if row["operation"] in {"START", "READY"} and counters:
+                require(all(value["count"] == 0 for value in counters.values()), "Startup IO counters are not zero")
+            if previous_counters and row["operation"][0].isupper():
+                require(counters, "Lifecycle record lost IO counters")
+            if row["operation"] == "SUMMARY":
+                require(counters and counters != previous_counters, "Idle or incomplete native SUMMARY")
+            if counters:
+                require(counters_advance(previous_counters, counters), "Native IO counters moved backwards")
+                previous_counters = counters
+                counter_samples.append((sequence, counters))
+            truncated = row.get("pathTruncated", False)
+            require(type(truncated) is bool and (not truncated or row["errno"] == 36
+                    and row["result"] == -1 and row["reason"] == "receipt-path-truncated"), "Invalid truncated-path receipt")
             require(all(row[key] == storage[key] for key in ("attemptId", "storageId", "namespace"))
                     and all(row[key] == identity[key] for key in ("instanceId", "daemonPid")), "Native journal identity mismatch")
             require(all(integer(row[key]) for key in ("revision", "timestampMs", "requestedBytes", "returnedBytes", "errno"))
@@ -171,6 +208,14 @@ class RetainedEvidence:
         status = instance["status"]
         require(integer(status["sequence"], 1) and status["sequence"] <= len(rows), "Stage status has no native sequence")
         current = rows[status["sequence"] - 1]
+        if counter_samples:
+            observed = io_counters(status.get("counters"))
+            for sequence, counters in counter_samples:
+                require(counters_advance(counters, observed) if sequence <= status["sequence"]
+                        else counters_advance(observed, counters), "STATUS counters conflict with journal capture")
+        elif status.get("counters"):
+            io_counters(status["counters"])
+            require(all(value["count"] == 0 for value in status["counters"].values()), "Legacy journal cannot prove IO counters")
         require(all(status[key] == current[key] for key in ("state", "faultId", "revision", "leaseMs", "leaseDeadlineMonotonicNs", "journalComplete"))
                 and status["stopping"] is False, "Stage status differs from its native receipt")
         return data, rows
@@ -223,6 +268,9 @@ def verify_ack(ack, transition, final, rows):
             and all(reply[key] == ack["instance"][key] for key in ("instanceId", "daemonPid")), "Control reply identity mismatch")
     for key in ("state", "faultId", "revision", "sequence", "leaseMs", "leaseDeadlineMonotonicNs", "journalComplete"):
         require(reply[key] == status[key] == row[key], "Control reply differs from native receipt")
+    if "counters" in row:
+        require(io_counters(reply.get("counters")) == io_counters(status.get("counters")) == row["counters"],
+                "Control counters differ from native receipt")
     require(row["faultId"] == transition["faultId"] and row["revision"] == transition["revision"]
             and row["leaseMs"] == 120000 and row["monotonicNs"] < row["leaseDeadlineMonotonicNs"]
             and reply["allowedOperations"] == ["create", "write"], "Fault rule or lease differs from frozen contract")

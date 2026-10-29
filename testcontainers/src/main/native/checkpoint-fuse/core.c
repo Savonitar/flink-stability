@@ -54,11 +54,49 @@ static void json_string(char *target, size_t capacity, const char *source) {
     target[written] = '\0';
 }
 
+static const char *const counter_names[CF_COUNTER_COUNT] = {"read", "getattr", "readdir", "access", "flush", "release"};
+
+static int counter_index(const char *operation) {
+    for (int i = 0; i < CF_COUNTER_COUNT; ++i) if (!strcmp(operation, counter_names[i])) return i;
+    return -1;
+}
+
+static bool lifecycle(const char *operation) { return operation[0] >= 'A' && operation[0] <= 'Z'; }
+
+static void counters_json(const struct cf_state *s, char *target, size_t capacity) {
+    size_t used = 0;
+    for (int i = 0; i < CF_COUNTER_COUNT; ++i) {
+        int count = snprintf(target + used, capacity - used, "%s\"%s\":{\"count\":%" PRIu64 ",\"bytes\":%" PRIu64 "}",
+                i ? "," : "", counter_names[i], s->counts[i], i == 0 ? s->read_bytes : 0);
+        if (count < 0 || (size_t) count >= capacity - used) abort();
+        used += (size_t) count;
+    }
+}
+
+static bool checkpoint_read(const char *path) {
+    if (!path) return false;
+    for (const char *p = path; *p; ++p) {
+        if ((p == path || p[-1] == '/') && !strncmp(p, "chk-", 4) && p[4] >= '1' && p[4] <= '9') {
+            const char *end = p + 5;
+            while (*end >= '0' && *end <= '9') ++end;
+            if (*end == '/') return true;
+        }
+    }
+    return false;
+}
+
 static int append_receipt(struct cf_state *s, const char *operation, const char *fault_operation,
                           const char *path, int64_t result, int error, uint64_t requested,
                           uint64_t returned, int datasync, const char *reason) {
     char encoded[CF_PATH_MAX * 6 + 1], fault[CF_ID_MAX + 3], fault_op[24], line[CF_RECEIPT_MAX];
-    json_string(encoded, sizeof(encoded), path ? path : ".");
+    char bounded_path[CF_PATH_MAX + 1], counters[512], extra[560] = "";
+    bool truncated = path && strlen(path) > CF_PATH_MAX;
+    snprintf(bounded_path, sizeof(bounded_path), "%.*s", CF_PATH_MAX, path ? path : ".");
+    json_string(encoded, sizeof(encoded), bounded_path);
+    if (lifecycle(operation)) {
+        counters_json(s, counters, sizeof(counters));
+        snprintf(extra, sizeof(extra), ",\"counters\":{%s}", counters);
+    }
     if (s->fault[0]) snprintf(fault, sizeof(fault), "\"%s\"", s->fault); else strcpy(fault, "null");
     if (fault_operation) snprintf(fault_op, sizeof(fault_op), "\"%s\"", fault_operation); else strcpy(fault_op, "null");
     uint64_t next = s->sequence + 1;
@@ -68,13 +106,14 @@ static int append_receipt(struct cf_state *s, const char *operation, const char 
         ",\"faultId\":%s,\"revision\":%" PRIu64 ",\"state\":\"%s\",\"journalComplete\":%s"
         ",\"leaseMs\":%" PRIu64 ",\"leaseDeadlineMonotonicNs\":%" PRIu64 ",\"allowedOperations\":%s"
         ",\"operation\":\"%s\",\"path\":\"%s\",\"faultOperation\":%s,\"result\":%" PRId64
-        ",\"errno\":%d,\"requestedBytes\":%" PRIu64 ",\"returnedBytes\":%" PRIu64 ",\"datasync\":%s,\"reason\":\"%s\"}\n",
+        ",\"errno\":%d,\"requestedBytes\":%" PRIu64 ",\"returnedBytes\":%" PRIu64 ",\"datasync\":%s,\"reason\":\"%s\"%s%s}\n",
         next, s->realtime(s->clock_context) / UINT64_C(1000000), s->monotonic(s->clock_context),
         (long) s->daemon_pid, s->attempt, s->storage, s->instance, s->namespace_name,
         fault, s->revision, cf_mode_name(s->mode), s->journal_complete ? "true" : "false",
         s->lease_ms, s->deadline_ns, s->fault[0] ? "[\"create\",\"write\"]" : "[]",
         operation, encoded, fault_op, result, error, requested, returned,
-        datasync < 0 ? "null" : datasync ? "true" : "false", reason ? reason : "none");
+        datasync < 0 ? "null" : datasync ? "true" : "false", reason ? reason : "none",
+        truncated ? ",\"pathTruncated\":true" : "", extra);
     if (count < 0 || (size_t) count >= sizeof(line) || s->sequence >= s->max_records ||
         (uint64_t) count > s->max_bytes - s->bytes_written) return -ENOSPC;
     size_t done = 0;
@@ -85,9 +124,12 @@ static int append_receipt(struct cf_state *s, const char *operation, const char 
         done += (size_t) amount;
         s->bytes_written += (uint64_t) amount;
     }
-    /* A control acknowledgement or I/O success never precedes its durable receipt. */
-    if (fdatasync(s->journal_fd) != 0) return -EIO;
+    /* The record is already appended: a failed sync must not reuse this sequence. */
     s->sequence = next;
+    if (lifecycle(operation)) { s->pending_aggregate = 0; s->last_summary_ns = s->monotonic(s->clock_context); }
+    /* Fault-family receipts and control/lifecycle acknowledgements are durable. Successful
+       reads/metadata and periodic summaries never add a synchronous disk flush per callback. */
+    if ((fault_operation || (lifecycle(operation) && strcmp(operation, "SUMMARY"))) && fdatasync(s->journal_fd) != 0) return -EIO;
     return 0;
 }
 
@@ -108,11 +150,31 @@ static int reserve_locked(struct cf_state *s) {
     return 0;
 }
 
+static int summary_locked(struct cf_state *s) {
+    if (!s->pending_aggregate || s->mode == CF_FATAL) return 0;
+    uint64_t now = s->monotonic(s->clock_context);
+    if (s->pending_aggregate < CF_SUMMARY_OPERATIONS && now - s->last_summary_ns < CF_SUMMARY_NS) return 0;
+    if (reserve_locked(s) != 0) return -EIO;
+    if (append_receipt(s, "SUMMARY", NULL, ".", 0, 0, 0, 0, -1, "successful-io-counters") != 0) {
+        fatal_locked(s, "journal-write-failed"); return -EIO;
+    }
+    return 0;
+}
+
 int cf_record_locked(struct cf_state *s, const char *operation, const char *fault_operation,
                      const char *path, int64_t result, int error, uint64_t requested,
                      uint64_t returned, int datasync, const char *reason) {
+    int counter = counter_index(operation);
+    if (counter >= 0 && result >= 0 && !error) {
+        if (s->counts[counter] == INT64_MAX || (counter == 0 && returned > (uint64_t) INT64_MAX - s->read_bytes)) {
+            fatal_locked(s, "counter-bound-exceeded"); return -EIO;
+        }
+        ++s->counts[counter]; ++s->pending_aggregate;
+        if (counter == 0) s->read_bytes += returned;
+        if (counter != 0 || !checkpoint_read(path)) return summary_locked(s);
+    }
     if (reserve_locked(s) != 0) return -EIO;
-    if (path && strlen(path) > CF_PATH_MAX) { fatal_locked(s, "receipt-path-too-long"); return -EIO; }
+    if (path && strlen(path) > CF_PATH_MAX) { result = -1; error = ENAMETOOLONG; reason = "receipt-path-truncated"; }
     if (append_receipt(s, operation, fault_operation, path, result, error, requested, returned, datasync, reason) != 0) {
         fatal_locked(s, "journal-write-failed");
         return -EIO;
@@ -127,13 +189,17 @@ static void expire_locked(struct cf_state *s) {
     (void) cf_record_locked(s, "EXPIRE", NULL, ".", -1, ETIMEDOUT, 0, 0, -1, "lease-expired");
 }
 
-int cf_begin_locked(struct cf_state *s, const char *fault_operation) {
+int cf_begin_operation_locked(struct cf_state *s, const char *fault_operation, bool mutation) {
     expire_locked(s);
-    if (reserve_locked(s) != 0) return -EIO;
+    if (mutation && reserve_locked(s) != 0) return -EIO;
     if (s->stop_requested || s->mode == CF_STOPPED) return -EIO;
     if (s->mode == CF_STARTING) return -EAGAIN;
     if (fault_operation && (s->mode == CF_ARMED || s->mode == CF_EXPIRED || s->mode == CF_ABORTED)) return -EIO;
     return 0;
+}
+
+int cf_begin_locked(struct cf_state *s, const char *fault_operation) {
+    return cf_begin_operation_locked(s, fault_operation, fault_operation != NULL);
 }
 
 int cf_init(struct cf_state *s, const char *attempt, const char *storage, const char *instance,
@@ -172,7 +238,7 @@ int cf_ready(struct cf_state *s) {
 }
 
 void cf_watchdog(struct cf_state *s) {
-    pthread_mutex_lock(&s->mutex); expire_locked(s); pthread_mutex_unlock(&s->mutex);
+    pthread_mutex_lock(&s->mutex); expire_locked(s); (void) summary_locked(s); pthread_mutex_unlock(&s->mutex);
 }
 
 void cf_shutdown(struct cf_state *s, const char *reason) {
@@ -186,7 +252,8 @@ void cf_shutdown(struct cf_state *s, const char *reason) {
 }
 
 static int response_locked(struct cf_state *s, bool ok, const char *error, char *response, size_t capacity) {
-    char fault[CF_ID_MAX + 3], encoded_error[96];
+    char fault[CF_ID_MAX + 3], encoded_error[96], counters[512];
+    counters_json(s, counters, sizeof(counters));
     if (s->fault[0]) snprintf(fault, sizeof(fault), "\"%s\"", s->fault); else strcpy(fault, "null");
     if (error) snprintf(encoded_error, sizeof(encoded_error), "\"%s\"", error); else strcpy(encoded_error, "null");
     uint64_t now = s->monotonic(s->clock_context);
@@ -196,11 +263,11 @@ static int response_locked(struct cf_state *s, bool ok, const char *error, char 
         "{\"version\":1,\"ok\":%s,\"error\":%s,\"state\":\"%s\",\"attemptId\":\"%s\",\"storageId\":\"%s\","
         "\"instanceId\":\"%s\",\"namespace\":\"%s\",\"faultId\":%s,\"revision\":%" PRIu64
         ",\"sequence\":%" PRIu64 ",\"journalComplete\":%s,\"daemonPid\":%ld,\"leaseRemainingMs\":%" PRIu64
-        ",\"leaseMs\":%" PRIu64 ",\"leaseDeadlineMonotonicNs\":%" PRIu64 ",\"allowedOperations\":%s,\"stopping\":%s}\n",
+        ",\"leaseMs\":%" PRIu64 ",\"leaseDeadlineMonotonicNs\":%" PRIu64 ",\"allowedOperations\":%s,\"stopping\":%s,\"counters\":{%s}}\n",
         ok ? "true" : "false", encoded_error, cf_mode_name(s->mode), s->attempt, s->storage, s->instance,
         s->namespace_name, fault, s->revision, s->sequence, s->journal_complete ? "true" : "false",
         (long) s->daemon_pid, remaining, s->lease_ms, s->deadline_ns,
-        s->fault[0] ? "[\"create\",\"write\"]" : "[]", s->stop_requested ? "true" : "false");
+        s->fault[0] ? "[\"create\",\"write\"]" : "[]", s->stop_requested ? "true" : "false", counters);
     return count > 0 && (size_t) count < capacity ? (ok ? 0 : -EINVAL) : -ENOSPC;
 }
 
@@ -240,12 +307,10 @@ int cf_control(struct cf_state *s, const char *command, char *response, size_t c
     if (!error && !status && !stop && s->stop_requested) error = "terminal-state";
     /* Terminal status/stop remain available even when no further receipt can be stored. */
     if (s->mode == CF_FATAL && !status && !stop && !error) error = "journal-incomplete";
-    if (s->mode != CF_FATAL && reserve_locked(s) != 0 && !status && !stop) error = "journal-incomplete";
+    if (!status && s->mode != CF_FATAL && reserve_locked(s) != 0 && !stop) error = "journal-incomplete";
     if (error) {
         if (s->mode != CF_FATAL) (void) cf_record_locked(s, "REJECT", NULL, ".", -1, EINVAL, 0, 0, -1, error);
-    } else if (status) {
-        if (s->mode != CF_FATAL) (void) cf_record_locked(s, "STATUS", NULL, ".", 0, 0, 0, 0, -1, "observed");
-    } else {
+    } else if (!status) {
         s->revision = revision;
         if (stop) {
             if (s->mode == CF_ARMED) {

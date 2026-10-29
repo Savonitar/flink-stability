@@ -86,7 +86,8 @@ bool cj_namespace_root(const struct cj_jail *jail, const char *path) {
 }
 
 int cj_validate(const struct cj_jail *jail, const char *path) {
-    if (!path || path[0] != '/' || strlen(path) > CF_PATH_MAX || strstr(path, "//")) return -EACCES;
+    if (path && strlen(path) > CF_PATH_MAX) return -ENAMETOOLONG;
+    if (!path || path[0] != '/' || strstr(path, "//")) return -EACCES;
     if (!strcmp(path, "/")) return 0;
     size_t ns = strlen(jail->namespace_name);
     if (strncmp(path + 1, jail->namespace_name, ns) || (path[1 + ns] && path[1 + ns] != '/')) return -EACCES;
@@ -100,9 +101,14 @@ int cj_validate(const struct cj_jail *jail, const char *path) {
 }
 
 int cj_begin_locked(const struct cj_jail *jail, struct cf_state *state, const char *path, const char *fault_operation) {
+    return cj_begin_operation_locked(jail, state, path, fault_operation, fault_operation != NULL);
+}
+
+int cj_begin_operation_locked(const struct cj_jail *jail, struct cf_state *state, const char *path,
+                              const char *fault_operation, bool mutation) {
     int checked = cj_validate(jail, path);
     if (!checked && fault_operation && !strcmp(path, "/")) checked = -EACCES;
-    int guard = cf_begin_locked(state, checked ? NULL : fault_operation);
+    int guard = cf_begin_operation_locked(state, checked ? NULL : fault_operation, mutation);
     return guard ? guard : checked;
 }
 

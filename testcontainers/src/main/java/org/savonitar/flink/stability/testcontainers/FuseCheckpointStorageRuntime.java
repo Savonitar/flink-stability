@@ -397,6 +397,8 @@ final class FuseCheckpointStorageRuntime implements StorageFaultControl, AutoClo
         JsonNode node = object(result.stdout);
         validateIdentity(node, mount);
         Status observed = status(node);
+        if (mount.status != null && !countersAdvance(mount.status.counters(), observed.counters()))
+            throw new IllegalStateException("Storage status IO counters moved backwards or disappeared");
         boolean accepted = result.exitCode == 0 && bool(node, "ok") && observed.revision() == revision
                 && observed.journalComplete() && (fault == null || fault.equals(observed.faultId()));
         if (operation.equals("ARM")) accepted &= observed.state() == State.ARMED && observed.leaseMs() == lease
@@ -449,6 +451,7 @@ final class FuseCheckpointStorageRuntime implements StorageFaultControl, AutoClo
         int end = text.lastIndexOf('\n');
         if (end < 0) throw new IllegalStateException("FUSE journal has no complete record");
         List<Operation> records = new ArrayList<>();
+        Map<String, IoCounter> previousCounters = Map.of();
         for (String line : text.substring(0, end).split("\n", -1)) {
             if (records.size() == MAX_JOURNAL_RECORDS || line.length() > 8192) throw new IllegalStateException("FUSE journal exceeds record budget");
             JsonNode node = object(line);
@@ -459,10 +462,28 @@ final class FuseCheckpointStorageRuntime implements StorageFaultControl, AutoClo
                 throw new IllegalStateException("FUSE journal identity, sequence or completeness differs");
             JsonNode datasync = node.get("datasync");
             if (datasync == null || !(datasync.isNull() || datasync.isBoolean())) throw new IllegalStateException("Invalid datasync evidence");
+            String operation = text(node, "operation");
+            Map<String, IoCounter> counters = counters(node);
+            if (operation.equals("SUMMARY") && counters.isEmpty()) throw new IllegalStateException("SUMMARY has no IO counters");
+            if ((operation.equals("START") || operation.equals("READY")) && counters.values().stream().anyMatch(value -> value.count() != 0))
+                throw new IllegalStateException("Startup record has nonzero IO counters");
+            if (!previousCounters.isEmpty() && !operation.isEmpty() && Character.isUpperCase(operation.charAt(0)) && counters.isEmpty())
+                throw new IllegalStateException("Lifecycle record lost IO counters");
+            if (!counters.isEmpty()) {
+                if (!countersAdvance(previousCounters, counters)) throw new IllegalStateException("Native IO counters moved backwards");
+                if (operation.equals("SUMMARY") && counters.equals(previousCounters))
+                    throw new IllegalStateException("Idle SUMMARY has no new IO counters");
+                previousCounters = counters;
+            }
+            boolean pathTruncated = node.has("pathTruncated") && bool(node, "pathTruncated");
+            if (pathTruncated && (number(node, "errno") != 36 || number(node, "result") != -1
+                    || !text(node, "reason").equals("receipt-path-truncated")))
+                throw new IllegalStateException("Invalid truncated-path receipt");
             records.add(new Operation(instance, number(node, "sequence"), number(node, "timestampMs"), number(node, "monotonicNs"),
-                    number(node, "revision"), State.valueOf(text(node, "state")), nullableText(node, "faultId"), text(node, "operation"),
+                    number(node, "revision"), State.valueOf(text(node, "state")), nullableText(node, "faultId"), operation,
                     text(node, "path"), nullableText(node, "faultOperation"), number(node, "result"), Math.toIntExact(number(node, "errno")),
-                    number(node, "requestedBytes"), number(node, "returnedBytes"), datasync.isNull() ? null : datasync.booleanValue(), text(node, "reason")));
+                    number(node, "requestedBytes"), number(node, "returnedBytes"), datasync.isNull() ? null : datasync.booleanValue(), text(node, "reason"),
+                    counters, pathTruncated));
         }
         return List.copyOf(records);
     }
@@ -539,7 +560,29 @@ final class FuseCheckpointStorageRuntime implements StorageFaultControl, AutoClo
     }
     private static Status status(JsonNode node) {
         return new Status(State.valueOf(text(node, "state")), nullableText(node, "faultId"), number(node, "revision"), number(node, "sequence"),
-                number(node, "leaseMs"), number(node, "leaseDeadlineMonotonicNs"), bool(node, "journalComplete"), bool(node, "stopping"));
+                number(node, "leaseMs"), number(node, "leaseDeadlineMonotonicNs"), bool(node, "journalComplete"), bool(node, "stopping"), counters(node));
+    }
+    private static Map<String, IoCounter> counters(JsonNode node) {
+        JsonNode value = node.get("counters");
+        if (value == null) return Map.of();
+        if (!value.isObject() || value.size() != 6) throw new IllegalStateException("Invalid native IO counter inventory");
+        Map<String, IoCounter> counters = new TreeMap<>();
+        for (String key : List.of("read", "getattr", "readdir", "access", "flush", "release")) {
+            JsonNode counter = value.get(key);
+            if (counter == null || !counter.isObject() || counter.size() != 2)
+                throw new IllegalStateException("Missing native IO counter " + key);
+            long count = number(counter, "count"), bytes = number(counter, "bytes");
+            if (count < 0 || bytes < 0 || (count == 0 && bytes != 0) || (!key.equals("read") && bytes != 0))
+                throw new IllegalStateException("Invalid native IO counter " + key);
+            counters.put(key, new IoCounter(count, bytes));
+        }
+        return Map.copyOf(counters);
+    }
+    private static boolean countersAdvance(Map<String, IoCounter> previous, Map<String, IoCounter> current) {
+        if (previous.isEmpty()) return true;
+        return previous.keySet().equals(current.keySet()) && previous.entrySet().stream().allMatch(entry ->
+                current.get(entry.getKey()).count() >= entry.getValue().count()
+                        && current.get(entry.getKey()).bytes() >= entry.getValue().bytes());
     }
     private static boolean denied(JsonNode node, String operation) {
         return operation.equals(text(node, "operation")) && "io-exception".equals(text(node, "status"))

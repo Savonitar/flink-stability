@@ -2,6 +2,7 @@ package org.savonitar.flink.stability.runtime.api;
 
 import java.time.Duration;
 import java.util.List;
+import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
 
@@ -43,8 +44,29 @@ public interface StorageFaultControl {
     }
 
     record Status(State state, String faultId, long revision, long sequence, long leaseMs,
-                  long leaseDeadlineMonotonicNs, boolean journalComplete, boolean stopping) {
-        public Status { Objects.requireNonNull(state, "state"); }
+                  long leaseDeadlineMonotonicNs, boolean journalComplete, boolean stopping,
+                  Map<String, IoCounter> counters) {
+        public Status { Objects.requireNonNull(state, "state"); counters = ioCounters(counters); }
+        public Status(State state, String faultId, long revision, long sequence, long leaseMs,
+                      long leaseDeadlineMonotonicNs, boolean journalComplete, boolean stopping) {
+            this(state, faultId, revision, sequence, leaseMs, leaseDeadlineMonotonicNs, journalComplete, stopping, Map.of());
+        }
+    }
+
+    record IoCounter(long count, long bytes) {
+        public IoCounter {
+            if (count < 0 || bytes < 0 || (count == 0 && bytes != 0)) throw new IllegalArgumentException("Invalid IO counter");
+        }
+    }
+
+    private static Map<String, IoCounter> ioCounters(Map<String, IoCounter> values) {
+        Map<String, IoCounter> counters = Map.copyOf(values);
+        if (!counters.isEmpty() && !counters.keySet().equals(java.util.Set.of("read", "getattr", "readdir", "access", "flush", "release")))
+            throw new IllegalArgumentException("Incomplete IO counters");
+        counters.forEach((name, value) -> {
+            if (!name.equals("read") && value.bytes() != 0) throw new IllegalArgumentException("Non-read byte counter");
+        });
+        return java.util.Collections.unmodifiableMap(new java.util.TreeMap<>(counters));
     }
 
     record Command(Instance instance, String command, long startedNanos, long completedNanos,
@@ -55,7 +77,17 @@ public interface StorageFaultControl {
     record Operation(Instance instance, long sequence, long timestampMillis, long monotonicNanos,
                      long revision, State state, String faultId, String operation, String path,
                      String faultOperation, long result, int errno, long requestedBytes,
-                     long returnedBytes, Boolean datasync, String reason) {}
+                     long returnedBytes, Boolean datasync, String reason,
+                     Map<String, IoCounter> counters, boolean pathTruncated) {
+        public Operation { counters = ioCounters(counters); }
+        public Operation(Instance instance, long sequence, long timestampMillis, long monotonicNanos,
+                         long revision, State state, String faultId, String operation, String path,
+                         String faultOperation, long result, int errno, long requestedBytes,
+                         long returnedBytes, Boolean datasync, String reason) {
+            this(instance, sequence, timestampMillis, monotonicNanos, revision, state, faultId, operation, path,
+                    faultOperation, result, errno, requestedBytes, returnedBytes, datasync, reason, Map.of(), false);
+        }
+    }
 
     /** Exact absolute FUSE path observed by the inspector, never the raw backing path. */
     record FileEvidence(String path, long size, boolean regularFile, String sha256, long observedNanos) {}

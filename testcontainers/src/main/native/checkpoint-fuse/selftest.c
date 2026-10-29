@@ -16,7 +16,7 @@ static unsigned int checks;
 
 struct time_source { uint64_t now; };
 static uint64_t fake_clock(void *context) { return ((struct time_source *) context)->now; }
-static char temporary[] = "/tmp/checkpoint-fuse-selftest-XXXXXX";
+static char temporary[PATH_MAX] = "/tmp/checkpoint-fuse-selftest-XXXXXX";
 static unsigned int journal_number;
 
 static int new_state(struct cf_state *state, struct time_source *clock, uint64_t records, char path[PATH_MAX]) {
@@ -106,9 +106,19 @@ static void abort_and_bounds(void) {
     close(fd); cf_destroy(&state); CHECK(unlink(path) == 0);
 
     fd = new_state(&state, &clock, 10, path);
+    uint64_t initial_sequence = state.sequence;
     for (unsigned int index = 0; index < 12; ++index) {
         char response[CF_RESPONSE_MAX]; (void) cf_control(&state, "STATUS attempt storage instance 0", response, sizeof(response));
     }
+    CHECK(state.mode == CF_HEALTHY && state.journal_complete && state.sequence == initial_sequence);
+    pthread_mutex_lock(&state.mutex);
+    for (unsigned int index = 0; index < 12; ++index)
+        (void) cf_record_locked(&state, "write", "write", "job/file", 1, 0, 1, 1, -1, "success");
+    CHECK(cf_begin_locked(&state, NULL) == 0);
+    CHECK(cf_begin_locked(&state, "write") == -EIO);
+    CHECK(cf_begin_operation_locked(&state, NULL, true) == -EIO);
+    CHECK(cf_record_locked(&state, "getattr", NULL, "job/file", 0, 0, 0, 0, -1, "success") == 0);
+    pthread_mutex_unlock(&state.mutex);
     CHECK(state.mode == CF_FATAL && !state.journal_complete && state.sequence <= 10);
     CHECK(control(&state, "STATUS attempt storage instance 0", "\"journalComplete\":false") == 0);
     CHECK(control(&state, "ARM attempt storage instance 1 forbidden 10 create,write", "\"ok\":false") < 0);
@@ -121,7 +131,7 @@ static void abort_and_bounds(void) {
     fd = new_state(&state, &clock, 10, path);
     pthread_mutex_lock(&state.mutex);
     while (state.sequence < 8)
-        CHECK(cf_record_locked(&state, "getattr", NULL, "job/file", 0, 0, 0, 0, -1, "success") == 0);
+        CHECK(cf_record_locked(&state, "write", "write", "job/file", 0, 0, 0, 0, -1, "success") == 0);
     CHECK(cf_begin_locked(&state, NULL) == 0);
     CHECK(cf_record_locked(&state, "rename-target", NULL, "job/new", 0, 0, 0, 0, -1, "success") == 0);
     CHECK(cf_record_locked(&state, "rename", NULL, "job/old", 0, 0, 0, 0, -1, "success") == -EIO);
@@ -140,15 +150,60 @@ static void abort_and_bounds(void) {
     fd = new_state(&state, &clock, 10000, path);
     char too_long[CF_PATH_MAX + 2]; memset(too_long, 'x', sizeof(too_long) - 1); too_long[sizeof(too_long) - 1] = '\0';
     pthread_mutex_lock(&state.mutex);
-    CHECK(cf_record_locked(&state, "getattr", NULL, too_long, -1, EACCES, 0, 0, -1, "invalid-path") == -EIO);
-    CHECK(state.mode == CF_FATAL && !state.journal_complete);
+    CHECK(cf_record_locked(&state, "getattr", NULL, too_long, -1, ENAMETOOLONG, 0, 0, -1, "invalid-path") == 0);
+    CHECK(state.mode == CF_HEALTHY && state.journal_complete);
     pthread_mutex_unlock(&state.mutex);
+    size = pread(fd, text, sizeof(text) - 1, 0); CHECK(size > 0); text[size] = '\0';
+    CHECK(strstr(text, "\"pathTruncated\":true") != NULL);
+    CHECK(strstr(text, "receipt-path-truncated") != NULL);
     close(fd); cf_destroy(&state); CHECK(unlink(path) == 0);
 
     fd = new_state(&state, &clock, 10000, path);
     CHECK(control(&state, "STOP attempt storage instance 1", "\"state\":\"STOPPED\"") == 0);
     cf_shutdown(&state, "loop-ended-without-stop"); CHECK(state.mode == CF_STOPPED && state.journal_complete);
     close(fd); cf_destroy(&state); CHECK(unlink(path) == 0);
+}
+
+static void aggregate_reads_and_durability(void) {
+    struct cf_state state; struct time_source clock = {.now = UINT64_C(1000000000)};
+    char path[PATH_MAX]; int fd = new_state(&state, &clock, 10000, path);
+    pthread_mutex_lock(&state.mutex);
+    for (unsigned int i = 0; i < 100000; ++i)
+        CHECK(cf_record_locked(&state, "getattr", NULL, "job/file", 0, 0, 0, 0, -1, "success") == 0);
+    CHECK(state.sequence == 102 && state.counts[1] == 100000);
+    uint64_t before = state.sequence;
+    CHECK(cf_record_locked(&state, "read", NULL, "job/ordinary", 8, 0, 8, 8, -1, "success") == 0);
+    CHECK(state.sequence == before && state.read_bytes == 8);
+    CHECK(cf_record_locked(&state, "read", NULL, "job/id/chk-7/state", 8, 0, 8, 8, -1, "success") == 0);
+    CHECK(state.sequence == before + 1 && state.read_bytes == 16);
+    CHECK(cf_record_locked(&state, "getattr", NULL, "job/missing", -1, ENOENT, 0, 0, -1, "backing-or-path-error") == 0);
+    CHECK(state.sequence == before + 2 && state.counts[1] == 100000);
+    pthread_mutex_unlock(&state.mutex);
+    clock.now += CF_SUMMARY_NS;
+    cf_watchdog(&state); CHECK(state.sequence == before + 3);
+    before = state.sequence;
+    clock.now += CF_SUMMARY_NS; cf_watchdog(&state); CHECK(state.sequence == before);
+    CHECK(control(&state, "STATUS attempt storage instance 0", "\"getattr\":{\"count\":100000,\"bytes\":0}") == 0);
+    CHECK(state.sequence == before && state.journal_complete);
+    close(fd); cf_destroy(&state); CHECK(unlink(path) == 0);
+
+    /* A pipe rejects fdatasync. SUMMARY remains a normal append, while a fault-family
+       receipt fails closed and consumes its sequence before the terminal receipt. */
+    fd = new_state(&state, &clock, 10000, path);
+    int pipes[2]; CHECK(pipe(pipes) == 0); state.journal_fd = pipes[1];
+    pthread_mutex_lock(&state.mutex);
+    CHECK(cf_record_locked(&state, "getattr", NULL, "job/file", 0, 0, 0, 0, -1, "success") == 0);
+    pthread_mutex_unlock(&state.mutex);
+    clock.now += CF_SUMMARY_NS; cf_watchdog(&state);
+    CHECK(state.mode == CF_HEALTHY && state.sequence == 3);
+    pthread_mutex_lock(&state.mutex);
+    CHECK(cf_record_locked(&state, "write", "write", "job/file", 1, 0, 1, 1, -1, "success") == -EIO);
+    CHECK(state.mode == CF_FATAL && !state.journal_complete && state.sequence == 5);
+    pthread_mutex_unlock(&state.mutex);
+    close(pipes[1]); char text[8192]; ssize_t size = read(pipes[0], text, sizeof(text) - 1);
+    CHECK(size > 0); text[size] = '\0';
+    CHECK(strstr(text, "\"sequence\":3,") != NULL && strstr(text, "\"sequence\":4,") != NULL && strstr(text, "\"sequence\":5,") != NULL);
+    close(pipes[0]); close(fd); cf_destroy(&state); CHECK(unlink(path) == 0);
 }
 
 static void jail_checks(void) {
@@ -212,10 +267,11 @@ static void jail_checks(void) {
 
 int main(void) {
     CHECK(mkdtemp(temporary) != NULL);
+    char resolved[PATH_MAX]; CHECK(realpath(temporary, resolved) != NULL); strcpy(temporary, resolved);
     CHECK(cf_identifier("attempt-01")); CHECK(!cf_identifier("../escape")); CHECK(!cf_identifier(""));
     uint64_t value; CHECK(cf_uint("0", &value) && value == 0); CHECK(!cf_uint("01", &value));
     CHECK(!cf_uint("18446744073709551616", &value)); CHECK(!cf_uint("-1", &value));
-    control_and_held_descriptor(); abort_and_bounds(); jail_checks();
+    control_and_held_descriptor(); abort_and_bounds(); aggregate_reads_and_durability(); jail_checks();
     CHECK(rmdir(temporary) == 0);
     printf("{\"status\":\"pass\",\"tests\":%u,\"scope\":\"native-core-and-jail-no-fuse-mount\"}\n", checks);
     return 0;

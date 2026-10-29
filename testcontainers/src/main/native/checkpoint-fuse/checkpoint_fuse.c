@@ -38,11 +38,13 @@ static const char *effective_path(const char *path, struct fuse_file_info *info)
 
 static int finish(const char *path, const char *operation, const char *family, int result,
                   uint64_t requested, uint64_t returned, int datasync) {
+    bool mutation = family || !strcmp(operation, "mkdir") || !strcmp(operation, "unlink") || !strcmp(operation, "rmdir")
+        || !strcmp(operation, "rename") || !strcmp(operation, "chmod") || !strcmp(operation, "chown") || !strcmp(operation, "utimens");
     const char *reason = result >= 0 ? "success" : result == -EIO && family &&
         (state.mode == CF_ARMED || state.mode == CF_EXPIRED || state.mode == CF_ABORTED)
-        ? "eio-rule" : "backing-or-path-error";
+        ? "eio-rule" : result == -EMFILE ? "open-handle-limit" : "backing-or-path-error";
     if (cf_record_locked(&state, operation, family, relative(path), result < 0 ? -1 : result,
-            result < 0 ? -result : 0, requested, returned, datasync, reason) != 0) result = -EIO;
+            result < 0 ? -result : 0, requested, returned, datasync, reason) != 0 && mutation) result = -EIO;
     pthread_mutex_unlock(&state.mutex);
     return result;
 }
@@ -50,6 +52,11 @@ static int finish(const char *path, const char *operation, const char *family, i
 static int begin(const char *path, const char *family) {
     pthread_mutex_lock(&state.mutex);
     return cj_begin_locked(&jail, &state, path, family);
+}
+
+static int begin_mutation(const char *path, const char *family) {
+    pthread_mutex_lock(&state.mutex);
+    return cj_begin_operation_locked(&jail, &state, path, family, true);
 }
 
 static void view_attributes(const char *path, struct stat *attributes) {
@@ -91,7 +98,7 @@ static int open_file(const char *path, struct fuse_file_info *info) {
         int fd = cj_open(&jail, path, info->flags & ~(O_CREAT | O_EXCL), 0);
         result = fd < 0 ? fd : new_handle(path, fd, info, false, false);
     }
-    return finish(path, "open", family, result, 0, 0, -1);
+    return finish(path, family ? "open-trunc" : "open", family, result, 0, 0, -1);
 }
 
 static int create_file(const char *path, mode_t mode, struct fuse_file_info *info) {
@@ -204,7 +211,7 @@ static int read_directory(const char *path, void *buffer, fuse_fill_dir_t fill, 
 }
 
 static int make_directory(const char *path, mode_t mode) {
-    int result = begin(path, NULL);
+    int result = begin_mutation(path, NULL);
     if (!result) {
         char leaf[NAME_MAX + 1]; int parent = cj_parent(&jail, path, leaf);
         if (parent < 0) result = parent;
@@ -214,7 +221,7 @@ static int make_directory(const char *path, mode_t mode) {
 }
 
 static int remove_path(const char *path, bool directory) {
-    int result = begin(path, NULL);
+    int result = begin_mutation(path, NULL);
     struct stat attributes;
     if (!result) result = cj_lstat(&jail, path, &attributes);
     if (!result) {
@@ -228,7 +235,7 @@ static int remove_file(const char *path) { return remove_path(path, false); }
 static int remove_directory(const char *path) { return remove_path(path, true); }
 
 static int rename_path(const char *source, const char *target, unsigned int flags) {
-    int result = begin(source, NULL);
+    int result = begin_mutation(source, NULL);
     if (!result) result = cj_validate(&jail, target);
     if (!result && flags != 0 && flags != RENAME_NOREPLACE) result = -EOPNOTSUPP;
     struct stat attributes;
@@ -264,7 +271,7 @@ static int truncate_file(const char *path, off_t size, struct fuse_file_info *in
 
 static int chmod_file(const char *path, mode_t mode, struct fuse_file_info *info) {
     path = effective_path(path, info);
-    int result = begin(path, NULL);
+    int result = begin_mutation(path, NULL);
     struct handle *h = handle_of(info);
     if (!result && (!strcmp(path, "/") || cj_namespace_root(&jail, path))) result = -EPERM;
     if (!result) {
@@ -277,7 +284,7 @@ static int chmod_file(const char *path, mode_t mode, struct fuse_file_info *info
 
 static int chown_file(const char *path, uid_t uid, gid_t gid, struct fuse_file_info *info) {
     path = effective_path(path, info);
-    int result = begin(path, NULL);
+    int result = begin_mutation(path, NULL);
     struct stat attributes;
     if (!result) result = cj_lstat(&jail, path, &attributes);
     if (!result && ((uid != (uid_t) -1 && uid != view_uid) || (gid != (gid_t) -1 && gid != view_gid))) result = -EPERM;
@@ -287,7 +294,7 @@ static int chown_file(const char *path, uid_t uid, gid_t gid, struct fuse_file_i
 
 static int change_times(const char *path, const struct timespec times[2], struct fuse_file_info *info) {
     path = effective_path(path, info);
-    int result = begin(path, NULL);
+    int result = begin_mutation(path, NULL);
     struct handle *h = handle_of(info);
     if (!result) {
         bool namespace_root = cj_namespace_root(&jail, path);

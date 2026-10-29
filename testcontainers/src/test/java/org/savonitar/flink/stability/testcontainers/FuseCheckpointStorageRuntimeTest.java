@@ -32,6 +32,34 @@ class FuseCheckpointStorageRuntimeTest {
         assertThrows(IllegalStateException.class, () -> parse("", true));
     }
 
+    @Test void cumulativeCountersAreRetainedAndCannotDisappearRegressOrCoerce() {
+        String ready = counterLine(1, "READY", 0, 0, 0);
+        String summary = counterLine(2, "SUMMARY", 2, 1000, 16);
+        var operations = parse(ready + summary, true);
+        assertEquals(new StorageFaultControl.IoCounter(2, 16), operations.getLast().counters().get("read"));
+        assertEquals(1000, operations.getLast().counters().get("getattr").count());
+        assertThrows(UnsupportedOperationException.class, () -> operations.getLast().counters().clear());
+        for (String invalid : new String[]{
+                counterLine(3, "SUMMARY", 1, 1001, 8),
+                counterLine(3, "SUMMARY", 2, 1000, 16),
+                line(3, "HEAL", "HEALTHY", 0, 0),
+                counterLine(3, "SUMMARY", 3, 1001, 24).replace("\"release\"", "\"unknown\""),
+                counterLine(3, "SUMMARY", 3, 1001, 24).replace("\"count\":3", "\"count\":3.0"),
+                counterLine(3, "SUMMARY", 3, 1001, 24).replace("\"bytes\":0", "\"bytes\":1")})
+            assertThrows(IllegalStateException.class, () -> parse(ready + summary + invalid, true));
+        assertThrows(IllegalStateException.class, () -> parse(line(1, "SUMMARY", "HEALTHY", 0, 0), true));
+        assertThrows(IllegalStateException.class, () -> parse(counterLine(1, "READY", 1, 0, 1), true));
+    }
+
+    @Test void overlongPathReceiptIsAnExplicitOperationErrorWithoutInventingJournalFailure() {
+        String receipt = line(1, "getattr", "HEALTHY", -1, 36)
+                .replace("\"reason\":\"test\"", "\"reason\":\"receipt-path-truncated\",\"pathTruncated\":true");
+        assertTrue(parse(receipt, true).getFirst().pathTruncated());
+        assertThrows(IllegalStateException.class, () -> parse(receipt.replace("\"errno\":36", "\"errno\":5"), true));
+        assertThrows(IllegalStateException.class, () -> parse(receipt.replace("\"pathTruncated\":true", "\"pathTruncated\":\"true\""), true));
+        assertTrue(parse(line(1, "getattr", "HEALTHY", 0, 0), true).getFirst().counters().isEmpty(), "Historical receipts remain readable");
+    }
+
     @Test void foreignIdentityGapsDuplicatesAndExplicitIncompleteNeverBecomeComplete() {
         String valid = line(1, "READY", "HEALTHY", 0, 0);
         for (String changed : new String[]{valid.replace("instance-a", "instance-b"), valid.replace("\"daemonPid\":25", "\"daemonPid\":26"),
@@ -97,6 +125,13 @@ class FuseCheckpointStorageRuntimeTest {
 
     private static java.util.List<StorageFaultControl.Operation> parse(String json, boolean quiescent) {
         return FuseCheckpointStorageRuntime.parseJournal(json.getBytes(StandardCharsets.UTF_8), INSTANCE, "attempt", "storage", "ns", quiescent);
+    }
+    private static String counterLine(int sequence, String operation, long reads, long metadata, long bytes) {
+        String counters = java.util.stream.Stream.of("read", "getattr", "readdir", "access", "flush", "release")
+                .map(name -> "\"" + name + "\":{\"count\":" + (name.equals("read") ? reads : name.equals("getattr") ? metadata : 0)
+                        + ",\"bytes\":" + (name.equals("read") ? bytes : 0) + "}")
+                .collect(java.util.stream.Collectors.joining(","));
+        return line(sequence, operation, "HEALTHY", 0, 0).replace("\"reason\":\"test\"", "\"reason\":\"test\",\"counters\":{" + counters + "}");
     }
     private static String line(int sequence, String operation, String state, long result, int errno) {
         return "{\"version\":1,\"sequence\":" + sequence + ",\"timestampMs\":100,\"monotonicNs\":200,\"daemonPid\":25,"

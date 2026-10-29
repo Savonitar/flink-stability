@@ -14,6 +14,8 @@ void cj_destroy(struct cj_jail *jail);
 int cj_validate(const struct cj_jail *jail, const char *path);
 /* Caller holds state->mutex. Invalid paths never receive the namespace fault. */
 int cj_begin_locked(const struct cj_jail *jail, struct cf_state *state, const char *path, const char *fault_operation);
+int cj_begin_operation_locked(const struct cj_jail *jail, struct cf_state *state, const char *path,
+                              const char *fault_operation, bool mutation);
 bool cj_namespace_root(const struct cj_jail *jail, const char *path);
 int cj_parent(const struct cj_jail *jail, const char *path, char leaf[NAME_MAX + 1]);
 int cj_lstat(const struct cj_jail *jail, const char *path, struct stat *attributes);
