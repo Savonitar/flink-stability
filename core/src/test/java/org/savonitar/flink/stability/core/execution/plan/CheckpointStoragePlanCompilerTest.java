@@ -25,7 +25,7 @@ class CheckpointStoragePlanCompilerTest {
         var storage = plan.job().checkpointing().fuse().orElseThrow();
         assertEquals("./helper-build", storage.bundle());
         assertEquals("a".repeat(64), storage.manifestSha256());
-        assertEquals(FuseCheckpointStorage.SUPPORTED_IMAGE_ID, storage.imageId());
+        assertEquals("sha256:2e93ded2cb7bf1a50f71b663d5e3ea01420bcc4e549cbf666d05120f939713c7", storage.imageId());
         assertEquals("linux/arm64", storage.platform());
         assertEquals("0 bytes", plan.job().standardFlinkConfiguration().get("execution.checkpointing.data-inline-threshold"));
         assertEquals("1", plan.job().standardFlinkConfiguration().get("execution.checkpointing.max-concurrent-checkpoints"));
@@ -63,6 +63,17 @@ class CheckpointStoragePlanCompilerTest {
         assertDoesNotThrow(() -> compile(document -> { steps(document).remove(1); addKillRestart(document); }));
     }
 
+    @Test void acceptsAnotherExplicitlyPinnedImageWithoutRelaxingStorageRuntimeEquality() {
+        String pin = "sha256:" + "b".repeat(64);
+        var plan = compile(document -> {
+            fuse(document).put("image_id", pin);
+            ((ObjectNode) document.at("/setup/flink")).put("image_id", pin).put("image_digest", pin);
+        });
+        assertEquals(pin, plan.flink().expectedImageId().orElseThrow());
+        assertEquals(pin, plan.flink().expectedImageDigest().orElseThrow());
+        assertEquals(pin, plan.job().checkpointing().fuse().orElseThrow().imageId());
+    }
+
     @Test void rejectsUnknownJobDuringSemanticResolution() {
         failure(SpecificationException.Stage.PREFLIGHT, document -> fault(document).put("job", "missing"));
     }
@@ -95,7 +106,6 @@ class CheckpointStoragePlanCompilerTest {
                     case "runtime" -> ((ObjectNode) document.at("/setup/flink")).remove("image_id");
                     case "identity" -> {
                         fuse(document).put("image_id", "sha256:" + "b".repeat(64));
-                        ((ObjectNode) document.at("/setup/flink")).put("image_id", "sha256:" + "b".repeat(64));
                     }
                     case "path" -> fuse(document).put("bundle", "../elsewhere");
                     case "absolute" -> fuse(document).put("bundle", "/tmp/helper");

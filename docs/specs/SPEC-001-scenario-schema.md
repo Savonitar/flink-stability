@@ -783,19 +783,24 @@ Connector pull-request gating is the same mechanism with one axis:
   digests. The Kroxylicious image is a harness-pinned capability in v1 because
   `setup.proxies` has no public image field; its configured reference and resolved
   digest are still recorded by the runner.
-- **R4.13e** The first runner accepts optional `setup.flink.image_id`: a full local
-  Docker image configuration ID, `sha256:` followed by 64 lowercase hexadecimal
-  characters, after string parameter resolution. It is distinct from a registry
-  manifest digest and does not establish the source revision. Before each Flink
-  process starts, inspect its created container and require its actual image ID
-  to match this expected ID when supplied. Without an explicit ID, pin the first
-  observed Flink image for the attempt. JobManager, initial TaskManager, and all
-  replacement TaskManagers must use that same ID. Missing identity, an expected-ID
-  mismatch, or a changed tag resolving to another ID prevents process start.
-  Retain the declared reference and the independently observed ID for every
-  successfully provisioned incarnation. An image pin alone does not relax the
-  version compatibility registry or introduce support for image-changing restart
-  steps; the explicit custom-line declaration is R4.13j.
+- **R4.13e** The first runner accepts optional `setup.flink.image_id`: a full
+  lowercase `sha256:` identity after parameter resolution. Docker's image ID is
+  backend-dependent: the classic graphdriver reports an image configuration
+  digest, while the containerd image store can report a multi-platform index
+  digest. Before each Flink process starts, inspect the created container and
+  its image by immutable container image ID. A declared `image_id` must match
+  either the container's image ID or one of that image's `RepoDigests`. Retain
+  both observed forms, which form matched, the storage driver and the optional
+  `driver-type` from Docker info. Missing inspection evidence rejects startup.
+  Optional `setup.flink.image_digest` is a bare lowercase `sha256:` repository
+  digest, verified against `RepoDigests` when supplied; it provides a
+  content-addressable pin independent of the daemon's image-ID representation.
+  Neither form establishes the source revision. Without an explicit ID, pin
+  the first observed Flink image for the attempt. JobManager, initial
+  TaskManager and replacement TaskManagers must retain that same actual image
+  ID; matching a repository digest does not permit image drift. An image pin
+  does not relax version compatibility or introduce image-changing restarts;
+  the explicit custom-line declaration is R4.13j.
   Before a successful attempt or an expected-failure scenario can pass, its
   provisioning and process-fence evidence must cover every logical component and
   role expected by the executable plan. Observed evidence must not define the
@@ -1179,9 +1184,15 @@ Connector pull-request gating is the same mechanism with one axis:
   `fuse: { bundle, manifest_sha256, image_id, platform }`. `bundle` is a local
   directory relative to the artifact root containing the PR3
   `build-evidence.json` and its `bundle/` files. The manifest SHA-256, local
-  Docker image ID and `linux/arm64` platform are mandatory. The image ID must
-  match both `setup.flink.image_id` and the qualified released Flink image;
-  another image/platform requires separate adapter qualification. Bundle path
+  Docker image ID and `linux/arm64` platform are mandatory. The author-declared
+  image ID must equal `setup.flink.image_id` and be bound to the helper build's
+  recorded image inspection; runtime verification follows R4.13e. There is no
+  compiled image constant. A different image requires separate qualification.
+  The 27 October 2026 qualification used Docker Engine 29.1.3 with the classic
+  graphdriver store: `sha256:2e93ded2cb7bf1a50f71b663d5e3ea01420bcc4e549cbf666d05120f939713c7`
+  is the arm64 config digest. The containerd store reports the index digest
+  `sha256:7ecfab9d5e8ec6987a248b32f6605b5fe9bcb7347aea0d7b1bc3976588408681`.
+  Supporting both identity forms does not extend the retained qualification. Bundle path
   traversal, symbolic links, missing/extra helpers, changed hashes and incomplete
   build/cleanup receipts reject before Docker. Preparation snapshots the bounded
   manifest and the exact daemon, native self-test and Java probe files into the

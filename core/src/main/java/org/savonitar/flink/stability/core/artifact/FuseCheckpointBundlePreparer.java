@@ -40,7 +40,7 @@ public final class FuseCheckpointBundlePreparer {
             String bundle, String manifestSha256, String imageId, String platform) {
         try {
             if (!manifestSha256.matches("[0-9a-f]{64}")
-                    || !FuseCheckpointStorage.SUPPORTED_IMAGE_ID.equals(imageId)
+                    || !imageId.matches("sha256:[0-9a-f]{64}")
                     || !FuseCheckpointStorage.SUPPORTED_PLATFORM.equals(platform))
                 throw new IOException("Unsupported or missing helper/runtime identity");
             Path declared = Path.of(bundle);
@@ -61,7 +61,7 @@ public final class FuseCheckpointBundlePreparer {
                     || !receipt.path("networkDisconnectedBeforeSourceCopy").booleanValue()
                     || !receipt.path("javaRelease").isIntegralNumber() || receipt.path("javaRelease").asInt() != 17
                     || !"3.14.0".equals(receipt.path("libfuseVersion").asText())
-                    || !imageId.equals(receipt.path("imageId").asText())
+                    || !matchesImagePin(receipt, imageId, platform)
                     || !platform.equals(receipt.path("platform").asText())
                     || !receipt.path("cleanup").isArray() || receipt.path("cleanup").isEmpty())
                 throw new IOException("Helper build evidence is incomplete or differs from the runtime pin");
@@ -106,6 +106,27 @@ public final class FuseCheckpointBundlePreparer {
                     "$/workload/jobs/0/checkpointing/storage/fuse",
                     "Cannot prepare the pinned FUSE helper bundle: " + safeMessage(failure))));
         }
+    }
+
+    private static boolean matchesImagePin(JsonNode receipt, String imageId, String platform) {
+        String builtImageId = receipt.path("imageId").asText();
+        if (!builtImageId.matches("sha256:[0-9a-f]{64}")) return false;
+        if (imageId.equals(builtImageId)) return true;
+        JsonNode inspection = receipt.path("imageInspection");
+        JsonNode repoDigests = inspection.path("RepoDigests");
+        String buildDigest = receipt.path("imageDigest").asText();
+        if (!builtImageId.equals(inspection.path("Id").asText())
+                || !platform.equals(inspection.path("Os").asText() + "/" + inspection.path("Architecture").asText())
+                || !repoDigests.isArray() || repoDigests.isEmpty()
+                || !buildDigest.matches("[^\\s@]+@sha256:[0-9a-f]{64}")) return false;
+        boolean declared = false;
+        boolean built = false;
+        for (JsonNode value : repoDigests) {
+            if (!value.isTextual() || !value.textValue().matches("[^\\s@]+@sha256:[0-9a-f]{64}")) return false;
+            declared |= value.textValue().endsWith("@" + imageId);
+            built |= value.textValue().equals(buildDigest);
+        }
+        return declared && built;
     }
 
     private static Path checked(Path base, Path candidate, boolean directory) throws IOException {

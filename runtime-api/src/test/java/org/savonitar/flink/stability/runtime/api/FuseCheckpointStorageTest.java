@@ -8,29 +8,39 @@ import java.util.Map;
 import static org.junit.jupiter.api.Assertions.*;
 
 class FuseCheckpointStorageTest {
+    private static final String IMAGE_ID = "sha256:" + "a".repeat(64);
     private static final Map<String, String> FILES = Map.of("checkpoint-fuse", "a".repeat(64),
             "checkpoint-fuse-selftest", "b".repeat(64), "probe.jar", "c".repeat(64));
     private static FuseCheckpointStorage storage() {
         return new FuseCheckpointStorage(Path.of("/prepared/helpers"), "d".repeat(64),
-                FuseCheckpointStorage.SUPPORTED_IMAGE_ID, FuseCheckpointStorage.SUPPORTED_PLATFORM, FILES);
+                IMAGE_ID, FuseCheckpointStorage.SUPPORTED_PLATFORM, FILES);
     }
     private static FlinkRuntimeTarget target() {
         String image = "flink:2.2.0";
         return FlinkRuntimeTarget.withConnectorBundle(image, new FlinkConnectorBundleInstallation(image,
-                List.of(), new ConnectorClasspathManifest(List.of()))).withExpectedImageId(FuseCheckpointStorage.SUPPORTED_IMAGE_ID);
+                List.of(), new ConnectorClasspathManifest(List.of()))).withExpectedImageId(IMAGE_ID);
     }
-    @Test void exactBundleAndReleasedImageAreRequiredBeforeContainerProvisioning() {
+    @Test void exactBundleAndAuthorDeclaredIdentityAreRequiredBeforeContainerProvisioning() {
         assertEquals(FILES, storage().files());
         assertThrows(UnsupportedOperationException.class, () -> storage().files().clear());
         assertThrows(IllegalArgumentException.class, () -> new FuseCheckpointStorage(Path.of("relative"), "d".repeat(64),
-                FuseCheckpointStorage.SUPPORTED_IMAGE_ID, FuseCheckpointStorage.SUPPORTED_PLATFORM, FILES));
+                IMAGE_ID, FuseCheckpointStorage.SUPPORTED_PLATFORM, FILES));
         assertThrows(IllegalArgumentException.class, () -> new FuseCheckpointStorage(Path.of("/prepared"), "d".repeat(64),
-                FuseCheckpointStorage.SUPPORTED_IMAGE_ID, "linux/amd64", FILES));
+                IMAGE_ID, "linux/amd64", FILES));
+        assertEquals("sha256:" + "e".repeat(64), new FuseCheckpointStorage(Path.of("/prepared"), "d".repeat(64),
+                "sha256:" + "e".repeat(64), FuseCheckpointStorage.SUPPORTED_PLATFORM, FILES).imageId());
         assertThrows(IllegalArgumentException.class, () -> new FuseCheckpointStorage(Path.of("/prepared"), "d".repeat(64),
-                "sha256:" + "e".repeat(64), FuseCheckpointStorage.SUPPORTED_PLATFORM, FILES));
-        assertThrows(IllegalArgumentException.class, () -> new FuseCheckpointStorage(Path.of("/prepared"), "d".repeat(64),
-                FuseCheckpointStorage.SUPPORTED_IMAGE_ID, FuseCheckpointStorage.SUPPORTED_PLATFORM, Map.of()));
+                IMAGE_ID, FuseCheckpointStorage.SUPPORTED_PLATFORM, Map.of()));
     }
+    @Test void optionalRepositoryDigestSurvivesEveryTargetCopy() {
+        String digest = "sha256:" + "f".repeat(64);
+        var configured = target().withExpectedImageDigest(digest).withCheckpointStorage(storage())
+                .withConfig(Map.of("custom.setting", "value")).withTaskManagers(1).withLogMarkers(List.of());
+        assertEquals(java.util.Optional.of(digest), configured.expectedImageDigest());
+        assertNotEquals(target(), target().withExpectedImageDigest(digest));
+        assertThrows(IllegalArgumentException.class, () -> target().withExpectedImageDigest("flink@" + digest));
+    }
+
     @Test void effectiveProcessConfigurationIncludesOwnedSettingsAndPreservesExactCustomValues() {
         Map<String, String> custom = Map.of("custom.setting", "literal value");
         var target = target().withConfig(custom);
@@ -49,7 +59,7 @@ class FuseCheckpointStorageTest {
 
     @Test void storageIdentitySurvivesCopiesAndRejectsUnsupportedLifecycle() {
         var configured = target().withCheckpointStorage(storage()).withConfig(Map.of("custom.setting", "value"))
-                .withLogMarkers(List.of()).withTaskManagers(1).withExpectedImageId(FuseCheckpointStorage.SUPPORTED_IMAGE_ID);
+                .withLogMarkers(List.of()).withTaskManagers(1).withExpectedImageId(IMAGE_ID);
         assertEquals(storage(), configured.checkpointStorage().orElseThrow());
         assertNotEquals(target(), target().withCheckpointStorage(storage()));
         assertEquals(configured, target().withConfig(Map.of("custom.setting", "value")).withCheckpointStorage(storage()));

@@ -217,7 +217,8 @@ public final class V1ScenarioExecutor {
         FlinkRuntimeIdentity.ExpectedTarget expectedRuntime = new FlinkRuntimeIdentity.ExpectedTarget(
                 plan.flink().expectedImageId(), plan.flink().expectedComponents(),
                 plan.flink().expectedRuntimeJar(), plan.flink().declaredLine(),
-                Optional.of(plan.flink().imageReference()), prepared.flinkRuntimeTarget().effectiveConfig());
+                Optional.of(plan.flink().imageReference()), prepared.flinkRuntimeTarget().effectiveConfig(),
+                plan.flink().expectedImageDigest());
         FlinkHaEvidence.Expected expectedHa = FlinkHaEvidence.Expected.from(
                 plan.phases(), plan.flink().highAvailability().isPresent(), plan.flink().tokenProvider().isPresent(),
                 plan.flink().taskmanagers()).withTokenProof(plan.flink().tokenProvider()

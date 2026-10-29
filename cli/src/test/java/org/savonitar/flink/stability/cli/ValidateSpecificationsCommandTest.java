@@ -47,7 +47,7 @@ class ValidateSpecificationsCommandTest {
         document.put("health_retry_limit", 0);
         ObjectNode flink = (ObjectNode) document.at("/setup/flink");
         flink.put("image", "internal/flink:vendor").put("line", "2.3")
-                .put("image_id", "sha256:" + "a".repeat(64));
+                .put("image_id", "sha256:" + "a".repeat(64)).put("image_digest", "sha256:" + "e".repeat(64));
         flink.putObject("runtime_jar").put("container_path", "/opt/flink/lib/flink-dist-vendor.jar")
                 .put("sha256", "b".repeat(64));
         flink.putObject("config").put("pipeline.name", "custom-test");
@@ -68,6 +68,8 @@ class ValidateSpecificationsCommandTest {
         assertEquals(0, result.exitCode(), result.stderr());
         var plan = new com.fasterxml.jackson.databind.ObjectMapper().readTree(result.stdout());
         assertEquals("2.3", plan.at("/resolved/setup/flink/line").asText());
+        assertEquals("sha256:" + "a".repeat(64), plan.at("/flinkRuntime/imageId").asText());
+        assertEquals("sha256:" + "e".repeat(64), plan.at("/flinkRuntime/imageDigest").asText());
         assertEquals("generic-kraft", plan.at("/kafkaRuntime/launchType").asText());
         assertEquals("confluent-platform", plan.at("/kafkaRuntime/layout").asText());
         assertEquals(1, plan.at("/kafkaRuntime/launches").size());

@@ -8,6 +8,7 @@ import org.savonitar.flink.stability.runtime.api.FlinkComponentRole;
 import org.savonitar.flink.stability.runtime.api.FlinkHaControl;
 import org.savonitar.flink.stability.runtime.api.FlinkProcessWriteFenceEvidence;
 import org.savonitar.flink.stability.runtime.api.TaskManagerControl;
+import org.savonitar.flink.stability.runtime.api.ImageIdentityEvidence;
 
 import java.time.Instant;
 import java.time.Duration;
@@ -388,9 +389,82 @@ class FlinkRuntimeIdentityTest {
 
     @Test
     void matchingObservedIdsDoNotOverrideTheDeclaredImageId() {
-        assertEquals(FlinkRuntimeIdentity.Outcome.MISMATCH,
+        assertEquals(FlinkRuntimeIdentity.Outcome.UNCONFIRMED,
                 evaluate(provisioning(1), Optional.of(OTHER_IMAGE_ID),
                         fence(1), noPhases()).outcome());
+    }
+
+    @Test
+    void repositoryDigestMatchRequiresInspectionForEveryInitialAndReplacementProcess() {
+        var components = provisioning(2).stream().map(component -> component.withImageIdentityEvidence(
+                imageProof(component.imageId(), Optional.of(OTHER_IMAGE_ID), Optional.empty()))).toList();
+        assertEquals(FlinkRuntimeIdentity.Outcome.CONFIRMED,
+                evaluate(components, Optional.of(OTHER_IMAGE_ID), fence(2), restarted()).outcome());
+        for (int index = 0; index < components.size(); index++) {
+            var missing = new ArrayList<>(components);
+            missing.set(index, provisioning(2).get(index));
+            assertEquals(FlinkRuntimeIdentity.Outcome.UNCONFIRMED,
+                    evaluate(missing, Optional.of(OTHER_IMAGE_ID), fence(2), restarted()).outcome());
+        }
+    }
+
+    @Test
+    void separatelyDeclaredDigestRequiresExactInspectionBindingEvenForDirectOrUnpinnedIds() {
+        for (Optional<String> pin : List.of(Optional.<String>empty(), Optional.of(IMAGE_ID), Optional.of(OTHER_IMAGE_ID))) {
+            var expected = new FlinkRuntimeIdentity.ExpectedTarget(pin, expected(pin).components(), Optional.empty(),
+                    Optional.empty(), Optional.empty(), Map.of(), Optional.of(OTHER_IMAGE_ID));
+            var components = provisioning(1).stream().map(component -> component.withImageIdentityEvidence(
+                    imageProof(component.imageId(), pin, Optional.of(OTHER_IMAGE_ID)))).toList();
+            assertEquals(FlinkRuntimeIdentity.Outcome.CONFIRMED,
+                    FlinkRuntimeIdentity.evaluate(expected, components, Optional.of(fence(1)), Optional.of(noPhases())).outcome());
+            assertEquals(FlinkRuntimeIdentity.Outcome.UNCONFIRMED,
+                    FlinkRuntimeIdentity.evaluate(expected, provisioning(1), Optional.of(fence(1)), Optional.of(noPhases())).outcome());
+            var wrongDeclaration = components.stream().map(component -> component.withImageIdentityEvidence(
+                    imageProof(component.imageId(), pin, Optional.empty()))).toList();
+            assertEquals(FlinkRuntimeIdentity.Outcome.MISMATCH,
+                    FlinkRuntimeIdentity.evaluate(expected, wrongDeclaration, Optional.of(fence(1)), Optional.of(noPhases())).outcome());
+        }
+    }
+
+    @Test
+    void validInspectionForAnotherDeclaredPinCannotSubstituteForThePlan() {
+        var components = provisioning(1).stream().map(component -> component.withImageIdentityEvidence(
+                imageProof(component.imageId(), Optional.of(IMAGE_ID), Optional.empty()))).toList();
+        assertEquals(FlinkRuntimeIdentity.Outcome.MISMATCH,
+                evaluate(components, Optional.of(OTHER_IMAGE_ID), fence(1), noPhases()).outcome());
+        assertEquals(FlinkRuntimeIdentity.Outcome.MISMATCH,
+                evaluate(components, Optional.empty(), fence(1), noPhases()).outcome());
+    }
+
+    @Test
+    void sharedRepositoryDigestCannotHideDifferentPhysicalImagesAcrossIncarnations() {
+        var components = new ArrayList<>(provisioning(2));
+        components.set(2, component("taskmanager-1", "tm-2", "sha256:" + "c".repeat(64)));
+        var observed = components.stream().map(component -> component.withImageIdentityEvidence(
+                imageProof(component.imageId(), Optional.of(OTHER_IMAGE_ID), Optional.empty()))).toList();
+        assertEquals(FlinkRuntimeIdentity.Outcome.MISMATCH,
+                evaluate(observed, Optional.of(OTHER_IMAGE_ID), fence(2), restarted()).outcome());
+    }
+
+    @Test
+    void imageStoreMayReportInspectedIndexIdentityWhileContainerConfigIdentityStaysStable() {
+        var components = provisioning(2).stream().map(component -> component.withImageIdentityEvidence(
+                new ImageIdentityEvidence(component.imageId(), OTHER_IMAGE_ID, List.of("flink@" + OTHER_IMAGE_ID),
+                        Optional.of(OTHER_IMAGE_ID), Optional.of(OTHER_IMAGE_ID), ImageIdentityEvidence.MatchForm.REPO_DIGEST,
+                        "overlayfs", Optional.of("io.containerd.snapshotter.v1")))).toList();
+        var expected = new FlinkRuntimeIdentity.ExpectedTarget(Optional.of(OTHER_IMAGE_ID),
+                expected(Optional.of(OTHER_IMAGE_ID)).components(), Optional.empty(), Optional.empty(), Optional.empty(),
+                Map.of(), Optional.of(OTHER_IMAGE_ID));
+        assertEquals(FlinkRuntimeIdentity.Outcome.CONFIRMED,
+                FlinkRuntimeIdentity.evaluate(expected, components, Optional.of(fence(2)), Optional.of(restarted())).outcome());
+    }
+
+    private static ImageIdentityEvidence imageProof(String actual, Optional<String> declaredId, Optional<String> digest) {
+        var form = declaredId.isEmpty() ? ImageIdentityEvidence.MatchForm.UNPINNED
+                : declaredId.get().equals(actual) ? ImageIdentityEvidence.MatchForm.CONTAINER_IMAGE_ID
+                : ImageIdentityEvidence.MatchForm.REPO_DIGEST;
+        return new ImageIdentityEvidence(actual, actual, List.of("flink@" + OTHER_IMAGE_ID), declaredId, digest,
+                form, "overlayfs", Optional.of("io.containerd.snapshotter.v1"));
     }
 
     @Test

@@ -529,6 +529,7 @@ final class V1ExecutionResultRenderer {
         runtime.put("status", result.flinkRuntimeIdentity().outcome().name().toLowerCase(Locale.ROOT));
         runtime.put("detail", result.flinkRuntimeIdentity().detail());
         result.expectedFlinkRuntime().imageId().ifPresent(id -> runtime.put("expectedImageId", id));
+        result.expectedFlinkRuntime().imageDigest().ifPresent(digest -> runtime.put("expectedImageDigest", digest));
         result.expectedFlinkRuntime().declaredLine().ifPresent(line -> {
             runtime.put("declaredLine", line);
             runtime.put("compatibilityBasis", "author-assertion");
@@ -587,6 +588,17 @@ final class V1ExecutionResultRenderer {
             rendered.put("runtimeId", component.runtimeId());
             rendered.put("imageReference", component.imageReference());
             rendered.put("imageId", component.imageId());
+            component.imageIdentityEvidence().ifPresent(identity -> {
+                ObjectNode proof = rendered.putObject("imageIdentityEvidence");
+                proof.put("containerImageId", identity.containerImageId());
+                proof.put("inspectedImageId", identity.inspectedImageId());
+                proof.set("repoDigests", JSON.valueToTree(identity.repoDigests()));
+                identity.declaredImageId().ifPresent(value -> proof.put("declaredImageId", value));
+                identity.declaredImageDigest().ifPresent(value -> proof.put("declaredImageDigest", value));
+                proof.put("imageIdMatchForm", identity.imageIdMatchForm().name());
+                proof.put("storageDriver", identity.storageDriver());
+                identity.driverType().ifPresent(value -> proof.put("driverType", value));
+            });
             rendered.put("targetBindingSha256", component.targetBindingSha256());
             rendered.put("classpathManifestSha256", component.classpathManifestSha256());
             if (!component.flinkConfig().isEmpty()) rendered.set("config", JSON.valueToTree(component.flinkConfig()));

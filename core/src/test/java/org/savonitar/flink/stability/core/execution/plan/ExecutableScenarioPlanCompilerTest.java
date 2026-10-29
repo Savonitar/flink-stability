@@ -1322,20 +1322,23 @@ class ExecutableScenarioPlanCompilerTest {
         createJar(artifactRoot.resolve("connector.jar"), false, null);
         createJar(artifactRoot.resolve("job.jar"), true, "v1");
         String imageId = "sha256:" + "b".repeat(64);
+        String imageDigest = "sha256:" + "d".repeat(64);
         ResolvedScenarioPlan resolved = resolved(document -> {
             useLocalArtifacts(document);
-            ((ObjectNode) document.at("/setup/flink")).put("image_id", imageId);
+            ((ObjectNode) document.at("/setup/flink")).put("image_id", imageId).put("image_digest", imageDigest);
             ((ObjectNode) document.at("/setup/flink")).putObject("runtime_jar")
                     .put("container_path", "/opt/flink/lib/flink-dist-2.2.0.jar")
                     .put("sha256", "c".repeat(64));
         });
         ExecutableScenarioPlan executable = compiler.compile(resolved);
         assertEquals(imageId, executable.flink().expectedImageId().orElseThrow());
+        assertEquals(imageDigest, executable.flink().expectedImageDigest().orElseThrow());
         assertEquals("c".repeat(64), executable.flink().expectedRuntimeJar().orElseThrow().sha256());
         try (PreparedScenarioPlan prepared = new ArtifactPlanResolver().resolve(
                 resolved, ArtifactResolutionOptions.online(artifactRoot))) {
             var runtime = compiler.bind(prepared, executable).flinkRuntimeTarget();
             assertEquals(imageId, runtime.expectedImageId().orElseThrow());
+            assertEquals(imageDigest, runtime.expectedImageDigest().orElseThrow());
             assertEquals(executable.flink().expectedRuntimeJar(), runtime.expectedRuntimeJar());
         }
     }

@@ -4,6 +4,7 @@ import org.savonitar.flink.stability.runtime.api.FlinkComponentProvisioningEvide
 import org.savonitar.flink.stability.runtime.api.FlinkComponentRole;
 import org.savonitar.flink.stability.runtime.api.FlinkProcessWriteFenceEvidence;
 import org.savonitar.flink.stability.runtime.api.FlinkRuntimeTarget;
+import org.savonitar.flink.stability.runtime.api.ImageIdentityEvidence;
 
 import java.util.HashMap;
 import java.util.HashSet;
@@ -40,7 +41,13 @@ public record FlinkRuntimeIdentity(Outcome outcome, String detail, String reason
             Optional<FlinkRuntimeTarget.RuntimeJar> runtimeJar,
             Optional<String> declaredLine,
             Optional<String> imageReference,
-            Map<String, String> config) {
+            Map<String, String> config,
+            Optional<String> imageDigest) {
+        public ExpectedTarget(Optional<String> imageId, Map<String, FlinkComponentRole> components,
+                              Optional<FlinkRuntimeTarget.RuntimeJar> runtimeJar, Optional<String> declaredLine,
+                              Optional<String> imageReference, Map<String, String> config) {
+            this(imageId, components, runtimeJar, declaredLine, imageReference, config, Optional.empty());
+        }
         public ExpectedTarget(Optional<String> imageId, Map<String, FlinkComponentRole> components,
                               Optional<FlinkRuntimeTarget.RuntimeJar> runtimeJar) {
             this(imageId, components, runtimeJar, Optional.empty(), Optional.empty(), Map.of());
@@ -50,9 +57,12 @@ public record FlinkRuntimeIdentity(Outcome outcome, String detail, String reason
             Objects.requireNonNull(imageReference, "imageReference");
             config = org.savonitar.flink.stability.runtime.api.FlinkConfiguration.validate(config);
             imageId = Objects.requireNonNull(imageId, "imageId");
+            imageDigest = Objects.requireNonNull(imageDigest, "imageDigest");
             runtimeJar = Objects.requireNonNull(runtimeJar, "runtimeJar");
             imageId.ifPresent(id -> org.savonitar.flink.stability.runtime.api.Checks
                     .requireDockerImageId(id, "imageId"));
+            imageDigest.ifPresent(digest -> org.savonitar.flink.stability.runtime.api.Checks
+                    .requireDockerImageId(digest, "imageDigest"));
             components = java.util.Collections.unmodifiableMap(new LinkedHashMap<>(
                     Objects.requireNonNull(components, "components")));
             if (components.isEmpty()) {
@@ -101,11 +111,34 @@ public record FlinkRuntimeIdentity(Outcome outcome, String detail, String reason
                     "Flink process configuration differs from the resolved custom configuration", CONFIG_MISMATCH);
         }
         String observedImageId = provisioning.getFirst().imageId();
-        if (provisioning.stream().anyMatch(component ->
-                !observedImageId.equals(component.imageId())
-                        || expected.imageId().filter(id -> !id.equals(component.imageId())).isPresent())) {
+        if (provisioning.stream().anyMatch(component -> !observedImageId.equals(component.imageId()))) {
             return new FlinkRuntimeIdentity(Outcome.MISMATCH,
-                    "Flink process image IDs differ across incarnations or from the declared image ID");
+                    "Flink process image IDs differ across incarnations");
+        }
+        for (var component : provisioning) {
+            var proof = component.imageIdentityEvidence();
+            boolean alternate = expected.imageId().filter(id -> !id.equals(component.imageId())).isPresent();
+            if (proof.isEmpty()) {
+                if (alternate || expected.imageDigest().isPresent())
+                    return unconfirmed("A declared repository digest requires image inspection evidence for every incarnation");
+                continue;
+            }
+            ImageIdentityEvidence identity = proof.orElseThrow();
+            ImageIdentityEvidence.MatchForm form = expected.imageId().isEmpty()
+                    ? ImageIdentityEvidence.MatchForm.UNPINNED
+                    : alternate ? ImageIdentityEvidence.MatchForm.REPO_DIGEST
+                    : ImageIdentityEvidence.MatchForm.CONTAINER_IMAGE_ID;
+            if (!identity.containerImageId().equals(component.imageId())
+                    || !identity.inspectedImageId().equals(component.imageId())
+                        && !containsDigest(identity.repoDigests(), identity.inspectedImageId())
+                    || !identity.declaredImageId().equals(expected.imageId())
+                    || !identity.declaredImageDigest().equals(expected.imageDigest())
+                    || identity.imageIdMatchForm() != form
+                    || alternate && !containsDigest(identity.repoDigests(), expected.imageId().orElseThrow())
+                    || expected.imageDigest().filter(digest -> !containsDigest(identity.repoDigests(), digest)).isPresent()) {
+                return new FlinkRuntimeIdentity(Outcome.MISMATCH,
+                        "Flink image inspection does not establish the declared image ID and digest");
+            }
         }
         Map<String, FlinkComponentProvisioningEvidence> byRuntimeId = new HashMap<>();
         Map<String, Long> incarnations = new HashMap<>();
@@ -282,6 +315,10 @@ public record FlinkRuntimeIdentity(Outcome outcome, String detail, String reason
         return new FlinkRuntimeIdentity(Outcome.CONFIRMED,
                 "Every recorded Flink incarnation used local Docker image " + observedImageId
                         + "; initial, replacement, and fenced process identities are covered");
+    }
+
+    private static boolean containsDigest(List<String> repoDigests, String digest) {
+        return repoDigests.stream().anyMatch(value -> value.endsWith("@" + digest));
     }
 
     private record StepIdentity(String path, List<PhaseExecutionEvidence.LoopIteration> iterations) {}

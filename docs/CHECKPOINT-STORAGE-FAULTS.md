@@ -26,8 +26,22 @@ for every key. Readiness must still prove that the fault landed before the
 remaining input was exhausted.
 
 The released Flink 2.2 runtime and helper bundle must have the same pinned image
-identity. The current native lock supports `linux/arm64` and image ID
-`sha256:2e93ded2cb7bf1a50f71b663d5e3ea01420bcc4e549cbf666d05120f939713c7`.
+identity. The native lock supports `linux/arm64`. `fuse.image_id` must equal
+`setup.flink.image_id`; both are author-declared, verified inputs. Before Flink
+starts, provisioning records the container image ID, image `RepoDigests`, the
+matching identity form and Docker's storage driver / optional `driver-type`.
+The pin may match either observed form; `setup.flink.image_digest`, when
+present, must match a repository digest.
+
+The 27 October 2026 qualification ran on Docker Engine 29.1.3 with the classic
+graphdriver image store. Its
+`sha256:2e93ded2cb7bf1a50f71b663d5e3ea01420bcc4e549cbf666d05120f939713c7`
+is the arm64 config digest. The containerd image store reports the index digest
+`sha256:7ecfab9d5e8ec6987a248b32f6605b5fe9bcb7347aea0d7b1bc3976588408681`.
+Thus `image_id` is backend-dependent; `image_digest` is content-addressable.
+The example defaults to that index digest, with a shared `flink_image_id`
+parameter for both declarations. Identity compatibility is covered by offline
+tests; the retained matrix does not qualify a containerd live run.
 HA, custom runtime JARs, token-provider fixtures, loops and combinations with
 other faults are outside this slice. The same FUSE provisioning can also run
 an uninterrupted control or one ordinary TaskManager kill/restart control.
@@ -46,7 +60,7 @@ checkpointing:
     fuse:
       bundle: ${helper_bundle}
       manifest_sha256: ${helper_manifest_sha256}
-      image_id: sha256:2e93ded2cb7bf1a50f71b663d5e3ea01420bcc4e549cbf666d05120f939713c7
+      image_id: ${flink_image_id}
       platform: linux/arm64
 ```
 

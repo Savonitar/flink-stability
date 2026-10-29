@@ -90,7 +90,7 @@ class FuseCheckpointStorageConcurrencyTest {
         mount.instance = new StorageFaultControl.Instance("taskmanager-1", "taskmanager-1#1", "container-a",
                 mount.instanceId, FlinkComponentRole.TASK_MANAGER, 25);
         mount.status = new StorageFaultControl.Status(StorageFaultControl.State.HEALTHY, null, 0, 1, 0, 0, true, false);
-        mount.verification = new StorageFaultControl.Verification(FuseCheckpointStorage.SUPPORTED_IMAGE_ID,
+        mount.verification = new StorageFaultControl.Verification("sha256:" + "a".repeat(64),
                 "a".repeat(64), "b".repeat(64), "generated mount", List.of(9999L), List.of(9999L), "0", 42,
                 "generated JVM", true, true, true, List.of());
         var stopped = new FlinkHaControl.ProcessState("container-a", false, false,
@@ -193,7 +193,7 @@ class FuseCheckpointStorageConcurrencyTest {
                 Files.write(bundle.resolve("bundle").resolve(file), bytes); hashes.put(file, Digests.sha256(bytes));
             }
             var target = new FuseCheckpointStorage(bundle, Digests.sha256("{}".getBytes(StandardCharsets.UTF_8)),
-                    FuseCheckpointStorage.SUPPORTED_IMAGE_ID, FuseCheckpointStorage.SUPPORTED_PLATFORM, hashes);
+                    "sha256:" + "a".repeat(64), FuseCheckpointStorage.SUPPORTED_PLATFORM, hashes);
             evidence = root.resolve("evidence"); Files.createDirectory(evidence);
             DockerClient docker = proxy(DockerClient.class, (value, method, args) -> switch (method.getName()) {
                 case "createVolumeCmd" -> command(CreateVolumeCmd.class, () -> { if (block == Block.CREATE) block(); });

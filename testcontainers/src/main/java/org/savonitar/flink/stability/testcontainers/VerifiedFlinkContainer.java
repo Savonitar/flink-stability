@@ -9,6 +9,8 @@ import org.savonitar.flink.stability.runtime.api.FlinkComponentRole;
 import org.savonitar.flink.stability.runtime.api.FlinkHaControl;
 import org.savonitar.flink.stability.runtime.api.FlinkConnectorBundleInstallation;
 import org.savonitar.flink.stability.runtime.api.FlinkRuntimeTarget;
+import org.savonitar.flink.stability.runtime.api.ImageConnectorArtifact;
+import org.savonitar.flink.stability.runtime.api.ImageIdentityEvidence;
 import org.savonitar.flink.stability.runtime.api.ProvisionedConnectorArtifact;
 import org.testcontainers.containers.GenericContainer;
 import org.testcontainers.images.builder.Transferable;
@@ -16,18 +18,16 @@ import org.testcontainers.containers.wait.strategy.WaitStrategy;
 import org.testcontainers.utility.DockerImageName;
 import org.testcontainers.utility.MountableFile;
 
+import java.time.Duration;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
 import java.util.Map;
-import org.savonitar.flink.stability.runtime.api.ImageConnectorArtifact;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.UUID;
 import java.util.function.Consumer;
 import java.util.function.Function;
-
-import static org.savonitar.flink.stability.runtime.api.Checks.requireDockerImageId;
 
 /** Verifies image identity and connector bytes while the created container is still stopped. */
 final class VerifiedFlinkContainer extends GenericContainer<VerifiedFlinkContainer> {
@@ -39,7 +39,7 @@ final class VerifiedFlinkContainer extends GenericContainer<VerifiedFlinkContain
     private final String resourceId;
     private final List<String> configuredBundleTargets = new ArrayList<>();
     private ConnectorBundleVerification verification;
-    private String verifiedImageId;
+    private volatile VerifiedImageIdentity verifiedImageIdentity;
     private String runtimeJarContainerId;
     private String imageConnectorContainerId;
     private List<ImageConnectorArtifact> imageConnectorArtifacts = List.of();
@@ -172,8 +172,8 @@ final class VerifiedFlinkContainer extends GenericContainer<VerifiedFlinkContain
         retainedLog.created(containerId);
         // Testcontainers 1.21.4 invokes this hook after its configured archive copies and before
         // Docker's startContainer command. A mismatch therefore prevents the Flink entrypoint.
-        verifyImageIdentity(containerId, id -> getDockerClient()
-                .inspectContainerCmd(id).exec().getImageId());
+        var imageDeadline = ContainerOperationDeadline.start("Flink image identity", Duration.ofSeconds(30), System::nanoTime);
+        verifyImageIdentity(containerId, id -> ImageIdentityVerifier.capture(getDockerClient(), id, imageDeadline));
         verifyRuntimeJarBeforeStart(containerId, this::readJarSha256);
         verifyCopiedBundle(runtimeTarget.connectorBundle());
         verifyImageConnectorsBeforeStart(containerId);
@@ -350,9 +350,9 @@ final class VerifiedFlinkContainer extends GenericContainer<VerifiedFlinkContain
     }
 
     /** The stopped-container inspection boundary; tests supply an inspector without Docker. */
-    void verifyImageIdentity(String containerId, Function<String, String> inspector) {
-        verifiedImageId = null;
-        final String actual;
+    void verifyImageIdentity(String containerId, Function<String, ImageIdentityVerifier.Observation> inspector) {
+        verifiedImageIdentity = null;
+        final ImageIdentityVerifier.Observation actual;
         try {
             actual = inspector.apply(containerId);
         } catch (RuntimeException failure) {
@@ -362,32 +362,29 @@ final class VerifiedFlinkContainer extends GenericContainer<VerifiedFlinkContain
                             + ": expected " + runtimeTarget.expectedImageId().orElse("first observed image")
                             + ", actual unavailable", failure);
         }
-        try {
-            requireDockerImageId(actual, "observed imageId");
-        } catch (IllegalArgumentException | NullPointerException failure) {
-            throw new IllegalStateException(
-                    "Invalid Docker image ID for container " + containerId
-                            + ": expected " + runtimeTarget.expectedImageId()
-                                    .orElse("sha256:<64 lowercase hexadecimal characters>")
-                            + ", actual " + actual, failure);
-        }
-        runtimeTarget.expectedImageId().ifPresent(expected -> {
-            if (!expected.equals(actual)) {
-                throw new IllegalStateException(
-                        "Docker image ID mismatch for container " + containerId
-                                + ": expected " + expected + ", actual " + actual);
-            }
-        });
-        imageIdVerifier.accept(actual);
-        verifiedImageId = actual;
+        ImageIdentityEvidence receipt = ImageIdentityVerifier.verify(
+                runtimeTarget.expectedImageId(), runtimeTarget.expectedImageDigest(), actual);
+        if (Thread.currentThread().isInterrupted()) throw new IllegalStateException("Image verification was interrupted");
+        imageIdVerifier.accept(receipt.containerImageId());
+        verifiedImageIdentity = new VerifiedImageIdentity(Objects.requireNonNull(containerId), receipt);
     }
 
     String verifiedImageId() {
-        if (verifiedImageId == null) {
+        var observed = verifiedImageIdentity;
+        if (observed == null) {
             throw new IllegalStateException("Flink container has no verified Docker image ID");
         }
-        return verifiedImageId;
+        return observed.evidence().containerImageId();
     }
+
+    ImageIdentityEvidence imageIdentityEvidence(String containerId) {
+        var observed = verifiedImageIdentity;
+        if (observed == null || !observed.containerId().equals(containerId))
+            throw new IllegalStateException("Flink container has no image identity receipt for " + containerId);
+        return observed.evidence();
+    }
+
+    private record VerifiedImageIdentity(String containerId, ImageIdentityEvidence evidence) {}
 
     List<String> configuredBundleTargets() {
         return List.copyOf(configuredBundleTargets);

@@ -3,6 +3,7 @@ package org.savonitar.flink.stability.runtime.api;
 import java.time.Duration;
 import java.util.List;
 import java.util.Objects;
+import java.util.Optional;
 
 /** Attempt-owned checkpoint filesystem control. Every transition retains per-incarnation receipts. */
 public interface StorageFaultControl {
@@ -20,8 +21,25 @@ public interface StorageFaultControl {
 
     record Verification(String imageId, String helperSha256, String probeSha256, String mountInfo,
                         List<Long> uid, List<Long> gid, String capabilities, long jvmPid, String jvmCommand, boolean rawReadDenied,
-                        boolean rawWriteDenied, boolean complete, List<String> diagnostics) {
-        public Verification { uid = List.copyOf(uid); gid = List.copyOf(gid); diagnostics = List.copyOf(diagnostics); }
+                        boolean rawWriteDenied, boolean complete, List<String> diagnostics,
+                        Optional<ImageIdentityEvidence> imageIdentityEvidence) {
+        public Verification {
+            uid = List.copyOf(uid); gid = List.copyOf(gid); diagnostics = List.copyOf(diagnostics);
+            imageIdentityEvidence = Objects.requireNonNull(imageIdentityEvidence, "imageIdentityEvidence");
+            imageIdentityEvidence.ifPresent(value -> {
+                if (!imageId.equals(value.containerImageId())) throw new IllegalArgumentException("Storage image proof differs");
+            });
+        }
+        public Verification(String imageId, String helperSha256, String probeSha256, String mountInfo,
+                List<Long> uid, List<Long> gid, String capabilities, long jvmPid, String jvmCommand,
+                boolean rawReadDenied, boolean rawWriteDenied, boolean complete, List<String> diagnostics) {
+            this(imageId, helperSha256, probeSha256, mountInfo, uid, gid, capabilities, jvmPid, jvmCommand,
+                    rawReadDenied, rawWriteDenied, complete, diagnostics, Optional.empty());
+        }
+        public Verification withImageIdentityEvidence(ImageIdentityEvidence receipt) {
+            return new Verification(imageId, helperSha256, probeSha256, mountInfo, uid, gid, capabilities,
+                    jvmPid, jvmCommand, rawReadDenied, rawWriteDenied, complete, diagnostics, Optional.of(receipt));
+        }
     }
 
     record Status(State state, String faultId, long revision, long sequence, long leaseMs,

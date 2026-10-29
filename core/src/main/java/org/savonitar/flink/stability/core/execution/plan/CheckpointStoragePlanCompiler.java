@@ -38,8 +38,6 @@ final class CheckpointStoragePlanCompiler {
         if (!"keyed-prefix-v1".equals(job.at("/behavior/type").asText())
                 || !"hashmap".equals(job.path("state_backend").asText())
                 || !flink.path("image_id").equals(checkpointing.at("/storage/fuse/image_id"))
-                || !org.savonitar.flink.stability.runtime.api.FuseCheckpointStorage.SUPPORTED_IMAGE_ID
-                        .equals(checkpointing.at("/storage/fuse/image_id").asText())
                 || flink.has("runtime_jar") || flink.has("token_provider") || flink.has("high_availability")) {
             reject(source, issues, "topology-unsupported",
                     "FUSE requires keyed-prefix-v1, HashMap state, an identical pinned runtime image and no HA/token provider");

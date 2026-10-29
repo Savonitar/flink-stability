@@ -354,7 +354,17 @@ public final class ExecutableScenarioPlan {
             Optional<String> declaredLine,
             Map<String, String> config,
             @com.fasterxml.jackson.annotation.JsonInclude(com.fasterxml.jackson.annotation.JsonInclude.Include.NON_EMPTY)
-            List<org.savonitar.flink.stability.runtime.api.FlinkLogMarker> logMarkers) {
+            List<org.savonitar.flink.stability.runtime.api.FlinkLogMarker> logMarkers,
+            Optional<String> expectedImageDigest) {
+        public FlinkCluster(String imageReference, Optional<String> expectedImageId, int jobmanagers, int taskmanagers,
+                            Optional<FlinkRuntimeTarget.RuntimeJar> expectedRuntimeJar,
+                            Optional<FlinkRuntimeTarget.HighAvailability> highAvailability,
+                            Optional<FlinkRuntimeTarget.TokenProvider> tokenProvider, Optional<String> declaredLine,
+                            Map<String, String> config,
+                            List<org.savonitar.flink.stability.runtime.api.FlinkLogMarker> logMarkers) {
+            this(imageReference, expectedImageId, jobmanagers, taskmanagers, expectedRuntimeJar,
+                    highAvailability, tokenProvider, declaredLine, config, logMarkers, Optional.empty());
+        }
         public FlinkCluster(String imageReference, Optional<String> expectedImageId, int jobmanagers, int taskmanagers,
                             Optional<FlinkRuntimeTarget.RuntimeJar> expectedRuntimeJar,
                             Optional<FlinkRuntimeTarget.HighAvailability> highAvailability,
@@ -388,12 +398,16 @@ public final class ExecutableScenarioPlan {
             config = org.savonitar.flink.stability.runtime.api.FlinkConfiguration.validate(config);
             imageReference = requireNonBlank(imageReference, "imageReference");
             expectedImageId = Objects.requireNonNull(expectedImageId, "expectedImageId");
+            expectedImageDigest = Objects.requireNonNull(expectedImageDigest, "expectedImageDigest");
             expectedRuntimeJar = Objects.requireNonNull(expectedRuntimeJar, "expectedRuntimeJar");
             highAvailability = Objects.requireNonNull(highAvailability, "highAvailability");
             tokenProvider = Objects.requireNonNull(tokenProvider, "tokenProvider");
             expectedImageId.ifPresent(id ->
                     org.savonitar.flink.stability.runtime.api.Checks.requireDockerImageId(
                             id, "expectedImageId"));
+            expectedImageDigest.ifPresent(digest ->
+                    org.savonitar.flink.stability.runtime.api.Checks.requireDockerImageId(
+                            digest, "expectedImageDigest"));
             if (jobmanagers != (highAvailability.isPresent() ? 2 : 1) || taskmanagers < 1
                     || taskmanagers > FlinkRuntimeTarget.MAX_TASK_MANAGERS) {
                 throw new IllegalArgumentException(

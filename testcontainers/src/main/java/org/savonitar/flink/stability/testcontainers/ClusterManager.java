@@ -633,23 +633,36 @@ public final class ClusterManager implements AutoCloseable {
     private FlinkComponentFactory createFlinkFactory(FlinkRuntimeTarget runtimeTarget) {
         Objects.requireNonNull(runtimeTarget, "runtimeTarget");
         runtimeTarget.connectorBundle().classpathManifest().verifyHostFiles();
-        FlinkRuntimeTarget effectiveTarget = runtimeTarget;
         if (!provisioningHistory.isEmpty()) {
-            String imageId = provisioningHistory.getFirst().imageId();
-            runtimeTarget.expectedImageId().ifPresent(expected -> {
-                if (!expected.equals(imageId)) {
-                    throw new IllegalStateException(
-                            "Flink image identity changed within the attempt: expected "
-                                    + expected + ", actual " + imageId);
-                }
-            });
-            effectiveTarget = runtimeTarget.withExpectedImageId(imageId);
+            var first = provisioningHistory.getFirst();
+            validateDeclaredImageIdentity(runtimeTarget, first);
         }
+        // Preserve the author declaration, including an absent pin. The factory provider's
+        // shared actual-image pin independently spans failed starts and replacement factories.
         FlinkComponentFactory factory = Objects.requireNonNull(
-                flinkFactoryProvider.create(effectiveTarget, network, checkpointStorageRoot),
+                flinkFactoryProvider.create(runtimeTarget, network, checkpointStorageRoot),
                 "Flink component factory returned null");
         flinkFactories.add(factory);
         return factory;
+    }
+
+    private static void validateDeclaredImageIdentity(FlinkRuntimeTarget target, FlinkComponentProvisioningEvidence evidence) {
+        target.expectedImageId().ifPresent(expected -> {
+            if (!expected.equals(evidence.imageId()) && evidence.imageIdentityEvidence().filter(receipt ->
+                    receipt.containerImageId().equals(evidence.imageId())
+                            && receipt.declaredImageId().equals(Optional.of(expected))
+                            && receipt.matchesImageId(expected)).isEmpty()) {
+                throw new IllegalStateException("Flink image ID mismatch for " + evidence.logicalName()
+                        + ": expected " + expected + ", actual " + evidence.imageId());
+            }
+        });
+        target.expectedImageDigest().ifPresent(expected -> {
+            if (evidence.imageIdentityEvidence().filter(receipt ->
+                    receipt.containerImageId().equals(evidence.imageId())
+                            && receipt.declaredImageDigest().equals(Optional.of(expected))
+                            && receipt.matchesImageDigest(expected)).isEmpty())
+                throw new IllegalStateException("Flink image digest mismatch for " + evidence.logicalName());
+        });
     }
 
     private void validateFlinkStart(FlinkRuntimeTarget runtimeTarget) {
@@ -1089,13 +1102,7 @@ public final class ClusterManager implements AutoCloseable {
                                     && receipt.sourceSha256().equals(receipt.observedSha256())).isEmpty())) {
                 throw new IllegalStateException("Flink effective configuration evidence does not match target for " + name);
             }
-            runtimeTarget.expectedImageId().ifPresent(expected -> {
-                if (!expected.equals(evidence.imageId())) {
-                    throw new IllegalStateException(
-                            "Flink image ID mismatch for " + name + ": expected "
-                                    + expected + ", actual " + evidence.imageId());
-                }
-            });
+            validateDeclaredImageIdentity(runtimeTarget, evidence);
             runtimeTarget.expectedRuntimeJar().ifPresent(expected -> {
                 if (evidence.runtimeJarEvidence().filter(observed -> expected.equals(observed.jar()))
                         .isEmpty()) {

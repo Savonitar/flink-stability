@@ -66,7 +66,7 @@ class FuseCheckpointStorageRuntimeTest {
         var hashes = new java.util.HashMap<String,String>();
         for (String name : FuseCheckpointStorage.REQUIRED_FILES) hashes.put(name, Digests.sha256(name.getBytes(StandardCharsets.UTF_8)));
         var target = new FuseCheckpointStorage(root, Digests.sha256("{}".getBytes(StandardCharsets.UTF_8)),
-                FuseCheckpointStorage.SUPPORTED_IMAGE_ID, FuseCheckpointStorage.SUPPORTED_PLATFORM, hashes);
+                "sha256:" + "a".repeat(64), FuseCheckpointStorage.SUPPORTED_PLATFORM, hashes);
         assertDoesNotThrow(() -> FuseCheckpointStorageRuntime.verifyBundle(target));
         Path daemon = root.resolve("bundle/checkpoint-fuse");
         Files.writeString(daemon, "changed");

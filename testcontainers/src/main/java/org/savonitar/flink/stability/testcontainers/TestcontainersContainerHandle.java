@@ -143,6 +143,7 @@ final class TestcontainersContainerHandle implements ContainerHandle {
                 installation.targetBindingSha256(),
                 verification.classpathManifestSha256(),
                 verification.connectorArtifacts())
+                .withImageIdentityEvidence(verifiedContainer.imageIdentityEvidence(runtimeId))
                 .withProcessConfiguration(verifiedContainer.observedConfig(), verifiedContainer.classLoadProcess())
                 .withImageConnectorArtifacts(verifiedContainer.imageConnectorEvidence(runtimeId));
         FlinkComponentProvisioningEvidence observedEvidence = effectiveConfiguration

@@ -183,8 +183,12 @@ final class FuseCheckpointStorageRuntime implements StorageFaultControl, AutoClo
         }
         var inspected = driver(deadline, "inspect created storage incarnation", () ->
                 docker.inspectContainerCmd(mount.container.getContainerId()).exec());
+        ImageIdentityEvidence identity = mount.container.imageIdentityEvidence(mount.container.getContainerId());
+        if (!identity.declaredImageId().equals(Optional.of(target.imageId()))
+                || !identity.containerImageId().equals(inspected.getImageId()))
+            throw new IllegalStateException("FUSE container image identity differs from its pre-start receipt");
         var host = inspected.getHostConfig();
-        if (!target.imageId().equals(inspected.getImageId()) || !"0:0".equals(inspected.getConfig().getUser())
+        if (!"0:0".equals(inspected.getConfig().getUser())
                 || Boolean.TRUE.equals(host.getPrivileged())
                 || !Set.of(Capability.ALL).equals(new HashSet<>(Arrays.asList(host.getCapDrop())))
                 || !Set.of(Capability.SYS_ADMIN).equals(new HashSet<>(Arrays.asList(host.getCapAdd())))
@@ -271,8 +275,10 @@ final class FuseCheckpointStorageRuntime implements StorageFaultControl, AutoClo
         if (!uid.equals(List.of(9999L, 9999L, 9999L, 9999L)) || !gid.equals(uid)
                 || !capabilities.matches("0+") || !readDenied || !writeDenied)
             throw new IllegalStateException("Unprivileged JVM/raw-backing isolation is not confirmed");
-        mount.verification = new Verification(target.imageId(), target.files().get("checkpoint-fuse"),
-                target.files().get("probe.jar"), mountLine, uid, gid, capabilities, 0, "", readDenied, writeDenied, false, List.of());
+        ImageIdentityEvidence identity = mount.container.imageIdentityEvidence(mount.container.getContainerId());
+        mount.verification = new Verification(identity.containerImageId(), target.files().get("checkpoint-fuse"),
+                target.files().get("probe.jar"), mountLine, uid, gid, capabilities, 0, "", readDenied, writeDenied, false, List.of())
+                .withImageIdentityEvidence(identity);
         capture(mount, false, deadline);
         if (mount.operations.stream().noneMatch(op -> op.operation().equals("READY") && CACHE_POLICY.equals(op.reason())))
             throw new IllegalStateException("FUSE effective cache policy is unconfirmed");
@@ -300,7 +306,8 @@ final class FuseCheckpointStorageRuntime implements StorageFaultControl, AutoClo
             throw new IllegalStateException("Actual Flink JVM has unexpected UID/GID/capabilities");
         Verification previous = mount.verification;
         mount.verification = new Verification(previous.imageId(), previous.helperSha256(), previous.probeSha256(),
-                previous.mountInfo(), uid, gid, cap, pid, lines.get(1), previous.rawReadDenied(), previous.rawWriteDenied(), true, List.of());
+                previous.mountInfo(), uid, gid, cap, pid, lines.get(1), previous.rawReadDenied(), previous.rawWriteDenied(), true, List.of(),
+                previous.imageIdentityEvidence());
     }
 
     @Override public Snapshot storageSnapshot(Duration timeout) {

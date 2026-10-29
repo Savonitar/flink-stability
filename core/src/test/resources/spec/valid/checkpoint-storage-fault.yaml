@@ -22,6 +22,7 @@ setup:
   flink:
     image: flink:2.2.0
     image_id: sha256:2e93ded2cb7bf1a50f71b663d5e3ea01420bcc4e549cbf666d05120f939713c7
+    image_digest: sha256:7ecfab9d5e8ec6987a248b32f6605b5fe9bcb7347aea0d7b1bc3976588408681
     jobmanagers: 1
     taskmanagers: 1
 subject:

@@ -199,6 +199,17 @@ uses GCC 13.3.0 and static libfuse 3.14.0. A native Linux qualification has not
 been performed.
 
 Earlier artifacts remain immutable:
+The 27 October 2026 qualification used the classic graphdriver image store.
+Its arm64 image config digest is
+`sha256:2e93ded2cb7bf1a50f71b663d5e3ea01420bcc4e549cbf666d05120f939713c7`;
+the containerd image store reports index digest
+`sha256:7ecfab9d5e8ec6987a248b32f6605b5fe9bcb7347aea0d7b1bc3976588408681`.
+The integrated adapter now verifies author-declared `image_id` against both
+container ID and image `RepoDigests`, recording the matched form and daemon
+store backend. Optional `image_digest` is the content-addressable repository
+pin; `image_id` depends on the backend. These identity checks preserve the
+historical qualification scope.
+
 
 - [Build 01](../jobs/checkpoint-storage-helper-build-20261027-01/build-evidence.json)
   passed its original checks before journal reservation hardening.

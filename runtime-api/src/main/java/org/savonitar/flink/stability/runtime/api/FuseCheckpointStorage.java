@@ -8,7 +8,6 @@ import java.util.Set;
 /** Prepared, immutable PR3 helper bundle; no scenario-selected container filesystem paths. */
 public record FuseCheckpointStorage(Path bundleRoot, String manifestSha256, String imageId,
                                     String platform, Map<String, String> files) {
-    public static final String SUPPORTED_IMAGE_ID = "sha256:2e93ded2cb7bf1a50f71b663d5e3ea01420bcc4e549cbf666d05120f939713c7";
     public static final String SUPPORTED_PLATFORM = "linux/arm64";
     public static final Set<String> REQUIRED_FILES = Set.of("checkpoint-fuse", "checkpoint-fuse-selftest", "probe.jar");
 
@@ -33,8 +32,8 @@ public record FuseCheckpointStorage(Path bundleRoot, String manifestSha256, Stri
             throw new IllegalArgumentException("Prepared helper bundle must be an absolute normalized path");
         manifestSha256 = Checks.requireSha256(manifestSha256, "manifestSha256");
         imageId = Checks.requireDockerImageId(imageId, "imageId");
-        if (!SUPPORTED_IMAGE_ID.equals(imageId) || !SUPPORTED_PLATFORM.equals(platform))
-            throw new IllegalArgumentException("FUSE checkpoint storage requires the qualified released image and linux/arm64 platform");
+        if (!SUPPORTED_PLATFORM.equals(platform))
+            throw new IllegalArgumentException("FUSE checkpoint storage requires the linux/arm64 platform");
         files = Map.copyOf(files);
         if (!files.keySet().equals(REQUIRED_FILES)) throw new IllegalArgumentException("Incomplete or unexpected helper bundle files");
         files.forEach((name, digest) -> Checks.requireSha256(digest, "helper " + name));

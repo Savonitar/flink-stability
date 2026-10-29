@@ -612,7 +612,11 @@
         "line": {"$ref": "#/$defs/nonEmptyString"},
         "image_id": {
           "$ref": "#/$defs/nonEmptyString",
-          "description": "Optional expected local Docker image ID (sha256 plus 64 lowercase hexadecimal characters), checked before every Flink process starts. This is not a registry manifest digest."
+          "description": "Optional expected Docker image identity (sha256 plus 64 lowercase hexadecimal characters). Docker image IDs depend on the image-store backend; verification records the actual ID and repository digests."
+        },
+        "image_digest": {
+          "type": "string", "pattern": "^sha256:[0-9a-f]{64}$",
+          "description": "Optional content-addressable repository digest, verified against the exact container image's RepoDigests before every Flink process starts."
         },
         "runtime_jar": {
           "type": "object",
@@ -1070,7 +1074,10 @@
           { "type": "string", "pattern": "^[0-9a-f]{64}$" },
           { "$ref": "#/$defs/templatedString" }
         ] },
-        "image_id": { "type": "string", "pattern": "^sha256:[0-9a-f]{64}$" },
+        "image_id": { "oneOf": [
+          { "type": "string", "pattern": "^sha256:[0-9a-f]{64}$" },
+          { "$ref": "#/$defs/templatedString" }
+        ] },
         "platform": { "enum": ["linux/arm64"] }
       }
     },

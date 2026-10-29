@@ -84,6 +84,10 @@ final class SpecificationValidationService {
                     kafka.set("launches", mapper.valueToTree(executable.kafka().runtimeTarget().resolvedLaunches()));
                 }
                 rendered.set("flinkConfig", mapper.valueToTree(bound.flinkRuntimeTarget().config()));
+                var flinkRuntime = rendered.putObject("flinkRuntime");
+                flinkRuntime.put("imageReference", bound.flinkRuntimeTarget().imageReference());
+                bound.flinkRuntimeTarget().expectedImageId().ifPresent(value -> flinkRuntime.put("imageId", value));
+                bound.flinkRuntimeTarget().expectedImageDigest().ifPresent(value -> flinkRuntime.put("imageDigest", value));
                 bound.flinkRuntimeTarget().checkpointStorage().ifPresent(storage -> rendered.putObject("checkpointStorage")
                         .put("type", "fuse-filesystem")
                         .put("checkpointUri", "runtime-generated isolated namespace")

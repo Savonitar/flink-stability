@@ -16,6 +16,7 @@ import java.util.List;
 import static org.junit.jupiter.api.Assertions.*;
 
 class FuseCheckpointBundlePreparerTest {
+    private static final String IMAGE_ID = "sha256:" + "6".repeat(64);
     @TempDir Path root;
     private final ObjectMapper json = new ObjectMapper();
 
@@ -40,6 +41,58 @@ class FuseCheckpointBundlePreparerTest {
         var fixture = fixture();
         rejected(() -> prepare(fixture, "0".repeat(64)));
         try (var files = Files.list(fixture.preparation())) { assertEquals(0, files.count()); }
+    }
+
+    @Test void acceptsOtherExactImagePinsAndRetainsImmutableLegacyManifest() throws Exception {
+        var fixture = fixture();
+        String other = "sha256:" + "b".repeat(64);
+        fixture.manifest().put("imageId", other);
+        String hash = writeManifest(fixture.bundle(), fixture.manifest());
+        var prepared = prepare(fixture, hash, other);
+        assertEquals(other, prepared.imageId());
+        assertEquals(hash, Digests.sha256(prepared.bundleRoot().resolve("build-evidence.json")));
+    }
+
+    @Test void acceptsRepositoryDigestOnlyThroughPinnedBuildImageInspection() throws Exception {
+        var fixture = fixture();
+        String digest = "sha256:" + "b".repeat(64);
+        imageInspection(fixture.manifest(), digest);
+        String hash = writeManifest(fixture.bundle(), fixture.manifest());
+        var prepared = prepare(fixture, hash, digest);
+        assertEquals(digest, prepared.imageId());
+        assertEquals(hash, Digests.sha256(prepared.bundleRoot().resolve("build-evidence.json")));
+        assertEquals(IMAGE_ID,
+                json.readTree(prepared.bundleRoot().resolve("build-evidence.json").toFile()).path("imageId").asText());
+    }
+
+    @Test void alternatePinRejectsMissingContradictoryOrForeignBuildInspection() throws Exception {
+        String digest = "sha256:" + "b".repeat(64);
+        for (String change : List.of("missing", "id", "os", "arch", "repo", "build-digest", "malformed", "fake-pin")) {
+            var fixture = fixture();
+            imageInspection(fixture.manifest(), digest);
+            var inspection = (ObjectNode) fixture.manifest().path("imageInspection");
+            switch (change) {
+                case "missing" -> fixture.manifest().remove("imageInspection");
+                case "id" -> inspection.put("Id", "sha256:" + "c".repeat(64));
+                case "os" -> inspection.put("Os", "darwin");
+                case "arch" -> inspection.put("Architecture", "amd64");
+                case "repo" -> inspection.putArray("RepoDigests");
+                case "build-digest" -> fixture.manifest().put("imageDigest", "other@sha256:" + "c".repeat(64));
+                case "malformed" -> inspection.withArray("RepoDigests").add("invalid-digest");
+                case "fake-pin" -> { }
+            }
+            String hash = writeManifest(fixture.bundle(), fixture.manifest());
+            String pin = change.equals("fake-pin") ? "sha256:" + "d".repeat(64) : digest;
+            rejected(() -> prepare(fixture, hash, pin));
+            try (var files = Files.list(fixture.preparation())) { assertEquals(0, files.count()); }
+        }
+    }
+
+    private static void imageInspection(ObjectNode manifest, String digest) {
+        manifest.put("imageDigest", "flink@" + digest);
+        manifest.putObject("imageInspection").put("Id", manifest.path("imageId").asText())
+                .put("Os", "linux").put("Architecture", "arm64")
+                .putArray("RepoDigests").add("flink@" + digest);
     }
 
     @Test void rejectsTamperedHelperEvenWhenManifestRemainsPinned() throws Exception {
@@ -98,7 +151,7 @@ class FuseCheckpointBundlePreparerTest {
         var fixture = fixture();
         for (String declared : List.of(fixture.bundle().toString(), "../elsewhere", "file:helper", "a\\b")) {
             rejected(() -> FuseCheckpointBundlePreparer.prepare(root, fixture.preparation(), root.resolve("scenario.yaml"),
-                    declared, fixture.hash(), FuseCheckpointStorage.SUPPORTED_IMAGE_ID, "linux/arm64"));
+                    declared, fixture.hash(), IMAGE_ID, "linux/arm64"));
         }
     }
 
@@ -123,8 +176,12 @@ class FuseCheckpointBundlePreparerTest {
     }
 
     private FuseCheckpointStorage prepare(Fixture fixture, String hash) {
+        return prepare(fixture, hash, IMAGE_ID);
+    }
+
+    private FuseCheckpointStorage prepare(Fixture fixture, String hash, String imageId) {
         return FuseCheckpointBundlePreparer.prepare(root, fixture.preparation(), root.resolve("scenario.yaml"),
-                root.relativize(fixture.bundle()).toString(), hash, FuseCheckpointStorage.SUPPORTED_IMAGE_ID, "linux/arm64");
+                root.relativize(fixture.bundle()).toString(), hash, imageId, "linux/arm64");
     }
 
     private void rejected(Runnable action) {
@@ -138,7 +195,7 @@ class FuseCheckpointBundlePreparerTest {
         Path files = Files.createDirectory(bundle.resolve("bundle"));
         ObjectNode manifest = json.createObjectNode().put("schemaVersion", 1).put("status", "built")
                 .put("networkDisconnectedBeforeSourceCopy", true).put("javaRelease", 17).put("libfuseVersion", "3.14.0")
-                .put("imageId", FuseCheckpointStorage.SUPPORTED_IMAGE_ID).put("platform", "linux/arm64");
+                .put("imageId", IMAGE_ID).put("platform", "linux/arm64");
         manifest.putArray("cleanup").addObject().put("status", "removed");
         var pins = manifest.putObject("files");
         for (String name : FuseCheckpointStorage.REQUIRED_FILES) {

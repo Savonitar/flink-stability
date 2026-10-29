@@ -758,7 +758,7 @@ class CheckpointStorageFaultTest {
         return new StorageFaultControl.Instance(name, name + "#" + runtime, runtime, "fuse-" + runtime, role, pid);
     }
     private static StorageFaultControl.Verification verification(StorageFaultControl.Instance instance) {
-        return new StorageFaultControl.Verification(FuseCheckpointStorage.SUPPORTED_IMAGE_ID, HASH, "c".repeat(64),
+        return new StorageFaultControl.Verification("sha256:" + "6".repeat(64), HASH, "c".repeat(64),
                 "fuse mount verified", List.of(9999L,9999L,9999L,9999L), List.of(9999L,9999L,9999L,9999L),
                 "0000000000000000", instance.daemonPid() + 100, "java Flink", true, true, true, List.of());
     }
@@ -819,7 +819,7 @@ class CheckpointStorageFaultTest {
     }
     private static FlinkComponentProvisioningEvidence provisioning(StorageFaultControl.Instance instance) {
         return FlinkComponentProvisioningEvidence.verified(instance.logicalName(), instance.role(), instance.runtimeId(),
-                "flink:2.2.0", FuseCheckpointStorage.SUPPORTED_IMAGE_ID, HASH, "c".repeat(64), List.of())
+                "flink:2.2.0", "sha256:" + "6".repeat(64), HASH, "c".repeat(64), List.of())
                 .withProcessConfiguration(Map.of(), instance.process());
     }
     private static FlinkComponentLog log(StorageFaultControl.Instance instance, Path path) { return new FlinkComponentLog(instance.process(), path, false, Optional.empty()); }

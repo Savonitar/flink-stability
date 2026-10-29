@@ -6,6 +6,7 @@ meta:
 parameters:
   helper_bundle: { type: string, required: true }
   helper_manifest_sha256: { type: string, required: true }
+  flink_image_id: { type: string, default: "sha256:7ecfab9d5e8ec6987a248b32f6605b5fe9bcb7347aea0d7b1bc3976588408681" }
 completion_timeout: 5m
 runs: 1
 health_retry_limit: 0
@@ -25,7 +26,8 @@ setup:
             replication_factor: 1
   flink:
     image: flink:2.2.0
-    image_id: sha256:2e93ded2cb7bf1a50f71b663d5e3ea01420bcc4e549cbf666d05120f939713c7
+    image_id: ${flink_image_id}
+    image_digest: sha256:7ecfab9d5e8ec6987a248b32f6605b5fe9bcb7347aea0d7b1bc3976588408681
     jobmanagers: 1
     taskmanagers: 1
 subject:
@@ -59,7 +61,7 @@ workload:
           fuse:
             bundle: ${helper_bundle}
             manifest_sha256: ${helper_manifest_sha256}
-            image_id: sha256:2e93ded2cb7bf1a50f71b663d5e3ea01420bcc4e549cbf666d05120f939713c7
+            image_id: ${flink_image_id}
             platform: linux/arm64
       program_args: [--processingDelayMs, "5"]
 phases:

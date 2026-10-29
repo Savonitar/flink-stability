@@ -462,6 +462,42 @@ class RunScenarioCommandTest {
     }
 
     @Test
+    void rendersContainerAndRepositoryImageIdentityProofWithoutConflatingPins() throws Exception {
+        String digest = "sha256:" + "d".repeat(64);
+        var proof = new org.savonitar.flink.stability.runtime.api.ImageIdentityEvidence(
+                IMAGE_ID, IMAGE_ID, List.of("flink@" + digest), Optional.of(digest), Optional.of(digest),
+                org.savonitar.flink.stability.runtime.api.ImageIdentityEvidence.MatchForm.REPO_DIGEST,
+                "overlayfs", Optional.of("io.containerd.snapshotter.v1"));
+        var component = passResult().flinkProvisioningEvidence().getFirst().withImageIdentityEvidence(proof);
+        var value = new V1ScenarioExecutionResult(V1ScenarioExecutionResult.Status.INCONCLUSIVE, "test.partial", "partial",
+                Optional.empty(), Optional.empty(), Optional.empty(), Optional.empty(), Optional.empty(), Optional.empty(),
+                Optional.empty(), Optional.empty(), List.of(component),
+                new FlinkRuntimeIdentity.ExpectedTarget(Optional.of(digest), EXPECTED_RUNTIME.components(), Optional.empty(),
+                        Optional.empty(), Optional.empty(), Map.of(), Optional.of(digest)), Optional.empty(),
+                KafkaTransactionVersion.Selection.notRequested(), List.of());
+        JsonNode runtime = JSON.readTree(new V1ExecutionResultRenderer().render(
+                "bounded-eos", context("1234abcd"), expectation, value)).at("/evidence/flinkRuntime");
+        assertEquals(digest, runtime.path("expectedImageId").asText());
+        assertEquals(digest, runtime.path("expectedImageDigest").asText());
+        JsonNode rendered = runtime.at("/components/0");
+        assertEquals(IMAGE_ID, rendered.path("imageId").asText());
+        assertEquals(IMAGE_ID, rendered.at("/imageIdentityEvidence/containerImageId").asText());
+        assertEquals(IMAGE_ID, rendered.at("/imageIdentityEvidence/inspectedImageId").asText());
+        assertEquals("flink@" + digest, rendered.at("/imageIdentityEvidence/repoDigests/0").asText());
+        assertEquals(digest, rendered.at("/imageIdentityEvidence/declaredImageId").asText());
+        assertEquals(digest, rendered.at("/imageIdentityEvidence/declaredImageDigest").asText());
+        assertEquals("REPO_DIGEST", rendered.at("/imageIdentityEvidence/imageIdMatchForm").asText());
+        assertEquals("overlayfs", rendered.at("/imageIdentityEvidence/storageDriver").asText());
+        assertEquals("io.containerd.snapshotter.v1", rendered.at("/imageIdentityEvidence/driverType").asText());
+        var storage = new org.savonitar.flink.stability.runtime.api.StorageFaultControl.Verification(
+                IMAGE_ID, "a".repeat(64), "b".repeat(64), "generated mount", List.of(9999L), List.of(9999L),
+                "0", 17L, "java probe", true, true, true, List.of()).withImageIdentityEvidence(proof);
+        var storageJson = StateRecoveryEvidenceRenderer.render(storage, JSON);
+        assertEquals(digest, storageJson.at("/imageIdentityEvidence/declaredImageDigest").asText());
+        assertEquals("REPO_DIGEST", storageJson.at("/imageIdentityEvidence/imageIdMatchForm").asText());
+    }
+
+    @Test
     void reportsRuntimeJarBytesAndClassLoadsWithTheirPhysicalContainerAssociation() throws Exception {
         var jar = new FlinkRuntimeTarget.RuntimeJar(
                 "/opt/flink/lib/flink-dist-2.2.0.jar", "c".repeat(64));

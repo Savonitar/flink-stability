@@ -18,6 +18,7 @@ public final class FlinkRuntimeTarget {
     private final String imageReference;
     private final FlinkConnectorBundleInstallation connectorBundle;
     private final Optional<String> expectedImageId;
+    private final Optional<String> expectedImageDigest;
     private final Optional<RuntimeJar> expectedRuntimeJar;
     private final int taskManagers;
     private final Optional<HighAvailability> highAvailability;
@@ -36,10 +37,12 @@ public final class FlinkRuntimeTarget {
             Optional<HighAvailability> highAvailability,
             Optional<TokenProvider> tokenProvider,
             Optional<String> declaredLine, Map<String, String> config, java.util.List<FlinkLogMarker> logMarkers,
-            Optional<FuseCheckpointStorage> checkpointStorage) {
+            Optional<FuseCheckpointStorage> checkpointStorage, Optional<String> expectedImageDigest) {
         this.imageReference = requireNonBlank(imageReference, "imageReference");
         this.connectorBundle = Objects.requireNonNull(connectorBundle, "connectorBundle");
         this.expectedImageId = Objects.requireNonNull(expectedImageId, "expectedImageId");
+        this.expectedImageDigest = Objects.requireNonNull(expectedImageDigest, "expectedImageDigest");
+        expectedImageDigest.ifPresent(value -> requireDockerImageId(value, "expectedImageDigest"));
         this.expectedRuntimeJar = Objects.requireNonNull(expectedRuntimeJar, "expectedRuntimeJar");
         if (taskManagers < 1 || taskManagers > MAX_TASK_MANAGERS) {
             throw new IllegalArgumentException("taskManagers must be between 1 and "
@@ -76,37 +79,46 @@ public final class FlinkRuntimeTarget {
                             + connectorBundle.targetFlinkImageReference());
         }
         return new FlinkRuntimeTarget(imageReference, connectorBundle, Optional.empty(), Optional.empty(),
-                1, Optional.empty(), Optional.empty(), Optional.empty(), Map.of(), java.util.List.of(), Optional.empty());
+                1, Optional.empty(), Optional.empty(), Optional.empty(), Map.of(), java.util.List.of(), Optional.empty(), Optional.empty());
     }
 
     /** Requires every physical Flink process to use this local Docker image identity. */
     public FlinkRuntimeTarget withExpectedImageId(String imageId) {
         return new FlinkRuntimeTarget(imageReference, connectorBundle,
                 Optional.of(requireDockerImageId(imageId, "expectedImageId")), expectedRuntimeJar,
-                taskManagers, highAvailability, tokenProvider, declaredLine, config, logMarkers, checkpointStorage);
+                taskManagers, highAvailability, tokenProvider, declaredLine, config, logMarkers, checkpointStorage, expectedImageDigest);
     }
+
+    /** Requires a content-addressable repository digest in every physical incarnation. */
+    public FlinkRuntimeTarget withExpectedImageDigest(String digest) {
+        return new FlinkRuntimeTarget(imageReference, connectorBundle, expectedImageId, expectedRuntimeJar,
+                taskManagers, highAvailability, tokenProvider, declaredLine, config, logMarkers, checkpointStorage,
+                Optional.of(requireDockerImageId(digest, "expectedImageDigest")));
+    }
+
+    public Optional<String> expectedImageDigest() { return expectedImageDigest; }
 
     /** Requires the selected runtime JAR bytes in every physical Flink process. */
     public FlinkRuntimeTarget withExpectedRuntimeJar(RuntimeJar runtimeJar) {
         return new FlinkRuntimeTarget(imageReference, connectorBundle, expectedImageId,
                 Optional.of(Objects.requireNonNull(runtimeJar, "runtimeJar")), taskManagers,
-                highAvailability, tokenProvider, declaredLine, config, logMarkers, checkpointStorage);
+                highAvailability, tokenProvider, declaredLine, config, logMarkers, checkpointStorage, expectedImageDigest);
     }
 
     /** Keeps one JobManager and provisions this many named TaskManager slots. */
     public FlinkRuntimeTarget withTaskManagers(int count) {
         return new FlinkRuntimeTarget(imageReference, connectorBundle, expectedImageId,
-                expectedRuntimeJar, count, highAvailability, tokenProvider, declaredLine, config, logMarkers, checkpointStorage);
+                expectedRuntimeJar, count, highAvailability, tokenProvider, declaredLine, config, logMarkers, checkpointStorage, expectedImageDigest);
     }
 
     public FlinkRuntimeTarget withHighAvailability(HighAvailability configuration) {
         return new FlinkRuntimeTarget(imageReference, connectorBundle, expectedImageId,
-                expectedRuntimeJar, taskManagers, Optional.of(configuration), tokenProvider, declaredLine, config, logMarkers, checkpointStorage);
+                expectedRuntimeJar, taskManagers, Optional.of(configuration), tokenProvider, declaredLine, config, logMarkers, checkpointStorage, expectedImageDigest);
     }
 
     public FlinkRuntimeTarget withTokenProvider(TokenProvider configuration) {
         return new FlinkRuntimeTarget(imageReference, connectorBundle, expectedImageId,
-                expectedRuntimeJar, taskManagers, highAvailability, Optional.of(configuration), declaredLine, config, logMarkers, checkpointStorage);
+                expectedRuntimeJar, taskManagers, highAvailability, Optional.of(configuration), declaredLine, config, logMarkers, checkpointStorage, expectedImageDigest);
     }
 
     public FlinkRuntimeTarget withDeclaredLine(String line) {
@@ -117,12 +129,12 @@ public final class FlinkRuntimeTarget {
             throw new IllegalArgumentException("Declared Flink line requires image_id and runtime_jar pins");
         }
         return new FlinkRuntimeTarget(imageReference, connectorBundle, expectedImageId,
-                expectedRuntimeJar, taskManagers, highAvailability, tokenProvider, Optional.of(line), config, logMarkers, checkpointStorage);
+                expectedRuntimeJar, taskManagers, highAvailability, tokenProvider, Optional.of(line), config, logMarkers, checkpointStorage, expectedImageDigest);
     }
 
     public FlinkRuntimeTarget withConfig(Map<String, String> configuration) {
         return new FlinkRuntimeTarget(imageReference, connectorBundle, expectedImageId,
-                expectedRuntimeJar, taskManagers, highAvailability, tokenProvider, declaredLine, configuration, logMarkers, checkpointStorage);
+                expectedRuntimeJar, taskManagers, highAvailability, tokenProvider, declaredLine, configuration, logMarkers, checkpointStorage, expectedImageDigest);
     }
 
     public Optional<String> declaredLine() { return declaredLine; }
@@ -135,14 +147,14 @@ public final class FlinkRuntimeTarget {
     public java.util.List<FlinkLogMarker> logMarkers() { return logMarkers; }
     public FlinkRuntimeTarget withLogMarkers(java.util.List<FlinkLogMarker> markers) {
         return new FlinkRuntimeTarget(imageReference, connectorBundle, expectedImageId, expectedRuntimeJar,
-                taskManagers, highAvailability, tokenProvider, declaredLine, config, markers, checkpointStorage);
+                taskManagers, highAvailability, tokenProvider, declaredLine, config, markers, checkpointStorage, expectedImageDigest);
     }
 
     public Optional<FuseCheckpointStorage> checkpointStorage() { return checkpointStorage; }
 
     public FlinkRuntimeTarget withCheckpointStorage(FuseCheckpointStorage storage) {
         return new FlinkRuntimeTarget(imageReference, connectorBundle, expectedImageId, expectedRuntimeJar,
-                taskManagers, highAvailability, tokenProvider, declaredLine, config, logMarkers, Optional.of(storage));
+                taskManagers, highAvailability, tokenProvider, declaredLine, config, logMarkers, Optional.of(storage), expectedImageDigest);
     }
 
     public Optional<HighAvailability> highAvailability() {
@@ -245,6 +257,7 @@ public final class FlinkRuntimeTarget {
                 && imageReference.equals(target.imageReference)
                 && Objects.equals(connectorBundle, target.connectorBundle)
                 && expectedImageId.equals(target.expectedImageId)
+                && expectedImageDigest.equals(target.expectedImageDigest)
                 && expectedRuntimeJar.equals(target.expectedRuntimeJar)
                 && taskManagers == target.taskManagers
                 && highAvailability.equals(target.highAvailability)
@@ -256,7 +269,7 @@ public final class FlinkRuntimeTarget {
     @Override
     public int hashCode() {
         return Objects.hash(imageReference, connectorBundle, expectedImageId, expectedRuntimeJar,
-                taskManagers, highAvailability, tokenProvider, declaredLine, config, logMarkers, checkpointStorage);
+                taskManagers, highAvailability, tokenProvider, declaredLine, config, logMarkers, checkpointStorage, expectedImageDigest);
     }
 
     @Override
@@ -264,6 +277,7 @@ public final class FlinkRuntimeTarget {
         return imageReference + " (TaskManagers " + taskManagers
                 + ", binding " + connectorBundle.targetBindingSha256()
                 + expectedImageId.map(value -> ", expected image " + value).orElse("")
+                + expectedImageDigest.map(value -> ", expected digest " + value).orElse("")
                 + expectedRuntimeJar.map(value -> ", runtime JAR " + value).orElse("") + ")";
     }
 }

@@ -161,8 +161,16 @@ revision or establish compiler provenance.
 | `kroxylicious-fault-filter` | `7222efbddc3d7a058ed9469901f72b2702723e644224d17b320431a9cbce78da` |
 | `synthetic-token-plugin` | `3edba08d054b17ad60f4b8915c48026aa05953df4a0407467ee2f052c480bdf0` |
 
-The released Flink image is `flink:2.2.0`, resolved to
-`sha256:2e93ded2cb7bf1a50f71b663d5e3ea01420bcc4e549cbf666d05120f939713c7`.
+The 27 October 2026 matrix used Docker Engine 29.1.3 with the classic graphdriver
+image store. The released `flink:2.2.0` image ID
+`sha256:2e93ded2cb7bf1a50f71b663d5e3ea01420bcc4e549cbf666d05120f939713c7`
+is its arm64 config digest. The containerd image store reports the index digest
+`sha256:7ecfab9d5e8ec6987a248b32f6605b5fe9bcb7347aea0d7b1bc3976588408681`.
+Current provisioning accepts an author-declared `image_id` matching the
+container image ID or its inspected `RepoDigests`, records the matched form and
+store backend, and verifies optional content-addressable `image_digest` against
+`RepoDigests`. This compatibility change does not requalify the historical
+matrix on a different store.
 Kafka is `apache/kafka:4.0.0`, resolved to
 `sha256:2cecec9e3ea2d63fd5d1da1ab95e6bb7c33a7ff81053c4eb46f4176cd0bad8c9`.
 The helper and Flink image platform pin is `linux/arm64`.

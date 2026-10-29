@@ -51,7 +51,7 @@ class ClusterManagerTest {
     void fuseProvisioningRequiresExactMergedConfigurationOnInitialAndReplacementProcesses() {
         var storage = new org.savonitar.flink.stability.runtime.api.FuseCheckpointStorage(
                 temporaryDirectory.resolve("prepared").toAbsolutePath().normalize(), "d".repeat(64),
-                org.savonitar.flink.stability.runtime.api.FuseCheckpointStorage.SUPPORTED_IMAGE_ID, "linux/arm64",
+                "sha256:" + "a".repeat(64), "linux/arm64",
                 Map.of("checkpoint-fuse", "a".repeat(64), "checkpoint-fuse-selftest", "b".repeat(64), "probe.jar", "c".repeat(64)));
         var target = target().withExpectedImageId(storage.imageId()).withConfig(Map.of("custom.setting", "literal"))
                 .withCheckpointStorage(storage);
@@ -349,6 +349,55 @@ class ClusterManagerTest {
     }
 
     @Test
+    void repoDigestPinRetainsPhysicalImageStabilityAcrossReplacementAndStartupRetry() {
+        RecordingFactory factory = new RecordingFactory();
+        factory.repositoryDigest = OTHER_IMAGE_ID;
+        var planned = target().withExpectedImageId(OTHER_IMAGE_ID).withExpectedImageDigest(OTHER_IMAGE_ID);
+        try (ClusterManager manager = manager(factory)) {
+            factory.failTaskManagerStart = true;
+            assertThrows(IllegalStateException.class, () -> manager.startFlink(planned));
+            factory.failTaskManagerStart = false;
+            manager.startFlink(planned);
+            assertEquals(Optional.of(OTHER_IMAGE_ID), factory.target.expectedImageId(), "Retry keeps the author pin");
+            manager.killTaskManager("taskmanager-1", ACTION_TIMEOUT);
+            manager.restartTaskManager("taskmanager-1", ACTION_TIMEOUT);
+            assertTrue(manager.provisioningHistory().stream().allMatch(value -> value.imageId().equals(IMAGE_ID)));
+            assertTrue(manager.provisioningHistory().stream().allMatch(value -> value.imageIdentityEvidence().isPresent()));
+            manager.killTaskManager("taskmanager-1", ACTION_TIMEOUT);
+            factory.imageId = "sha256:" + "c".repeat(64);
+            assertThrows(IllegalStateException.class, () -> manager.restartTaskManager("taskmanager-1", ACTION_TIMEOUT),
+                    "Matching RepoDigest must not hide a different physical image within an attempt");
+        }
+    }
+
+    @Test
+    void explicitImageDigestRequiresTypedObservationEvenWhenConfigIdMatches() {
+        try (ClusterManager manager = manager(new RecordingFactory())) {
+            assertThrows(IllegalStateException.class,
+                    () -> manager.startFlink(target().withExpectedImageId(IMAGE_ID).withExpectedImageDigest(OTHER_IMAGE_ID)));
+            assertTrue(manager.provisioningHistory().isEmpty());
+        }
+    }
+
+    @Test
+    void unpinnedStartupRetryKeepsUnpinnedDeclarationInTypedEvidence() {
+        RecordingFactory factory = new RecordingFactory();
+        factory.repositoryDigest = OTHER_IMAGE_ID;
+        try (ClusterManager manager = manager(factory)) {
+            factory.failTaskManagerStart = true;
+            assertThrows(IllegalStateException.class, () -> manager.startFlink(target()));
+            factory.failTaskManagerStart = false;
+            manager.startFlink(target());
+            assertTrue(factory.target.expectedImageId().isEmpty());
+            assertTrue(manager.provisioningHistory().stream().allMatch(evidence ->
+                    evidence.imageIdentityEvidence().orElseThrow().declaredImageId().isEmpty()));
+            assertTrue(manager.provisioningHistory().stream().allMatch(evidence ->
+                    evidence.imageIdentityEvidence().orElseThrow().imageIdMatchForm()
+                            == org.savonitar.flink.stability.runtime.api.ImageIdentityEvidence.MatchForm.UNPINNED));
+        }
+    }
+
+    @Test
     void rejectsDifferentImagesUnderTheSameTagForInitialComponents() {
         RecordingFactory factory = new RecordingFactory();
         factory.taskManagerImageId = OTHER_IMAGE_ID;
@@ -437,7 +486,7 @@ class ClusterManagerTest {
             factory.failTaskManagerStart = false;
             manager.startFlink(target());
 
-            assertEquals(IMAGE_ID, factory.target.expectedImageId().orElseThrow());
+            assertTrue(factory.target.expectedImageId().isEmpty(), "Retry preserves the unpinned author declaration");
             assertEquals(List.of("jobmanager-1#1", "taskmanager-1#1",
                             "jobmanager-1#2", "taskmanager-1#2"),
                     new DockerV1AttemptRuntime(manager).flinkClassLoadLogs().stream()
@@ -657,6 +706,7 @@ class ClusterManagerTest {
         private boolean badEvidence;
         private String imageId = IMAGE_ID;
         private String taskManagerImageId;
+        private String repositoryDigest;
         private Map<String, String> observedConfiguration;
 
         @Override
@@ -700,7 +750,7 @@ class ClusterManagerTest {
                     events,
                     (failTaskManagerStart && role == FlinkComponentRole.TASK_MANAGER)
                             || name.equals(failedTaskManagerName),
-                    badEvidence, observedConfiguration);
+                    badEvidence, observedConfiguration, repositoryDigest);
             handles.put(name, handle);
             return handle;
         }
@@ -716,6 +766,7 @@ class ClusterManagerTest {
         private final boolean failStart;
         private final boolean badEvidence;
         private final Map<String, String> observedConfiguration;
+        private final String repositoryDigest;
         private boolean running;
         private boolean removed;
         private RuntimeException fenceFailure;
@@ -731,7 +782,7 @@ class ClusterManagerTest {
                 String imageId,
                 List<String> events,
                 boolean failStart,
-                boolean badEvidence, Map<String, String> observedConfiguration) {
+                boolean badEvidence, Map<String, String> observedConfiguration, String repositoryDigest) {
             this.name = name;
             this.role = role;
             this.runtimeId = runtimeId;
@@ -741,6 +792,7 @@ class ClusterManagerTest {
             this.failStart = failStart;
             this.badEvidence = badEvidence;
             this.observedConfiguration = observedConfiguration;
+            this.repositoryDigest = repositoryDigest;
         }
 
         @Override
@@ -854,6 +906,14 @@ class ClusterManagerTest {
                     installation.targetBindingSha256(),
                     installation.classpathManifest().manifestSha256(),
                     List.of());
+            if (repositoryDigest != null) evidence = evidence.withImageIdentityEvidence(
+                    new org.savonitar.flink.stability.runtime.api.ImageIdentityEvidence(imageId, imageId,
+                            List.of("flink@" + repositoryDigest), target.expectedImageId(), target.expectedImageDigest(),
+                            target.expectedImageId().isEmpty() ? org.savonitar.flink.stability.runtime.api.ImageIdentityEvidence.MatchForm.UNPINNED
+                                    : target.expectedImageId().get().equals(imageId)
+                                    ? org.savonitar.flink.stability.runtime.api.ImageIdentityEvidence.MatchForm.CONTAINER_IMAGE_ID
+                                    : org.savonitar.flink.stability.runtime.api.ImageIdentityEvidence.MatchForm.REPO_DIGEST,
+                            "overlayfs", Optional.of("io.containerd.snapshotter.v1")));
             return observedConfiguration == null ? evidence : evidence
                     .withProcessConfiguration(observedConfiguration, name + "#" + runtimeId)
                     .withEffectiveConfiguration(new FlinkComponentProvisioningEvidence.EffectiveConfigurationEvidence(

@@ -142,6 +142,8 @@ public final class ExecutableScenarioPlanCompiler {
                 .withTaskManagers(executablePlan.flink().taskmanagers());
         runtimeTarget = executablePlan.flink().expectedImageId()
                 .map(runtimeTarget::withExpectedImageId).orElse(runtimeTarget);
+        runtimeTarget = executablePlan.flink().expectedImageDigest()
+                .map(runtimeTarget::withExpectedImageDigest).orElse(runtimeTarget);
         runtimeTarget = executablePlan.flink().expectedRuntimeJar()
                 .map(runtimeTarget::withExpectedRuntimeJar).orElse(runtimeTarget);
         runtimeTarget = executablePlan.flink().highAvailability()
@@ -551,7 +553,8 @@ public final class ExecutableScenarioPlanCompiler {
                 HighAvailabilityPlanCompiler.highAvailability(flinkNode),
                 HighAvailabilityPlanCompiler.tokenProvider(flinkNode),
                 Optional.ofNullable(flinkNode.path("line").textValue()),
-                scalarMap(flinkNode.path("config")), logMarkers(flinkNode.path("log_markers")));
+                scalarMap(flinkNode.path("config")), logMarkers(flinkNode.path("log_markers")),
+                Optional.ofNullable(flinkNode.path("image_digest").textValue()));
         ExecutableScenarioPlan.GeneratedIntegerSequenceInput input =
                 new ExecutableScenarioPlan.GeneratedIntegerSequenceInput(
                         clusterAlias,
