@@ -6,7 +6,26 @@ under local `jobs/`. The [publication manifest](evidence/checkpoint-storage-publ
 records each copy's separate SHA-256 and omissions. Full journals, binaries and
 command transcripts are not included; the copies cannot rerun the raw audit.
 
-The review rebuild on 29 October 2026 is a new artifact:
+The final strict-journal review rebuild on 29 October 2026 is
+[build 03](evidence/checkpoint-storage-helper-build-20261029-03/build-evidence.json),
+original manifest SHA-256
+`79653f4d614b7a86137f11d21f3e942b3637d6e7a1fde4ae9034628d53d2b0d1`.
+Successful operations outside the fault family and checkpoint reads no longer
+produce individual records. The eight aggregate counters include separate
+`fsync`/`fdatasync` counts, preserving native force evidence without per-call
+sync records. Errors and lifecycle/control receipts remain individual. It passed
+strict Linux compilation, 100,438 native assertions and the unprivileged Java
+smoke; both owned build containers were removed. The assertion count includes
+the 100,000-iteration aggregation case, not that many independent scenarios.
+See the [review verification](CHECKPOINT-STORAGE-REVIEW-VERIFICATION.md) for live scope.
+
+| Final artifact | SHA-256 |
+| --- | --- |
+| `checkpoint-fuse` | `c45845195feb47442d993b3d4757bac74cf118bb88a50628ebadd7f3093830fe` |
+| `checkpoint-fuse-selftest` | `f1799cbf544d85dbcc2fd0cb0b52736bb883ae57c4f608b9a95afa3a6be7f584` |
+| `probe.jar` | `2fd880248a7515b08ee419e1ff875cc1edff8e0f784878aa55a0aaa0a1780983` |
+
+The earlier review rebuild on 29 October 2026 remains separately retained:
 [build 02 receipt](evidence/checkpoint-storage-helper-build-20261029-02/build-evidence.json),
 original manifest SHA-256
 `50721e4f8f3bd515ca9f445f7a96aee0d3f04da21448a744088bdd4045454e2d`.
@@ -18,7 +37,7 @@ both owned containers were removed. All 51 locked package receipts were checked
 before installation, with network disconnection verified before installation
 and before source copy. Its observed store was classic `overlay2`.
 
-| New artifact | SHA-256 |
+| Build 02 artifact | SHA-256 |
 | --- | --- |
 | `checkpoint-fuse` | `aa2f74a87e73551c6ddb9c6e9285f33e1d14fbd476212fec18a024a9a33f6aef` |
 | `checkpoint-fuse-selftest` | `297b4070df3dfcfc6e82849f1024b55c4b4fd64f5cf61be997b46661876cc83a` |

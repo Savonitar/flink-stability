@@ -2648,6 +2648,216 @@
         "Workspace/home/host-temp paths replaced; original retained unchanged."
       ],
       "omittedFields": []
+    },
+    {
+      "sourcePath": "jobs/checkpoint-review-remediation-20261029-01/verification.json",
+      "originalSha256": "e803ea087369e1716870ac0fc3bcabdc8be24f64eccab9f0a0816b52bd1bbc4e",
+      "originalBytes": 11853,
+      "publishedPath": "docs/evidence/checkpoint-review-remediation-20261029-01/verification.json",
+      "sanitizedCopySha256": "df126e4b8a2cd40633ed08a6cbfd28257109004f8d05fd85693f0d40d8b4a5a2",
+      "sanitizedCopyBytes": 11453,
+      "mode": "sanitized-copy",
+      "sanitizationNotes": [
+        "Host workspace/home/Docker executable paths replaced; original hashes and retained originals unchanged.",
+        "Receipt/report only; raw logs, journals, responses and binaries are not published."
+      ],
+      "omittedFields": []
+    },
+    {
+      "sourcePath": "jobs/checkpoint-review-remediation-20261029-01/d-cli-validations.json",
+      "originalSha256": "b74fc1d322587b5b324a93a7236a44fb7911a7b905fb231d73d674e928c9eb5f",
+      "originalBytes": 3442,
+      "publishedPath": "docs/evidence/checkpoint-review-remediation-20261029-01/d-cli-validations.json",
+      "sanitizedCopySha256": "b5700aeea9fef2e1cc854087020cc255a2907ee286faea1c3d161a002deee525",
+      "sanitizedCopyBytes": 3192,
+      "mode": "sanitized-copy",
+      "sanitizationNotes": [
+        "Host workspace/home/Docker executable paths replaced; original hashes and retained originals unchanged.",
+        "Receipt/report only; raw logs, journals, responses and binaries are not published."
+      ],
+      "omittedFields": []
+    },
+    {
+      "sourcePath": "jobs/checkpoint-review-remediation-20261029-01/d-packaged-pair.json",
+      "originalSha256": "c4b4c8ab9fef58e4539487e578e496fefa412930384998a1ffa9cae119a7e9ab",
+      "originalBytes": 953,
+      "publishedPath": "docs/evidence/checkpoint-review-remediation-20261029-01/d-packaged-pair.json",
+      "sanitizedCopySha256": "c4b4c8ab9fef58e4539487e578e496fefa412930384998a1ffa9cae119a7e9ab",
+      "sanitizedCopyBytes": 953,
+      "mode": "sanitized-copy",
+      "sanitizationNotes": [
+        "Host workspace/home/Docker executable paths replaced; original hashes and retained originals unchanged.",
+        "Receipt/report only; raw logs, journals, responses and binaries are not published."
+      ],
+      "omittedFields": []
+    },
+    {
+      "sourcePath": "jobs/checkpoint-review-remediation-20261029-01/d-property-only-results.json",
+      "originalSha256": "98187333ae7d75980a4273b71efb807715c314551bc4a9431410418e794a03fa",
+      "originalBytes": 1011,
+      "publishedPath": "docs/evidence/checkpoint-review-remediation-20261029-01/d-property-only-results.json",
+      "sanitizedCopySha256": "98889930579299d5caff8a7a5737e09d0d3e80304094db7bf759c973d048bf5b",
+      "sanitizedCopyBytes": 861,
+      "mode": "sanitized-copy",
+      "sanitizationNotes": [
+        "Host workspace/home/Docker executable paths replaced; original hashes and retained originals unchanged.",
+        "Receipt/report only; raw logs, journals, responses and binaries are not published."
+      ],
+      "omittedFields": []
+    },
+    {
+      "sourcePath": "jobs/checkpoint-review-remediation-20261029-01/d-current-audit-seed1.json",
+      "originalSha256": "ff481ba0cb785e6af2d5958aa84313e267c209bb111fc0ffbbf58c839a493f3a",
+      "originalBytes": 128547,
+      "publishedPath": "docs/evidence/checkpoint-review-remediation-20261029-01/d-current-audit-seed1.json",
+      "sanitizedCopySha256": "c8db4604812e6a98d7f4dd54f992e152d0e3a992e8cd29101715ab92322b900c",
+      "sanitizedCopyBytes": 124787,
+      "mode": "sanitized-copy",
+      "sanitizationNotes": [
+        "Host workspace/home/Docker executable paths replaced; original hashes and retained originals unchanged.",
+        "Receipt/report only; raw logs, journals, responses and binaries are not published."
+      ],
+      "omittedFields": []
+    },
+    {
+      "sourcePath": "jobs/checkpoint-review-live-20261029-01/finished.json",
+      "originalSha256": "bac42390914ba2713e36520c05fb52243ab8b57e794ffdeea655fcbe58ccc575",
+      "originalBytes": 248233,
+      "publishedPath": "docs/evidence/checkpoint-review-live-20261029-01/finished.json",
+      "sanitizedCopySha256": "a036a9e0fd266b405a3c719a52516189cc36ab86f31da96ac5f25cee9f6e689b",
+      "sanitizedCopyBytes": 243969,
+      "mode": "sanitized-copy",
+      "sanitizationNotes": [
+        "Host workspace/home/Docker executable paths replaced; original hashes and retained originals unchanged.",
+        "Receipt/report only; raw logs, journals, responses and binaries are not published."
+      ],
+      "omittedFields": []
+    },
+    {
+      "sourcePath": "jobs/checkpoint-review-live-20261029-01/manifest.json",
+      "originalSha256": "e3d26e43663b959cc3d632dbe5bdd982b09d7ac7d0b009b0b4e337cd2c848daf",
+      "originalBytes": 14506,
+      "publishedPath": "docs/evidence/checkpoint-review-live-20261029-01/manifest.json",
+      "sanitizedCopySha256": "3db166481fc3f547f311d5a02507145b4f7427d12c50db63b3c2bce5a21b3c89",
+      "sanitizedCopyBytes": 14464,
+      "mode": "sanitized-copy",
+      "sanitizationNotes": [
+        "Host workspace/home/Docker executable paths replaced; original hashes and retained originals unchanged.",
+        "Receipt/report only; raw logs, journals, responses and binaries are not published."
+      ],
+      "omittedFields": []
+    },
+    {
+      "sourcePath": "jobs/checkpoint-storage-helper-build-20261029-03/build-evidence.json",
+      "originalSha256": "79653f4d614b7a86137f11d21f3e942b3637d6e7a1fde4ae9034628d53d2b0d1",
+      "originalBytes": 38491,
+      "publishedPath": "docs/evidence/checkpoint-storage-helper-build-20261029-03/build-evidence.json",
+      "sanitizedCopySha256": "73402135426da904eef20faacb6df22c5090a7cd4a00100b53bd62839b070f56",
+      "sanitizedCopyBytes": 34835,
+      "mode": "sanitized-copy",
+      "sanitizationNotes": [
+        "Host workspace/home/Docker executable paths replaced; original hashes and retained originals unchanged.",
+        "Build receipt only; binaries, source snapshots and command logs remain in the local original batch."
+      ],
+      "omittedFields": []
+    },
+    {
+      "sourcePath": "jobs/checkpoint-review-remediation-20261029-01/final-verification.json",
+      "originalSha256": "eee6967f92c0344ff38d63ec362cc43c7c9761b2174ec1b86e675a8951a185df",
+      "originalBytes": 9633,
+      "publishedPath": "docs/evidence/checkpoint-review-remediation-20261029-01/final-verification.json",
+      "sanitizedCopySha256": "f6087edf37c2ef526e9e107effc1c950885d7003243913f4b4a5b3ddbec56e8e",
+      "sanitizedCopyBytes": 9383,
+      "mode": "sanitized-copy",
+      "sanitizationNotes": [
+        "Host workspace/home/Docker executable paths replaced; original hashes and retained originals unchanged.",
+        "Receipt/report only; raw logs, response bodies, journals and binaries remain in the local original batch."
+      ],
+      "omittedFields": []
+    },
+    {
+      "sourcePath": "jobs/checkpoint-review-remediation-20261029-01/d-cli-final-validations.json",
+      "originalSha256": "882b4cf466d53821b5c126bfdfc959406b291459c8df565b203acc5b642436c7",
+      "originalBytes": 3442,
+      "publishedPath": "docs/evidence/checkpoint-review-remediation-20261029-01/d-cli-final-validations.json",
+      "sanitizedCopySha256": "b7d5a9371cf3c97287e5ec7326f96bf5a92b46380f2938a380adbe2a7d80496f",
+      "sanitizedCopyBytes": 3192,
+      "mode": "sanitized-copy",
+      "sanitizationNotes": [
+        "Host workspace/home/Docker executable paths replaced; original hashes and retained originals unchanged.",
+        "Receipt/report only; raw logs, response bodies, journals and binaries remain in the local original batch."
+      ],
+      "omittedFields": []
+    },
+    {
+      "sourcePath": "jobs/checkpoint-review-remediation-20261029-01/d-final-packaged-pair.json",
+      "originalSha256": "377e7d42d72da4d53ceee92a54b9142cd3148342fcc477184aa0e2106baf156a",
+      "originalBytes": 953,
+      "publishedPath": "docs/evidence/checkpoint-review-remediation-20261029-01/d-final-packaged-pair.json",
+      "sanitizedCopySha256": "377e7d42d72da4d53ceee92a54b9142cd3148342fcc477184aa0e2106baf156a",
+      "sanitizedCopyBytes": 953,
+      "mode": "sanitized-copy",
+      "sanitizationNotes": [
+        "Host workspace/home/Docker executable paths replaced; original hashes and retained originals unchanged.",
+        "Receipt/report only; raw logs, response bodies, journals and binaries remain in the local original batch."
+      ],
+      "omittedFields": []
+    },
+    {
+      "sourcePath": "jobs/checkpoint-review-remediation-20261029-01/d-final-current-audit-seed1.json",
+      "originalSha256": "88ef39bf50bdc2e52c04d7fa8e576ba231a93ad7d219bbf7d317500abd458c14",
+      "originalBytes": 129072,
+      "publishedPath": "docs/evidence/checkpoint-review-remediation-20261029-01/d-final-current-audit-seed1.json",
+      "sanitizedCopySha256": "85411be5cf155f104156c6345d11d53505445ece4626104bbc24ca6a137c8c65",
+      "sanitizedCopyBytes": 125312,
+      "mode": "sanitized-copy",
+      "sanitizationNotes": [
+        "Host workspace/home/Docker executable paths replaced; original hashes and retained originals unchanged.",
+        "Receipt/report only; raw logs, response bodies, journals and binaries remain in the local original batch."
+      ],
+      "omittedFields": []
+    },
+    {
+      "sourcePath": "jobs/checkpoint-review-remediation-20261029-01/d-final-journal-filter-check.json",
+      "originalSha256": "52748c015b3f3581aa4776877dfa3bc9513fe2ab24e1c8d4d58ac98778545c7f",
+      "originalBytes": 562,
+      "publishedPath": "docs/evidence/checkpoint-review-remediation-20261029-01/d-final-journal-filter-check.json",
+      "sanitizedCopySha256": "52748c015b3f3581aa4776877dfa3bc9513fe2ab24e1c8d4d58ac98778545c7f",
+      "sanitizedCopyBytes": 562,
+      "mode": "sanitized-copy",
+      "sanitizationNotes": [
+        "Host workspace/home/Docker executable paths replaced; original hashes and retained originals unchanged.",
+        "Receipt/report only; raw logs, response bodies, journals and binaries remain in the local original batch."
+      ],
+      "omittedFields": []
+    },
+    {
+      "sourcePath": "jobs/checkpoint-review-final-fuse-20261029-01/finished.json",
+      "originalSha256": "056a5964203f97804b331344db0fda73029ae7a96d4638604b4a30c7f3663fe6",
+      "originalBytes": 146107,
+      "publishedPath": "docs/evidence/checkpoint-review-final-fuse-20261029-01/finished.json",
+      "sanitizedCopySha256": "0a0a9cb98218138385549f259454137db37505489541d60fdcd0485a34406ce8",
+      "sanitizedCopyBytes": 142137,
+      "mode": "sanitized-copy",
+      "sanitizationNotes": [
+        "Host workspace/home/Docker executable paths replaced; original hashes and retained originals unchanged.",
+        "Receipt/report only; raw logs, response bodies, journals and binaries remain in the local original batch."
+      ],
+      "omittedFields": []
+    },
+    {
+      "sourcePath": "jobs/checkpoint-review-final-fuse-20261029-01/manifest.json",
+      "originalSha256": "64df45d5c87a3c55043b95b0ca97e308fbcde0342ff2228729d354ed636d2302",
+      "originalBytes": 13107,
+      "publishedPath": "docs/evidence/checkpoint-review-final-fuse-20261029-01/manifest.json",
+      "sanitizedCopySha256": "999d125ba4c6192f5c0cba4c62e90c0aacf023f62360df0d223eb1d2f22e0704",
+      "sanitizedCopyBytes": 13065,
+      "mode": "sanitized-copy",
+      "sanitizationNotes": [
+        "Host workspace/home/Docker executable paths replaced; original hashes and retained originals unchanged.",
+        "Receipt/report only; raw logs, response bodies, journals and binaries remain in the local original batch."
+      ],
+      "omittedFields": []
     }
   ]
 }

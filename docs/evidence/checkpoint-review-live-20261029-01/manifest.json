@@ -1,0 +1,220 @@
+{
+  "attemptsPerCell": 1,
+  "automaticRetries": 0,
+  "cells": [
+    {
+      "catalog": "catalogs/state-prefix-baseline",
+      "execution": "uninterrupted",
+      "keyCount": 8,
+      "mode": "correct",
+      "name": "state-prefix-baseline",
+      "requiredOutcome": "pass",
+      "scenario": "state-prefix-baseline",
+      "totalRecords": 3000
+    },
+    {
+      "catalog": "catalogs/state-recovery-restart",
+      "execution": "restart",
+      "keyCount": 8,
+      "mode": "correct",
+      "name": "state-recovery-restart",
+      "requiredOutcome": "pass",
+      "scenario": "state-recovery",
+      "totalRecords": 6000
+    },
+    {
+      "catalog": "catalogs/correct-eio",
+      "execution": "eio",
+      "keyCount": 8,
+      "mode": "correct",
+      "name": "correct-eio",
+      "requiredOutcome": "pass",
+      "scenario": "checkpoint-storage-calibration",
+      "totalRecords": 30000
+    }
+  ],
+  "docker": "<host-docker-cli>",
+  "dockerApiVersion": "1.44",
+  "dockerEndpoint": "unix://<host-home>/.docker/run/docker.sock",
+  "frameworkFreeze": {
+    "path": "framework/manifest.json",
+    "sha256": "6d835ca64d225487215e6ec9ff7d2c22bd3fe47fbb23777d1720937fb0188d04"
+  },
+  "frameworkModuleJars": [
+    {
+      "installedSha256": "f7525f710f5f05a97ba7cd1e9515ea1470dcfda58c4a5d4b0c11ee927776fb32",
+      "module": "runtime-api",
+      "path": "jars/runtime-api-0.1.0-SNAPSHOT.jar",
+      "sha256": "f7525f710f5f05a97ba7cd1e9515ea1470dcfda58c4a5d4b0c11ee927776fb32",
+      "targetSha256": "f7525f710f5f05a97ba7cd1e9515ea1470dcfda58c4a5d4b0c11ee927776fb32"
+    },
+    {
+      "installedSha256": "3e66d7917fea8145dfab199e45cdc37f833dd6d7796a96674decf026fdff7d12",
+      "module": "core",
+      "path": "jars/core-0.1.0-SNAPSHOT.jar",
+      "sha256": "3e66d7917fea8145dfab199e45cdc37f833dd6d7796a96674decf026fdff7d12",
+      "targetSha256": "3e66d7917fea8145dfab199e45cdc37f833dd6d7796a96674decf026fdff7d12"
+    },
+    {
+      "installedSha256": "cb77af560d0b0cd7996a4a8fe85931594b41eb7433bb7fdd9905896ee9b79fde",
+      "module": "testcontainers",
+      "path": "jars/testcontainers-0.1.0-SNAPSHOT.jar",
+      "sha256": "cb77af560d0b0cd7996a4a8fe85931594b41eb7433bb7fdd9905896ee9b79fde",
+      "targetSha256": "cb77af560d0b0cd7996a4a8fe85931594b41eb7433bb7fdd9905896ee9b79fde"
+    },
+    {
+      "installedSha256": "28b7d9afab4f7d0713c37a39ed9ba98b3f09fdfca17ca70127c88b01095a1dff",
+      "module": "cli",
+      "path": "jars/cli-0.1.0-SNAPSHOT.jar",
+      "sha256": "28b7d9afab4f7d0713c37a39ed9ba98b3f09fdfca17ca70127c88b01095a1dff",
+      "targetSha256": "28b7d9afab4f7d0713c37a39ed9ba98b3f09fdfca17ca70127c88b01095a1dff"
+    },
+    {
+      "installedSha256": "03a7a07966ca5d3f4d31072a3a2c8d707c3af54529d979ab97c178ab8cc28f60",
+      "module": "kroxylicious-fault-filter",
+      "path": "jars/kroxylicious-fault-filter-0.1.0-SNAPSHOT.jar",
+      "sha256": "03a7a07966ca5d3f4d31072a3a2c8d707c3af54529d979ab97c178ab8cc28f60",
+      "targetSha256": "03a7a07966ca5d3f4d31072a3a2c8d707c3af54529d979ab97c178ab8cc28f60"
+    },
+    {
+      "installedSha256": "3edba08d054b17ad60f4b8915c48026aa05953df4a0407467ee2f052c480bdf0",
+      "module": "synthetic-token-plugin",
+      "path": "jars/synthetic-token-plugin-0.1.0-SNAPSHOT.jar",
+      "sha256": "3edba08d054b17ad60f4b8915c48026aa05953df4a0407467ee2f052c480bdf0",
+      "targetSha256": "3edba08d054b17ad60f4b8915c48026aa05953df4a0407467ee2f052c480bdf0"
+    }
+  ],
+  "helperBundle": {
+    "files": {
+      "checkpoint-fuse": "aa2f74a87e73551c6ddb9c6e9285f33e1d14fbd476212fec18a024a9a33f6aef",
+      "checkpoint-fuse-selftest": "297b4070df3dfcfc6e82849f1024b55c4b4fd64f5cf61be997b46661876cc83a",
+      "probe.jar": "2fd880248a7515b08ee419e1ff875cc1edff8e0f784878aa55a0aaa0a1780983"
+    },
+    "imageId": "sha256:2e93ded2cb7bf1a50f71b663d5e3ea01420bcc4e549cbf666d05120f939713c7",
+    "manifestSha256": "50721e4f8f3bd515ca9f445f7a96aee0d3f04da21448a744088bdd4045454e2d",
+    "path": "artifacts/helper",
+    "platform": "linux/arm64"
+  },
+  "kind": "three-single-current-checkout-verifications",
+  "qualificationMatrix": false,
+  "runTimeoutSeconds": 900,
+  "runtimeIdentity": {
+    "connectorArtifacts": [
+      {
+        "containerPath": "/opt/flink/lib/flink-stability-connector-00000000-6bb63f7b09930d99745325393b481c092b0c26d626e738b7a1fd6fd8d7d4f1da.jar",
+        "sha256": "6bb63f7b09930d99745325393b481c092b0c26d626e738b7a1fd6fd8d7d4f1da"
+      },
+      {
+        "containerPath": "/opt/flink/lib/flink-stability-connector-00000001-4eeeae8d20c078abb64b015ec158add383ac581571cddc45c68f0c9ae0230720.jar",
+        "sha256": "4eeeae8d20c078abb64b015ec158add383ac581571cddc45c68f0c9ae0230720"
+      },
+      {
+        "containerPath": "/opt/flink/lib/flink-stability-connector-00000002-d8054ae7c0d1c2d2f55d28e46026ebe5892881f3fab5f439233184381c3b4a1f.jar",
+        "sha256": "d8054ae7c0d1c2d2f55d28e46026ebe5892881f3fab5f439233184381c3b4a1f"
+      },
+      {
+        "containerPath": "/opt/flink/lib/flink-stability-connector-00000003-4b364e6850dc89172fcf1d4dd26b8ff5488eda44ff4657e22dd265203dd5ab3c.jar",
+        "sha256": "4b364e6850dc89172fcf1d4dd26b8ff5488eda44ff4657e22dd265203dd5ab3c"
+      },
+      {
+        "containerPath": "/opt/flink/lib/flink-stability-connector-00000004-e2d202d4606e23aeaf8a5a9632db06f5fefd5b63d251c3f503f9faaa78530e5c.jar",
+        "sha256": "e2d202d4606e23aeaf8a5a9632db06f5fefd5b63d251c3f503f9faaa78530e5c"
+      },
+      {
+        "containerPath": "/opt/flink/lib/flink-stability-connector-00000005-f30d77f5826b9e9813342e84ab412095ed4ed5cf4fef6f93cebb848cb0fd0294.jar",
+        "sha256": "f30d77f5826b9e9813342e84ab412095ed4ed5cf4fef6f93cebb848cb0fd0294"
+      },
+      {
+        "containerPath": "/opt/flink/lib/flink-stability-connector-00000006-bcf39f152c5553c2501a491fc4a73c5b0330741e8eed96a481323b8ee89738af.jar",
+        "sha256": "bcf39f152c5553c2501a491fc4a73c5b0330741e8eed96a481323b8ee89738af"
+      },
+      {
+        "containerPath": "/opt/flink/lib/flink-stability-connector-00000007-581bd61000ef7648943f781ca05689e56d03f6052748365a8e2b3a9b5d3fa32f.jar",
+        "sha256": "581bd61000ef7648943f781ca05689e56d03f6052748365a8e2b3a9b5d3fa32f"
+      },
+      {
+        "containerPath": "/opt/flink/lib/flink-stability-connector-00000008-b6c3237e24b8252a5a9c3a0e1ae30ef8f323412e74bd358548b7a9e527d676df.jar",
+        "sha256": "b6c3237e24b8252a5a9c3a0e1ae30ef8f323412e74bd358548b7a9e527d676df"
+      },
+      {
+        "containerPath": "/opt/flink/lib/flink-stability-connector-00000009-a58a84c4271e50df4c96ed916ccb7e48a869f8ed9cdcda1ad5d3d4c33b0214a3.jar",
+        "sha256": "a58a84c4271e50df4c96ed916ccb7e48a869f8ed9cdcda1ad5d3d4c33b0214a3"
+      },
+      {
+        "containerPath": "/opt/flink/lib/flink-stability-connector-00000010-4c766cb3f855415ee734b2392949a0b6f12a60879334a74518deaf6270d32e36.jar",
+        "sha256": "4c766cb3f855415ee734b2392949a0b6f12a60879334a74518deaf6270d32e36"
+      },
+      {
+        "containerPath": "/opt/flink/lib/flink-stability-connector-00000011-d3ef575e3e4979678dc01bf1dcce51021493b4d11fb7f1be8ad982877c16a1c0.jar",
+        "sha256": "d3ef575e3e4979678dc01bf1dcce51021493b4d11fb7f1be8ad982877c16a1c0"
+      }
+    ],
+    "connectorSha256": "6bb63f7b09930d99745325393b481c092b0c26d626e738b7a1fd6fd8d7d4f1da",
+    "flinkImageId": "sha256:2e93ded2cb7bf1a50f71b663d5e3ea01420bcc4e549cbf666d05120f939713c7",
+    "flinkImageReference": "flink:2.2.0",
+    "kafkaImageId": "sha256:2cecec9e3ea2d63fd5d1da1ab95e6bb7c33a7ff81053c4eb46f4176cd0bad8c9",
+    "kafkaImageReference": "apache/kafka:4.0.0"
+  },
+  "selectedFiles": {
+    "artifacts/helper/build-evidence.json": "50721e4f8f3bd515ca9f445f7a96aee0d3f04da21448a744088bdd4045454e2d",
+    "artifacts/helper/bundle/checkpoint-fuse": "aa2f74a87e73551c6ddb9c6e9285f33e1d14fbd476212fec18a024a9a33f6aef",
+    "artifacts/helper/bundle/checkpoint-fuse-selftest": "297b4070df3dfcfc6e82849f1024b55c4b4fd64f5cf61be997b46661876cc83a",
+    "artifacts/helper/bundle/probe.jar": "2fd880248a7515b08ee419e1ff875cc1edff8e0f784878aa55a0aaa0a1780983",
+    "catalogs/correct-eio/checkpoint-storage-calibration.expected.yaml": "e11712748ef0154f7e52a903ccdb09fadbdaf9fd794a670408d35f0f5573cfac",
+    "catalogs/correct-eio/checkpoint-storage-calibration.yaml": "efb98c7a92ab38d66b56f7136c341e1649712e2a7a3ca07869df3b0b4afbe453",
+    "catalogs/state-prefix-baseline/state-prefix-baseline.expected.yaml": "baea4740bbf0f669651c6028ef0eccd617187cfd53f804e521c5ca45793a8ac7",
+    "catalogs/state-prefix-baseline/state-prefix-baseline.yaml": "6b238c06a7ed32b4c6e3fa6edca83dc99c941c0e49167088a63062240ae3788d",
+    "catalogs/state-recovery-restart/state-recovery.expected.yaml": "a503ea420150f779d9ea915a499ca2e0b1f25217cfaa82eb86dc8546e279034a",
+    "catalogs/state-recovery-restart/state-recovery.yaml": "f93dc011d8d0880722784bf8bd2eb0c55252e981a45850564587dea636b4a9d6",
+    "flink-job-generator/target/flink-job-generator.jar": "4807a1135db036b1a53b650d43917f8ecfcc9c6e2dbbc9e06d53c95acb769f45",
+    "inputs/baseline.yaml": "974d92b7dcf0ccc8544ffa66a4221c8bb6a4c3cd342900439095c4ce64e8547f",
+    "inputs/final-install.log": "f95f319f74db6cfd5597ad7b315d65cafd50882626045d4e984a162461881cb3",
+    "inputs/framework-inputs.json": "b87eda0463dd402eca3556333708a6577a32eb6b28d7c73da593aa8b2d2101d1",
+    "inputs/restart-phase.yaml": "8bcc2406b028266573afc9fe7f49eba030ae4fcdfa10af5c32410e429c778721",
+    "inputs/runtime-reference-manifest.json": "c9f673f7cd883796b58e8a4dd70e61646e50a8bfaab026cc07bf4d7d1448d945",
+    "inputs/state-prefix-baseline.yaml": "8752111128302e5f49a449177aab0d6a5e624391652735e19aaf8b208d38f02c",
+    "recipe/README.md": "2879d84f86dbd6fa6e8f09539f987648b19bd1295574461753a9524952d5f800",
+    "recipe/ResolveClosure.java": "2ba4849e8381f91a82212d3c26a4a939290643ee1231582646c8ef55cbc56659",
+    "recipe/audit.py": "36b2314b0a4cbbdc6aad70900026b77abd2e941b90b12ebf71d5dab2fde8b7c6",
+    "recipe/catalogs.py": "610ff04a048a35a5a3e2f0506ad902a5d22e3b41ae480a187e75dd7668eafd7f",
+    "recipe/check.py": "3da3a1b1e5a750ff51e6d28678834b8de2f7631828b845da356bc7e2f6e99800",
+    "recipe/component_events.py": "77bb40fc37fceee0771cc9a87b003873c396802a6f407e6e6d8e2f88289f1af5",
+    "recipe/d-live-verification.py": "5072f18996e6e4b9bfbdde6a0a619f4c751f96642207a2adb500d377befa1242",
+    "recipe/framework.py": "c328b7b4a9b549ddc45bd99751eaf632517fd71afd867462c6e029f2c759e89a",
+    "recipe/inventory.py": "f934da812c4fb36537956b9ab0456f3be11a919f91bdf2dedc4993c90da629b5",
+    "recipe/prepare.py": "6ef831ef1e03a429a508cef9fc0525e66beac6e16e8da5bf6695ab8bfd84ef7e",
+    "recipe/raw_evidence.py": "c3bdc9a338508f5da611ac0624417b4dd74386d2e11d70813191121bab25fed0",
+    "recipe/report.py": "ec46ecaf581a74bbdd1bf50486e3006a3389f3a93c900fdd8f1793e749841ebb",
+    "recipe/run.py": "521ff4f67683cf773bc4601cdc68c7defb5264ce096ac8bd7dac7a0709477e7b",
+    "recipe/state_recovery_check.py": "b5c8cedaa921642692c07e85a9e55f7d3a3e6dbfefa819bc7b23d6e4c69cd2c5",
+    "workload-sources/flink-job-generator/pom.xml": "cce4d5a59a76ca8607c25cb10020ef149d18541d42a67803978a2fc5e4a54601",
+    "workload-sources/flink-job-generator/src/main/java/org/savonitar/flink/stability/flinkjob/AsyncSnapshotDelay.java": "033ef97c8dddbfc5dfa9e0be6cb309992cd7205c05606d5fae3b1fd782e253bd",
+    "workload-sources/flink-job-generator/src/main/java/org/savonitar/flink/stability/flinkjob/ConnectorNamingStrategy.java": "3ccf6fe54410f056331b76d58438cd7c1dd85f3e1691cc408ef921d014c70689",
+    "workload-sources/flink-job-generator/src/main/java/org/savonitar/flink/stability/flinkjob/FlinkKafkaEosJob.java": "2b8b560b4f652d4f44e6f582a8a263d31a5a55d489be82cdac6e8ab16308c3de",
+    "workload-sources/flink-job-generator/src/main/java/org/savonitar/flink/stability/flinkjob/FlinkKafkaEosJobArguments.java": "8a2e486ad4513b2e2e9ba4bbc52b22be5a9d96ac7971c018bec04658bfb8da2c",
+    "workload-sources/flink-job-generator/src/main/java/org/savonitar/flink/stability/flinkjob/KeyedPrefixFunction.java": "fdfab8d3c5592595d8645b75bda8028720d5a410913f628951759db578310d29",
+    "workload-sources/flink-job-generator/src/main/java/org/savonitar/flink/stability/flinkjob/StateRecoveryBuild.java": "1ff694e7932486b9cae947a69052577da95909465b9cdb4b12ab9b7c2a62a817",
+    "workload-sources/flink-job-generator/src/main/java/org/savonitar/flink/stability/flinkjob/WorkloadProtocolV1Configuration.java": "1d4d9adebbc8810660cfac47a630ee3c90c81820c927570c3893b9ab9df0f33b",
+    "workload-sources/flink-job-generator/src/main/resources/log4j2.properties": "4063a293e1f0d4dad2b0d1ce87a1d038d4fdd7ba9ef31c9f4666731083bad650",
+    "workload-sources/pom.xml": "430cb52bd12a624b74d9f87d3418015fb18b74ac3fc675765e1e1aa53e72e9bd"
+  },
+  "validationTimeoutSeconds": 120,
+  "validationsPerCell": 1,
+  "version": 1,
+  "workload": {
+    "path": "flink-job-generator/target/flink-job-generator.jar",
+    "sha256": "4807a1135db036b1a53b650d43917f8ecfcc9c6e2dbbc9e06d53c95acb769f45",
+    "sources": {
+      "flink-job-generator/pom.xml": "cce4d5a59a76ca8607c25cb10020ef149d18541d42a67803978a2fc5e4a54601",
+      "flink-job-generator/src/main/java/org/savonitar/flink/stability/flinkjob/AsyncSnapshotDelay.java": "033ef97c8dddbfc5dfa9e0be6cb309992cd7205c05606d5fae3b1fd782e253bd",
+      "flink-job-generator/src/main/java/org/savonitar/flink/stability/flinkjob/ConnectorNamingStrategy.java": "3ccf6fe54410f056331b76d58438cd7c1dd85f3e1691cc408ef921d014c70689",
+      "flink-job-generator/src/main/java/org/savonitar/flink/stability/flinkjob/FlinkKafkaEosJob.java": "2b8b560b4f652d4f44e6f582a8a263d31a5a55d489be82cdac6e8ab16308c3de",
+      "flink-job-generator/src/main/java/org/savonitar/flink/stability/flinkjob/FlinkKafkaEosJobArguments.java": "8a2e486ad4513b2e2e9ba4bbc52b22be5a9d96ac7971c018bec04658bfb8da2c",
+      "flink-job-generator/src/main/java/org/savonitar/flink/stability/flinkjob/KeyedPrefixFunction.java": "fdfab8d3c5592595d8645b75bda8028720d5a410913f628951759db578310d29",
+      "flink-job-generator/src/main/java/org/savonitar/flink/stability/flinkjob/StateRecoveryBuild.java": "1ff694e7932486b9cae947a69052577da95909465b9cdb4b12ab9b7c2a62a817",
+      "flink-job-generator/src/main/java/org/savonitar/flink/stability/flinkjob/WorkloadProtocolV1Configuration.java": "1d4d9adebbc8810660cfac47a630ee3c90c81820c927570c3893b9ab9df0f33b",
+      "flink-job-generator/src/main/resources/log4j2.properties": "4063a293e1f0d4dad2b0d1ce87a1d038d4fdd7ba9ef31c9f4666731083bad650",
+      "pom.xml": "430cb52bd12a624b74d9f87d3418015fb18b74ac3fc675765e1e1aa53e72e9bd"
+    }
+  }
+}

@@ -1,0 +1,950 @@
+{
+  "cleanup": [
+    {
+      "container": "checkpoint-fuse-smoke-727f95ef78a24707",
+      "status": "removed"
+    },
+    {
+      "container": "checkpoint-fuse-build-11e996b6ccc0405f",
+      "status": "removed"
+    }
+  ],
+  "commands": [
+    {
+      "argv": [
+        "<host-docker-cli>",
+        "--config",
+        "<workspace>/jobs/checkpoint-storage-helper-build-20261029-03/docker-config",
+        "--host",
+        "unix://<host-home>/.docker/run/docker.sock",
+        "image",
+        "inspect",
+        "flink@sha256:7ecfab9d5e8ec6987a248b32f6605b5fe9bcb7347aea0d7b1bc3976588408681"
+      ],
+      "elapsedSeconds": 0.177,
+      "exitCode": 0,
+      "label": "image-inspect",
+      "stderr": "commands/001-image-inspect.stderr",
+      "stdout": "commands/001-image-inspect.stdout"
+    },
+    {
+      "argv": [
+        "<host-docker-cli>",
+        "--config",
+        "<workspace>/jobs/checkpoint-storage-helper-build-20261029-03/docker-config",
+        "--host",
+        "unix://<host-home>/.docker/run/docker.sock",
+        "info",
+        "--format",
+        "{\"Driver\":{{json .Driver}},\"DriverStatus\":{{json .DriverStatus}}}"
+      ],
+      "elapsedSeconds": 0.535,
+      "exitCode": 0,
+      "label": "image-store-backend",
+      "stderr": "commands/002-image-store-backend.stderr",
+      "stdout": "commands/002-image-store-backend.stdout"
+    },
+    {
+      "argv": [
+        "<host-docker-cli>",
+        "--config",
+        "<workspace>/jobs/checkpoint-storage-helper-build-20261029-03/docker-config",
+        "--host",
+        "unix://<host-home>/.docker/run/docker.sock",
+        "create",
+        "--name",
+        "checkpoint-fuse-build-11e996b6ccc0405f",
+        "--label",
+        "org.savonitar.checkpoint-fuse.build=checkpoint-fuse-build-11e996b6ccc0405f",
+        "--network",
+        "bridge",
+        "--user",
+        "0:0",
+        "--security-opt",
+        "no-new-privileges:true",
+        "--platform",
+        "linux/arm64",
+        "--entrypoint",
+        "/bin/sleep",
+        "sha256:2e93ded2cb7bf1a50f71b663d5e3ea01420bcc4e549cbf666d05120f939713c7",
+        "1020"
+      ],
+      "elapsedSeconds": 0.068,
+      "exitCode": 0,
+      "label": "create-builder",
+      "stderr": "commands/003-create-builder.stderr",
+      "stdout": "commands/003-create-builder.stdout"
+    },
+    {
+      "argv": [
+        "<host-docker-cli>",
+        "--config",
+        "<workspace>/jobs/checkpoint-storage-helper-build-20261029-03/docker-config",
+        "--host",
+        "unix://<host-home>/.docker/run/docker.sock",
+        "inspect",
+        "checkpoint-fuse-build-11e996b6ccc0405f"
+      ],
+      "elapsedSeconds": 0.021,
+      "exitCode": 0,
+      "label": "verify-created-image",
+      "stderr": "commands/004-verify-created-image.stderr",
+      "stdout": "commands/004-verify-created-image.stdout"
+    },
+    {
+      "argv": [
+        "<host-docker-cli>",
+        "--config",
+        "<workspace>/jobs/checkpoint-storage-helper-build-20261029-03/docker-config",
+        "--host",
+        "unix://<host-home>/.docker/run/docker.sock",
+        "start",
+        "checkpoint-fuse-build-11e996b6ccc0405f"
+      ],
+      "elapsedSeconds": 0.127,
+      "exitCode": 0,
+      "label": "start-builder",
+      "stderr": "commands/005-start-builder.stderr",
+      "stdout": "commands/005-start-builder.stdout"
+    },
+    {
+      "argv": [
+        "<host-docker-cli>",
+        "--config",
+        "<workspace>/jobs/checkpoint-storage-helper-build-20261029-03/docker-config",
+        "--host",
+        "unix://<host-home>/.docker/run/docker.sock",
+        "exec",
+        "checkpoint-fuse-build-11e996b6ccc0405f",
+        "mkdir",
+        "-p",
+        "/work/debs",
+        "/work/receipts",
+        "/work/bundle"
+      ],
+      "elapsedSeconds": 0.072,
+      "exitCode": 0,
+      "label": "prepare-package-area",
+      "stderr": "commands/006-prepare-package-area.stderr",
+      "stdout": "commands/006-prepare-package-area.stdout"
+    },
+    {
+      "argv": [
+        "<host-docker-cli>",
+        "--config",
+        "<workspace>/jobs/checkpoint-storage-helper-build-20261029-03/docker-config",
+        "--host",
+        "unix://<host-home>/.docker/run/docker.sock",
+        "exec",
+        "-i",
+        "checkpoint-fuse-build-11e996b6ccc0405f",
+        "/bin/sh",
+        "-c",
+        "cat > /work/ubuntu.sources"
+      ],
+      "elapsedSeconds": 0.07,
+      "exitCode": 0,
+      "label": "apt-source",
+      "stderr": "commands/007-apt-source.stderr",
+      "stdout": "commands/007-apt-source.stdout"
+    },
+    {
+      "argv": [
+        "<host-docker-cli>",
+        "--config",
+        "<workspace>/jobs/checkpoint-storage-helper-build-20261029-03/docker-config",
+        "--host",
+        "unix://<host-home>/.docker/run/docker.sock",
+        "exec",
+        "checkpoint-fuse-build-11e996b6ccc0405f",
+        "apt-get",
+        "-o",
+        "Dir::Etc::sourcelist=/work/ubuntu.sources",
+        "-o",
+        "Dir::Etc::sourceparts=-",
+        "-o",
+        "Acquire::AllowInsecureRepositories=false",
+        "-o",
+        "APT::Get::AllowUnauthenticated=false",
+        "update"
+      ],
+      "elapsedSeconds": 3.006,
+      "exitCode": 0,
+      "label": "apt-update",
+      "stderr": "commands/008-apt-update.stderr",
+      "stdout": "commands/008-apt-update.stdout"
+    },
+    {
+      "argv": [
+        "<host-docker-cli>",
+        "--config",
+        "<workspace>/jobs/checkpoint-storage-helper-build-20261029-03/docker-config",
+        "--host",
+        "unix://<host-home>/.docker/run/docker.sock",
+        "exec",
+        "checkpoint-fuse-build-11e996b6ccc0405f",
+        "/bin/sh",
+        "-c",
+        "sha256sum /usr/share/keyrings/ubuntu-archive-keyring.gpg /var/lib/apt/lists/*InRelease"
+      ],
+      "elapsedSeconds": 0.075,
+      "exitCode": 0,
+      "label": "signed-index-hashes",
+      "stderr": "commands/009-signed-index-hashes.stderr",
+      "stdout": "commands/009-signed-index-hashes.stdout"
+    },
+    {
+      "argv": [
+        "<host-docker-cli>",
+        "--config",
+        "<workspace>/jobs/checkpoint-storage-helper-build-20261029-03/docker-config",
+        "--host",
+        "unix://<host-home>/.docker/run/docker.sock",
+        "exec",
+        "checkpoint-fuse-build-11e996b6ccc0405f",
+        "apt-get",
+        "-o",
+        "Dir::Etc::sourcelist=/work/ubuntu.sources",
+        "-o",
+        "Dir::Etc::sourceparts=-",
+        "-o",
+        "Acquire::AllowInsecureRepositories=false",
+        "-o",
+        "APT::Get::AllowUnauthenticated=false",
+        "--yes",
+        "--no-install-recommends",
+        "--download-only",
+        "install",
+        "binutils=2.42-4ubuntu2.10",
+        "binutils-aarch64-linux-gnu=2.42-4ubuntu2.10",
+        "binutils-common=2.42-4ubuntu2.10",
+        "cpp=4:13.2.0-7ubuntu1",
+        "cpp-13=13.3.0-6ubuntu2~24.04.1",
+        "cpp-13-aarch64-linux-gnu=13.3.0-6ubuntu2~24.04.1",
+        "cpp-aarch64-linux-gnu=4:13.2.0-7ubuntu1",
+        "gcc=4:13.2.0-7ubuntu1",
+        "gcc-13=13.3.0-6ubuntu2~24.04.1",
+        "gcc-13-aarch64-linux-gnu=13.3.0-6ubuntu2~24.04.1",
+        "gcc-13-base=13.3.0-6ubuntu2~24.04.1",
+        "gcc-aarch64-linux-gnu=4:13.2.0-7ubuntu1",
+        "libasan8=14.2.0-4ubuntu2~24.04.1",
+        "libatomic1=14.2.0-4ubuntu2~24.04.1",
+        "libbinutils=2.42-4ubuntu2.10",
+        "libc-bin=2.39-0ubuntu8.9",
+        "libc-dev-bin=2.39-0ubuntu8.9",
+        "libc6=2.39-0ubuntu8.9",
+        "libc6-dev=2.39-0ubuntu8.9",
+        "libcc1-0=14.2.0-4ubuntu2~24.04.1",
+        "libcrypt-dev=1:4.4.36-4build1",
+        "libctf-nobfd0=2.42-4ubuntu2.10",
+        "libctf0=2.42-4ubuntu2.10",
+        "libfuse3-3=3.14.0-5build1",
+        "libfuse3-dev=3.14.0-5build1",
+        "libgcc-13-dev=13.3.0-6ubuntu2~24.04.1",
+        "libgomp1=14.2.0-4ubuntu2~24.04.1",
+        "libgprofng0=2.42-4ubuntu2.10",
+        "libhwasan0=14.2.0-4ubuntu2~24.04.1",
+        "libisl23=0.26-3build1.1",
+        "libitm1=14.2.0-4ubuntu2~24.04.1",
+        "libjansson4=2.14-2build2",
+        "liblsan0=14.2.0-4ubuntu2~24.04.1",
+        "libmpc3=1.3.1-1build1.1",
+        "libmpfr6=4.2.1-1build1.1",
+        "libpcre2-16-0=10.42-4ubuntu2.1",
+        "libpcre2-32-0=10.42-4ubuntu2.1",
+        "libpcre2-dev=10.42-4ubuntu2.1",
+        "libpcre2-posix3=10.42-4ubuntu2.1",
+        "libpkgconf3=1.8.1-2build1",
+        "libselinux1-dev=3.5-2ubuntu2.1",
+        "libsepol-dev=3.5-2build1",
+        "libsframe1=2.42-4ubuntu2.10",
+        "libtsan2=14.2.0-4ubuntu2~24.04.1",
+        "libubsan1=14.2.0-4ubuntu2~24.04.1",
+        "linux-libc-dev=6.8.0-147.147",
+        "locales=2.39-0ubuntu8.9",
+        "pkg-config=1.8.1-2build1",
+        "pkgconf=1.8.1-2build1",
+        "pkgconf-bin=1.8.1-2build1",
+        "rpcsvc-proto=1.4.2-0ubuntu7"
+      ],
+      "elapsedSeconds": 3.688,
+      "exitCode": 0,
+      "label": "apt-download",
+      "stderr": "commands/010-apt-download.stderr",
+      "stdout": "commands/010-apt-download.stdout"
+    },
+    {
+      "argv": [
+        "<host-docker-cli>",
+        "--config",
+        "<workspace>/jobs/checkpoint-storage-helper-build-20261029-03/docker-config",
+        "--host",
+        "unix://<host-home>/.docker/run/docker.sock",
+        "exec",
+        "checkpoint-fuse-build-11e996b6ccc0405f",
+        "/bin/sh",
+        "-c",
+        "set -eu\nfor file in /var/cache/apt/archives/*.deb; do\n  package=$(dpkg-deb -f \"$file\" Package)\n  version=$(dpkg-deb -f \"$file\" Version)\n  architecture=$(dpkg-deb -f \"$file\" Architecture)\n  size=$(stat -c %s \"$file\")\n  digest=$(sha256sum \"$file\"); digest=${digest%% *}\n  printf '%s\\t%s\\t%s\\t%s\\t%s\\n' \"$package\" \"$version\" \"$architecture\" \"$size\" \"$digest\"\n  cp \"$file\" /work/debs/\ndone\n"
+      ],
+      "elapsedSeconds": 0.446,
+      "exitCode": 0,
+      "label": "package-sha256",
+      "stderr": "commands/011-package-sha256.stderr",
+      "stdout": "commands/011-package-sha256.stdout"
+    },
+    {
+      "argv": [
+        "<host-docker-cli>",
+        "--config",
+        "<workspace>/jobs/checkpoint-storage-helper-build-20261029-03/docker-config",
+        "--host",
+        "unix://<host-home>/.docker/run/docker.sock",
+        "cp",
+        "checkpoint-fuse-build-11e996b6ccc0405f:/work/debs",
+        "<workspace>/jobs/checkpoint-storage-helper-build-20261029-03/packages"
+      ],
+      "elapsedSeconds": 0.23,
+      "exitCode": 0,
+      "label": "copy-public-packages",
+      "stderr": "commands/012-copy-public-packages.stderr",
+      "stdout": "commands/012-copy-public-packages.stdout"
+    },
+    {
+      "argv": [
+        "<host-docker-cli>",
+        "--config",
+        "<workspace>/jobs/checkpoint-storage-helper-build-20261029-03/docker-config",
+        "--host",
+        "unix://<host-home>/.docker/run/docker.sock",
+        "network",
+        "disconnect",
+        "bridge",
+        "checkpoint-fuse-build-11e996b6ccc0405f"
+      ],
+      "elapsedSeconds": 0.126,
+      "exitCode": 0,
+      "label": "disconnect-network",
+      "stderr": "commands/013-disconnect-network.stderr",
+      "stdout": "commands/013-disconnect-network.stdout"
+    },
+    {
+      "argv": [
+        "<host-docker-cli>",
+        "--config",
+        "<workspace>/jobs/checkpoint-storage-helper-build-20261029-03/docker-config",
+        "--host",
+        "unix://<host-home>/.docker/run/docker.sock",
+        "inspect",
+        "checkpoint-fuse-build-11e996b6ccc0405f"
+      ],
+      "elapsedSeconds": 0.018,
+      "exitCode": 0,
+      "label": "verify-network-before-install",
+      "stderr": "commands/014-verify-network-before-install.stderr",
+      "stdout": "commands/014-verify-network-before-install.stdout"
+    },
+    {
+      "argv": [
+        "<host-docker-cli>",
+        "--config",
+        "<workspace>/jobs/checkpoint-storage-helper-build-20261029-03/docker-config",
+        "--host",
+        "unix://<host-home>/.docker/run/docker.sock",
+        "exec",
+        "-e",
+        "DEBIAN_FRONTEND=noninteractive",
+        "checkpoint-fuse-build-11e996b6ccc0405f",
+        "apt-get",
+        "-o",
+        "Dir::Etc::sourcelist=/work/ubuntu.sources",
+        "-o",
+        "Dir::Etc::sourceparts=-",
+        "-o",
+        "Acquire::AllowInsecureRepositories=false",
+        "-o",
+        "APT::Get::AllowUnauthenticated=false",
+        "--yes",
+        "--no-install-recommends",
+        "--no-download",
+        "install",
+        "binutils=2.42-4ubuntu2.10",
+        "binutils-aarch64-linux-gnu=2.42-4ubuntu2.10",
+        "binutils-common=2.42-4ubuntu2.10",
+        "cpp=4:13.2.0-7ubuntu1",
+        "cpp-13=13.3.0-6ubuntu2~24.04.1",
+        "cpp-13-aarch64-linux-gnu=13.3.0-6ubuntu2~24.04.1",
+        "cpp-aarch64-linux-gnu=4:13.2.0-7ubuntu1",
+        "gcc=4:13.2.0-7ubuntu1",
+        "gcc-13=13.3.0-6ubuntu2~24.04.1",
+        "gcc-13-aarch64-linux-gnu=13.3.0-6ubuntu2~24.04.1",
+        "gcc-13-base=13.3.0-6ubuntu2~24.04.1",
+        "gcc-aarch64-linux-gnu=4:13.2.0-7ubuntu1",
+        "libasan8=14.2.0-4ubuntu2~24.04.1",
+        "libatomic1=14.2.0-4ubuntu2~24.04.1",
+        "libbinutils=2.42-4ubuntu2.10",
+        "libc-bin=2.39-0ubuntu8.9",
+        "libc-dev-bin=2.39-0ubuntu8.9",
+        "libc6=2.39-0ubuntu8.9",
+        "libc6-dev=2.39-0ubuntu8.9",
+        "libcc1-0=14.2.0-4ubuntu2~24.04.1",
+        "libcrypt-dev=1:4.4.36-4build1",
+        "libctf-nobfd0=2.42-4ubuntu2.10",
+        "libctf0=2.42-4ubuntu2.10",
+        "libfuse3-3=3.14.0-5build1",
+        "libfuse3-dev=3.14.0-5build1",
+        "libgcc-13-dev=13.3.0-6ubuntu2~24.04.1",
+        "libgomp1=14.2.0-4ubuntu2~24.04.1",
+        "libgprofng0=2.42-4ubuntu2.10",
+        "libhwasan0=14.2.0-4ubuntu2~24.04.1",
+        "libisl23=0.26-3build1.1",
+        "libitm1=14.2.0-4ubuntu2~24.04.1",
+        "libjansson4=2.14-2build2",
+        "liblsan0=14.2.0-4ubuntu2~24.04.1",
+        "libmpc3=1.3.1-1build1.1",
+        "libmpfr6=4.2.1-1build1.1",
+        "libpcre2-16-0=10.42-4ubuntu2.1",
+        "libpcre2-32-0=10.42-4ubuntu2.1",
+        "libpcre2-dev=10.42-4ubuntu2.1",
+        "libpcre2-posix3=10.42-4ubuntu2.1",
+        "libpkgconf3=1.8.1-2build1",
+        "libselinux1-dev=3.5-2ubuntu2.1",
+        "libsepol-dev=3.5-2build1",
+        "libsframe1=2.42-4ubuntu2.10",
+        "libtsan2=14.2.0-4ubuntu2~24.04.1",
+        "libubsan1=14.2.0-4ubuntu2~24.04.1",
+        "linux-libc-dev=6.8.0-147.147",
+        "locales=2.39-0ubuntu8.9",
+        "pkg-config=1.8.1-2build1",
+        "pkgconf=1.8.1-2build1",
+        "pkgconf-bin=1.8.1-2build1",
+        "rpcsvc-proto=1.4.2-0ubuntu7"
+      ],
+      "elapsedSeconds": 4.266,
+      "exitCode": 0,
+      "label": "apt-install-locked",
+      "stderr": "commands/015-apt-install-locked.stderr",
+      "stdout": "commands/015-apt-install-locked.stdout"
+    },
+    {
+      "argv": [
+        "<host-docker-cli>",
+        "--config",
+        "<workspace>/jobs/checkpoint-storage-helper-build-20261029-03/docker-config",
+        "--host",
+        "unix://<host-home>/.docker/run/docker.sock",
+        "inspect",
+        "checkpoint-fuse-build-11e996b6ccc0405f"
+      ],
+      "elapsedSeconds": 0.022,
+      "exitCode": 0,
+      "label": "verify-network-before-source",
+      "stderr": "commands/016-verify-network-before-source.stderr",
+      "stdout": "commands/016-verify-network-before-source.stdout"
+    },
+    {
+      "argv": [
+        "<host-docker-cli>",
+        "--config",
+        "<workspace>/jobs/checkpoint-storage-helper-build-20261029-03/docker-config",
+        "--host",
+        "unix://<host-home>/.docker/run/docker.sock",
+        "cp",
+        "<workspace>/jobs/checkpoint-storage-helper-build-20261029-03/source",
+        "checkpoint-fuse-build-11e996b6ccc0405f:/work/source"
+      ],
+      "elapsedSeconds": 0.037,
+      "exitCode": 0,
+      "label": "copy-frozen-source",
+      "stderr": "commands/017-copy-frozen-source.stderr",
+      "stdout": "commands/017-copy-frozen-source.stdout"
+    },
+    {
+      "argv": [
+        "<host-docker-cli>",
+        "--config",
+        "<workspace>/jobs/checkpoint-storage-helper-build-20261029-03/docker-config",
+        "--host",
+        "unix://<host-home>/.docker/run/docker.sock",
+        "exec",
+        "checkpoint-fuse-build-11e996b6ccc0405f",
+        "/bin/sh",
+        "-c",
+        "set -eu\ncd /work/source\ngcc --version > /work/receipts/compiler.txt\npkg-config --modversion fuse3 > /work/receipts/libfuse-version.txt\npkg-config --cflags fuse3 > /work/receipts/fuse-cflags.txt\npkg-config --static --libs fuse3 > /work/receipts/fuse-static-libs.txt\ngcc -std=c11 -D_FILE_OFFSET_BITS=64 -O2 -Wall -Wextra -Werror -pthread $(pkg-config --cflags fuse3) core.c jail.c checkpoint_fuse.c -Wl,-Bstatic $(pkg-config --static --libs fuse3) -Wl,-Bdynamic -o /work/bundle/checkpoint-fuse\ngcc -std=c11 -D_FILE_OFFSET_BITS=64 -O2 -Wall -Wextra -Werror -pthread core.c jail.c selftest.c -o /work/bundle/checkpoint-fuse-selftest\nreadelf -d /work/bundle/checkpoint-fuse > /work/receipts/daemon-dynamic.txt\nreadelf --version-info /work/bundle/checkpoint-fuse > /work/receipts/daemon-symbol-versions.txt\nreadelf -d /work/bundle/checkpoint-fuse-selftest > /work/receipts/selftest-dynamic.txt\n/work/bundle/checkpoint-fuse-selftest > /work/receipts/native-selftest.json\n/work/bundle/checkpoint-fuse --version > /work/receipts/helper-version.txt\n"
+      ],
+      "elapsedSeconds": 0.824,
+      "exitCode": 0,
+      "label": "compile-native",
+      "stderr": "commands/018-compile-native.stderr",
+      "stdout": "commands/018-compile-native.stdout"
+    },
+    {
+      "argv": [
+        "<host-docker-cli>",
+        "--config",
+        "<workspace>/jobs/checkpoint-storage-helper-build-20261029-03/docker-config",
+        "--host",
+        "unix://<host-home>/.docker/run/docker.sock",
+        "cp",
+        "checkpoint-fuse-build-11e996b6ccc0405f:/work/bundle",
+        "<workspace>/jobs/checkpoint-storage-helper-build-20261029-03/bundle"
+      ],
+      "elapsedSeconds": 0.022,
+      "exitCode": 0,
+      "label": "copy-native-bundle",
+      "stderr": "commands/019-copy-native-bundle.stderr",
+      "stdout": "commands/019-copy-native-bundle.stdout"
+    },
+    {
+      "argv": [
+        "<host-docker-cli>",
+        "--config",
+        "<workspace>/jobs/checkpoint-storage-helper-build-20261029-03/docker-config",
+        "--host",
+        "unix://<host-home>/.docker/run/docker.sock",
+        "cp",
+        "checkpoint-fuse-build-11e996b6ccc0405f:/work/receipts",
+        "<workspace>/jobs/checkpoint-storage-helper-build-20261029-03/native-receipts"
+      ],
+      "elapsedSeconds": 0.02,
+      "exitCode": 0,
+      "label": "copy-native-receipts",
+      "stderr": "commands/020-copy-native-receipts.stderr",
+      "stdout": "commands/020-copy-native-receipts.stdout"
+    },
+    {
+      "argv": [
+        "<host-home>/.sdkman/candidates/java/21.0.7-amzn/bin/javac",
+        "-version"
+      ],
+      "elapsedSeconds": 0.131,
+      "exitCode": 0,
+      "label": "javac-version",
+      "stderr": "commands/021-javac-version.stderr",
+      "stdout": "commands/021-javac-version.stdout"
+    },
+    {
+      "argv": [
+        "<host-home>/.sdkman/candidates/java/21.0.7-amzn/bin/javac",
+        "--release",
+        "17",
+        "-encoding",
+        "UTF-8",
+        "-classpath",
+        "<workspace>/jobs/checkpoint-storage-helper-build-20261029-03/java-classes",
+        "-sourcepath",
+        "<workspace>/jobs/checkpoint-storage-helper-build-20261029-03/empty-sourcepath",
+        "-d",
+        "<workspace>/jobs/checkpoint-storage-helper-build-20261029-03/java-classes",
+        "<workspace>/jobs/checkpoint-storage-helper-build-20261029-03/source/CheckpointStorageIoProbe.java",
+        "<workspace>/jobs/checkpoint-storage-helper-build-20261029-03/source/CheckpointStateInspector.java"
+      ],
+      "elapsedSeconds": 0.437,
+      "exitCode": 0,
+      "label": "compile-java",
+      "stderr": "commands/022-compile-java.stderr",
+      "stdout": "commands/022-compile-java.stdout"
+    },
+    {
+      "argv": [
+        "<host-home>/.sdkman/candidates/java/21.0.7-amzn/bin/jar",
+        "--create",
+        "--file",
+        "<workspace>/jobs/checkpoint-storage-helper-build-20261029-03/bundle/probe.jar",
+        "--main-class",
+        "org.savonitar.flink.stability.testcontainers.storage.CheckpointStorageIoProbe",
+        "--date=2026-01-01T00:00:00Z",
+        "-C",
+        "<workspace>/jobs/checkpoint-storage-helper-build-20261029-03/java-classes",
+        "."
+      ],
+      "elapsedSeconds": 0.08,
+      "exitCode": 0,
+      "label": "package-java",
+      "stderr": "commands/023-package-java.stderr",
+      "stdout": "commands/023-package-java.stdout"
+    },
+    {
+      "argv": [
+        "<host-docker-cli>",
+        "--config",
+        "<workspace>/jobs/checkpoint-storage-helper-build-20261029-03/docker-config",
+        "--host",
+        "unix://<host-home>/.docker/run/docker.sock",
+        "create",
+        "--name",
+        "checkpoint-fuse-smoke-727f95ef78a24707",
+        "--label",
+        "org.savonitar.checkpoint-fuse.build=checkpoint-fuse-smoke-727f95ef78a24707",
+        "--network",
+        "none",
+        "--cap-drop",
+        "ALL",
+        "--user",
+        "0:0",
+        "--security-opt",
+        "no-new-privileges:true",
+        "--platform",
+        "linux/arm64",
+        "--entrypoint",
+        "/bin/sleep",
+        "sha256:2e93ded2cb7bf1a50f71b663d5e3ea01420bcc4e549cbf666d05120f939713c7",
+        "120"
+      ],
+      "elapsedSeconds": 0.127,
+      "exitCode": 0,
+      "label": "create-smoke",
+      "stderr": "commands/024-create-smoke.stderr",
+      "stdout": "commands/024-create-smoke.stdout"
+    },
+    {
+      "argv": [
+        "<host-docker-cli>",
+        "--config",
+        "<workspace>/jobs/checkpoint-storage-helper-build-20261029-03/docker-config",
+        "--host",
+        "unix://<host-home>/.docker/run/docker.sock",
+        "inspect",
+        "checkpoint-fuse-smoke-727f95ef78a24707"
+      ],
+      "elapsedSeconds": 0.021,
+      "exitCode": 0,
+      "label": "verify-created-image",
+      "stderr": "commands/025-verify-created-image.stderr",
+      "stdout": "commands/025-verify-created-image.stdout"
+    },
+    {
+      "argv": [
+        "<host-docker-cli>",
+        "--config",
+        "<workspace>/jobs/checkpoint-storage-helper-build-20261029-03/docker-config",
+        "--host",
+        "unix://<host-home>/.docker/run/docker.sock",
+        "start",
+        "checkpoint-fuse-smoke-727f95ef78a24707"
+      ],
+      "elapsedSeconds": 0.124,
+      "exitCode": 0,
+      "label": "start-smoke",
+      "stderr": "commands/026-start-smoke.stderr",
+      "stdout": "commands/026-start-smoke.stdout"
+    },
+    {
+      "argv": [
+        "<host-docker-cli>",
+        "--config",
+        "<workspace>/jobs/checkpoint-storage-helper-build-20261029-03/docker-config",
+        "--host",
+        "unix://<host-home>/.docker/run/docker.sock",
+        "cp",
+        "<workspace>/jobs/checkpoint-storage-helper-build-20261029-03/bundle",
+        "checkpoint-fuse-smoke-727f95ef78a24707:/bundle"
+      ],
+      "elapsedSeconds": 0.037,
+      "exitCode": 0,
+      "label": "copy-smoke-bundle",
+      "stderr": "commands/027-copy-smoke-bundle.stderr",
+      "stdout": "commands/027-copy-smoke-bundle.stdout"
+    },
+    {
+      "argv": [
+        "<host-docker-cli>",
+        "--config",
+        "<workspace>/jobs/checkpoint-storage-helper-build-20261029-03/docker-config",
+        "--host",
+        "unix://<host-home>/.docker/run/docker.sock",
+        "exec",
+        "checkpoint-fuse-smoke-727f95ef78a24707",
+        "/bundle/checkpoint-fuse-selftest"
+      ],
+      "elapsedSeconds": 0.075,
+      "exitCode": 0,
+      "label": "pristine-native-selftest",
+      "stderr": "commands/028-pristine-native-selftest.stderr",
+      "stdout": "commands/028-pristine-native-selftest.stdout"
+    },
+    {
+      "argv": [
+        "<host-docker-cli>",
+        "--config",
+        "<workspace>/jobs/checkpoint-storage-helper-build-20261029-03/docker-config",
+        "--host",
+        "unix://<host-home>/.docker/run/docker.sock",
+        "exec",
+        "checkpoint-fuse-smoke-727f95ef78a24707",
+        "/bundle/checkpoint-fuse",
+        "--version"
+      ],
+      "elapsedSeconds": 0.069,
+      "exitCode": 0,
+      "label": "pristine-helper-version",
+      "stderr": "commands/029-pristine-helper-version.stderr",
+      "stdout": "commands/029-pristine-helper-version.stdout"
+    },
+    {
+      "argv": [
+        "<host-docker-cli>",
+        "--config",
+        "<workspace>/jobs/checkpoint-storage-helper-build-20261029-03/docker-config",
+        "--host",
+        "unix://<host-home>/.docker/run/docker.sock",
+        "exec",
+        "checkpoint-fuse-smoke-727f95ef78a24707",
+        "/bin/sh",
+        "-c",
+        "java -version 2>&1"
+      ],
+      "elapsedSeconds": 0.118,
+      "exitCode": 0,
+      "label": "runtime-java-version",
+      "stderr": "commands/030-runtime-java-version.stderr",
+      "stdout": "commands/030-runtime-java-version.stdout"
+    },
+    {
+      "argv": [
+        "<host-docker-cli>",
+        "--config",
+        "<workspace>/jobs/checkpoint-storage-helper-build-20261029-03/docker-config",
+        "--host",
+        "unix://<host-home>/.docker/run/docker.sock",
+        "exec",
+        "checkpoint-fuse-smoke-727f95ef78a24707",
+        "mkdir",
+        "-m",
+        "777",
+        "/tmp/io-view",
+        "/tmp/io-evidence"
+      ],
+      "elapsedSeconds": 0.069,
+      "exitCode": 0,
+      "label": "java-smoke-directories",
+      "stderr": "commands/031-java-smoke-directories.stderr",
+      "stdout": "commands/031-java-smoke-directories.stdout"
+    },
+    {
+      "argv": [
+        "<host-docker-cli>",
+        "--config",
+        "<workspace>/jobs/checkpoint-storage-helper-build-20261029-03/docker-config",
+        "--host",
+        "unix://<host-home>/.docker/run/docker.sock",
+        "exec",
+        "-i",
+        "--user",
+        "flink",
+        "checkpoint-fuse-smoke-727f95ef78a24707",
+        "java",
+        "-jar",
+        "/bundle/probe.jar",
+        "--root",
+        "/tmp/io-view",
+        "--raw-root",
+        "/tmp/io-raw",
+        "--evidence-root",
+        "/tmp/io-evidence",
+        "--timeout-seconds",
+        "20"
+      ],
+      "elapsedSeconds": 0.119,
+      "exitCode": 0,
+      "label": "pristine-java-probe",
+      "stderr": "commands/032-pristine-java-probe.stderr",
+      "stdout": "commands/032-pristine-java-probe.stdout"
+    },
+    {
+      "argv": [
+        "<host-docker-cli>",
+        "--config",
+        "<workspace>/jobs/checkpoint-storage-helper-build-20261029-03/docker-config",
+        "--host",
+        "unix://<host-home>/.docker/run/docker.sock",
+        "inspect",
+        "checkpoint-fuse-smoke-727f95ef78a24707"
+      ],
+      "elapsedSeconds": 0.018,
+      "exitCode": 0,
+      "label": "cleanup-inspect",
+      "stderr": "commands/033-cleanup-inspect.stderr",
+      "stdout": "commands/033-cleanup-inspect.stdout"
+    },
+    {
+      "argv": [
+        "<host-docker-cli>",
+        "--config",
+        "<workspace>/jobs/checkpoint-storage-helper-build-20261029-03/docker-config",
+        "--host",
+        "unix://<host-home>/.docker/run/docker.sock",
+        "rm",
+        "-f",
+        "checkpoint-fuse-smoke-727f95ef78a24707"
+      ],
+      "elapsedSeconds": 0.066,
+      "exitCode": 0,
+      "label": "cleanup-remove",
+      "stderr": "commands/034-cleanup-remove.stderr",
+      "stdout": "commands/034-cleanup-remove.stdout"
+    },
+    {
+      "argv": [
+        "<host-docker-cli>",
+        "--config",
+        "<workspace>/jobs/checkpoint-storage-helper-build-20261029-03/docker-config",
+        "--host",
+        "unix://<host-home>/.docker/run/docker.sock",
+        "inspect",
+        "checkpoint-fuse-build-11e996b6ccc0405f"
+      ],
+      "elapsedSeconds": 0.024,
+      "exitCode": 0,
+      "label": "cleanup-inspect",
+      "stderr": "commands/035-cleanup-inspect.stderr",
+      "stdout": "commands/035-cleanup-inspect.stdout"
+    },
+    {
+      "argv": [
+        "<host-docker-cli>",
+        "--config",
+        "<workspace>/jobs/checkpoint-storage-helper-build-20261029-03/docker-config",
+        "--host",
+        "unix://<host-home>/.docker/run/docker.sock",
+        "rm",
+        "-f",
+        "checkpoint-fuse-build-11e996b6ccc0405f"
+      ],
+      "elapsedSeconds": 0.069,
+      "exitCode": 0,
+      "label": "cleanup-remove",
+      "stderr": "commands/036-cleanup-remove.stderr",
+      "stdout": "commands/036-cleanup-remove.stdout"
+    }
+  ],
+  "compiler": "gcc (Ubuntu 13.3.0-6ubuntu2~24.04.1) 13.3.0\nCopyright (C) 2023 Free Software Foundation, Inc.\nThis is free software; see the source for copying conditions.  There is NO\nwarranty; not even for MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.",
+  "compilerFlags": [
+    "-std=c11",
+    "-D_FILE_OFFSET_BITS=64",
+    "-O2",
+    "-Wall",
+    "-Wextra",
+    "-Werror",
+    "-pthread"
+  ],
+  "containerImageIdentities": [
+    {
+      "container": "checkpoint-fuse-build-11e996b6ccc0405f",
+      "containerImageId": "sha256:2e93ded2cb7bf1a50f71b663d5e3ea01420bcc4e549cbf666d05120f939713c7",
+      "inspectedImageId": "sha256:2e93ded2cb7bf1a50f71b663d5e3ea01420bcc4e549cbf666d05120f939713c7",
+      "repoDigests": [
+        "flink@sha256:7ecfab9d5e8ec6987a248b32f6605b5fe9bcb7347aea0d7b1bc3976588408681"
+      ]
+    },
+    {
+      "container": "checkpoint-fuse-smoke-727f95ef78a24707",
+      "containerImageId": "sha256:2e93ded2cb7bf1a50f71b663d5e3ea01420bcc4e549cbf666d05120f939713c7",
+      "inspectedImageId": "sha256:2e93ded2cb7bf1a50f71b663d5e3ea01420bcc4e549cbf666d05120f939713c7",
+      "repoDigests": [
+        "flink@sha256:7ecfab9d5e8ec6987a248b32f6605b5fe9bcb7347aea0d7b1bc3976588408681"
+      ]
+    }
+  ],
+  "dependencyLockSha256": "1458d129527d65c94d60fee9226cd557049f4e89b541b6f1aa93f7a3d516ba47",
+  "dockerEndpoint": "unix://<host-home>/.docker/run/docker.sock",
+  "downloadedPackageCount": 51,
+  "files": {
+    "checkpoint-fuse": "c45845195feb47442d993b3d4757bac74cf118bb88a50628ebadd7f3093830fe",
+    "checkpoint-fuse-selftest": "f1799cbf544d85dbcc2fd0cb0b52736bb883ae57c4f608b9a95afa3a6be7f584",
+    "probe.jar": "2fd880248a7515b08ee419e1ff875cc1edff8e0f784878aa55a0aaa0a1780983"
+  },
+  "fuseStaticLibraries": "-lfuse3 -lpthread -ldl -pthread -lrt",
+  "helperVersion": "checkpoint-fuse-v1 libfuse=3.14.0",
+  "imageDigest": "flink@sha256:7ecfab9d5e8ec6987a248b32f6605b5fe9bcb7347aea0d7b1bc3976588408681",
+  "imageId": "sha256:2e93ded2cb7bf1a50f71b663d5e3ea01420bcc4e549cbf666d05120f939713c7",
+  "imageIdentity": {
+    "declaredConfigId": "sha256:2e93ded2cb7bf1a50f71b663d5e3ea01420bcc4e549cbf666d05120f939713c7",
+    "driverType": null,
+    "inspectedImageId": "sha256:2e93ded2cb7bf1a50f71b663d5e3ea01420bcc4e549cbf666d05120f939713c7",
+    "matchForm": "config-id",
+    "repoDigests": [
+      "flink@sha256:7ecfab9d5e8ec6987a248b32f6605b5fe9bcb7347aea0d7b1bc3976588408681"
+    ],
+    "storageDriver": "overlay2"
+  },
+  "imageInspection": {
+    "Architecture": "arm64",
+    "Id": "sha256:2e93ded2cb7bf1a50f71b663d5e3ea01420bcc4e549cbf666d05120f939713c7",
+    "Os": "linux",
+    "RepoDigests": [
+      "flink@sha256:7ecfab9d5e8ec6987a248b32f6605b5fe9bcb7347aea0d7b1bc3976588408681"
+    ]
+  },
+  "javaRelease": 17,
+  "javac": "javac 21.0.7",
+  "libfuseVersion": "3.14.0",
+  "linkage": "static libfuse3; dynamic runtime libc",
+  "neededLibraries": [
+    "libc.so.6",
+    "ld-linux-aarch64.so.1"
+  ],
+  "networkDisconnectedBeforePackageInstall": true,
+  "networkDisconnectedBeforeSourceCopy": true,
+  "platform": "linux/arm64",
+  "pristineHelperVersion": "checkpoint-fuse-v1 libfuse=3.14.0",
+  "pristineJavaProbe": [
+    {
+      "capEff": "0000000000000000",
+      "gid": [
+        9999,
+        9999,
+        9999,
+        9999
+      ],
+      "javaVendor": "Eclipse Adoptium",
+      "javaVersion": "17.0.19",
+      "linuxIdentityAvailable": true,
+      "maximumPayloadBytes": 4096,
+      "operation": "hello",
+      "osArch": "aarch64",
+      "osName": "Linux",
+      "osVersion": "6.12.54-linuxkit",
+      "phase": "complete",
+      "pid": 49,
+      "protocol": "checkpoint-storage-io-v1",
+      "requestId": 1,
+      "sequence": 1,
+      "status": "ok",
+      "timeoutSeconds": 20,
+      "timestamp": "2026-10-29T22:38:40.045037625Z",
+      "uid": [
+        9999,
+        9999,
+        9999,
+        9999
+      ],
+      "watchdogExitCode": 124
+    },
+    {
+      "operation": "quit",
+      "phase": "complete",
+      "protocol": "checkpoint-storage-io-v1",
+      "requestId": 2,
+      "sequence": 2,
+      "status": "ok",
+      "timestamp": "2026-10-29T22:38:40.052246584Z"
+    }
+  ],
+  "pristineNativeSelftest": "{\"status\":\"pass\",\"tests\":100438,\"scope\":\"native-core-and-jail-no-fuse-mount\"}",
+  "runtimeJava": "openjdk version \"17.0.19\" 2026-04-21\nOpenJDK Runtime Environment Temurin-17.0.19+10 (build 17.0.19+10)\nOpenJDK 64-Bit Server VM Temurin-17.0.19+10 (build 17.0.19+10, mixed mode, sharing)",
+  "schemaVersion": 1,
+  "signedIndexReceipt": "80a36b0a6de2f69f49d2df75ef473ccde121e9e190b9ea01d20a4f63778d5c31  /usr/share/keyrings/ubuntu-archive-keyring.gpg\nd90e89008640e66a6eacc13ffaad0fbbd205877cc51acdd8d4f99f9d21fcfee0  /var/lib/apt/lists/ports.ubuntu.com_ubuntu-ports_dists_noble-security_InRelease\n2e663f00d85d69961304599e980bc915e5f2e4be59419eeb1c7d13a94c83967f  /var/lib/apt/lists/ports.ubuntu.com_ubuntu-ports_dists_noble-updates_InRelease\ncdb2f31d809f589719a53c6ad15f255b27569c4059542ada282aaa21b8e164b0  /var/lib/apt/lists/ports.ubuntu.com_ubuntu-ports_dists_noble_InRelease",
+  "sourceHashes": {
+    "testcontainers/checkpoint_storage_build.py": "f42b12801081b3fdd488e9a257dd70832457fa88cc0bdb9e54a0119b6e1cb817",
+    "testcontainers/src/main/java/org/savonitar/flink/stability/testcontainers/storage/CheckpointStateInspector.java": "f447f8607bc4e625095d64b7c12eddf192953342bfade6f65c01daa99110061c",
+    "testcontainers/src/main/java/org/savonitar/flink/stability/testcontainers/storage/CheckpointStorageIoProbe.java": "b855410c8ffef766cca6c1228b03b1d6a9f3eb3eb8b05f20911aac61c72824dd",
+    "testcontainers/src/main/native/checkpoint-fuse/checkpoint_fuse.c": "f3f0184ef4fb1814aae7b1dd6cf66221da0a97c21c6fc138a3d0e82d7b8e9627",
+    "testcontainers/src/main/native/checkpoint-fuse/core.c": "02eb33c0910f8dee6d12c5c3fe3ed723b4acaeff6be1d3bdd441f734315a1fb5",
+    "testcontainers/src/main/native/checkpoint-fuse/core.h": "2c5d7a01f4604c9f3f0c645947fb801c0587bc8db18e8f7f430b7c22720a9935",
+    "testcontainers/src/main/native/checkpoint-fuse/dependencies.json": "1458d129527d65c94d60fee9226cd557049f4e89b541b6f1aa93f7a3d516ba47",
+    "testcontainers/src/main/native/checkpoint-fuse/jail.c": "fa9dbe71f249ad2770eaa23d911fea2f9000bf5b0bef86be11ff0dea1745dadf",
+    "testcontainers/src/main/native/checkpoint-fuse/jail.h": "474d574f37047127566223ffc1798c5a400ebc78dfa526fc12f5d4c915b854f9",
+    "testcontainers/src/main/native/checkpoint-fuse/selftest.c": "4631506b2f4b212b1a1f69b31e0a4a58c738c348a5a0950383fe8a453013fe92"
+  },
+  "status": "built"
+}

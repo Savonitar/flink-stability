@@ -1,0 +1,294 @@
+{
+  "formatVersion": 1,
+  "date": "2026-10-29",
+  "reviewHead": "5f19a7a5796b6a8eb4397320b44e6d4ceed0b7a5",
+  "scope": "Review remediation verification; three fresh single attempts, not a new twelve-run matrix. No live mutant or containerd-store qualification.",
+  "java": {
+    "tests": 1677,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 1,
+    "command": "JDK 21 mvn -B -ntp install with explicit public-only settings and selected artifact cache"
+  },
+  "python": {
+    "tests": 480,
+    "passed": true,
+    "command": "JAVA_HOME=<jdk-21> python3 -B -m unittest discover -s tools/tests -v"
+  },
+  "logs": {
+    "d-reactor-install-02.log": {
+      "path": "jobs/checkpoint-review-remediation-20261029-01/d-reactor-install-02.log",
+      "sha256": "f95f319f74db6cfd5597ad7b315d65cafd50882626045d4e984a162461881cb3"
+    },
+    "d-python-all-03.log": {
+      "path": "jobs/checkpoint-review-remediation-20261029-01/d-python-all-03.log",
+      "sha256": "c34622e6aeeeb243715f47756e53c1014f7ad68930203ecef2cb33418ba70ee0"
+    }
+  },
+  "cliValidations": [
+    {
+      "case": "baseline",
+      "command": [
+        "<workspace>/jobs/checkpoint-review-remediation-20261029-01/maven.sh",
+        "-q",
+        "org.codehaus.mojo:exec-maven-plugin:3.1.0:java",
+        "-pl",
+        "cli",
+        "-Dexec.mainClass=org.savonitar.flink.stability.cli.Main",
+        "-Dexec.args=validate --catalog-root scenarios --artifact-root . --show-plan --scenario state-prefix-baseline"
+      ],
+      "expectedExit": 0,
+      "exitCode": 0,
+      "expectedReason": null,
+      "confirmed": true
+    },
+    {
+      "case": "fuse-index",
+      "command": [
+        "<workspace>/jobs/checkpoint-review-remediation-20261029-01/maven.sh",
+        "-q",
+        "org.codehaus.mojo:exec-maven-plugin:3.1.0:java",
+        "-pl",
+        "cli",
+        "-Dexec.mainClass=org.savonitar.flink.stability.cli.Main",
+        "-Dexec.args=validate --catalog-root scenarios --artifact-root . --show-plan --scenario checkpoint-storage-fault --parameter helper_bundle=jobs/checkpoint-storage-helper-build-20261029-02 --parameter helper_manifest_sha256=50721e4f8f3bd515ca9f445f7a96aee0d3f04da21448a744088bdd4045454e2d"
+      ],
+      "expectedExit": 0,
+      "exitCode": 0,
+      "expectedReason": null,
+      "confirmed": true
+    },
+    {
+      "case": "fuse-config",
+      "command": [
+        "<workspace>/jobs/checkpoint-review-remediation-20261029-01/maven.sh",
+        "-q",
+        "org.codehaus.mojo:exec-maven-plugin:3.1.0:java",
+        "-pl",
+        "cli",
+        "-Dexec.mainClass=org.savonitar.flink.stability.cli.Main",
+        "-Dexec.args=validate --catalog-root scenarios --artifact-root . --show-plan --scenario checkpoint-storage-fault --parameter helper_bundle=jobs/checkpoint-storage-helper-build-20261029-02 --parameter helper_manifest_sha256=50721e4f8f3bd515ca9f445f7a96aee0d3f04da21448a744088bdd4045454e2d --parameter flink_image_id=sha256:2e93ded2cb7bf1a50f71b663d5e3ea01420bcc4e549cbf666d05120f939713c7"
+      ],
+      "expectedExit": 0,
+      "exitCode": 0,
+      "expectedReason": null,
+      "confirmed": true
+    },
+    {
+      "case": "fuse-missing",
+      "command": [
+        "<workspace>/jobs/checkpoint-review-remediation-20261029-01/maven.sh",
+        "-q",
+        "org.codehaus.mojo:exec-maven-plugin:3.1.0:java",
+        "-pl",
+        "cli",
+        "-Dexec.mainClass=org.savonitar.flink.stability.cli.Main",
+        "-Dexec.args=validate --catalog-root scenarios --artifact-root . --show-plan --scenario checkpoint-storage-fault"
+      ],
+      "expectedExit": 1,
+      "exitCode": 1,
+      "expectedReason": "parameter.required-value-missing",
+      "confirmed": true
+    },
+    {
+      "case": "fuse-escape",
+      "command": [
+        "<workspace>/jobs/checkpoint-review-remediation-20261029-01/maven.sh",
+        "-q",
+        "org.codehaus.mojo:exec-maven-plugin:3.1.0:java",
+        "-pl",
+        "cli",
+        "-Dexec.mainClass=org.savonitar.flink.stability.cli.Main",
+        "-Dexec.args=validate --catalog-root scenarios --artifact-root . --show-plan --scenario checkpoint-storage-fault --parameter helper_bundle=../x --parameter helper_manifest_sha256=50721e4f8f3bd515ca9f445f7a96aee0d3f04da21448a744088bdd4045454e2d"
+      ],
+      "expectedExit": 1,
+      "exitCode": 1,
+      "expectedReason": "runner.checkpoint-storage.configuration-invalid",
+      "confirmed": true
+    }
+  ],
+  "packaging": {
+    "version": 1,
+    "status": "pass",
+    "changedEntries": [
+      "META-INF/MANIFEST.MF",
+      "META-INF/flink-stability/keyed-prefix-build.properties"
+    ],
+    "identicalClassEntries": 18,
+    "artifacts": {
+      "correct": {
+        "path": "flink-job-generator/target/flink-job-generator.jar",
+        "sha256": "4807a1135db036b1a53b650d43917f8ecfcc9c6e2dbbc9e06d53c95acb769f45"
+      },
+      "mutant": {
+        "path": "jobs/checkpoint-review-remediation-20261029-01/b1-packaging/mutant/state-reset-on-restore/flink-job-generator-state-reset-on-restore.jar",
+        "sha256": "6ebdf3bb779fa56ff7e05b22cf854e3ac44699b49912c71ed74d1a1ceed5b931"
+      }
+    },
+    "correctBuildLog": "jobs/checkpoint-review-remediation-20261029-01/d-reactor-install-02.log",
+    "mutantBuildLog": "jobs/checkpoint-review-remediation-20261029-01/b1-package-mutant-01.log",
+    "scope": "Current installed correct arm versus fresh isolated profile-built mutant; identical class bytes and CRCs."
+  },
+  "propertyOnlyBuild": {
+    "cases": [
+      {
+        "case": "default",
+        "command": [
+          "<workspace>/jobs/checkpoint-review-remediation-20261029-01/maven.sh",
+          "-pl",
+          "flink-job-generator",
+          "-Dworkload.build.mode=reset-state-on-restore-v1",
+          "package"
+        ],
+        "exitCode": 1,
+        "confirmed": true
+      },
+      {
+        "case": "fresh",
+        "command": [
+          "<workspace>/jobs/checkpoint-review-remediation-20261029-01/maven.sh",
+          "-pl",
+          "flink-job-generator",
+          "-Dworkload.build.mode=reset-state-on-restore-v1",
+          "-Dworkload.build.directory=<workspace>/jobs/checkpoint-review-remediation-20261029-01/d-property-only-fresh",
+          "package"
+        ],
+        "exitCode": 1,
+        "confirmed": true
+      }
+    ],
+    "correctJarUnchangedSha256": "4807a1135db036b1a53b650d43917f8ecfcc9c6e2dbbc9e06d53c95acb769f45"
+  },
+  "live": [
+    {
+      "cell": "state-prefix-baseline",
+      "confirmed": true,
+      "rawStatus": "pass",
+      "rawReason": "validator.kafka.state-prefix.match",
+      "records": 3000,
+      "idDefects": {
+        "missing": 0,
+        "unexpected": 0,
+        "malformed": 0,
+        "duplicates": 0
+      },
+      "stateMismatches": 0,
+      "stateRecoveryConfirmed": true,
+      "buildMode": "correct",
+      "elapsedSeconds": 41.32486549951136,
+      "stdoutBytes": 81386,
+      "stdoutSha256": "538bd3e12b7bb73c45209a15ce45ae55d5c8034f2dd7df0679e04a0950a072d8",
+      "componentEvents": 0,
+      "restErrors": 0,
+      "cleanupComplete": true,
+      "ownedContainerCount": 3
+    },
+    {
+      "cell": "state-recovery-restart",
+      "confirmed": true,
+      "rawStatus": "pass",
+      "rawReason": "validator.kafka.state-prefix.match",
+      "records": 6000,
+      "idDefects": {
+        "missing": 0,
+        "unexpected": 0,
+        "malformed": 0,
+        "duplicates": 0
+      },
+      "stateMismatches": 0,
+      "stateRecoveryConfirmed": true,
+      "buildMode": "correct",
+      "elapsedSeconds": 114.0475929165259,
+      "stdoutBytes": 80252,
+      "stdoutSha256": "3d229fa52210da5afb5d4e79274838eb6951d240821c82eacd4dfb25a58d5356",
+      "componentEvents": 2,
+      "restErrors": 0,
+      "cleanupComplete": true,
+      "ownedContainerCount": 4
+    },
+    {
+      "cell": "correct-eio",
+      "confirmed": true,
+      "rawStatus": "pass",
+      "rawReason": "validator.kafka.state-prefix.match",
+      "records": 30000,
+      "idDefects": {
+        "missing": 0,
+        "unexpected": 0,
+        "malformed": 0,
+        "duplicates": 0
+      },
+      "stateMismatches": 0,
+      "stateRecoveryConfirmed": true,
+      "buildMode": "correct",
+      "elapsedSeconds": 279.72747754119337,
+      "stdoutBytes": 2749144,
+      "stdoutSha256": "8fff77a5f6cdb18ff401e0ce60fc18705924f4bb81c22988157fe32d5445defb",
+      "componentEvents": 2,
+      "restErrors": 0,
+      "cleanupComplete": true,
+      "ownedContainerCount": 4
+    }
+  ],
+  "frameworkManifestSha256": "6d835ca64d225487215e6ec9ff7d2c22bd3fe47fbb23777d1720937fb0188d04",
+  "helperManifestSha256": "50721e4f8f3bd515ca9f445f7a96aee0d3f04da21448a744088bdd4045454e2d",
+  "imageIdentity": {
+    "containerImageId": "sha256:2e93ded2cb7bf1a50f71b663d5e3ea01420bcc4e549cbf666d05120f939713c7",
+    "inspectedImageId": "sha256:2e93ded2cb7bf1a50f71b663d5e3ea01420bcc4e549cbf666d05120f939713c7",
+    "repoDigests": [
+      "flink@sha256:7ecfab9d5e8ec6987a248b32f6605b5fe9bcb7347aea0d7b1bc3976588408681"
+    ],
+    "declaredImageId": "sha256:2e93ded2cb7bf1a50f71b663d5e3ea01420bcc4e549cbf666d05120f939713c7",
+    "imageIdMatchForm": "CONTAINER_IMAGE_ID",
+    "storageDriver": "overlay2"
+  },
+  "fuse": {
+    "baselineCheckpoint": 1,
+    "failedCheckpoint": 2,
+    "nativeEioOperations": 20,
+    "sourceCaptureCount": 59,
+    "cleanupVolumeAbsent": true
+  },
+  "currentChecker": {
+    "confirmed": true,
+    "hashSeeds": [
+      1,
+      137
+    ],
+    "byteIdentical": true,
+    "reportSha256": "ff481ba0cb785e6af2d5958aa84313e267c209bb111fc0ffbbf58c839a493f3a",
+    "checkerSha256": {
+      "calibration/checkpoint-storage/audit.py": "36b2314b0a4cbbdc6aad70900026b77abd2e941b90b12ebf71d5dab2fde8b7c6",
+      "calibration/checkpoint-storage/check.py": "68f870840bf3228a2013c7fad013a989d296b2c849879f60ead38795d61f5838",
+      "calibration/checkpoint-storage/component_events.py": "77bb40fc37fceee0771cc9a87b003873c396802a6f407e6e6d8e2f88289f1af5",
+      "calibration/checkpoint-storage/framework.py": "c328b7b4a9b549ddc45bd99751eaf632517fd71afd867462c6e029f2c759e89a",
+      "calibration/checkpoint-storage/inventory.py": "f934da812c4fb36537956b9ab0456f3be11a919f91bdf2dedc4993c90da629b5",
+      "calibration/checkpoint-storage/raw_evidence.py": "c3bdc9a338508f5da611ac0624417b4dd74386d2e11d70813191121bab25fed0",
+      "calibration/state-recovery/check.py": "b5c8cedaa921642692c07e85a9e55f7d3a3e6dbfefa819bc7b23d6e4c69cd2c5"
+    },
+    "derivedCliProjections": {
+      "files": [
+        {
+          "legacyRepresentation": true,
+          "path": "input-evidence.json",
+          "sha256": "9fb3bdc6838d33376738412d8ca37e101abe9b60c02d66feae1d6f476085dc35",
+          "source": "stdout.json#/evidence/input"
+        },
+        {
+          "legacyRepresentation": true,
+          "path": "configuration-evidence.json",
+          "sha256": "de8ed719c41973cb7c7b30aefef2547dcd0aa8ef6f5ac9a9235578534cccc165",
+          "source": "stdout.json#/evidence/flinkRuntime"
+        }
+      ],
+      "independentProof": false,
+      "kind": "derived-cli-result-projection",
+      "scope": "CLI result copies checked for self-consistency; mandatory raw source proof is separate"
+    }
+  },
+  "preservedFailures": [
+    "First full install failed one stale image-identity test fixture; expectation stayed unchanged and the corrected full install passed.",
+    "Fresh helper build 01 failed strict selftest compilation; helper build 02 is separately retained and passed."
+  ],
+  "followUps": "docs/CHECKPOINT-STORAGE-REVIEW-FOLLOWUPS.md"
+}

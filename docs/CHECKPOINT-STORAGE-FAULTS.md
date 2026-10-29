@@ -1,5 +1,10 @@
 # Checkpoint storage faults
 
+The [October 29 review verification](CHECKPOINT-STORAGE-REVIEW-VERIFICATION.md)
+records fresh successful regression attempts with the rebuilt helpers. The final
+FUSE result JSON was 2,762,931 bytes, including raw source references and the bound
+journal subset; this observed size is not a general per-run maximum.
+
 Historical evidence links open [sanitized copies and compact summaries](evidence/README.md).
 Printed receipt/result hashes identify the **raw originals**, retained unchanged
 under local `jobs/`. The [publication manifest](evidence/checkpoint-storage-publication-manifest.json)
@@ -290,10 +295,12 @@ stopped incarnation's journal before removing its container and preserves
 contiguous prefixes across later captures. The integrated adapter explicitly
 sets journal bounds of 16 MiB and 25,000 records per incarnation; the retained
 journal-copy budget is 128 MiB. The helper's minimum configurable limits are
-64 KiB and 10 records. Individual records cover mutations, errors,
-control/lifecycle events and checkpoint-file reads. Successful ordinary reads,
-getattr, readdir, access, flush and release instead accumulate per-instance
-counters; STATUS reports these without consuming a journal record, and SUMMARY
+64 KiB and 10 records. Individual records cover the create/write fault family
+(including truncate and open-with-truncation), all errors, control/lifecycle
+events and checkpoint-file reads. Successful ordinary reads, getattr, readdir,
+access, flush, release, fsync and fdatasync instead accumulate per-instance
+counters; other successful non-fault operations produce no individual receipt.
+STATUS reports counters without consuming a journal record, and SUMMARY
 records flush pending counters after 1,000 aggregated operations or one second
 of activity. Fault-family results and control acknowledgements are synced before
 reply; aggregate summaries do not force a sync per read.

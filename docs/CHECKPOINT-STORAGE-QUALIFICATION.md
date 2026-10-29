@@ -1,5 +1,9 @@
 # Checkpoint-storage qualification
 
+For the later review fixes and fresh regression attempts, see the
+[October 29 verification report](CHECKPOINT-STORAGE-REVIEW-VERIFICATION.md).
+The twelve-run qualification below retains its original artifact scope.
+
 **Status: QUALIFIED on 2026-10-27 for Docker Desktop `linux/arm64`.** The fixed
 PR 5 matrix `jobs/checkpoint-storage-qualification-20261027-01` confirmed all
 twelve allocations: nine raw PASS results and three raw mutant state-mismatch

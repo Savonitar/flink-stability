@@ -1,0 +1,82 @@
+[
+  {
+    "case": "baseline",
+    "command": [
+      "<workspace>/jobs/checkpoint-review-remediation-20261029-01/maven.sh",
+      "-q",
+      "org.codehaus.mojo:exec-maven-plugin:3.1.0:java",
+      "-pl",
+      "cli",
+      "-Dexec.mainClass=org.savonitar.flink.stability.cli.Main",
+      "-Dexec.args=validate --catalog-root scenarios --artifact-root . --show-plan --scenario state-prefix-baseline"
+    ],
+    "expectedExit": 0,
+    "exitCode": 0,
+    "expectedReason": null,
+    "confirmed": true
+  },
+  {
+    "case": "fuse-index",
+    "command": [
+      "<workspace>/jobs/checkpoint-review-remediation-20261029-01/maven.sh",
+      "-q",
+      "org.codehaus.mojo:exec-maven-plugin:3.1.0:java",
+      "-pl",
+      "cli",
+      "-Dexec.mainClass=org.savonitar.flink.stability.cli.Main",
+      "-Dexec.args=validate --catalog-root scenarios --artifact-root . --show-plan --scenario checkpoint-storage-fault --parameter helper_bundle=jobs/checkpoint-storage-helper-build-20261029-02 --parameter helper_manifest_sha256=50721e4f8f3bd515ca9f445f7a96aee0d3f04da21448a744088bdd4045454e2d"
+    ],
+    "expectedExit": 0,
+    "exitCode": 0,
+    "expectedReason": null,
+    "confirmed": true
+  },
+  {
+    "case": "fuse-config",
+    "command": [
+      "<workspace>/jobs/checkpoint-review-remediation-20261029-01/maven.sh",
+      "-q",
+      "org.codehaus.mojo:exec-maven-plugin:3.1.0:java",
+      "-pl",
+      "cli",
+      "-Dexec.mainClass=org.savonitar.flink.stability.cli.Main",
+      "-Dexec.args=validate --catalog-root scenarios --artifact-root . --show-plan --scenario checkpoint-storage-fault --parameter helper_bundle=jobs/checkpoint-storage-helper-build-20261029-02 --parameter helper_manifest_sha256=50721e4f8f3bd515ca9f445f7a96aee0d3f04da21448a744088bdd4045454e2d --parameter flink_image_id=sha256:2e93ded2cb7bf1a50f71b663d5e3ea01420bcc4e549cbf666d05120f939713c7"
+    ],
+    "expectedExit": 0,
+    "exitCode": 0,
+    "expectedReason": null,
+    "confirmed": true
+  },
+  {
+    "case": "fuse-missing",
+    "command": [
+      "<workspace>/jobs/checkpoint-review-remediation-20261029-01/maven.sh",
+      "-q",
+      "org.codehaus.mojo:exec-maven-plugin:3.1.0:java",
+      "-pl",
+      "cli",
+      "-Dexec.mainClass=org.savonitar.flink.stability.cli.Main",
+      "-Dexec.args=validate --catalog-root scenarios --artifact-root . --show-plan --scenario checkpoint-storage-fault"
+    ],
+    "expectedExit": 1,
+    "exitCode": 1,
+    "expectedReason": "parameter.required-value-missing",
+    "confirmed": true
+  },
+  {
+    "case": "fuse-escape",
+    "command": [
+      "<workspace>/jobs/checkpoint-review-remediation-20261029-01/maven.sh",
+      "-q",
+      "org.codehaus.mojo:exec-maven-plugin:3.1.0:java",
+      "-pl",
+      "cli",
+      "-Dexec.mainClass=org.savonitar.flink.stability.cli.Main",
+      "-Dexec.args=validate --catalog-root scenarios --artifact-root . --show-plan --scenario checkpoint-storage-fault --parameter helper_bundle=../x --parameter helper_manifest_sha256=50721e4f8f3bd515ca9f445f7a96aee0d3f04da21448a744088bdd4045454e2d"
+    ],
+    "expectedExit": 1,
+    "exitCode": 1,
+    "expectedReason": "runner.checkpoint-storage.configuration-invalid",
+    "confirmed": true
+  }
+]

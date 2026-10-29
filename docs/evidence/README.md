@@ -19,10 +19,10 @@ are represented by numbered summary lines with their source filename and hash.
 These files support inspection of the reported observations; they are insufficient
 for independently rerunning the full raw-evidence checker.
 
-The publication contains 58 selected receipts from 23 batches. All 50 previously
+The publication contains 73 selected receipts. All 50 previously
 linked local targets were available (49 files and one directory); no missing
 receipt was substituted or presented as observed. Original and published hashes
-were checked for every copy, and 90 result/report objects were checked for unchanged
+were checked for every copy. The historical publication also checked 90 result/report objects for unchanged
 verdicts and reported error/event counts. Detailed mismatch examples are bounded
 to the first three where the original contains more; total mismatch counts remain.
 Long failure text is explicitly excerpted with its original length and text hash.
@@ -67,3 +67,7 @@ The previously published [Kafka lifecycle receipts](kafka-lifecycle/2026-10-11/R
 
 - [Review helper build 01](checkpoint-storage-helper-build-20261029-01/README.md)
 - [Review helper build 02](checkpoint-storage-helper-build-20261029-02/README.md)
+- [Review verification receipts](checkpoint-review-remediation-20261029-01/README.md)
+- [Fresh live verification](checkpoint-review-live-20261029-01/README.md)
+- [Final strict-journal helper build](checkpoint-storage-helper-build-20261029-03/README.md)
+- [Final strict-journal live verification](checkpoint-review-final-fuse-20261029-01/README.md)

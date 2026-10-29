@@ -1,0 +1,22 @@
+{
+  "version": 1,
+  "status": "pass",
+  "changedEntries": [
+    "META-INF/MANIFEST.MF",
+    "META-INF/flink-stability/keyed-prefix-build.properties"
+  ],
+  "identicalClassEntries": 18,
+  "artifacts": {
+    "correct": {
+      "path": "flink-job-generator/target/flink-job-generator.jar",
+      "sha256": "4807a1135db036b1a53b650d43917f8ecfcc9c6e2dbbc9e06d53c95acb769f45"
+    },
+    "mutant": {
+      "path": "jobs/checkpoint-review-remediation-20261029-01/b1-packaging/mutant/state-reset-on-restore/flink-job-generator-state-reset-on-restore.jar",
+      "sha256": "6ebdf3bb779fa56ff7e05b22cf854e3ac44699b49912c71ed74d1a1ceed5b931"
+    }
+  },
+  "correctBuildLog": "jobs/checkpoint-review-remediation-20261029-01/d-reactor-install-02.log",
+  "mutantBuildLog": "jobs/checkpoint-review-remediation-20261029-01/b1-package-mutant-01.log",
+  "scope": "Current installed correct arm versus fresh isolated profile-built mutant; identical class bytes and CRCs."
+}

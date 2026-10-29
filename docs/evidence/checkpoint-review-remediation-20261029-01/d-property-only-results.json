@@ -1,0 +1,30 @@
+{
+  "cases": [
+    {
+      "case": "default",
+      "command": [
+        "<workspace>/jobs/checkpoint-review-remediation-20261029-01/maven.sh",
+        "-pl",
+        "flink-job-generator",
+        "-Dworkload.build.mode=reset-state-on-restore-v1",
+        "package"
+      ],
+      "exitCode": 1,
+      "confirmed": true
+    },
+    {
+      "case": "fresh",
+      "command": [
+        "<workspace>/jobs/checkpoint-review-remediation-20261029-01/maven.sh",
+        "-pl",
+        "flink-job-generator",
+        "-Dworkload.build.mode=reset-state-on-restore-v1",
+        "-Dworkload.build.directory=<workspace>/jobs/checkpoint-review-remediation-20261029-01/d-property-only-fresh",
+        "package"
+      ],
+      "exitCode": 1,
+      "confirmed": true
+    }
+  ],
+  "correctJarUnchangedSha256": "4807a1135db036b1a53b650d43917f8ecfcc9c6e2dbbc9e06d53c95acb769f45"
+}

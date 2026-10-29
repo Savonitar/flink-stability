@@ -1,0 +1,29 @@
+{
+  "confirmed": true,
+  "instances": [
+    {
+      "process": "jobmanager-1#1",
+      "records": 5895,
+      "bytes": 4783593,
+      "forbiddenSuccessfulRecords": 0,
+      "fsync": 2,
+      "fdatasync": 0
+    },
+    {
+      "process": "taskmanager-1#1",
+      "records": 85,
+      "bytes": 67294,
+      "forbiddenSuccessfulRecords": 0,
+      "fsync": 4,
+      "fdatasync": 0
+    },
+    {
+      "process": "taskmanager-1#2",
+      "records": 2243,
+      "bytes": 1632061,
+      "forbiddenSuccessfulRecords": 0,
+      "fsync": 4,
+      "fdatasync": 0
+    }
+  ]
+}
