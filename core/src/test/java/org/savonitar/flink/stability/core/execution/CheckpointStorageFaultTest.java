@@ -81,6 +81,122 @@ class CheckpointStorageFaultTest {
         assertTrue(CheckpointStorageFault.finalConfirmed(evidence, fake.snapshot(true)));
     }
 
+    @Test void captureScopesRetainSelectedFaultObservationsAndDiscardPendingTriggerAndRecoveryPolls() throws Exception {
+        var fake = new Fixture(Mode.HEALTHY);
+        fake.pendingTriggerPolls = 2;
+        fake.pendingRecoveryPolls = 1;
+        var evidence = fake.execute();
+        assertTrue(evidence.confirmed(), () -> evidence.errors().toString());
+        var captures = fake.captures;
+        captures.assertClosed();
+        var triggerScopes = captures.scopes.stream().filter(scope -> scope.calls.stream()
+                .anyMatch(call -> call.operation().equals("checkpointStatus"))).toList();
+        var recoveryScopes = captures.scopes.stream().filter(scope -> scope.calls.stream()
+                .anyMatch(call -> call.operation().equals("observe") && call.context().equals("phase-5"))).toList();
+        assertEquals(3, triggerScopes.size());
+        assertEquals(2, recoveryScopes.size());
+        var discarded = List.of(triggerScopes.get(0), triggerScopes.get(1), recoveryScopes.getFirst());
+        for (var call : captures.calls) {
+            if (call.scope() == null) {
+                assertEquals("checkpointHistory", call.operation(), "Only the ordinary failure-history poll is ungrouped");
+                assertEquals("phase-2", call.context());
+                captures.assertDiscarded(call);
+            } else if (discarded.contains(call.scope())) captures.assertDiscarded(call);
+            else captures.assertRetained(call);
+        }
+        assertTrue(captures.calls.stream().anyMatch(call -> call.scope() == null));
+        var selectedReferences = new ArrayList<List<RawEvidenceRef>>();
+        selectedReferences.add(evidence.configuration().rawEvidence());
+        selectedReferences.add(evidence.triggerSubmitEvidence());
+        selectedReferences.add(evidence.triggerResult().rawEvidence());
+        selectedReferences.add(evidence.failedCheckpoint().rawEvidence());
+        selectedReferences.add(evidence.beforeKillEvidence());
+        selectedReferences.add(evidence.afterKillEvidence());
+        for (var sample : evidence.samples()) {
+            selectedReferences.add(sample.job().rawEvidence());
+            selectedReferences.add(sample.checkpoints().rawEvidence());
+        }
+        for (var references : selectedReferences) {
+            assertEquals(1, references.size(), "Selected proof must reference its own captured call");
+            assertTrue(captures.store.since(0).containsAll(references));
+        }
+        assertEquals(captures.calls.stream().filter(call -> call.scope() != null && !discarded.contains(call.scope())).count(),
+                captures.store.utilisation().captures());
+    }
+
+    @Test void failedSubmissionRetainsItsResponseAndClosesTheScopeBeforeAborting() throws Exception {
+        var fake = new Fixture(Mode.UNKNOWN_POST);
+        var evidence = fake.execute();
+        assertFalse(evidence.confirmed());
+        fake.captures.assertClosed();
+        var submission = fake.captures.calls.stream().filter(call -> call.operation().equals("triggerCheckpoint"))
+                .findFirst().orElseThrow();
+        fake.captures.assertRetained(submission);
+        assertEquals(submission.references(), evidence.triggerSubmitEvidence());
+        assertEquals(1, fake.count("abort"));
+        assertEquals(0, fake.count("kill"));
+    }
+
+    @Test void timedOutTriggerDiscardsPendingResponseAndDoesNotExposeItsPlannedReference() throws Exception {
+        var fake = new Fixture(Mode.TRIGGER_DEADLINE);
+        var evidence = fake.execute();
+        assertFalse(evidence.confirmed());
+        fake.captures.assertClosed();
+        var pending = fake.captures.calls.stream().filter(call -> call.operation().equals("checkpointStatus"))
+                .findFirst().orElseThrow();
+        fake.captures.assertDiscarded(pending);
+        assertTrue(evidence.triggerResult().rawEvidence().isEmpty());
+        assertEquals(1, fake.count("abort"));
+    }
+
+    @Test void idlessStartupTriggerFailuresPermitTheWholeFaultSequenceWithoutResettingCounts() throws Exception {
+        var fake = new Fixture(Mode.HEALTHY);
+        fake.startupIdlessFailures = 1;
+        var evidence = fake.execute();
+        assertTrue(evidence.confirmed(), () -> evidence.errors().toString());
+        assertEquals(1, evidence.baselineIdlessTriggerFailures());
+        assertEquals(List.of("gate", "materialize", "arm", "trigger", "trigger-status", "kill", "heal", "restart"), fake.actions);
+        assertEquals(1, evidence.samples().getFirst().checkpoints().counts().failed());
+        assertEquals(2, evidence.samples().get(2).checkpoints().counts().failed());
+        assertTrue(evidence.samples().stream().allMatch(sample -> sample.checkpoints().idlessFailures() == 1));
+        assertTrue(CheckpointStorageFault.finalConfirmed(evidence, fake.snapshot(true)));
+        var forged = new CheckpointStorageFault.Evidence(evidence.path(), evidence.jobId(), evidence.triggerId(),
+                evidence.timeoutMillis(), evidence.checkpointId(), evidence.failedCheckpointId(), evidence.configuration(),
+                evidence.readiness(), evidence.materialization(), evidence.triggerResult(), evidence.failedCheckpoint(),
+                evidence.failureTrace(), evidence.recoveryTrace(), evidence.samples(), evidence.transitions(), evidence.kill(),
+                evidence.restart(), evidence.recovery(), evidence.errors(), evidence.declaredControls(),
+                evidence.triggerSubmitEvidence(), evidence.beforeKillEvidence(), evidence.afterKillEvidence(), 0);
+        assertFalse(forged.confirmed());
+    }
+
+    @Test void retainedAndLatestRealFailuresRejectBeforeInspectorWithPreciseDiagnostics() throws Exception {
+        for (boolean retained : List.of(false, true)) {
+            var fake = new Fixture(Mode.HEALTHY);
+            fake.baselineFailedCheckpoint = true;
+            fake.retainBaselineFailure = retained;
+            var evidence = fake.execute();
+            assertFalse(evidence.confirmed());
+            assertEquals(List.of("gate"), fake.actions);
+            assertNull(evidence.materialization());
+            assertTrue(evidence.errors().stream().anyMatch(message -> message.contains(retained
+                    ? "retained FAILED checkpoint" : "latest FAILED checkpoint")), evidence.errors().toString());
+            assertTrue(evidence.errors().stream().noneMatch(message -> message.contains("Latest completed checkpoint changed")));
+        }
+    }
+
+    @Test void newIdlessFailureAfterArmCannotBeAttributedToTheInjectedCheckpoint() throws Exception {
+        var fake = new Fixture(Mode.HEALTHY);
+        fake.startupIdlessFailures = 1;
+        fake.additionalIdlessAfterArm = true;
+        var evidence = fake.execute();
+        assertFalse(evidence.confirmed());
+        assertEquals(1, fake.count("arm"));
+        assertEquals(0, fake.count("trigger"));
+        assertEquals(0, fake.count("kill"));
+        assertEquals(1, fake.count("abort"));
+        assertTrue(evidence.errors().stream().anyMatch(message -> message.contains("Checkpoint changed while arming")));
+    }
+
     @Test void acceptsExactRestoreStartedByJobManagerBeforeReplacementSlotsExist() throws Exception {
         var fake = new Fixture(Mode.EARLY_RESTORE);
         var evidence = fake.execute();
@@ -541,13 +657,18 @@ class CheckpointStorageFaultTest {
         final Path oldLog, newLog;
         final FlinkScenarioControl flink;
         final V1AttemptRuntime runtime;
+        final RecordingRawEvidenceCaptures captures;
         int phase, failureLogPolls, failureHistoryReads, postKillHistoryReads;
+        int pendingTriggerPolls, pendingRecoveryPolls, recoveryObservations;
         int observedTolerance = 10;
+        int startupIdlessFailures;
+        boolean baselineFailedCheckpoint, retainBaselineFailure, additionalIdlessAfterArm;
         String faultId = "";
         StorageFaultControl.Transition arm, heal;
 
         Fixture(Mode mode) throws Exception {
             this.mode = mode;
+            captures = new RecordingRawEvidenceCaptures(temporary.toRealPath().resolve("raw-" + java.util.UUID.randomUUID()));
             oldLog = Files.createTempFile(temporary, "old-", ".log");
             newLog = Files.createTempFile(temporary, "new-", ".log");
             Files.writeString(oldLog, delayedFailureLog() ? preText() : failedLogText());
@@ -579,13 +700,22 @@ class CheckpointStorageFaultTest {
 
         private Object flinkCall(String method, Object[] arguments) throws Exception {
             now.addAndGet(1_000_000);
+            if (!method.equals("captureRawEvidence") && !method.equals("latestCallEvidence"))
+                captures.record(method, "phase-" + phase);
             return switch (method) {
-                case "latestCallEvidence" -> List.of();
+                case "captureRawEvidence" -> captures.open();
+                case "latestCallEvidence" -> captures.latest();
                 case "checkpointConfiguration" -> new FlinkCheckpointEvidence.Configuration(JOB, "exactly_once", 10000, 60000,
-                        0, 1, observedTolerance, "HashMapStateBackend", "FileSystemCheckpointStorage", false, false, false, false);
-                case "checkpointHistory" -> observedHistory();
-                case "checkpointDetails" -> checkpoint(4, true);
-                case "observe" -> observedJob();
+                        0, 1, observedTolerance, "HashMapStateBackend", "FileSystemCheckpointStorage", false, false, false, false)
+                        .withRawEvidence(captures.latest());
+                case "checkpointHistory" -> observedHistory().withRawEvidence(captures.latest());
+                case "checkpointDetails" -> checkpoint(4, true).withRawEvidence(captures.latest());
+                case "observe" -> {
+                    if (phase == 5) recoveryObservations++;
+                    var observed = observedJob();
+                    yield new FlinkJobObservation(observed.jobManagerTimeMillis(), observed.state(), observed.completedCheckpoints(),
+                            observed.restoredCheckpoints(), observed.latestRestore(), observed.failures(), observed.subtasks(), captures.latest());
+                }
                 case "jobManagerTimeMillis" -> phase < 3 ? 1100L : 1200L;
                 case "triggerCheckpoint" -> {
                     actions.add("trigger"); assertEquals(faultId, arguments[1]);
@@ -593,10 +723,13 @@ class CheckpointStorageFaultTest {
                     yield arguments[1];
                 }
                 case "checkpointStatus" -> {
-                    actions.add("trigger-status"); assertEquals(faultId, arguments[1]); phase = 2;
+                    actions.add("trigger-status"); assertEquals(faultId, arguments[1]);
+                    if (pendingTriggerPolls-- > 0) yield new FlinkCheckpointTrigger.Observation(
+                            FlinkCheckpointTrigger.State.IN_PROGRESS, OptionalLong.empty(), Optional.empty(), captures.latest());
+                    phase = 2;
                     if (mode == Mode.TRIGGER_DEADLINE) { now.set(Duration.ofSeconds(3).toNanos());
-                        yield new FlinkCheckpointTrigger.Observation(FlinkCheckpointTrigger.State.IN_PROGRESS, OptionalLong.empty(), Optional.empty()); }
-                    yield failedTrigger();
+                        yield new FlinkCheckpointTrigger.Observation(FlinkCheckpointTrigger.State.IN_PROGRESS, OptionalLong.empty(), Optional.empty(), captures.latest()); }
+                    yield failedTrigger().withRawEvidence(captures.latest());
                 }
                 default -> throw new AssertionError("Unexpected Flink call: " + method);
             };
@@ -648,6 +781,23 @@ class CheckpointStorageFaultTest {
         }
 
         private FlinkCheckpointEvidence.History observedHistory() {
+            var result = originalHistory();
+            if (baselineFailedCheckpoint && phase == 0) {
+                var failed = postKillCheckpoint(2, 650);
+                var retained = new ArrayList<>(result.retained());
+                if (retainBaselineFailure) retained.add(failed);
+                return new FlinkCheckpointEvidence.History(JOB, new FlinkCheckpointEvidence.Counts(2, 0, 1, 1, 0),
+                        retained, result.latestCompleted(), Optional.of(failed), Optional.empty(), Optional.empty());
+            }
+            long extra = startupIdlessFailures + (additionalIdlessAfterArm && phase > 0 ? 1 : 0);
+            var counts = result.counts();
+            return new FlinkCheckpointEvidence.History(JOB, new FlinkCheckpointEvidence.Counts(counts.total() + extra,
+                    counts.inProgress(), counts.completed(), counts.failed() + extra, counts.restored()), result.retained(),
+                    result.latestCompleted(), result.latestFailed(), result.latestSavepoint(), result.latestRestored());
+        }
+
+        private FlinkCheckpointEvidence.History originalHistory() {
+            if (phase == 5 && recoveryObservations <= pendingRecoveryPolls) return history(4);
             if (phase == 2) failureHistoryReads++;
             if (phase == 3) postKillHistoryReads++;
             var ordinary = history(phase);

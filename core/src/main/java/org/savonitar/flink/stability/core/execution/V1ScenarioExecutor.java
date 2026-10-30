@@ -566,7 +566,7 @@ public final class V1ScenarioExecutor {
             result = result.withStateRecovery(StateRecoveryReport.collect(prepared,
                     job == null ? "unsubmitted" : job.jobId(), result, runtime, stateRecoveryGate));
         }
-        return result;
+        return result.withRawEvidence(flink == null ? Optional.empty() : flink.rawEvidenceUtilisation());
     }
 
     private static SubjectClassOrigins subjectOrigins(

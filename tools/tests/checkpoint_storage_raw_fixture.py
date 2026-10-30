@@ -174,4 +174,8 @@ def attach_raw_fixture(result, directory):
         state["rawEvidence"] = source(raw, group("docker-inspect"), "/v1.44/containers/" + state["runtimeId"] + "/json", start,
             kind="docker-inspect-id-state-source-projection", directory_name="raw-storage")
     (directory / "retained-evidence.json").write_text(json.dumps(index, sort_keys=True) + "\n")
+    rest_paths = [directory / row["localPath"] for row in index["files"]
+                  if row["kind"] == "raw-response" and row["localPath"].startswith("raw-flink-rest/")]
+    evidence["rawEvidence"] = dict(captures=len(rest_paths), bytes=sum(path.stat().st_size for path in rest_paths),
+                                   maxCaptures=4096, maxBytes=67108864, complete=True)
     return result

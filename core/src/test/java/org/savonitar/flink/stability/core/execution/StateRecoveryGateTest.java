@@ -49,7 +49,7 @@ class StateRecoveryGateTest {
         assertEquals(4, readiness.committedPrefix().observedRecords());
         assertEquals(3, readiness.committedPrefix().maximumId());
         assertEquals(Map.of(0, 2L, 1, 2L), readiness.committedPrefix().perKeyCounts());
-        assertEquals(List.of("taskManagerIdentity", "checkpointOverview", "latestCallEvidence", "observe",
+        assertEquals(List.of("taskManagerIdentity", "captureRawEvidence", "checkpointOverview", "latestCallEvidence", "observe",
                 "flinkProvisioningEvidence", "flinkComponentLogs"), calls);
         assertEquals(List.of(readiness), gate.attempts());
     }
@@ -58,16 +58,25 @@ class StateRecoveryGateTest {
     void retainsFixedCommittedBoundaryWhileWaitingForInFlightCheckpointToFinish() throws Exception {
         var reads = new AtomicInteger();
         var calls = new ArrayList<String>();
+        var captures = captures();
         var gate = gate((bootstrap, topic, timeout, records, bytes) -> {
             if (reads.incrementAndGet() > 1) throw new AssertionError("A second consumer read would miss the window");
             return snapshot(List.of(row(0), row(1), row(2), row(3)));
-        }, new AtomicLong(), calls, 1);
+        }, new AtomicLong(), calls, 1, captures);
         var readiness = gate.awaitReady(HANDLE, "taskmanager-1").orElseThrow();
         assertTrue(readiness.ready(), readiness.reason());
         assertEquals(1, reads.get());
         assertEquals(2, calls.stream().filter("checkpointOverview"::equals).count());
         assertEquals(Map.of(0, 0L), readiness.committedPrefix().beginningOffsets());
         assertEquals(Map.of(0, 4L), readiness.committedPrefix().endOffsets());
+        captures.assertClosed();
+        assertEquals(2, captures.scopes.size());
+        assertFalse(captures.scopes.getFirst().retained, "An in-flight checkpoint is only a polling candidate");
+        for (var call : captures.scopes.getFirst().calls) captures.assertDiscarded(call);
+        for (var call : captures.scopes.getLast().calls) captures.assertRetained(call);
+        assertEquals(2, captures.store.utilisation().captures());
+        assertEquals(captures.scopes.getLast().calls.getFirst().references(), readiness.checkpointEvidence());
+        assertEquals(captures.scopes.getLast().calls.getLast().references(), readiness.jobObservation().rawEvidence());
     }
 
     @Test
@@ -129,7 +138,9 @@ class StateRecoveryGateTest {
     void missingProgressIsRetainedAsUnreadyAndNoRuntimeMutationIsPossible() throws Exception {
         var clock = new AtomicLong();
         var calls = new ArrayList<String>();
-        var gate = gate(snapshot(List.of(row(0), row(1), row(2), row(3))), clock, calls);
+        var captures = captures();
+        var gate = gate((bootstrap, topic, timeout, records, bytes) -> snapshot(List.of(row(0), row(1), row(2), row(3))),
+                clock, calls, 0, captures);
         Files.writeString(temporary.resolve("process.log"), "unrelated process line\n");
         var readiness = gate.awaitReady(HANDLE, "taskmanager-1").orElseThrow();
         assertFalse(readiness.ready());
@@ -137,6 +148,12 @@ class StateRecoveryGateTest {
         assertEquals(1, gate.attempts().size());
         assertTrue(clock.get() >= StateRecoveryGate.TIMEOUT.toNanos());
         assertTrue(calls.stream().noneMatch(call -> call.startsWith("kill") || call.startsWith("restart")));
+        captures.assertClosed();
+        assertEquals(1, captures.scopes.size());
+        for (var call : captures.calls) captures.assertDiscarded(call);
+        assertEquals(0, captures.store.utilisation().captures());
+        assertTrue(readiness.checkpointEvidence().isEmpty(), "Unselected references must not escape into evidence");
+        assertTrue(readiness.jobObservation().rawEvidence().isEmpty());
     }
 
     private StateRecoveryGate gate(KafkaStateTopicSnapshot snapshot, AtomicLong clock, List<String> calls) throws Exception {
@@ -149,6 +166,15 @@ class StateRecoveryGateTest {
 
     private StateRecoveryGate gate(KafkaStateSnapshotReader reader, AtomicLong clock, List<String> calls,
                                    int inFlightPolls) throws Exception {
+        return gate(reader, clock, calls, inFlightPolls, captures());
+    }
+
+    private RecordingRawEvidenceCaptures captures() throws IOException {
+        return new RecordingRawEvidenceCaptures(temporary.toRealPath().resolve("raw-" + java.util.UUID.randomUUID()));
+    }
+
+    private StateRecoveryGate gate(KafkaStateSnapshotReader reader, AtomicLong clock, List<String> calls,
+                                   int inFlightPolls, RecordingRawEvidenceCaptures captures) throws Exception {
         var remainingInFlight = new AtomicInteger(inFlightPolls);
         Path log = temporary.resolve("process.log");
         Files.writeString(log, marker("START", -1, "buildMode=correct")
@@ -176,15 +202,20 @@ class StateRecoveryGateTest {
         var flink = (FlinkScenarioControl) Proxy.newProxyInstance(getClass().getClassLoader(),
                 new Class<?>[]{FlinkScenarioControl.class}, (proxy, method, args) -> {
                     calls.add(method.getName());
+                    if (!method.getName().equals("captureRawEvidence") && !method.getName().equals("latestCallEvidence"))
+                        captures.record(method.getName(), "readiness");
                     return switch (method.getName()) {
-                        case "latestCallEvidence" -> List.of();
+                        case "captureRawEvidence" -> captures.open();
+                        case "latestCallEvidence" -> captures.latest();
                         case "checkpointOverview" -> {
                             var current = checkpoints.deepCopy();
                             ((com.fasterxml.jackson.databind.node.ObjectNode) current).putObject("counts")
                                     .put("in_progress", remainingInFlight.getAndDecrement() > 0 ? 1 : 0);
                             yield current;
                         }
-                        case "observe" -> observation;
+                        case "observe" -> new FlinkJobObservation(observation.jobManagerTimeMillis(), observation.state(),
+                                observation.completedCheckpoints(), observation.restoredCheckpoints(), observation.latestRestore(),
+                                observation.failures(), observation.subtasks(), captures.latest());
                         default -> throw new AssertionError("Unexpected Flink operation: " + method.getName());
                     };
                 });

@@ -298,6 +298,38 @@ class FlinkRuntimeIdentityTest {
     }
 
     @Test
+    void unconfirmedAtomicFaultVerifiesOnlyPhysicalIncarnationsActuallyCreated() {
+        var original = atomicStorageRestart();
+        var step = original.steps().getFirst();
+        var unconfirmed = new PhaseExecutionEvidence.StepEvidence(step.phaseIndex(), step.phaseName(), step.path(),
+                step.loopIterations(), step.kind(), PhaseExecutionEvidence.StepStatus.UNCONFIRMED, "fault not confirmed");
+        var notInjected = new PhaseExecutionEvidence(List.of(unconfirmed), List.of(), List.of(), List.of());
+        assertEquals(FlinkRuntimeIdentity.Outcome.CONFIRMED,
+                evaluate(provisioning(1), Optional.of(IMAGE_ID), fence(1), notInjected).outcome());
+        assertEquals(FlinkRuntimeIdentity.Outcome.UNCONFIRMED,
+                evaluate(provisioning(2), Optional.of(IMAGE_ID), fence(2), notInjected).outcome());
+
+        // A late fault failure cannot erase the kill/replacement that physically happened.
+        var replaced = new PhaseExecutionEvidence(List.of(unconfirmed), original.taskManagerKills(), List.of(),
+                original.taskManagerRestarts());
+        assertEquals(FlinkRuntimeIdentity.Outcome.CONFIRMED,
+                evaluate(provisioning(2), Optional.of(IMAGE_ID), fence(2), replaced).outcome());
+        assertEquals(FlinkRuntimeIdentity.Outcome.UNCONFIRMED,
+                evaluate(provisioning(2), Optional.of(IMAGE_ID), fence(1), replaced).outcome());
+        var missingKill = new PhaseExecutionEvidence(List.of(unconfirmed), List.of(), List.of(),
+                original.taskManagerRestarts());
+        assertEquals(FlinkRuntimeIdentity.Outcome.UNCONFIRMED,
+                evaluate(provisioning(2), Optional.of(IMAGE_ID), fence(2), missingKill).outcome());
+
+        var skipped = new PhaseExecutionEvidence.StepEvidence(step.phaseIndex(), step.phaseName(), step.path(),
+                step.loopIterations(), PhaseExecutionEvidence.StepKind.KILL_TASKMANAGER,
+                PhaseExecutionEvidence.StepStatus.SKIPPED, "readiness unavailable");
+        assertEquals(FlinkRuntimeIdentity.Outcome.CONFIRMED,
+                evaluate(provisioning(1), Optional.of(IMAGE_ID), fence(1),
+                        new PhaseExecutionEvidence(List.of(skipped), List.of(), List.of(), List.of())).outcome());
+    }
+
+    @Test
     void atomicCheckpointStorageStepRejectsMissingOrForeignKillAndRestartEvidence() {
         var original = atomicStorageRestart();
         var kill = original.taskManagerKills().getFirst();

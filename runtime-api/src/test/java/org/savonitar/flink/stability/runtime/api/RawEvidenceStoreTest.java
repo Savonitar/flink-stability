@@ -41,4 +41,54 @@ class RawEvidenceStoreTest {
         Files.createDirectory(root.resolve("real")); Files.createSymbolicLink(root.resolve("link"), root.resolve("real"));
         assertThrows(IOException.class, () -> new RawEvidenceStore(root.resolve("link/raw")));
     }
+
+    @Test void emptyBodyIsAnExactReceiptAndDoesNotPoisonLaterCaptures() throws Exception {
+        var store = new RawEvidenceStore(temporary.toRealPath().resolve("empty"));
+        var empty = store.retain(new byte[0], "test", "empty", "GET", "/", 503, 1, 2);
+        assertEquals(0, empty.bytes());
+        assertEquals("e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855", empty.sha256());
+        assertEquals(0, Files.size(Path.of(empty.path())));
+        store.retain(new byte[]{1}, "test", "next", "GET", "/", 200, 3, 4);
+        assertEquals(new RawEvidenceStore.Utilisation(2, 1, RawEvidenceStore.MAX_CAPTURES,
+                RawEvidenceStore.MAX_TOTAL_BYTES, true), store.utilisation());
+        assertThrows(IllegalArgumentException.class, () -> new RawEvidenceRef(empty.path(), empty.sha256(), -1,
+                "test", 1, 1, 2, "group", "GET", "/", 200));
+    }
+
+    @Test void unselectedBatchesConsumeNoFilesSequencesOrPersistentBudget() throws Exception {
+        var store = new RawEvidenceStore(temporary.toRealPath().resolve("selected"));
+        for (int i = 0; i <= RawEvidenceStore.MAX_CAPTURES; i++) {
+            try (var batch = store.batch()) {
+                var ref = batch.retain(new byte[]{1}, "test", "poll-" + i, "GET", "/", 200, i, i);
+                assertEquals(1, ref.sequence()); assertFalse(Files.exists(Path.of(ref.path())));
+            }
+        }
+        assertEquals(0, store.cursor()); assertEquals(0, store.utilisation().bytes());
+        RawEvidenceRef selected;
+        byte[] bytes = {2};
+        try (var batch = store.batch()) {
+            selected = batch.retain(bytes, "test", "selected", "GET", "/", 200, 1, 2);
+            bytes[0] = 99;
+            batch.commit(); batch.commit();
+        }
+        assertArrayEquals(new byte[]{2}, Files.readAllBytes(Path.of(selected.path())));
+        assertEquals(java.util.List.of(selected), store.since(0));
+        assertEquals(1, store.utilisation().captures()); assertTrue(store.utilisation().complete());
+    }
+
+    @Test void selectedBatchWriteFailureRemainsVisibleAndNeverOverwritesEvidence() throws Exception {
+        var store = new RawEvidenceStore(temporary.toRealPath().resolve("selected-failure"));
+        try (var batch = store.batch()) {
+            var first = batch.retain(new byte[]{1}, "test", "selected", "GET", "/", 200, 1, 2);
+            var ref = batch.retain(new byte[]{2}, "test", "selected", "GET", "/next", 200, 3, 4);
+            Files.writeString(Path.of(ref.path()), "reserved");
+            assertThrows(IOException.class, batch::commit);
+            assertEquals(java.util.List.of(first), store.since(0));
+            assertArrayEquals(new byte[]{1}, Files.readAllBytes(Path.of(first.path())));
+            assertEquals("reserved", Files.readString(Path.of(ref.path())));
+        }
+        assertEquals(1, store.utilisation().captures()); assertEquals(1, store.utilisation().bytes());
+        assertFalse(store.utilisation().complete());
+        assertThrows(IOException.class, store::batch);
+    }
 }

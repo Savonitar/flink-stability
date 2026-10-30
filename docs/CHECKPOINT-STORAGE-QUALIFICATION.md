@@ -42,6 +42,10 @@ details, trigger acknowledgement/status, pre/post-kill clocks, materialization,
 the final job observation and physical process states. Capture hashes, byte limits,
 request identities, distinct call groups and ARM/kill/HEAL ordering are checked.
 Missing source captures cannot be replaced with a reserialized typed object.
+The current checker also requires a complete `evidence.rawEvidence` utilisation
+block whose counts match the retained REST inventory. A missing or null block
+prevents qualification, including under `--re-audit`; historical reports may
+still display unknown utilisation without meeting this current contract.
 
 The current catalog contract is version 2 and requires explicit mutant opt-in.
 The current checker, including `--re-audit`, rejects the old batch: it lacks that

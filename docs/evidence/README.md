@@ -4,9 +4,11 @@ The linked copies make selected historical receipts available in a fresh clone.
 The original `jobs/` directories remain local and immutable. Each published receipt
 is a sanitized copy or a compact projection, not the original raw proof.
 
-[The publication manifest](checkpoint-storage-publication-manifest.json) maps every
-copy to its original source name, original SHA-256, sanitized-copy SHA-256, byte sizes
-and exact omissions. Hashes printed in the implementation and qualification guides
+[The publication manifest](checkpoint-storage-publication-manifest.json) records every
+published file's SHA-256, byte size and omissions. Copies identify their original
+source name, SHA-256 and byte size. Aggregate summaries list each source receipt
+separately in `sourceReceipts`; they have no single original-file hash.
+Hashes printed in the implementation and qualification guides
 continue to identify the original receipts, journals and binaries. They must not be
 used to verify the sanitized copies.
 
@@ -19,7 +21,9 @@ are represented by numbered summary lines with their source filename and hash.
 These files support inspection of the reported observations; they are insufficient
 for independently rerunning the full raw-evidence checker.
 
-The publication contains 73 selected receipts. All 50 previously
+The publication contains 74 selected receipts and summaries, including the
+[N1–N5 verification summary](checkpoint-review-n1-n5-20261030-01/verification.json)
+derived from 15 separately identified original receipts. All 50 previously
 linked local targets were available (49 files and one directory); no missing
 receipt was substituted or presented as observed. Original and published hashes
 were checked for every copy. The historical publication also checked 90 result/report objects for unchanged

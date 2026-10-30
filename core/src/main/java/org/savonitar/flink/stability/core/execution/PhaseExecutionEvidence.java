@@ -480,6 +480,10 @@ public record PhaseExecutionEvidence(
 
     public enum StepStatus {
         SUCCEEDED,
-        FAILED
+        FAILED,
+        /** The operation returned partial evidence without confirming its required effect. */
+        UNCONFIRMED,
+        /** A readiness condition prevented the physical operation from being invoked. */
+        SKIPPED
     }
 }

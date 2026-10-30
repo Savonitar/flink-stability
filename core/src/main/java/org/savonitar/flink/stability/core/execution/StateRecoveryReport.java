@@ -1,6 +1,5 @@
 package org.savonitar.flink.stability.core.execution;
 
-import org.savonitar.flink.stability.core.execution.plan.ExecutableScenarioPlan;
 import org.savonitar.flink.stability.core.execution.plan.PreparedExecutableScenarioPlan;
 import org.savonitar.flink.stability.runtime.api.V1AttemptRuntime;
 
@@ -43,9 +42,13 @@ public record StateRecoveryReport(String jobId, String workloadSha256, int keyCo
             V1ScenarioExecutionResult result, V1AttemptRuntime runtime, StateRecoveryGate gate) {
         var plan = prepared.executablePlan();
         int keys = plan.job().workloadConfiguration().behavior().orElseThrow().keyCount();
-        int expected = countKills(plan.phases().stream().flatMap(phase -> phase.steps().stream()).toList());
+        int expected = result.phaseEvidence().map(StateRecoveryReport::countKills).orElse(0);
         boolean fenced = result.writeFenceEvidence().isPresent() && V1ScenarioExecutor.confirmedPhysicalFence(result);
         var errors = new ArrayList<String>();
+        if (result.phaseEvidence().isEmpty()) errors.add("Phase execution evidence is unavailable");
+        result.phaseEvidence().ifPresent(phases -> phases.steps().stream()
+                .filter(step -> step.status() != PhaseExecutionEvidence.StepStatus.SUCCEEDED)
+                .forEach(step -> errors.add("Phase " + step.status() + " at " + step.path() + ": " + step.detail())));
         if (gate != null) errors.addAll(gate.failures());
         StateRecoveryEvidence.Trace trace;
         try {
@@ -129,12 +132,16 @@ public record StateRecoveryReport(String jobId, String workloadSha256, int keyCo
         return modes.size() == 1 ? modes.getFirst() : Optional.empty();
     }
 
-    private static int countKills(List<ExecutableScenarioPlan.Step> steps) {
+    static int countKills(PhaseExecutionEvidence phases) {
         int count = 0;
-        for (var step : steps) {
-            if (step instanceof ExecutableScenarioPlan.KillTaskManager
-                    || step instanceof ExecutableScenarioPlan.CheckpointStorageFault) count++;
-            else if (step instanceof ExecutableScenarioPlan.Loop loop) count += loop.times() * countKills(loop.steps());
+        for (var step : phases.steps()) {
+            boolean kill = step.kind() == PhaseExecutionEvidence.StepKind.KILL_TASKMANAGER
+                    || step.kind() == PhaseExecutionEvidence.StepKind.CHECKPOINT_STORAGE_FAULT;
+            if (kill && step.status() == PhaseExecutionEvidence.StepStatus.SUCCEEDED) count++;
+            else if (step.kind() == PhaseExecutionEvidence.StepKind.CHECKPOINT_STORAGE_FAULT
+                    && step.status() == PhaseExecutionEvidence.StepStatus.UNCONFIRMED
+                    && phases.taskManagerKills().stream().anyMatch(actual -> actual.path().equals(step.path())
+                        && actual.loopIterations().equals(step.loopIterations()))) count++;
         }
         return count;
     }

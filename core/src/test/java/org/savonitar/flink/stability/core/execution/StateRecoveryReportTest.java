@@ -13,6 +13,29 @@ class StateRecoveryReportTest {
             new StateRecoveryEvidence.ProcessIdentity("taskmanager-1", "runtime-1", "taskmanager-1#0");
 
     @Test
+    void recoveryAccountingDoesNotInventSkippedKillsOrHidePartialPhysicalKills() {
+        String path = "$/phases/0/steps/0";
+        var kill = new PhaseExecutionEvidence.TaskManagerKill(path, List.of(), "taskmanager-1",
+                new org.savonitar.flink.stability.core.flink.FlinkJobObservation.Attempt(
+                        java.util.Optional.empty(), java.util.Optional.of("not observed")),
+                java.util.OptionalLong.empty(), java.util.OptionalLong.empty(), java.util.Optional.empty());
+        for (var kind : List.of(PhaseExecutionEvidence.StepKind.KILL_TASKMANAGER,
+                PhaseExecutionEvidence.StepKind.CHECKPOINT_STORAGE_FAULT)) {
+            for (var status : PhaseExecutionEvidence.StepStatus.values()) {
+                var step = new PhaseExecutionEvidence.StepEvidence(0, "recovery", path, List.of(), kind, status, "test");
+                var noKill = new PhaseExecutionEvidence(List.of(step), List.of(), List.of(), List.of());
+                assertEquals(status == PhaseExecutionEvidence.StepStatus.SUCCEEDED ? 1 : 0,
+                        StateRecoveryReport.countKills(noKill), kind + " " + status);
+                var actualKill = new PhaseExecutionEvidence(List.of(step), List.of(kill), List.of(), List.of());
+                boolean expected = status == PhaseExecutionEvidence.StepStatus.SUCCEEDED
+                        || kind == PhaseExecutionEvidence.StepKind.CHECKPOINT_STORAGE_FAULT
+                            && status == PhaseExecutionEvidence.StepStatus.UNCONFIRMED;
+                assertEquals(expected ? 1 : 0, StateRecoveryReport.countKills(actualKill), kind + " " + status);
+            }
+        }
+    }
+
+    @Test
     void bothUninterruptedBuildsRequireInitialStartAndObservedAllKeyProgress() {
         for (String mode : List.of("correct", "reset-state-on-restore-v1")) {
             var trace = trace(start(mode) + progress());

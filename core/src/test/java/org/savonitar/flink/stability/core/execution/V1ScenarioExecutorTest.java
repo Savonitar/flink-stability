@@ -160,6 +160,85 @@ class V1ScenarioExecutorTest {
         }
     }
 
+    @Test void unconfirmedFaultBeforeKeyedKillCannotConfirmUninterruptedRecoveryProof() throws Exception {
+        for (String faultType : List.of("packet_fault", "broker_fault")) {
+            var events = new ArrayList<String>();
+            try (var fixture = fixture(document -> {
+                var job = (ObjectNode) document.at("/workload/jobs/0");
+                job.putObject("behavior").put("type", "keyed-prefix-v1").put("key_count", 2);
+                ((ObjectNode) job.path("checkpointing")).putObject("storage").put("type", "filesystem");
+                ((ObjectNode) document.at("/terminal_validations/0")).put("type", "kafka.state-prefix").put("job", "eos-job");
+                ((ObjectNode) document.at("/setup/kafka/clusters/main")).put("brokers", 3);
+                document.at("/setup/kafka/clusters/main/topics").forEach(topic -> ((ObjectNode) topic).put("replication_factor", 3));
+                var steps = ((ArrayNode) document.at("/phases/0/steps")).removeAll();
+                var fault = steps.addObject().putObject(faultType).put("duration", "15s").put("timeout", "2m");
+                var target = fault.putObject("target").put("kind", "selector").put("role", "broker").put("cluster", "main");
+                if (faultType.equals("packet_fault")) {
+                    fault.put("taskmanager", "taskmanager-1").put("mode", "loss").put("loss_percent", 25);
+                    target.put("type", "partition-leader").put("topic", "output").put("partition", 0);
+                } else {
+                    fault.put("mode", "kill");
+                    target.put("type", "transaction-coordinator").put("job", "eos-job");
+                }
+                steps.addObject().putObject("kill").putObject("target")
+                        .put("kind", "named").put("role", "taskmanager").put("name", "taskmanager-1");
+                steps.addObject().putObject("restart").put("component", "taskmanager");
+            })) {
+                var runtime = new FakeRuntime(events);
+                runtime.confirmBroker = false;
+                runtime.provisioningOverride = FlinkRuntimeIdentityTest.provisioning(1).stream()
+                        .map(component -> component.withProcessConfiguration(Map.of(), component.logicalName() + "#" + component.runtimeId())).toList();
+                var log = Files.writeString(temporaryDirectory.resolve(faultType + "-progress.log"),
+                        "STATE_PREFIX_START version=1 jobId=job-1 operatorUid=flink-stability-keyed-prefix-v1 attempt=0 subtask=0 checkpoint=-1 restoredCheckpoint=-1 buildMode=correct\n"
+                        + "STATE_PREFIX_PROGRESS version=1 jobId=job-1 operatorUid=flink-stability-keyed-prefix-v1 attempt=0 subtask=0 checkpoint=-1 restoredCheckpoint=-1 keyCount=2 observedKeys=2 minimumObservedCount=1 processedThisAttempt=2 maximumInputId=1\n");
+                runtime.componentLogs = List.of(new org.savonitar.flink.stability.runtime.api.FlinkComponentLog(
+                        "taskmanager-1#tm-1", log, false, Optional.empty()));
+                var flink = new FakeFlink(events);
+                if (faultType.equals("packet_fault")) {
+                    flink.observations.add(job(1_000, FlinkJobState.RUNNING, 1, 0));
+                    flink.observations.add(job(2_000, FlinkJobState.RUNNING, 1, 0));
+                }
+                var oracleInvoked = new AtomicBoolean();
+                stateValidation = (bootstrap, topic, manifest, keys, timeout) -> {
+                    assertTrue(runtime.fenced);
+                    oracleInvoked.set(true);
+                    return new org.savonitar.flink.stability.core.validation.kafka.KafkaStatePrefixValidationResult(
+                            KafkaIdSetValidationResult.Status.PASS, "validator.kafka.state-prefix.match", "state comparison",
+                            passResult().evidence(), new org.savonitar.flink.stability.core.validation.kafka.KafkaStatePrefixValidationResult.StateEvidence(
+                                    keys, OptionalLong.of(0), List.of()));
+                };
+                var result = executor(events, runtime, flink, (bootstrap, topic, ids, timeout) -> {
+                    throw new AssertionError("State workload must not run the ID-only oracle");
+                }).execute(fixture.bound(), attemptContext());
+
+                assertTrue(oracleInvoked.get());
+                assertEquals(V1ScenarioExecutionResult.Status.INCONCLUSIVE, result.status());
+                assertEquals(faultType.equals("packet_fault") ? "packet.fault.effect-unconfirmed"
+                        : "broker.operation.effect-unconfirmed", result.reason());
+                var phases = result.phaseEvidence().orElseThrow();
+                assertEquals(1, phases.steps().size());
+                assertEquals(PhaseExecutionEvidence.StepStatus.UNCONFIRMED, phases.steps().getFirst().status());
+                assertTrue(phases.taskManagerKills().isEmpty());
+                assertTrue(phases.taskManagerRestarts().isEmpty());
+                assertFalse(events.contains("taskmanager-kill"));
+                assertFalse(events.contains("taskmanager-restart"));
+                assertTrue(events.contains(faultType.equals("packet_fault") ? "packet-fault" : "broker-kill"));
+                var recovery = result.stateRecovery().orElseThrow();
+                assertEquals(0, recovery.expectedRestarts());
+                assertFalse(recovery.confirmed());
+                assertEquals(1, recovery.observationErrors().size());
+                assertTrue(recovery.observationErrors().getFirst().startsWith("Phase UNCONFIRMED"));
+                // The same fenced trace is a valid uninterrupted control. Only the missed fault
+                // prevents this run from reporting that its recovery proof was confirmed.
+                assertTrue(StateRecoveryReport.evaluate(recovery.jobId(), recovery.workloadSha256(), recovery.keyCount(),
+                        recovery.totalRecords(), 0, recovery.physicalFenceConfirmed(), recovery.trace(),
+                        recovery.readinessAttempts(), recovery.recoveries(), List.of()).confirmed());
+                assertEquals(ScenarioVerdict.Status.INCONCLUSIVE,
+                        ScenarioVerdict.of(ExecutableScenarioPlan.ExpectedOutcome.pass(), result).status());
+            }
+        }
+    }
+
     @Test void markerEvidenceAndCheckpointRetentionAreCapturedAfterFenceBeforeCleanup() throws Exception {
         for (boolean markerPresent : List.of(true, false)) {
             var events = new ArrayList<String>();
@@ -2654,6 +2733,12 @@ class V1ScenarioExecutorTest {
         }
 
         private boolean includeCommitWitness;
+        @Override public org.savonitar.flink.stability.runtime.api.PacketFaultControl.Evidence packetFault(
+                org.savonitar.flink.stability.runtime.api.PacketFaultControl.Request request) {
+            events.add("packet-fault");
+            return org.savonitar.flink.stability.runtime.api.PacketFaultControl.unconfirmed(request, "No packet counters");
+        }
+
         @Override public List<org.savonitar.flink.stability.runtime.api.KafkaBrokerControl.Evidence> brokerFault(
                 org.savonitar.flink.stability.runtime.api.KafkaBrokerControl.Request request,
                 List<org.savonitar.flink.stability.runtime.api.KafkaLogCapture.Partition> partitions) {

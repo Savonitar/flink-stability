@@ -99,6 +99,22 @@ public final class FlinkCheckpointEvidence {
             return retained.stream().filter(checkpoint -> checkpoint.status() == Status.IN_PROGRESS).toList();
         }
 
+        /**
+         * Failed triggers without an observed checkpoint identity. A nonzero remainder alone
+         * does not prove that every failure was ID-less: the retained window may omit older
+         * checkpoints. Baseline acceptance additionally requires no retained/latest failure.
+         */
+        public long idlessFailures() {
+            var identified = new java.util.HashSet<Long>();
+            retained.stream().filter(checkpoint -> checkpoint.status() == Status.FAILED)
+                    .map(Checkpoint::id).forEach(identified::add);
+            latestFailed.map(Checkpoint::id).ifPresent(identified::add);
+            if (counts.failed() < identified.size()) {
+                throw new IllegalArgumentException("Identified failed checkpoints exceed the failed count");
+            }
+            return counts.failed() - identified.size();
+        }
+
         public Optional<Checkpoint> find(long id) {
             Optional<Checkpoint> entry = retained.stream().filter(checkpoint -> checkpoint.id() == id).findFirst();
             if (entry.isPresent()) return entry;
@@ -199,7 +215,10 @@ public final class FlinkCheckpointEvidence {
                 || failed.isPresent() && counts.failed() == 0 || restored.isPresent() && counts.restored() == 0) {
             throw invalid("Latest checkpoint contradicts counts");
         }
-        return new History(jobId, counts, retained, completed, failed, savepoint, restored);
+        History result = new History(jobId, counts, retained, completed, failed, savepoint, restored);
+        try { result.idlessFailures(); }
+        catch (IllegalArgumentException inconsistent) { throw invalid(inconsistent.getMessage()); }
+        return result;
     }
 
     private static Optional<Checkpoint> latest(JsonNode latest, String field, Status status, Boolean savepoint,

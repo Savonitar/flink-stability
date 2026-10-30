@@ -200,9 +200,11 @@ public final class ExecutablePhaseExecutor {
                 if (observed.kill() != null) evidence.kills.add(observed.kill());
                 if (observed.restart() != null) evidence.restarts.add(observed.restart());
                 evidence.stopFurtherSteps |= !observed.confirmed();
-                succeeded(evidence, phaseIndex, phaseName, path, loopIterations,
+                evidence.steps.add(new PhaseExecutionEvidence.StepEvidence(phaseIndex, phaseName, path, loopIterations,
                         PhaseExecutionEvidence.StepKind.CHECKPOINT_STORAGE_FAULT,
-                        "effectConfirmed=" + observed.confirmed());
+                        observed.confirmed() ? PhaseExecutionEvidence.StepStatus.SUCCEEDED
+                                : PhaseExecutionEvidence.StepStatus.UNCONFIRMED,
+                        "effectConfirmed=" + observed.confirmed()));
             } else if (step instanceof ExecutableScenarioPlan.SavepointRestore restore) {
                 var observation = SavepointLifecycle.execute(path, flink, job, restoreSubmission, savepointDirectory, restore, sleeper, nanoTime);
                 evidence.savepoints.add(observation);
@@ -226,8 +228,11 @@ public final class ExecutablePhaseExecutor {
                 var observed = new PhaseExecutionEvidence.PacketFault(path, loopIterations, raw, before, after);
                 evidence.packets.add(observed);
                 evidence.stopFurtherSteps |= !observed.confirmed();
-                succeeded(evidence, phaseIndex, phaseName, path, loopIterations, PhaseExecutionEvidence.StepKind.PACKET_FAULT,
-                        "effectConfirmed=" + observed.confirmed());
+                evidence.steps.add(new PhaseExecutionEvidence.StepEvidence(phaseIndex, phaseName, path, loopIterations,
+                        PhaseExecutionEvidence.StepKind.PACKET_FAULT,
+                        observed.confirmed() ? PhaseExecutionEvidence.StepStatus.SUCCEEDED
+                                : PhaseExecutionEvidence.StepStatus.UNCONFIRMED,
+                        "effectConfirmed=" + observed.confirmed()));
             } else if (step instanceof ExecutableScenarioPlan.BrokerFault fault) {
                 java.util.List<org.savonitar.flink.stability.runtime.api.KafkaBrokerControl.Evidence> observations;
                 boolean rolling = fault.request().action() == org.savonitar.flink.stability.runtime.api.KafkaBrokerControl.Action.ROLLING_RESTART;
@@ -263,9 +268,13 @@ public final class ExecutablePhaseExecutor {
                     }
                 }
                 for (var observation : observations) evidence.brokers.add(new PhaseExecutionEvidence.BrokerOperation(path, loopIterations, observation, beforeRolling, afterRolling));
-                evidence.stopFurtherSteps |= observations.size() != (rolling ? 6 : 2) || observations.stream().anyMatch(value -> !value.confirmed());
-                succeeded(evidence, phaseIndex, phaseName, path, loopIterations, PhaseExecutionEvidence.StepKind.BROKER_FAULT,
-                        "effectConfirmed=" + !evidence.stopFurtherSteps);
+                boolean confirmed = observations.size() == (rolling ? 6 : 2) && observations.stream().allMatch(value -> value.confirmed());
+                evidence.stopFurtherSteps |= !confirmed;
+                evidence.steps.add(new PhaseExecutionEvidence.StepEvidence(phaseIndex, phaseName, path, loopIterations,
+                        PhaseExecutionEvidence.StepKind.BROKER_FAULT,
+                        confirmed ? PhaseExecutionEvidence.StepStatus.SUCCEEDED
+                                : PhaseExecutionEvidence.StepStatus.UNCONFIRMED,
+                        "effectConfirmed=" + confirmed));
             } else if (step instanceof ExecutableScenarioPlan.BrokerOperation operation) {
                 org.savonitar.flink.stability.runtime.api.KafkaBrokerControl.Evidence raw;
                 try {
@@ -523,9 +532,9 @@ public final class ExecutablePhaseExecutor {
             }
             if (stateReadiness.isEmpty() || !stateReadiness.orElseThrow().ready()) {
                 evidence.stopFurtherSteps = true;
-                succeeded(evidence, phaseIndex, phaseName, path, loopIterations,
-                        PhaseExecutionEvidence.StepKind.KILL_TASKMANAGER,
-                        "State recovery readiness unconfirmed; kill not injected");
+                evidence.steps.add(new PhaseExecutionEvidence.StepEvidence(phaseIndex, phaseName, path, loopIterations,
+                        PhaseExecutionEvidence.StepKind.KILL_TASKMANAGER, PhaseExecutionEvidence.StepStatus.SKIPPED,
+                        "State recovery readiness unconfirmed; kill not injected"));
                 return;
             }
         }

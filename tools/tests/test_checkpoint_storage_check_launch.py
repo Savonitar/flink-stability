@@ -209,6 +209,9 @@ class FixedMatrixAllocationTest(unittest.TestCase):
                        "stateRecovery": {"jobId": f"{1 if change == 'job' and number == 11 else number + 1:032x}"},
                        "checkpointStorage": {"storageId": "generated-" + str(number)},
                        "flinkRuntime": {"components": [{"runtimeId": f"{1 if change == 'runtime' and number == 11 else number + 1:064x}"}]}}}
+            if change == "audit-failure" and relative == "attempts/correct-eio/run-2":
+                raw["evidence"]["rawEvidence"] = {"captures": 4096, "bytes": 654321,
+                    "maxCaptures": 4096, "maxBytes": 67108864, "complete": False}
             put(directory / "stdout.json", raw); put(directory / "stderr.log", b"")
             put(directory / "exit-code.txt", b"0\n")
             put(directory / "command.json", {"environment": {"DOCKER_HOST": ENDPOINT, "DOCKER_API_VERSION": "1.44"}})
@@ -241,6 +244,13 @@ class FixedMatrixAllocationTest(unittest.TestCase):
                     self.assertEqual([], report["errors"])
                 else:
                     self.assertTrue(report["errors"])
+                if change == "audit-failure":
+                    failed = next(row for row in report["attempts"]
+                                  if row["cell"] == "correct-eio" and row["number"] == 2)
+                    self.assertFalse(failed["confirmed"])
+                    self.assertEqual({"captures": 4096, "bytes": 654321, "maxCaptures": 4096,
+                                      "maxBytes": 67108864, "complete": False}, failed["rawEvidence"])
+                    self.assertNotIn("rawEvidenceAudit", failed)
 
 
 if __name__ == "__main__":

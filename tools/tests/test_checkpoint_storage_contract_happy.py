@@ -121,6 +121,17 @@ class CompleteAttemptContractTest(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, "missing/bounded REST"):
                 check.audit_attempt(result, code, cell, manifest, directory)
 
+    def test_missing_utilisation_fails_the_real_attempt_contract_with_all_raw_sources_present(self):
+        for mode in ("correct", "mutant"):
+            with self.subTest(mode=mode), tempfile.TemporaryDirectory() as temporary:
+                directory = Path(temporary).resolve()
+                result, code, cell, manifest = complete_attempt(directory, mode=mode)
+                self.assertTrue(check.audit_attempt(result, code, cell, manifest, directory)["confirmed"])
+                del result["evidence"]["rawEvidence"]
+                with self.assertRaisesRegex(ValueError, "utilisation/completeness") as caught:
+                    check.audit_attempt(result, code, cell, manifest, directory)
+                self.assertTrue(caught.exception.component_event_audit["confirmed"])
+
     def test_projection_source_or_kind_cannot_claim_independent_evidence(self):
         for name in ("input-evidence.json", "configuration-evidence.json"):
             for field, value in (("kind", "raw-response"), ("kind", None), ("source", "raw/container.json"), ("source", None)):

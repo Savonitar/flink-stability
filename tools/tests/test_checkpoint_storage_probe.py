@@ -712,6 +712,38 @@ class SupervisorLifecycleTest(unittest.TestCase):
             probe.Docker(self.output, "tcp://example.invalid:2375", ATTEMPT)
         self.assertFalse((self.output / "docker-client").exists())
 
+    def test_explicit_docker_binary_preserves_isolated_client_configuration(self):
+        binary = self.output / "selected-docker"
+        binary.write_text("generated executable fixture\n")
+        binary.chmod(0o700)
+        docker = probe.Docker(self.output, "unix:///tmp/fixture-docker.sock", ATTEMPT, docker=binary)
+        self.assertEqual(str(binary), docker.prefix[0])
+        self.assertEqual(["--config", str(self.output / "docker-client"), "--host",
+                          "unix:///tmp/fixture-docker.sock"], docker.prefix[1:])
+        self.assertEqual("{}\n", (self.output / "docker-client/config.json").read_text())
+        self.assertNotIn("DOCKER_CONTEXT", docker.environment)
+
+    def test_explicit_docker_path_rejects_relative_personal_or_nonexecutable_inputs(self):
+        for value in ("relative/docker", "/Users/example/Documents/not-read"):
+            with self.subTest(value=value), self.assertRaises(ValueError):
+                probe.docker_executable(value)
+        binary = self.output / "not-executable"
+        binary.write_text("generated fixture")
+        binary.chmod(0o600)
+        with self.assertRaises(ValueError):
+            probe.docker_executable(binary)
+        self.assertEqual("docker", probe.docker_executable(None))
+
+    def test_docker_cli_option_reaches_the_probe_without_context_discovery(self):
+        binary = self.output / "selected-docker"
+        with patch.object(probe, "Probe") as owner, patch("builtins.print"):
+            owner.return_value.execute.return_value = {"status": "pass"}
+            result = probe.main(["--bundle", str(self.output / "bundle"), "--output", str(self.output / "run"),
+                                 "--image-id", IMAGE, "--platform", "linux/arm64",
+                                 "--docker-host", "unix:///tmp/fixture-docker.sock", "--docker", str(binary)])
+        self.assertEqual(0, result)
+        self.assertEqual(binary, owner.call_args.args[0].docker)
+
 
 if __name__ == "__main__":
     unittest.main()

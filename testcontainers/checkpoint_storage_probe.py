@@ -98,9 +98,27 @@ class Unsupported(RuntimeError):
     pass
 
 
+def docker_executable(value):
+    if value is None:
+        return "docker"
+    path = Path(value)
+    require(path.is_absolute(), "--docker must name an absolute executable path")
+    for _ in range(8):
+        require(not any(part in {"Documents", "Downloads", "Desktop", "Photos", "Pictures", "Videos"}
+                        for part in path.parts), "Personal directories are not executable inputs")
+        require(not any(parent.is_symlink() for parent in path.parents), "Executable parents must not be symlinks")
+        if not path.is_symlink():
+            require(path.is_file() and os.access(path, os.X_OK), "Docker executable is unavailable")
+            return str(path)
+        target = path.readlink()
+        path = target if target.is_absolute() else path.parent / target
+    raise ValueError("Executable symlink chain is too long")
+
+
 class Docker:
-    def __init__(self, output, endpoint, attempt, timeout=300):
+    def __init__(self, output, endpoint, attempt, timeout=300, docker=None):
         require(re.fullmatch(r"unix:///[^\s]+", endpoint), "Only an explicit local Unix Docker endpoint is supported")
+        selected_docker = docker_executable(docker)
         self.output, self.attempt = output, attempt
         self.deadline = time.monotonic() + timeout
         self.sequence = 0
@@ -110,7 +128,7 @@ class Docker:
         config.mkdir()
         (config / "config.json").write_text("{}\n")
         (output / "commands").mkdir()
-        self.prefix = ["docker", "--config", str(config), "--host", endpoint]
+        self.prefix = [selected_docker, "--config", str(config), "--host", endpoint]
         self.environment = {"PATH": "/usr/local/bin:/usr/bin:/bin", "LANG": "C.UTF-8",
                             "DOCKER_CONFIG": str(config), "DOCKER_HOST": endpoint, "DOCKER_API_VERSION": "1.44"}
 
@@ -219,7 +237,7 @@ class Probe:
         self.containers, self.names, self.instances, self.revisions = {}, {}, {}, {}
         self.observations, self.sessions = [], []
         self.faults = {}
-        self.docker = Docker(self.output, args.docker_host, self.attempt)
+        self.docker = Docker(self.output, args.docker_host, self.attempt, docker=args.docker)
         self.report = {"version": 1, "kind": "checkpoint-fuse-probe", "attemptId": self.attempt,
                        "storageId": self.storage, "namespace": self.namespace, "imageId": args.image_id,
                        "platform": args.platform, "bundle": self.bundle, "observations": self.observations,
@@ -683,6 +701,7 @@ def main(argv=None):
     parser.add_argument("--image-id", required=True)
     parser.add_argument("--platform", required=True)
     parser.add_argument("--docker-host", required=True)
+    parser.add_argument("--docker", type=Path, help="Absolute Docker CLI path; default searches the isolated PATH")
     args = parser.parse_args(argv)
     previous = {}
     def interrupted(signum, unused):

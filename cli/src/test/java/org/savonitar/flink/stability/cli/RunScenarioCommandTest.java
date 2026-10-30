@@ -56,6 +56,41 @@ class RunScenarioCommandTest {
     @TempDir
     Path temporaryDirectory;
 
+    @Test void skippedAndUnconfirmedStepsCannotRenderAsCompletedPhases() throws Exception {
+        for (var status : List.of(PhaseExecutionEvidence.StepStatus.SKIPPED, PhaseExecutionEvidence.StepStatus.UNCONFIRMED)) {
+            var phases = new PhaseExecutionEvidence(List.of(new PhaseExecutionEvidence.StepEvidence(
+                    0, "fault", "$/phases/0/steps/0", List.of(), PhaseExecutionEvidence.StepKind.CHECKPOINT_STORAGE_FAULT,
+                    status, "readiness missing")));
+            var rendered = renderIncompletePhases(phases).path("phases");
+            assertFalse(rendered.path("completed").asBoolean());
+            assertEquals("partial", rendered.path("status").asText());
+            assertEquals(0, rendered.path("succeeded").asInt());
+            assertEquals(1, rendered.path(status == PhaseExecutionEvidence.StepStatus.SKIPPED ? "skipped" : "unconfirmed").asInt());
+        }
+    }
+
+    @Test void rawStoreUtilisationSurvivesEnrichmentAndCleanupAndRendersAsNumbers() throws Exception {
+        var usage = new org.savonitar.flink.stability.runtime.api.RawEvidenceStore.Utilisation(43, 12345, 4096, 67108864, true);
+        var base = passResult().withRawEvidence(Optional.of(usage));
+        for (var result : List.of(base, base.withKafkaRuntime(Optional.empty()), base.withKafkaLogs(base.kafkaLogs()),
+                base.withComponentErrors(base.componentErrors()), base.withFlinkRestErrors(List.of()),
+                base.withCleanupFailure(new IOException("cleanup")),
+                base.withPreparedArtifactCleanupFailure(new IOException("artifact cleanup")))) {
+            assertEquals(Optional.of(usage), result.rawEvidence());
+            var value = JSON.readTree(new V1ExecutionResultRenderer().render("raw", context("1234abcd"),
+                    ExecutableScenarioPlan.ExpectedOutcome.pass(), result)).at("/evidence/rawEvidence");
+            assertEquals(43, value.path("captures").asInt());
+            assertEquals(12345, value.path("bytes").asLong());
+            assertEquals(4096, value.path("maxCaptures").asInt());
+            assertEquals(67108864, value.path("maxBytes").asLong());
+            assertTrue(value.path("complete").asBoolean());
+        }
+        var incomplete = passResult().withRawEvidence(Optional.of(
+                new org.savonitar.flink.stability.runtime.api.RawEvidenceStore.Utilisation(0, 0, 4096, 67108864, false)));
+        assertEquals(V1ScenarioExecutionResult.Status.INCONCLUSIVE, incomplete.status());
+        assertEquals("raw-evidence.incomplete", incomplete.reason());
+    }
+
     @Test void statePrefixReportKeepsIdAndStateEvidenceTogetherAndOmitsIncompleteTotals() throws Exception {
         for (boolean complete : List.of(true, false)) {
             var terminal = new org.savonitar.flink.stability.core.validation.kafka.KafkaStatePrefixValidationResult(

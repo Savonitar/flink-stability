@@ -173,6 +173,13 @@ cannot qualify. Docker configuration/environment is excluded from the projection
 The transport may retry an idempotent inspect GET within its deadline; the proof
 binds the returned response, not a single wire exchange.
 
+The `evidence.rawEvidence` utilisation/completeness block is mandatory. Its
+capture count and byte total must match the retained REST inventory, its limits
+must match the store contract, and `complete` must be true. Missing, null or
+incomplete blocks reject qualification even with `--re-audit`. Historical results
+can still render unknown utilisation; reproduce their original qualification
+with their retained verifier rather than filling in missing evidence.
+
 Hashes establish retained-byte consistency, not daemon authenticity. Harness
 monotonic and JobManager epoch clocks are separately observed; no cross-clock
 synchronization is claimed. Terminal Kafka counts remain framework-oracle output,

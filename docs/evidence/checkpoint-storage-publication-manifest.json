@@ -2858,6 +2858,100 @@
         "Receipt/report only; raw logs, response bodies, journals and binaries remain in the local original batch."
       ],
       "omittedFields": []
+    },
+    {
+      "publishedPath": "docs/evidence/checkpoint-review-n1-n5-20261030-01/verification.json",
+      "sanitizedCopySha256": "4c56b1e647889cedd2b3dfd94ce93bb1be4c87f64aa0d17b1d379d9532db2b4b",
+      "sanitizedCopyBytes": 12542,
+      "mode": "aggregate-summary",
+      "sourceReceipts": [
+        {
+          "sourcePath": "jobs/checkpoint-review-n1-n5-20261030-01/checks/maven-install-02.log",
+          "originalSha256": "9cfc13a73fe3f71edc1f798da07e04f68ab264a8b92aa6efbe8b89b762753b36",
+          "originalBytes": 60031
+        },
+        {
+          "sourcePath": "jobs/checkpoint-review-n1-n5-20261030-01/checks/python-full-03.log",
+          "originalSha256": "2d891c2dda119e0c30d2c8b1f57c6b47e1523ab4ef36b645cf6d90dc577f1cc1",
+          "originalBytes": 94691
+        },
+        {
+          "sourcePath": "jobs/checkpoint-review-n1-n5-20261030-01/checks/validate-show-plan.stdout.log",
+          "originalSha256": "97244720948f452fd458a1744879cafb8c2a093886f3e2862902081d00a77ccb",
+          "originalBytes": 3416
+        },
+        {
+          "sourcePath": "jobs/checkpoint-review-n1-n5-20261030-01/helper/build-evidence.json",
+          "originalSha256": "67d958d62e1d1e3a35ad162f8b72c95483593912a084ca0f139fcfb4db0cb8d7",
+          "originalBytes": 48516
+        },
+        {
+          "sourcePath": "jobs/checkpoint-review-n1-n5-20261030-01/live/attempts/correct-eio/run-1/cleanup.json",
+          "originalSha256": "61e10c8c0077834df438867e9e422231aad7941a4a882601d731897c57ca54d2",
+          "originalBytes": 3077
+        },
+        {
+          "sourcePath": "jobs/checkpoint-review-n1-n5-20261030-01/live/attempts/correct-eio/run-1/execution.json",
+          "originalSha256": "bb10de6e95b5f3f4c4ceac1a6c90475f8399e3d596874b2064dec835f044866f",
+          "originalBytes": 530
+        },
+        {
+          "sourcePath": "jobs/checkpoint-review-n1-n5-20261030-01/live/attempts/correct-eio/run-1/retained-evidence.json",
+          "originalSha256": "409a2f706460f5bd4c045a4dd933d2495070d7864b031867220b5d83fcbf3873",
+          "originalBytes": 44306
+        },
+        {
+          "sourcePath": "jobs/checkpoint-review-n1-n5-20261030-01/live/attempts/correct-eio/run-1/stdout.json",
+          "originalSha256": "1940f534fb2a86a51b0af182855fbcadb88b37b47eba363466f32b7f4ab6f18f",
+          "originalBytes": 2780593
+        },
+        {
+          "sourcePath": "jobs/checkpoint-review-n1-n5-20261030-01/live/attempts/correct-eio/run-2/cleanup.json",
+          "originalSha256": "0ccd7a6118a76519baa38d281f49ad1e8dbdd9e3926fa8741d76a1ab0cc7a954",
+          "originalBytes": 3077
+        },
+        {
+          "sourcePath": "jobs/checkpoint-review-n1-n5-20261030-01/live/attempts/correct-eio/run-2/execution.json",
+          "originalSha256": "55d973d1bbab80425fee7cc5cbb36398e40846d2743669d7e5f56b8da12e2b29",
+          "originalBytes": 531
+        },
+        {
+          "sourcePath": "jobs/checkpoint-review-n1-n5-20261030-01/live/attempts/correct-eio/run-2/retained-evidence.json",
+          "originalSha256": "d20056533c28389014c9d464c59ca52295e366f62471718d090fed254608fe5b",
+          "originalBytes": 44306
+        },
+        {
+          "sourcePath": "jobs/checkpoint-review-n1-n5-20261030-01/live/attempts/correct-eio/run-2/stdout.json",
+          "originalSha256": "a1b9279ecb80ef3bc278d1422341d63cfa32ef08885de91bc0656a716577ed97",
+          "originalBytes": 2781954
+        },
+        {
+          "sourcePath": "jobs/checkpoint-review-n1-n5-20261030-01/live/finished.json",
+          "originalSha256": "c4b404ddab3d247e11d7807fa78d7144b22275b49e7c483b0cb9dca3e97cecdb",
+          "originalBytes": 290880
+        },
+        {
+          "sourcePath": "jobs/checkpoint-review-n1-n5-20261030-01/live/framework/manifest.json",
+          "originalSha256": "75ebe9c6e9186435d8aa5b78e722d2233ff7af9120e84f793d3307bf73eb7308",
+          "originalBytes": 326429
+        },
+        {
+          "sourcePath": "jobs/checkpoint-review-n1-n5-20261030-01/live/manifest.json",
+          "originalSha256": "dea6b924d1e22e71cd7a5e36725df317a9eab32c3ab4a9903075438495a8e2bc",
+          "originalBytes": 13548
+        }
+      ],
+      "sanitizationNotes": [
+        "This summary was composed from multiple retained receipts; it has no single original file or original-file hash. Each source receipt is identified separately.",
+        "Source names are workspace-relative provenance labels. Original hashes and all retained originals are unchanged."
+      ],
+      "omittedFields": [
+        "Raw logs and REST response bodies",
+        "Native journal operation arrays",
+        "Complete command and state-marker transcripts",
+        "Frozen framework, workload and helper binaries"
+      ]
     }
-  ]
+  ],
+  "updatedDate": "2026-11-04"
 }
