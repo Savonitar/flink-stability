@@ -2053,6 +2053,15 @@ Connector pull-request gating is the same mechanism with one axis:
 
   Require healthy instances, a materialized completed checkpoint N with nonzero
   keyed progress and a suffix remaining, and no known in-flight checkpoint.
+  Before inspecting checkpoint files, reject any retained FAILED checkpoint,
+  `latest.failed` checkpoint, prior restore or changed execution with a specific
+  diagnostic. An ID-less startup trigger failure is permitted only when neither
+  retained history nor `latest.failed` identifies a failed checkpoint; retain the
+  exact `baselineIdlessTriggerFailures` count. Recheck the same checkpoint/count
+  boundary after inspection. The baseline count is not reset or subtracted from
+  evidence: the failed trigger and every post-kill failure still require exact
+  count deltas and identified failed checkpoints. A new unaccounted ID-less
+  failure after arming cannot confirm the operation.
   Arm every required instance before one REST checkpoint trigger; never retry an
   uncertain trigger. Confirm one unambiguous newer checkpoint failure and a real
   matching checkpoint-file create/write EIO. Keep the fault armed through the
@@ -2064,6 +2073,9 @@ Connector pull-request gating is the same mechanism with one axis:
   checkpoints, expired leases, absent materialization/EIO receipts or an
   unexpected restart leave the operation unconfirmed. Preserve observed data
   failures and cleanup errors; passing output cannot substitute for fault proof.
+  Record an unconfirmed atomic operation as `UNCONFIRMED` and a readiness-blocked
+  keyed kill as `SKIPPED`, never `SUCCEEDED`. Neither label invents a physical
+  kill or replacement; any actual partial lifecycle receipts remain available.
 - **R6.12b** `leader_fault: { mode, duration, timeout, token_fault?, recovery_barrier? }` is an atomic,
   automatically healed HA operation. `mode` is `kill`, `pause`, or
   `isolate-zookeeper`; the target is the observed current leader, never a guessed

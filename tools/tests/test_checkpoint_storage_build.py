@@ -1,9 +1,12 @@
 import copy
 import importlib.util
 import json
+import os
 from pathlib import Path
+import shutil
 import tempfile
 import unittest
+import zipfile
 from unittest.mock import Mock
 
 
@@ -238,6 +241,80 @@ class CheckpointStorageBuildTest(unittest.TestCase):
             package.write_bytes(b'changed package fixture')
             with self.assertRaises(ValueError):
                 build.validate_package_cache(root, lock)
+
+    def test_toolchain_requires_identified_jdk21_before_invocation(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory).resolve()
+            (root / 'lib').mkdir()
+            (root / 'lib/modules').write_bytes(b'generated module fixture')
+            for release in ('JAVA_VERSION="17.0.1"\nIMPLEMENTOR="Generated vendor"\n',
+                            'JAVA_VERSION="21.0.1"\n',
+                            'JAVA_VERSION="21.0.1"\nIMPLEMENTOR="A"\nIMPLEMENTOR="B"\n'):
+                (root / 'release').write_text(release)
+                commands = Mock()
+                with self.subTest(release=release), self.assertRaises((RuntimeError, ValueError)):
+                    build.java_toolchain(commands, root, {})
+                commands.run.assert_not_called()
+
+
+class ProbeJarReproducibilityTest(unittest.TestCase):
+    def test_real_selected_jdk_builds_identical_probe_archives_in_distinct_directories(self):
+        configured = os.environ.get('JAVA_HOME')
+        javac = shutil.which('javac') if not configured else None
+        if not configured and not javac:
+            self.skipTest('JDK21 not available; set JAVA_HOME to run the real compiler fixture')
+        try:
+            java_home = build.checked_path(configured, directory=True) if configured else build.executable(javac).parent.parent
+            java_tools = {name: build.checked_path(java_home / 'bin' / name) for name in ('java', 'javac', 'jar')}
+            release = build.checked_path(java_home / 'release').read_text(encoding='utf-8')
+        except (OSError, ValueError):
+            self.skipTest('An explicit complete JDK21 is unavailable')
+        if not any(line.startswith('JAVA_VERSION="21') for line in release.splitlines()):
+            self.skipTest('Selected JAVA_HOME/javac is not JDK21')
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory).resolve()
+            archives, identities, receipts = [], [], []
+            for index in (1, 2):
+                output = root / ('build-' + str(index))
+                output.mkdir()
+                (output / 'bundle').mkdir()
+                source = output / 'source'
+                source.mkdir()
+                # Reverse creation order and change mtimes; neither is an archive input.
+                for file in ([build.JAVA, build.INSPECTOR] if index == 1 else [build.INSPECTOR, build.JAVA]):
+                    destination = source / file.name
+                    destination.write_bytes((REPO / file).read_bytes())
+                    os.utime(destination, (946684800 * index, 946684800 * index))
+                commands = build.Commands(output, 'unix:///var/run/docker.sock', Path('/not-used/docker'), 60)
+                identities.append(build.java_toolchain(commands, java_home, java_tools))
+                receipts.append(build.compile_probe(commands, java_tools, source, output))
+                archives.append((output / 'bundle/probe.jar').read_bytes())
+                if index == 1:
+                    view, evidence = output / 'view', output / 'probe-evidence'
+                    view.mkdir()
+                    evidence.mkdir()
+                    smoke = commands.run('java-archive-smoke', [str(java_tools['java']), '-jar',
+                        str(output / 'bundle/probe.jar'), '--root', str(view), '--raw-root', str(output / 'raw'),
+                        '--evidence-root', str(evidence), '--timeout-seconds', '10'], stdin='1\thello\n2\tquit\n')
+                    self.assertEqual(['ok', 'ok'], [row['status'] for row in map(json.loads, smoke.splitlines())])
+                with zipfile.ZipFile(output / 'bundle/probe.jar') as jar:
+                    names = jar.namelist()
+                    self.assertEqual('META-INF/MANIFEST.MF', names[0])
+                    self.assertEqual(sorted(names[1:]), names[1:])
+                    self.assertEqual(build.JAR_MANIFEST, jar.read(names[0]))
+                    self.assertNotIn(b'Created-By:', jar.read(names[0]))
+                    self.assertTrue(all(entry.date_time == build.JAR_TIMESTAMP for entry in jar.infolist()))
+                    self.assertTrue(all(entry.compress_type == zipfile.ZIP_STORED for entry in jar.infolist()))
+                    self.assertIn(build.MAIN.replace('.', '/') + '$HeldFile.class', names)
+            self.assertEqual(archives[0], archives[1])
+            self.assertEqual(receipts[0], receipts[1])
+            self.assertEqual(identities[0], identities[1])
+            self.assertTrue(identities[0]['vendor'])
+            self.assertEqual(build.sha256(java_home / 'lib/modules'), identities[0]['modulesSha256'])
+            for name, tool in identities[0]['tools'].items():
+                self.assertEqual(build.sha256(java_tools[name]), tool['sha256'])
+                self.assertIn('21', tool['version'])
+                self.assertIn('build', tool['runtimeVersion'])
 
 
 if __name__ == '__main__':

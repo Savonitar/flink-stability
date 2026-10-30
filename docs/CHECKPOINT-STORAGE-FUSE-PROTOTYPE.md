@@ -127,25 +127,65 @@ a Java hello/quit exchange as UID/GID `9999:9999`, with all capabilities dropped
 The build produces a separate bundle; it does not rebuild Flink JARs or create
 a derived runtime image.
 
+New builds package `probe.jar` with a literal manifest, a fixed entry timestamp
+(`2026-01-01T00:00:00Z`), sorted class entries and stored ZIP entries. There is no
+compiler-generated `Created-By` manifest value. The builder verifies this layout
+and each packaged class against the compiler output. `build-evidence.json`
+records `javaArchive` plus `javaToolchain`: selected tool paths and SHA-256 values,
+the JDK vendor and release metadata, full runtime version/build output for
+`java`, `javac` and `jar`, and hashes of the JDK `release` file and module image.
+The toolchain identity must remain unchanged through compilation and packaging.
+
+The reproducibility check compiles the same probe and inspector sources twice
+with one selected JDK in distinct directories and compares the entire JAR.
+`--release 17` constrains the Java API and class-file target; it does not promise
+identical bytecode across JDK vendors, updates or builds. The review comparison
+using Temurin 21.0.12.1 and JDK 21.0.7 produced different Java artifacts even
+though the native helper bytes matched. Pin the selected JDK identity when
+comparing Java hashes. Historical build receipts and hashes remain unchanged.
+
 Both tools use a fresh empty Docker client configuration and a minimal process
 environment. Missing images may be downloaded by the pinned public digest;
 cached images are not refreshed. Identity and platform are checked before use.
 If a locked Ubuntu package becomes unavailable or differs from its recorded
 hash, the build fails rather than silently selecting another version.
 
-Run from the repository root. Replace the two executable paths below and choose
-new output directory names for every build and probe. The endpoint shown is the
-explicit local default; substitute another local `unix:///...` socket only when
-that is the intended daemon.
+Select the CLI and local endpoint explicitly before running these commands.
+On macOS, Docker Desktop's CLI can be used directly at
+`/Applications/Docker.app/Contents/Resources/bin/docker` when `/usr/local/bin/docker`
+is absent. Its `/var/run/docker.sock` symlink is optional, so a working ordinary
+`docker` command does not establish that the default socket exists. See
+[Docker Desktop's CLI and socket locations](https://docs.docker.com/desktop/setup/install/mac-permission-requirements/#installing-symlinks).
+
+To inspect a context you have selected, use the CLI's read-only context commands;
+the builder does not discover contexts or read authentication stores. For example,
+after confirming that `desktop-linux` is the intended local context:
+
+```sh
+CHECKPOINT_DOCKER=/Applications/Docker.app/Contents/Resources/bin/docker
+"$CHECKPOINT_DOCKER" context ls
+"$CHECKPOINT_DOCKER" context inspect desktop-linux --format '{{.Endpoints.docker.Host}}'
+```
+
+Copy that context's literal `unix:///...` endpoint into `CHECKPOINT_DOCKER_HOST`
+below. Choose the context deliberately; a selected remote context is unsupported.
+These inspection commands do not change the active context. The build and probe
+use their supplied endpoint and fresh client configuration, so they do not inherit
+the context selected by an ordinary Docker invocation. See
+[Docker's context documentation](https://docs.docker.com/engine/manage-resources/contexts/).
+
+Run from the repository root. Replace the executable paths and endpoint below,
+and choose new output directory names for every build and probe.
 
 ```sh
 CHECKPOINT_JDK21=/path/to/jdk-21
 CHECKPOINT_DOCKER=/path/to/docker
+CHECKPOINT_DOCKER_HOST=unix:///var/run/docker.sock
 
 python3 testcontainers/checkpoint_storage_build.py \
   --java-home "$CHECKPOINT_JDK21" \
   --docker "$CHECKPOINT_DOCKER" \
-  --docker-host unix:///var/run/docker.sock \
+  --docker-host "$CHECKPOINT_DOCKER_HOST" \
   --output jobs/checkpoint-storage-helper-local-01
 
 python3 tools/checkpoint_storage_probe.py \
@@ -153,7 +193,8 @@ python3 tools/checkpoint_storage_probe.py \
   --output jobs/checkpoint-storage-probe-local-01 \
   --image-id sha256:2e93ded2cb7bf1a50f71b663d5e3ea01420bcc4e549cbf666d05120f939713c7 \
   --platform linux/arm64 \
-  --docker-host unix:///var/run/docker.sock
+  --docker "$CHECKPOINT_DOCKER" \
+  --docker-host "$CHECKPOINT_DOCKER_HOST"
 ```
 
 `--bundle` names the build output containing `build-evidence.json` and `bundle/`.

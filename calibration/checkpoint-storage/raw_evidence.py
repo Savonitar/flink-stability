@@ -76,7 +76,7 @@ class Inspector:
     def source(self, ref, kind):
         require(isinstance(ref, dict) and set(ref) == {"path", "sha256", "bytes", "kind", "sequence", "startedNanos",
                 "completedNanos", "group", "method", "endpoint", "status"}, "missing or malformed capture reference")
-        require(ref["kind"] == kind and type(ref["bytes"]) is int and 0 < ref["bytes"] <= MAX_BODY
+        require(ref["kind"] == kind and type(ref["bytes"]) is int and 0 <= ref["bytes"] <= MAX_BODY
                 and type(ref["sequence"]) is int and 0 < ref["sequence"] <= 4096
                 and type(ref["startedNanos"]) is int and type(ref["completedNanos"]) is int
                 and ref["completedNanos"] >= ref["startedNanos"]
@@ -308,6 +308,16 @@ def audit(result, retained):
                   if row["runtimeId"] == old and row["moment"] == "after-declared-kill" and row.get("state") is not None]
         require(len(killed) == 1 and before_clock[-1]["completedNanos"] <= killed[0]["startedNanos"]
                 and killed[0]["completedNanos"] <= after_clock[0]["startedNanos"], "kill clocks do not enclose the source process-stop observation")
+    usage = evidence.get("rawEvidence")
+    if usage is not None:
+        require(isinstance(usage, dict) and usage.get("complete") is True,
+                "raw REST store completeness is unconfirmed")
+        for name in ("captures", "bytes", "maxCaptures", "maxBytes"):
+            require(type(usage.get(name)) is int and usage[name] >= 0, "invalid raw REST utilisation")
+        require(usage["maxCaptures"] == 4096 and usage["maxBytes"] == 64 * 1024 * 1024
+                and usage["captures"] == stores["raw-flink-rest"]["files"]
+                and usage["bytes"] == stores["raw-flink-rest"]["bytes"],
+                "raw REST utilisation differs from retained inventory")
     require(len(inspector.references) <= 8192, "capture reference inventory exceeds bound")
     return {"confirmed": True, "coverage": "retained-source-responses-v1", "captureCount": len(inspector.references),
             "groupCount": len(inspector.groups), "typedComparisons": inspector.typed,

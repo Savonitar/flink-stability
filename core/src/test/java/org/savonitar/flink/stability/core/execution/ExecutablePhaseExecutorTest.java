@@ -34,6 +34,8 @@ import org.savonitar.flink.stability.core.spec.document.ScenarioSpecification;
 import org.savonitar.flink.stability.core.spec.document.SpecificationLoader;
 import org.savonitar.flink.stability.core.execution.plan.ExecutableScenarioPlan;
 import org.savonitar.flink.stability.core.execution.plan.ExecutableScenarioPlanCompiler;
+import org.savonitar.flink.stability.core.execution.kafka.KafkaInputManifest;
+import org.savonitar.flink.stability.core.validation.kafka.KafkaSnapshotException;
 
 import java.io.IOException;
 import java.net.URISyntaxException;
@@ -60,6 +62,75 @@ class ExecutablePhaseExecutorTest {
 
     @TempDir
     Path temporaryDirectory;
+
+    @Test
+    void atomicStorageFaultWithoutReadinessIsUnconfirmedAndStopsFollowingSteps() throws Exception {
+        var plan = storagePlan(document -> {
+            var steps = replaceSteps(document);
+            steps.addObject().putObject("checkpoint_storage_fault").put("job", "state-job")
+                    .put("timeout", "90s").put("lease", "120s");
+            steps.addObject().putObject("wait").put("duration", "25ms");
+        });
+        var events = new ArrayList<String>();
+        var executor = new ExecutablePhaseExecutor(new FakeFlink(events), new FakeTaskManagers(events),
+                ExecutablePhaseExecutor.NetworkFaults.NONE, duration -> events.add("sleep"));
+        var evidence = executor.execute(plan, JOB);
+        assertEquals(1, evidence.steps().size());
+        assertEquals(PhaseExecutionEvidence.StepStatus.UNCONFIRMED, evidence.steps().getFirst().status());
+        assertFalse(evidence.storageFaults().getFirst().confirmed());
+        assertTrue(evidence.storageFaults().getFirst().errors().stream()
+                .anyMatch(value -> value.contains("State readiness gate is unavailable")));
+        assertTrue(evidence.taskManagerKills().isEmpty());
+        assertTrue(evidence.taskManagerRestarts().isEmpty());
+        assertEquals(0, StateRecoveryReport.countKills(evidence));
+        assertTrue(events.isEmpty(), events.toString());
+    }
+
+    @Test
+    void keyedKillWhosePrefixCannotBeObservedIsSkippedWithoutKillOrRestart() throws Exception {
+        var plan = storagePlan(document -> {
+            ((ObjectNode) document.at("/workload/jobs/0/checkpointing/storage")).remove("fuse");
+            ((ObjectNode) document.at("/workload/jobs/0/checkpointing"))
+                    .remove(List.of("small_file_threshold", "max_concurrent", "tolerable_failures"));
+            var steps = replaceSteps(document);
+            steps.addObject().putObject("kill").putObject("target")
+                    .put("kind", "named").put("role", "taskmanager").put("name", "taskmanager-1");
+            steps.addObject().putObject("restart").put("component", "taskmanager");
+        });
+        var events = new ArrayList<String>();
+        var flink = new FakeFlink(events);
+        var runtime = new FakeTaskManagers(events);
+        var records = java.util.stream.IntStream.range(0, 6).mapToObj(id -> new KafkaInputManifest.RecordAcknowledgement(id,
+                org.savonitar.flink.stability.runtime.api.Digests.sha256(Integer.toString(id)),
+                List.of(new KafkaInputManifest.ProducerAttempt(1, 0, 0, id, KafkaInputManifest.AcknowledgementOutcome.ACKNOWLEDGED)),
+                0, id, KafkaInputManifest.AcknowledgementOutcome.ACKNOWLEDGED, KafkaInputManifest.TerminalDisposition.PRESENT)).toList();
+        var manifest = new KafkaInputManifest("main", "input", 6, records, java.util.Map.of(0, 0L), java.util.Map.of(0, 6L),
+                KafkaInputManifest.EvidenceStatus.COMPLETE, new KafkaInputManifest.ReconciliationEvidence(
+                java.util.Map.of("isolation.level", "read_uncommitted"), List.of(0L, 1L, 2L, 3L, 4L, 5L), true));
+        var gate = new StateRecoveryGate(flink, runtime, manifest, "kafka:9092", "output", 2,
+                (bootstrap, topic, timeout, maximumRecords, maximumBytes) -> {
+                    throw new KafkaSnapshotException("snapshot.unavailable", "No committed prefix before deadline");
+                }, System::nanoTime, duration -> { throw new AssertionError("No polling after snapshot failure"); });
+        var executor = new ExecutablePhaseExecutor(flink, runtime, ExecutablePhaseExecutor.NetworkFaults.NONE,
+                duration -> events.add("sleep")).withStateRecoveryGate(gate);
+        var evidence = executor.execute(plan, JOB);
+        assertEquals(1, evidence.steps().size());
+        assertEquals(PhaseExecutionEvidence.StepStatus.SKIPPED, evidence.steps().getFirst().status());
+        assertTrue(evidence.taskManagerKills().isEmpty());
+        assertTrue(evidence.taskManagerRestarts().isEmpty());
+        assertEquals(0, StateRecoveryReport.countKills(evidence));
+        assertEquals(1, gate.failures().size());
+        assertTrue(events.isEmpty(), events.toString());
+    }
+
+    private ExecutableScenarioPlan storagePlan(Consumer<ObjectNode> mutation) {
+        var source = resource("checkpoint-storage-fault.yaml");
+        var document = loader.loadScenario(source).document();
+        mutation.accept(document);
+        return compiler.compile(new ScenarioPlanResolver().resolve(new ScenarioBundle(
+                loader.validateScenarioDocument(source, document),
+                loader.loadExpectedResult(resource("checkpoint-storage-fault.expected.yaml"))), ResolutionRequest.none()));
+    }
 
     @Test
     void checkpointPollArmsTheNextKillAndObservesAllSinkPartitions() throws Exception {

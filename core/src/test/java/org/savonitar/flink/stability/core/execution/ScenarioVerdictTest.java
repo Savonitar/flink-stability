@@ -358,15 +358,14 @@ class ScenarioVerdictTest {
     @Test
     void matchingFailuresNeedSuccessfulPhasesBothFencesAndACompletePinnedOracle() {
         V1ScenarioExecutionResult complete = attempt(V1ScenarioExecutionResult.Status.FAIL, DUPLICATES);
-        PhaseExecutionEvidence failedPhase = new PhaseExecutionEvidence(List.of(
-                new PhaseExecutionEvidence.StepEvidence(0, "fault", "$/phases/0/steps/0",
-                        List.of(), PhaseExecutionEvidence.StepKind.KILL_TASKMANAGER,
-                        PhaseExecutionEvidence.StepStatus.FAILED, "kill unavailable")));
-        for (String missing : List.of("phases", "successful-phases", "write-fence",
+        for (String missing : List.of("phases", "FAILED", "SKIPPED", "UNCONFIRMED", "write-fence",
                 "both-fences", "oracle", "complete-snapshot", "pinned-reason", "failing-oracle")) {
             Optional<PhaseExecutionEvidence> phases = switch (missing) {
                 case "phases" -> Optional.empty();
-                case "successful-phases" -> Optional.of(failedPhase);
+                case "FAILED", "SKIPPED", "UNCONFIRMED" -> Optional.of(new PhaseExecutionEvidence(List.of(
+                        new PhaseExecutionEvidence.StepEvidence(0, "fault", "$/phases/0/steps/0",
+                                List.of(), PhaseExecutionEvidence.StepKind.KILL_TASKMANAGER,
+                                PhaseExecutionEvidence.StepStatus.valueOf(missing), "kill unavailable"))));
                 default -> complete.phaseEvidence();
             };
             Optional<? extends org.savonitar.flink.stability.core.validation.kafka.KafkaTerminalValidationResult> oracle = switch (missing) {
@@ -401,6 +400,26 @@ class ScenarioVerdictTest {
             assertFalse(verdict.matched(), missing);
             assertEquals(V1ScenarioExecutionResult.Status.FAIL, invalid.status(), missing);
         }
+    }
+
+    @Test
+    void incompleteRawEvidencePreservesDataFailureButCannotValidateANegativeControl() {
+        var incomplete = new org.savonitar.flink.stability.runtime.api.RawEvidenceStore.Utilisation(
+                1, 0, 4096, 64L * 1024 * 1024, false);
+        var failed = attempt(V1ScenarioExecutionResult.Status.FAIL, DUPLICATES)
+                .withRawEvidence(Optional.of(incomplete));
+        assertEquals(V1ScenarioExecutionResult.Status.FAIL, failed.status());
+        assertEquals(DUPLICATES, failed.reason());
+        assertEquals(ScenarioVerdict.Status.FAIL, ScenarioVerdict.of(ExpectedOutcome.pass(), failed).status());
+        var verdict = ScenarioVerdict.of(EXPECT_DUPLICATES, failed);
+        assertEquals(ScenarioVerdict.Status.INCONCLUSIVE, verdict.status());
+        assertEquals("raw-evidence.incomplete", verdict.reason());
+        assertFalse(verdict.matched());
+
+        var complete = attempt(V1ScenarioExecutionResult.Status.FAIL, DUPLICATES)
+                .withRawEvidence(Optional.of(new org.savonitar.flink.stability.runtime.api.RawEvidenceStore.Utilisation(
+                        1, 0, 4096, 64L * 1024 * 1024, true)));
+        assertTrue(ScenarioVerdict.of(EXPECT_DUPLICATES, complete).matched());
     }
 
     @Test

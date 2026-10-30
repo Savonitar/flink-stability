@@ -59,7 +59,7 @@ public final class CheckpointStorageFault {
                            StateRecoveryEvidence.Recovery recovery, List<String> errors,
                            ExecutableScenarioPlan.CheckpointControls declaredControls,
                            List<RawEvidenceRef> triggerSubmitEvidence, List<RawEvidenceRef> beforeKillEvidence,
-                           List<RawEvidenceRef> afterKillEvidence) {
+                           List<RawEvidenceRef> afterKillEvidence, long baselineIdlessTriggerFailures) {
         public Evidence {
             java.util.Objects.requireNonNull(declaredControls, "declaredControls");
             triggerSubmitEvidence = List.copyOf(triggerSubmitEvidence);
@@ -67,6 +67,26 @@ public final class CheckpointStorageFault {
             samples = List.copyOf(samples); transitions = List.copyOf(transitions); errors = List.copyOf(errors);
             if (samples.size() > 6 || transitions.size() > 3 || errors.size() > 20)
                 throw new IllegalArgumentException("Storage experiment evidence limit exceeded");
+            if (baselineIdlessTriggerFailures < -1)
+                throw new IllegalArgumentException("Invalid baseline ID-less trigger failure count");
+        }
+        public Evidence(String path, String jobId, String triggerId, long timeoutMillis,
+                        long checkpointId, long failedCheckpointId, FlinkCheckpointEvidence.Configuration configuration,
+                        StateRecoveryEvidence.Readiness readiness, StorageFaultControl.Materialization materialization,
+                        FlinkCheckpointTrigger.Observation triggerResult, FlinkCheckpointEvidence.Checkpoint failedCheckpoint,
+                        StateRecoveryEvidence.Trace failureTrace, StateRecoveryEvidence.Trace recoveryTrace,
+                        List<Sample> samples, List<StorageFaultControl.Transition> transitions,
+                        PhaseExecutionEvidence.TaskManagerKill kill, PhaseExecutionEvidence.TaskManagerRestart restart,
+                        StateRecoveryEvidence.Recovery recovery, List<String> errors,
+                        ExecutableScenarioPlan.CheckpointControls declaredControls,
+                        List<RawEvidenceRef> triggerSubmitEvidence, List<RawEvidenceRef> beforeKillEvidence,
+                        List<RawEvidenceRef> afterKillEvidence) {
+            this(path, jobId, triggerId, timeoutMillis, checkpointId, failedCheckpointId, configuration,
+                    readiness, materialization, triggerResult, failedCheckpoint, failureTrace, recoveryTrace,
+                    samples, transitions, kill, restart, recovery, errors, declaredControls,
+                    triggerSubmitEvidence, beforeKillEvidence, afterKillEvidence,
+                    samples.stream().filter(sample -> sample.stage() == Stage.BEFORE_ARM).findFirst()
+                            .map(sample -> sample.checkpoints().idlessFailures()).orElse(-1L));
         }
         public Evidence(String path, String jobId, String triggerId, long timeoutMillis,
                         long checkpointId, long failedCheckpointId, FlinkCheckpointEvidence.Configuration configuration,
@@ -132,11 +152,17 @@ public final class CheckpointStorageFault {
             require(gate != null, "State readiness gate is unavailable");
             r.readiness = gate.await(job, TARGET, left(deadline)).orElseThrow(() -> new IOException("No readiness observation"));
             require(r.readiness.ready(), "State readiness unconfirmed: " + r.readiness.reason());
-            r.configuration = flink.checkpointConfiguration(job, left(deadline));
+            r.configuration = captured(() -> flink.checkpointConfiguration(job, left(deadline)));
             validateConfiguration(r.configuration, job.jobId(), declaredControls);
             r.checkpoint = r.readiness.completedSnapshots().keySet().stream().mapToLong(Long::longValue).max().orElseThrow();
-            r.materialization = runtime.inspectCheckpoint(job.jobId(), r.checkpoint, left(deadline));
             Sample before = sample(r, Stage.BEFORE_ARM, job, deadline, started);
+            r.baselineIdlessFailures = before.checkpoints().idlessFailures();
+            validateBaseline(r.readiness, r.checkpoint, before);
+            r.materialization = runtime.inspectCheckpoint(job.jobId(), r.checkpoint, left(deadline));
+            Sample refreshed = sample(r, Stage.BEFORE_ARM, job, deadline, started);
+            require(sameCheckpointBoundary(before.checkpoints(), refreshed.checkpoints()),
+                    "Checkpoint boundary changed during checkpoint materialization");
+            before = refreshed;
             validateBaseline(r.readiness, r.checkpoint, before);
             validateMaterialization(r.materialization, before.storage(), r.readiness, r.checkpoint);
 
@@ -149,10 +175,20 @@ public final class CheckpointStorageFault {
             require(sameExecution(r.readiness, armed.job()), "Execution changed before checkpoint trigger");
 
             // Exactly one submission, even if its response is lost. A failed trigger has no checkpoint ID.
-            require(flink.triggerCheckpoint(job, r.triggerId, left(deadline)).equals(r.triggerId), "Checkpoint trigger acknowledgement mismatch");
-            r.triggerSubmitEvidence = flink.latestCallEvidence();
+            captured(() -> {
+                try {
+                    require(flink.triggerCheckpoint(job, r.triggerId, left(deadline)).equals(r.triggerId),
+                            "Checkpoint trigger acknowledgement mismatch");
+                    return null;
+                } finally { r.triggerSubmitEvidence = flink.latestCallEvidence(); }
+            });
             do {
-                r.triggerResult = flink.checkpointStatus(job, r.triggerId, left(deadline));
+                try (var capture = flink.captureRawEvidence()) {
+                    r.triggerResult = flink.checkpointStatus(job, r.triggerId, left(deadline));
+                    if (r.triggerResult.state() != FlinkCheckpointTrigger.State.IN_PROGRESS) capture.retain();
+                    else r.triggerResult = new FlinkCheckpointTrigger.Observation(r.triggerResult.state(),
+                            r.triggerResult.checkpointId(), r.triggerResult.failure());
+                }
                 if (r.triggerResult.state() == FlinkCheckpointTrigger.State.IN_PROGRESS) pause(deadline);
             } while (r.triggerResult.state() == FlinkCheckpointTrigger.State.IN_PROGRESS);
             // The asynchronous trigger and checkpoint statistics have separate REST
@@ -163,7 +199,7 @@ public final class CheckpointStorageFault {
             Sample failed = sample(r, Stage.FAILED_CHECKPOINT, job, deadline, started);
             r.failedCheckpoint = correlate(armed.checkpoints(), failed.checkpoints(), r.triggerResult);
             r.failedId = r.failedCheckpoint.id();
-            FlinkCheckpointEvidence.Checkpoint details = flink.checkpointDetails(job, r.failedId, left(deadline));
+            FlinkCheckpointEvidence.Checkpoint details = captured(() -> flink.checkpointDetails(job, r.failedId, left(deadline)));
             require(details.id() == r.failedId && details.status() == FlinkCheckpointEvidence.Status.FAILED
                     && details.triggerTimestamp() == r.failedCheckpoint.triggerTimestamp(), "Failed checkpoint details contradict history");
             r.failedCheckpoint = details;
@@ -175,21 +211,17 @@ public final class CheckpointStorageFault {
                         marker.event() == StateRecoveryEvidence.Event.SNAPSHOT && marker.checkpointId() == r.failedId)) break;
                 pause(deadline);
             } while (true);
-            var failedJob = flink.observe(job, left(deadline));
-            var failedHistory = flink.checkpointHistory(job, left(deadline));
-            var failedStorage = runtime.storageSnapshot(left(deadline));
-            left(deadline);
-            require(sameCheckpointBoundary(failed.checkpoints(), failedHistory), "Checkpoint changed while awaiting failed snapshot receipt");
-            failed = new Sample(Stage.FAILED_CHECKPOINT, failed.sequence(), clock.getAsLong() - started,
-                    failedStorage, failedHistory, failedJob);
-            r.samples.set(2, failed);
+            var refreshedFailure = sample(r, Stage.FAILED_CHECKPOINT, job, deadline, started);
+            require(sameCheckpointBoundary(failed.checkpoints(), refreshedFailure.checkpoints()),
+                    "Checkpoint changed while awaiting failed snapshot receipt");
+            failed = refreshedFailure;
             validateFailure(r.snapshot(), failed);
             require(sameExecution(r.readiness, failed.job()), "Unexpected failure/restart before the deliberate TaskManager kill");
 
-            long beforeKill = flink.jobManagerTimeMillis(job, left(deadline));
+            long beforeKill = captured(() -> flink.jobManagerTimeMillis(job, left(deadline)));
             r.beforeKillEvidence = flink.latestCallEvidence();
             runtime.killTaskManager(TARGET, left(deadline));
-            long afterKill = flink.jobManagerTimeMillis(job, left(deadline));
+            long afterKill = captured(() -> flink.jobManagerTimeMillis(job, left(deadline)));
             r.afterKillEvidence = flink.latestCallEvidence();
             r.kill = new PhaseExecutionEvidence.TaskManagerKill(path, iterations, TARGET,
                     new FlinkJobObservation.Attempt(Optional.of(failed.job()), Optional.empty()),
@@ -197,9 +229,14 @@ public final class CheckpointStorageFault {
                     Optional.empty(), Optional.empty(), Optional.of(r.readiness));
             FlinkJobObservation stopped;
             do {
-                stopped = flink.observe(job, left(deadline));
-                if (stopped.activeSubtasks().isEmpty()
-                        && flink.checkpointHistory(job, left(deadline)).counts().inProgress() == 0) break;
+                try (var capture = flink.captureRawEvidence()) {
+                    stopped = flink.observe(job, left(deadline));
+                    if (stopped.activeSubtasks().isEmpty()
+                            && flink.checkpointHistory(job, left(deadline)).counts().inProgress() == 0) {
+                        capture.retain();
+                        break;
+                    }
+                }
                 pause(deadline);
             } while (true);
             Sample dead = sample(r, Stage.STOPPED, job, deadline, started, stopped);
@@ -221,6 +258,7 @@ public final class CheckpointStorageFault {
             require(replacement.isPresent() && !replacement.orElseThrow().runtimeId().equals(r.readiness.target().runtimeId()),
                     "TaskManager replacement identity is unconfirmed");
             while (true) {
+                try (var capture = flink.captureRawEvidence()) {
                 FlinkJobObservation observed = flink.observe(job, left(deadline));
                 var history = flink.checkpointHistory(job, left(deadline));
                 var trace = StateRecoveryEvidence.collect(runtime.flinkProvisioningEvidence(), runtime.flinkComponentLogs(), job.jobId());
@@ -233,10 +271,12 @@ public final class CheckpointStorageFault {
                     r.samples.add(new Sample(Stage.RECOVERED, r.samples.size() + 1, clock.getAsLong() - started,
                             runtime.storageSnapshot(left(deadline)), history, observed));
                     left(deadline);
+                    capture.retain();
                     validate(r.snapshot());
                     break;
                 }
                 require(!observed.state().terminal(), "Job terminated before checkpoint/state recovery proof completed");
+                }
                 pause(deadline);
             }
         } catch (Exception failure) {
@@ -253,19 +293,46 @@ public final class CheckpointStorageFault {
     }
 
     private Sample sample(Recorder r, Stage stage, FlinkJobHandle job, MonotonicDeadline deadline, long started) throws IOException {
-        return sample(r, stage, job, deadline, started, flink.observe(job, left(deadline)));
+        return captured(() -> sampleUncaptured(r, stage, job, deadline, started, flink.observe(job, left(deadline))));
     }
 
     private Sample sample(Recorder r, Stage stage, FlinkJobHandle job, MonotonicDeadline deadline, long started,
                           FlinkJobObservation observed) throws IOException {
+        return captured(() -> sampleUncaptured(r, stage, job, deadline, started, observed));
+    }
+
+    private Sample sampleUncaptured(Recorder r, Stage stage, FlinkJobHandle job, MonotonicDeadline deadline,
+                                   long started, FlinkJobObservation observed) throws IOException {
         var history = flink.checkpointHistory(job, left(deadline));
         var storage = runtime.storageSnapshot(left(deadline));
         left(deadline);
-        Sample value = new Sample(stage, r.samples.size() + 1, clock.getAsLong() - started, storage, history, observed);
-        r.samples.add(value);
+        boolean refresh = !r.samples.isEmpty() && r.samples.getLast().stage() == stage;
+        Sample value = new Sample(stage, refresh ? r.samples.size() : r.samples.size() + 1,
+                clock.getAsLong() - started, storage, history, observed);
+        if (refresh) r.samples.set(r.samples.size() - 1, value);
+        else r.samples.add(value);
         require(history.jobId().equals(job.jobId()), "Checkpoint history belongs to another job");
         require(storage.complete() && storage.diagnostics().isEmpty(), "Storage capture incomplete: " + storage.diagnostics());
         return value;
+    }
+
+    @FunctionalInterface private interface Observation<T> { T read() throws IOException; }
+
+    /** Selected proof and received error responses survive; ordinary poll candidates do not. */
+    private <T> T captured(Observation<T> operation) throws IOException {
+        try (var capture = flink.captureRawEvidence()) {
+            try {
+                T value = operation.read();
+                capture.retain();
+                return value;
+            } catch (IOException | RuntimeException failure) {
+                try { capture.retain(); }
+                catch (IOException | RuntimeException retention) {
+                    if (retention != failure) failure.addSuppressed(retention);
+                }
+                throw failure;
+            }
+        }
     }
 
     /** Counts plus identities expose competing automatic checkpoints even when history is truncated. */
@@ -312,11 +379,20 @@ public final class CheckpointStorageFault {
     }
 
     private static void validateBaseline(StateRecoveryEvidence.Readiness ready, long checkpoint, Sample before) throws IOException {
-        require(ready.ready() && sameExecution(ready, before.job())
-                && before.checkpoints().counts().failed() == 0 && before.checkpoints().counts().restored() == 0
-                && before.checkpoints().highestObservedId() == checkpoint
-                && before.checkpoints().counts().inProgress() == 0 && before.checkpoints().inProgress().isEmpty()
-                && before.checkpoints().latestCompleted().filter(value -> value.id() == checkpoint).isPresent(),
+        require(ready.ready(), "State recovery readiness is unconfirmed: " + ready.reason());
+        require(sameExecution(ready, before.job()), "Execution changed after state recovery readiness");
+        var history = before.checkpoints();
+        require(history.retained().stream().noneMatch(value -> value.status() == FlinkCheckpointEvidence.Status.FAILED),
+                "Baseline contains a retained FAILED checkpoint");
+        require(history.latestFailed().isEmpty(), "Baseline contains a latest FAILED checkpoint");
+        require(history.counts().failed() == history.idlessFailures(),
+                "Baseline failed count is not fully accounted by ID-less trigger failures");
+        require(history.counts().restored() == 0 && history.latestRestored().isEmpty(),
+                "Baseline already restored a checkpoint before the deliberate kill");
+        require(history.counts().inProgress() == 0 && history.inProgress().isEmpty(),
+                "Baseline contains an in-progress checkpoint");
+        require(history.highestObservedId() == checkpoint
+                && history.latestCompleted().filter(value -> value.id() == checkpoint).isPresent(),
                 "Latest completed checkpoint changed after readiness");
         var instances = before.storage().instances();
         require(instances.size() == 2 && instances.stream().noneMatch(StorageFaultControl.InstanceEvidence::processDead)
@@ -554,6 +630,8 @@ public final class CheckpointStorageFault {
         var before = e.samples().get(0); var armed = e.samples().get(1); var failed = e.samples().get(2);
         var stopped = e.samples().get(3); var healed = e.samples().get(4); var recovered = e.samples().get(5);
         validateBaseline(e.readiness(), e.checkpointId(), before);
+        require(e.baselineIdlessTriggerFailures() == before.checkpoints().idlessFailures(),
+                "Recorded baseline ID-less trigger failures differ from checkpoint history");
         validateMaterialization(e.materialization(), before.storage(), e.readiness(), e.checkpointId());
         require(sameCheckpointBoundary(before.checkpoints(), armed.checkpoints()), "Arming checkpoint race");
         requireArmed(armed.storage(), e.triggerId(), e.readiness().target().runtimeId(), false);
@@ -654,7 +732,7 @@ public final class CheckpointStorageFault {
         final String path, jobId, triggerId = UUID.randomUUID().toString().replace("-", "");
         final long timeout;
         final ExecutableScenarioPlan.CheckpointControls declaredControls;
-        long checkpoint = -1, failedId = -1;
+        long checkpoint = -1, failedId = -1, baselineIdlessFailures = -1;
         FlinkCheckpointEvidence.Configuration configuration;
         StateRecoveryEvidence.Readiness readiness;
         StorageFaultControl.Materialization materialization;
@@ -675,6 +753,7 @@ public final class CheckpointStorageFault {
         }
         Evidence snapshot() { return new Evidence(path, jobId, triggerId, timeout, checkpoint, failedId, configuration, readiness,
                 materialization, triggerResult, failedCheckpoint, failureTrace, recoveryTrace, samples, transitions, kill, restart,
-                recovery, errors, declaredControls, triggerSubmitEvidence, beforeKillEvidence, afterKillEvidence); }
+                recovery, errors, declaredControls, triggerSubmitEvidence, beforeKillEvidence, afterKillEvidence,
+                baselineIdlessFailures); }
     }
 }

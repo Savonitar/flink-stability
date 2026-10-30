@@ -1,5 +1,9 @@
 # Checkpoint storage faults
 
+The [October 30 N1–N5 verification](CHECKPOINT-STORAGE-N1-N5-VERIFICATION.md)
+records two fresh successful FUSE attempts with scoped REST capture, the new
+normalized helper archive and independently checked raw-store utilisation.
+
 The [October 29 review verification](CHECKPOINT-STORAGE-REVIEW-VERIFICATION.md)
 records fresh successful regression attempts with the rebuilt helpers. The final
 FUSE result JSON was 2,762,931 bytes, including raw source references and the bound
@@ -100,6 +104,19 @@ the inline threshold defaults to 20 KiB. Failure tolerance covers JobManager
 I/O failures, asynchronous TaskManager checkpoint failures and checkpoint
 timeouts; a synchronous TaskManager failure can still cause immediate failover.
 An unexpected restart before the deliberate kill does not qualify this window.
+Flink can also report a failed startup trigger before tasks are ready, without
+allocating a checkpoint ID. Such failures are allowed only when the baseline has
+no retained `FAILED` checkpoint and no `latest.failed` entry. The explicit
+`baselineIdlessTriggerFailures` receipt records the residual failed counter after
+subtracting distinct failed IDs. Any identified failed checkpoint rejects the
+baseline. Subsequent validation compares counter deltas against this baseline;
+one additional correlated EIO failure is required, and unexpected later failures
+still reject the window. Baseline diagnostics distinguish changed completed IDs,
+in-flight checkpoints and identified failures. The baseline is checked before
+launching the metadata inspector and refreshed before ARM.
+A skipped keyed kill is `SKIPPED`; an unconfirmed atomic fault is `UNCONFIRMED`,
+so neither is reported as a successful phase. Actual completed kill/restart
+receipts still determine which physical incarnations require identity checks.
 See the [released checkpoint configuration definitions](https://github.com/apache/flink/blob/release-2.2.0/flink-core/src/main/java/org/apache/flink/configuration/CheckpointingOptions.java).
 
 ## Build the helper and prepare the catalog
@@ -115,8 +132,30 @@ uses the pinned image and locked public Ubuntu package closure, compiles the
 native helper, and compiles both Java I/O probe and checkpoint metadata inspector
 with `--release 17`. It retains compiler/command receipts, dependency and source
 hashes, native self-test output and artifact hashes in `build-evidence.json`.
+`probe.jar` uses sorted entries, fixed ZIP timestamps, stored entries and a
+literal manifest without a generated JDK build field. Repeated builds with the
+same selected toolchain produce identical JAR bytes. The build receipt records
+the selected Java tools, their hashes and version output; different JDK builds
+can still emit different class bytes, so the bundle manifest hash identifies
+that particular build and toolchain. Native artifact reproducibility is separate.
 It does not rebuild Flink or produce a derived runtime image. Earlier PR 3
 bundles without `CheckpointStateInspector` are insufficient for this operation.
+
+On macOS Docker Desktop, select the packaged CLI and obtain the endpoint from
+your selected Docker context before invoking the builder:
+
+```sh
+CHECKPOINT_DOCKER=/Applications/Docker.app/Contents/Resources/bin/docker
+CHECKPOINT_CONTEXT=desktop-linux # replace with the deliberately selected local context
+export DOCKER_HOST=$("$CHECKPOINT_DOCKER" context inspect "$CHECKPOINT_CONTEXT" --format '{{.Endpoints.docker.Host}}')
+```
+
+The selected endpoint must be a local `unix:///` socket.
+Pass these explicit values using `--docker` and `--docker-host`; the builder's
+legacy defaults are `/usr/local/bin/docker` and `unix:///var/run/docker.sock`,
+which are not present on every installation. The builder itself uses an empty
+isolated Docker configuration and does not inspect the user's context store.
+For Linux, select its installed CLI and local Unix socket.
 
 Run from the repository root and choose fresh names for every build and attempt:
 
@@ -125,7 +164,7 @@ CHECKPOINT_JDK21=/path/to/jdk-21
 CHECKPOINT_DOCKER=/path/to/docker
 CHECKPOINT_BUNDLE=jobs/checkpoint-storage-helper-local-04
 export JAVA_HOME="$CHECKPOINT_JDK21"
-export DOCKER_HOST=unix:///var/run/docker.sock
+export DOCKER_HOST=unix:///path/to/selected/docker.sock
 
 python3 testcontainers/checkpoint_storage_build.py \
   --java-home "$CHECKPOINT_JDK21" \
@@ -344,10 +383,25 @@ the final job view, readiness's original checkpoint overview, materialization an
 physical fence states have counterparts.
 There is no second inspect measurement used to manufacture the receipt.
 
+Only proof calls selected by the readiness gate, atomic fault and final job
+observation are persisted. Ordinary REST polling remains unretained. Candidate
+readiness/fault samples are buffered until selected, then committed as one call
+scope; discarded polls create no capture files. After the atomic operation,
+completion polling consumes no captures; the final pre-fence observation is
+retained. Increasing an attempt to 600 seconds therefore does not consume the
+store merely through additional polls. Every required source group remains
+mandatory in the independent audit.
+
 Capture failures prevent a confirmed result. Each store permits at most 4,096
 responses, 2 MiB per response and 64 MiB in aggregate; files are created once with
-owner-only access. Flink GET retries retain their individual responses in the same
-call group; checkpoint POST is never replayed. The Docker client may retry an
+owner-only access. Empty response bodies are valid zero-byte captures with the
+SHA-256 of empty bytes, so an empty HTTP response does not disable later calls.
+Flink GET retries retain their individual responses in the same selected
+call group; checkpoint POST is never replayed. `evidence.rawEvidence` reports
+`captures`, `bytes`, `maxCaptures`, `maxBytes` and `complete` for the REST store.
+The qualification Markdown reports the same utilisation separately from the
+source audit's capture count, which also includes inspector and Docker evidence.
+Historical results without these counters show unknown utilisation, not zero. The Docker client may retry an
 idempotent GET within the shared deadline, so its receipt describes the final
 returned response rather than a single wire exchange. Local evidence writes are
 checked against the remaining budget but cannot preempt a stalled host filesystem.

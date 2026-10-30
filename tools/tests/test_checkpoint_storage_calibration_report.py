@@ -50,6 +50,18 @@ def fixture():
 
 
 class CheckpointStorageReportTest(unittest.TestCase):
+    def test_raw_rest_utilisation_is_separate_from_audit_counts_and_unknown_when_absent(self):
+        value, manifest = fixture()
+        value["attempts"][0]["rawEvidence"] = dict(captures=43, bytes=12345, maxCaptures=4096,
+                                                 maxBytes=67108864, complete=True)
+        value["attempts"][0]["rawEvidenceAudit"] = dict(confirmed=True, captureCount=59, groupCount=24)
+        text = report.render(value, manifest)
+        self.assertIn("captures 59; call groups 24", text)
+        self.assertIn("captures 43/4096; bytes 12345/67108864; complete True", text)
+        self.assertIn("captures unknown/unknown; bytes unknown/unknown; complete unknown", text)
+        value["attempts"][0]["rawEvidence"] = ["malformed"]
+        self.assertIn("captures unknown/unknown; bytes unknown/unknown; complete unknown", report.render(value, manifest))
+
     def test_current_and_legacy_cli_copies_are_labelled_derived_separately_from_raw_proof(self):
         value, manifest = fixture()
         value["attempts"][0]["derivedCliProjections"] = {

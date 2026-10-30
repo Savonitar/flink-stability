@@ -89,6 +89,23 @@ class FlinkCheckpointEvidenceTest {
         assertThrows(UnsupportedOperationException.class, () -> result.retained().clear());
     }
 
+    @Test void accountsIdlessTriggersWithoutDoubleCountingLatestFailedCheckpoint() throws Exception {
+        ObjectNode startup = history();
+        startup.set("history", MAPPER.createArrayNode().add(checkpoint(9, "COMPLETED")));
+        ((ObjectNode) startup.path("latest")).remove("failed");
+        ((ObjectNode) startup.path("counts")).put("total", 10).put("in_progress", 0).put("completed", 9).put("failed", 1);
+        assertEquals(1, client(startup.toString(), new ArrayList<>()).checkpointHistory(JOB, Duration.ofSeconds(1)).idlessFailures());
+
+        ObjectNode retained = history();
+        assertEquals(1, client(retained.toString(), new ArrayList<>()).checkpointHistory(JOB, Duration.ofSeconds(1)).idlessFailures());
+        retained.withArray("history").remove(0); // latest.failed still names the failure outside the cache.
+        assertEquals(1, client(retained.toString(), new ArrayList<>()).checkpointHistory(JOB, Duration.ofSeconds(1)).idlessFailures());
+        retained.withArray("history").add(checkpoint(10, "FAILED"));
+        assertEquals(0, client(retained.toString(), new ArrayList<>()).checkpointHistory(JOB, Duration.ofSeconds(1)).idlessFailures());
+        ((ObjectNode) retained.path("counts")).put("failed", 1).put("total", 11);
+        assertInvalidHistory(retained);
+    }
+
     @Test
     void failsOnDuplicateConflictingAndExcessiveRetainedHistory() throws Exception {
         ObjectNode duplicate = history();

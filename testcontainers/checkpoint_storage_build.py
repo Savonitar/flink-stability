@@ -16,6 +16,7 @@ import subprocess
 import sys
 import time
 import uuid
+import zipfile
 from urllib.parse import unquote, urlsplit
 
 
@@ -24,6 +25,11 @@ NATIVE = Path('testcontainers/src/main/native/checkpoint-fuse')
 JAVA = Path('testcontainers/src/main/java/org/savonitar/flink/stability/testcontainers/storage/CheckpointStorageIoProbe.java')
 INSPECTOR = JAVA.with_name('CheckpointStateInspector.java')
 MAIN = 'org.savonitar.flink.stability.testcontainers.storage.CheckpointStorageIoProbe'
+JAR_DATE = '2026-01-01T00:00:00Z'
+JAR_TIMESTAMP = (2026, 1, 1, 0, 0, 0)
+_MAIN_MANIFEST_LINE = 'Main-Class: ' + MAIN
+JAR_MANIFEST = ('Manifest-Version: 1.0\r\n' + _MAIN_MANIFEST_LINE[:70] + '\r\n '
+                + _MAIN_MANIFEST_LINE[70:] + '\r\n\r\n').encode('ascii')
 NATIVE_SOURCES = ('core.c', 'core.h', 'jail.c', 'jail.h', 'checkpoint_fuse.c', 'selftest.c')
 IMAGE_ID = 'sha256:2e93ded2cb7bf1a50f71b663d5e3ea01420bcc4e549cbf666d05120f939713c7'
 IMAGE_DIGEST = 'flink@sha256:7ecfab9d5e8ec6987a248b32f6605b5fe9bcb7347aea0d7b1bc3976588408681'
@@ -276,6 +282,72 @@ def freeze_sources(output, lock_path):
     return frozen, hashes
 
 
+def java_toolchain(command, java_home, java_tools):
+    """Identify only the explicitly selected JDK; never dump ambient properties."""
+    release = checked_path(java_home / 'release')
+    modules = checked_path(java_home / 'lib/modules')
+    selected = {'IMPLEMENTOR', 'IMPLEMENTOR_VERSION', 'JAVA_VERSION', 'JAVA_VERSION_DATE',
+                'JAVA_RUNTIME_VERSION', 'FULL_VERSION', 'OS_NAME', 'OS_ARCH'}
+    metadata = {}
+    for line in release.read_text(encoding='utf-8').splitlines():
+        name, separator, value = line.partition('=')
+        if separator and name in selected:
+            if name in metadata:
+                raise ValueError('Duplicate selected JDK release metadata')
+            metadata[name] = json.loads(value)
+    if (not isinstance(metadata.get('IMPLEMENTOR'), str) or not metadata['IMPLEMENTOR']
+            or not isinstance(metadata.get('JAVA_VERSION'), str)
+            or not re.fullmatch(r'21(?:\.[0-9A-Za-z.+_-]+)?', metadata['JAVA_VERSION'])):
+        raise RuntimeError('Use an identified JDK21 for the standalone Java probe build')
+    tools = {}
+    for name, path in java_tools.items():
+        version = command.run(name + '-version', [str(path), '-version' if name == 'javac' else '--version']).strip()
+        runtime = version if name == 'java' else command.run(name + '-runtime-version', [str(path), '-J--version']).strip()
+        if not version or not runtime:
+            raise RuntimeError('Selected Java tool version is missing: ' + name)
+        tools[name] = {'path': str(path), 'sha256': sha256(path), 'version': version, 'runtimeVersion': runtime}
+    if not re.fullmatch(r'javac 21(?:\.[0-9A-Za-z.+_-]+)?', tools['javac']['version']):
+        raise RuntimeError('Use JDK21 for the standalone Java probe build')
+    return {'vendor': metadata['IMPLEMENTOR'], 'releaseMetadata': metadata,
+            'releaseSha256': sha256(release), 'modulesSha256': sha256(modules), 'tools': tools}
+
+
+def compile_probe(command, java_tools, frozen, output):
+    """Fixed archive metadata; class bytes still depend on the selected compiler."""
+    classes, empty = output / 'java-classes', output / 'empty-sourcepath'
+    classes.mkdir()
+    empty.mkdir()
+    sources = sorted((frozen / JAVA.name, frozen / INSPECTOR.name))
+    command.run('compile-java', [str(java_tools['javac']), '--release', '17', '-encoding', 'UTF-8',
+                '-proc:none', '-classpath', str(classes), '-sourcepath', str(empty), '-d', str(classes),
+                *(str(path) for path in sources)])
+    class_files = sorted(path for path in classes.rglob('*') if path.is_file())
+    if not class_files or any(checked_path(path).suffix != '.class' for path in class_files):
+        raise RuntimeError('Unexpected Java compiler output')
+    class_hashes = {path.relative_to(classes).as_posix(): sha256(path) for path in class_files}
+    manifest = classes / 'META-INF/MANIFEST.MF'
+    manifest.parent.mkdir()
+    manifest.write_bytes(JAR_MANIFEST)
+    entries = ['META-INF/MANIFEST.MF', *class_hashes]
+    archive = output / 'bundle/probe.jar'
+    arguments = [str(java_tools['jar']), '--create', '--file', str(archive), '--no-manifest',
+                 '--no-compress', '--date=' + JAR_DATE]
+    for entry in entries:
+        arguments.extend(['-C', str(classes), entry])
+    command.run('package-java', arguments)
+    with zipfile.ZipFile(archive) as jar:
+        if (jar.namelist() != entries or jar.read('META-INF/MANIFEST.MF') != JAR_MANIFEST
+                or any(entry.date_time != JAR_TIMESTAMP or entry.compress_type != zipfile.ZIP_STORED
+                       for entry in jar.infolist())):
+            raise RuntimeError('Probe archive differs from deterministic packaging contract')
+        for entry, digest in class_hashes.items():
+            if hashlib.sha256(jar.read(entry)).hexdigest() != digest:
+                raise RuntimeError('Packaged probe class differs from compiler output')
+    return {'entryOrder': entries, 'entryTimestamp': JAR_DATE, 'compression': 'stored',
+            'manifestSha256': hashlib.sha256(JAR_MANIFEST).hexdigest(), 'classSha256': class_hashes,
+            'reproducibilityScope': 'same source bytes and selected JDK; cross-JDK class identity is not guaranteed'}
+
+
 def build(args):
     endpoint = local_endpoint(args.docker_host)
     output = checked_path(args.output, exists=False)
@@ -299,6 +371,8 @@ def build(args):
     failure = None
     try:
         frozen, evidence['sourceHashes'] = freeze_sources(output, lock_path)
+        evidence['javaToolchain'] = java_toolchain(command, java_home, java_tools)
+        evidence['javac'] = evidence['javaToolchain']['tools']['javac']['version']
         inspected = ensure_image(command)
         evidence['imageId'] = inspected['Id']
         evidence['imageInspection'] = {'Id': inspected['Id'], 'Os': inspected['Os'],
@@ -371,17 +445,9 @@ readelf -d /work/bundle/checkpoint-fuse-selftest > /work/receipts/selftest-dynam
         evidence['libfuseVersion'] = (receipts / 'libfuse-version.txt').read_text().strip()
         evidence['fuseStaticLibraries'] = (receipts / 'fuse-static-libs.txt').read_text().strip()
         evidence['helperVersion'] = (receipts / 'helper-version.txt').read_text().strip()
-        # Classpath and sourcepath are explicit empty directories; no ambient sources.
-        classes, empty = output / 'java-classes', output / 'empty-sourcepath'
-        classes.mkdir()
-        empty.mkdir()
-        evidence['javac'] = command.run('javac-version', [str(java_tools['javac']), '-version']).strip()
-        if not re.fullmatch(r'javac 21(?:\.[0-9A-Za-z.+_-]+)?', evidence['javac']):
-            raise RuntimeError('Use JDK21 for the standalone Java probe build')
-        command.run('compile-java', [str(java_tools['javac']), '--release', '17', '-encoding', 'UTF-8',
-                    '-classpath', str(classes), '-sourcepath', str(empty), '-d', str(classes), str(frozen / JAVA.name), str(frozen / INSPECTOR.name)])
-        command.run('package-java', [str(java_tools['jar']), '--create', '--file', str(output / 'bundle/probe.jar'),
-                    '--main-class', MAIN, '--date=2026-01-01T00:00:00Z', '-C', str(classes), '.'])
+        evidence['javaArchive'] = compile_probe(command, java_tools, frozen, output)
+        if java_toolchain(command, java_home, java_tools) != evidence['javaToolchain']:
+            raise RuntimeError('Selected Java toolchain changed during the build')
         # Run native binaries with the pristine runtime, proving the builder's libc
         # upgrade did not add a runtime dependency. This container has no network.
         smoke = 'checkpoint-fuse-smoke-' + uuid.uuid4().hex[:16]

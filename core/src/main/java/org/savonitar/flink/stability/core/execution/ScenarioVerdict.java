@@ -93,6 +93,9 @@ public record ScenarioVerdict(Status status, String reason, String message, bool
 
     /** Keep the observed data failure, but do not bless an invalid negative control. */
     private static ScenarioVerdict matchingFailure(V1ScenarioExecutionResult attempt) {
+        if (attempt.rawEvidence().filter(value -> !value.complete()).isPresent())
+            return unconfirmed("raw-evidence.incomplete",
+                    "The expected data failure lacks complete required raw REST evidence");
         if (attempt.stateRecovery().filter(value -> StateRecoveryReport.UNEXPECTED_BUILD_MODE.equals(value.reason())).isPresent())
             return unconfirmed(StateRecoveryReport.UNEXPECTED_BUILD_MODE,
                     "The observed reset-state workload lacks explicit scenario calibration permission");
@@ -109,7 +112,7 @@ public record ScenarioVerdict(Status status, String reason, String message, bool
         if (window != null) return window;
         if (attempt.phaseEvidence().isEmpty()
                 || attempt.phaseEvidence().orElseThrow().steps().stream().anyMatch(step ->
-                        step.status() == PhaseExecutionEvidence.StepStatus.FAILED)
+                        step.status() != PhaseExecutionEvidence.StepStatus.SUCCEEDED)
                 || attempt.writeFenceEvidence().isEmpty()
                 || attempt.processFenceEvidence().isEmpty()
                 || attempt.terminalValidation().filter(validation ->

@@ -36,6 +36,9 @@ class ActualBuildOrderingTest(unittest.TestCase):
         source.write_bytes(Path(builder.__file__).read_bytes())
         java_home = root / "jdk"
         (java_home / "bin").mkdir(parents=True)
+        (java_home / "lib").mkdir()
+        (java_home / "release").write_text('JAVA_VERSION="21.0.7"\nIMPLEMENTOR="Generated JDK fixture"\n')
+        (java_home / "lib/modules").write_bytes(b"generated module image fixture")
         for name in ("java", "javac", "jar"):
             (java_home / "bin" / name).write_text("generated executable fixture\n")
         docker = root / "docker"
@@ -66,6 +69,12 @@ class ActualBuildOrderingTest(unittest.TestCase):
 
             def run(self, label, command, **unused):
                 self.receipts.append(dict(label=label, argv=command, exitCode=0, elapsedSeconds=0))
+                if label == "javac-version":
+                    return "javac 21.0.7\n"
+                if label == "jar-version":
+                    return "jar 21.0.7\n"
+                if label in ("java-version", "javac-runtime-version", "jar-runtime-version"):
+                    return "openjdk 21.0.7\nGenerated JDK fixture (build 21.0.7+1)\n"
                 if label == "image-store-backend":
                     return json.dumps(dict(Driver="overlay2", DriverStatus=[]))
                 if label == "create-builder":
@@ -109,6 +118,8 @@ class ActualBuildOrderingTest(unittest.TestCase):
         self.assertEqual([dict(container=instances[0].name, status="removed")], evidence["cleanup"])
         self.assertEqual(instances[0].receipts, evidence["commands"])
         self.assertEqual("cleanup-remove", evidence["commands"][-1]["label"])
+        self.assertEqual("Generated JDK fixture", evidence["javaToolchain"]["vendor"])
+        self.assertEqual(builder.sha256(java_home / "lib/modules"), evidence["javaToolchain"]["modulesSha256"])
         return evidence
 
     def test_actual_build_verifies_downloads_then_disconnects_before_install_and_source_transfer(self):

@@ -251,6 +251,46 @@ class NativeStorageAuditTest(unittest.TestCase):
                     self.assertEqual(report["nativeEioOperations"], 1)
                     self.assertEqual(report["stages"], list(audit.STAGES))
 
+    def test_idless_startup_failure_is_retained_through_the_full_atomic_sequence(self):
+        def change(result):
+            fault = result["evidence"]["checkpointStorageFaults"][0]
+            fault["baselineIdlessTriggerFailures"] = 1
+            for sample in fault["samples"]:
+                counts = sample["checkpoints"]["counts"]
+                counts["total"] += 1
+                counts["failed"] += 1
+        report = self.run_case(change)
+        self.assertTrue(report["complete"])
+        self.assertEqual(1, report["baselineIdlessTriggerFailures"])
+
+    def test_real_baseline_failures_and_unaccounted_idless_deltas_are_rejected(self):
+        def idless(fault):
+            fault["baselineIdlessTriggerFailures"] = 1
+            for sample in fault["samples"]:
+                sample["checkpoints"]["counts"]["total"] += 1
+                sample["checkpoints"]["counts"]["failed"] += 1
+
+        def actual_failure(fault, retained):
+            idless(fault)
+            old = deepcopy(fault["failedCheckpoint"])
+            old.update(id=41, triggerTimestamp=1, failureTimestamp=2)
+            for sample in fault["samples"][:2]:
+                sample["checkpoints"]["latestFailed"] = old
+                if retained:
+                    sample["checkpoints"]["retained"].append(old)
+
+        changes = {
+            "retained failure": lambda fault: actual_failure(fault, True),
+            "latest outside cache": lambda fault: actual_failure(fault, False),
+            "forged baseline count": lambda fault: fault.update(baselineIdlessTriggerFailures=1),
+            "missing nonzero baseline": lambda fault: (idless(fault), fault.pop("baselineIdlessTriggerFailures")),
+            "idless change during ARM": lambda fault: fault["samples"][1]["checkpoints"]["counts"].update(total=2, failed=1),
+            "extra idless failure with injected failure": lambda fault: fault["samples"][2]["checkpoints"]["counts"].update(total=3, failed=2),
+        }
+        for name, change in changes.items():
+            with self.subTest(name=name), self.assertRaises(ValueError):
+                self.run_case(lambda result: change(result["evidence"]["checkpointStorageFaults"][0]))
+
     def test_causal_negative_receipts_cannot_qualify(self):
         changes = {
             "missing stage": lambda f: f["samples"].pop(2),

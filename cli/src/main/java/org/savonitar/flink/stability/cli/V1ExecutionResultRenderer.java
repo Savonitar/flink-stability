@@ -146,6 +146,7 @@ final class V1ExecutionResultRenderer {
         });
         var componentDiagnostics = componentErrorsNode.putArray("diagnostics");
         result.componentErrors().diagnostics().forEach(componentDiagnostics::add);
+        result.rawEvidence().ifPresent(value -> evidence.set("rawEvidence", StateRecoveryEvidenceRenderer.render(value, JSON)));
         ObjectNode rest = evidence.putObject("flinkRest");
         rest.put("errorCount", result.flinkRestErrors().size());
         ArrayNode restErrors = rest.putArray("errors");
@@ -175,13 +176,20 @@ final class V1ExecutionResultRenderer {
         phase.put("steps", 0);
         phase.put("succeeded", 0);
         phase.put("failed", 0);
+        phase.put("skipped", 0);
+        phase.put("unconfirmed", 0);
         result.phaseEvidence().ifPresent(phases -> {
             long failed = phases.steps().stream()
                     .filter(step -> step.status()
                             == PhaseExecutionEvidence.StepStatus.FAILED)
                     .count();
-            phase.put("status", failed == 0 ? "complete" : "partial");
-            phase.put("completed", failed == 0);
+            long skipped = phases.steps().stream().filter(step -> step.status() == PhaseExecutionEvidence.StepStatus.SKIPPED).count();
+            long unconfirmed = phases.steps().stream().filter(step -> step.status() == PhaseExecutionEvidence.StepStatus.UNCONFIRMED).count();
+            boolean completed = failed + skipped + unconfirmed == 0;
+            phase.put("status", completed ? "complete" : "partial");
+            phase.put("completed", completed);
+            phase.put("skipped", skipped);
+            phase.put("unconfirmed", unconfirmed);
             phase.put("steps", phases.steps().size());
             phase.put("succeeded", phases.steps().stream()
                     .filter(step -> step.status()

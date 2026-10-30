@@ -49,7 +49,7 @@ class StateRecoveryGateTest {
         assertEquals(4, readiness.committedPrefix().observedRecords());
         assertEquals(3, readiness.committedPrefix().maximumId());
         assertEquals(Map.of(0, 2L, 1, 2L), readiness.committedPrefix().perKeyCounts());
-        assertEquals(List.of("taskManagerIdentity", "checkpointOverview", "latestCallEvidence", "observe",
+        assertEquals(List.of("taskManagerIdentity", "captureRawEvidence", "checkpointOverview", "latestCallEvidence", "observe",
                 "flinkProvisioningEvidence", "flinkComponentLogs"), calls);
         assertEquals(List.of(readiness), gate.attempts());
     }
@@ -177,6 +177,7 @@ class StateRecoveryGateTest {
                 new Class<?>[]{FlinkScenarioControl.class}, (proxy, method, args) -> {
                     calls.add(method.getName());
                     return switch (method.getName()) {
+                        case "captureRawEvidence" -> FlinkScenarioControl.RawEvidenceCapture.NONE;
                         case "latestCallEvidence" -> List.of();
                         case "checkpointOverview" -> {
                             var current = checkpoints.deepCopy();

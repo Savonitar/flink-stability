@@ -52,6 +52,7 @@ public final class FlinkRestApiClient implements FlinkScenarioControl {
     private final Sleeper sleeper;
     private final List<RestError> restErrors = new ArrayList<>();
     private RawEvidenceStore rawEvidence;
+    private RawEvidenceStore.Batch capture;
     private long groupSequence;
     private String activeGroup;
     private List<RawEvidenceRef> latestCallEvidence = List.of();
@@ -63,13 +64,36 @@ public final class FlinkRestApiClient implements FlinkScenarioControl {
 
     @Override public List<RawEvidenceRef> latestCallEvidence() { return latestCallEvidence; }
 
+    @Override public Optional<RawEvidenceStore.Utilisation> rawEvidenceUtilisation() {
+        return Optional.ofNullable(rawEvidence).map(RawEvidenceStore::utilisation);
+    }
+
+    @Override public RawEvidenceCapture captureRawEvidence() throws IOException {
+        if (rawEvidence == null) return RawEvidenceCapture.NONE;
+        if (capture != null) throw new IllegalStateException("Nested raw response capture is unsupported");
+        var batch = rawEvidence.batch();
+        capture = batch;
+        return new RawEvidenceCapture() {
+            private boolean closed;
+            @Override public void retain() throws IOException {
+                if (closed) throw new IllegalStateException("Raw response capture is closed");
+                batch.commit();
+            }
+            @Override public void close() {
+                if (!closed) { closed = true; batch.close(); capture = null; }
+            }
+        };
+    }
+
     private EvidenceCall evidenceCall(String name) { return new EvidenceCall(name); }
 
     private final class EvidenceCall implements AutoCloseable {
-        private final long cursor = rawEvidence == null ? 0 : rawEvidence.cursor();
+        private final int cursor = capture == null ? 0 : capture.references().size();
         private final String previous = activeGroup;
         private EvidenceCall(String name) { activeGroup = name + "-" + ++groupSequence; }
-        private List<RawEvidenceRef> references() { return rawEvidence == null ? List.of() : rawEvidence.since(cursor); }
+        private List<RawEvidenceRef> references() {
+            return capture == null ? List.of() : List.copyOf(capture.references().subList(cursor, capture.references().size()));
+        }
         @Override public void close() { latestCallEvidence = references(); activeGroup = previous; }
     }
 
@@ -534,7 +558,8 @@ public final class FlinkRestApiClient implements FlinkScenarioControl {
 
     private JsonNode execute(String method, String endpoint, byte[] requestBody,
             MonotonicDeadline deadline, int maximumResponseBytes) throws IOException {
-        if (rawEvidence != null) maximumResponseBytes = Math.min(maximumResponseBytes, RawEvidenceStore.MAX_RESPONSE_BYTES);
+        if (rawEvidence != null)
+            maximumResponseBytes = Math.min(maximumResponseBytes, RawEvidenceStore.MAX_RESPONSE_BYTES);
         while (true) {
             Duration remaining = deadline == null ? DEFAULT_CALL_TIMEOUT : remaining(deadline);
             HttpResponse response;
@@ -548,9 +573,8 @@ public final class FlinkRestApiClient implements FlinkScenarioControl {
                 }
                 throw timeout;
             }
-            if (rawEvidence != null) {
-                rawEvidence.retain(response.body(), "flink-rest-decoded-body",
-                        activeGroup == null ? "request-" + ++groupSequence : activeGroup,
+            if (capture != null && activeGroup != null) {
+                capture.retain(response.body(), "flink-rest-decoded-body", activeGroup,
                         method, endpoint, response.status(), started, nanoTime.getAsLong());
             }
             if (!response.successful()) {

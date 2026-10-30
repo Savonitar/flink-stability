@@ -200,9 +200,11 @@ public final class ExecutablePhaseExecutor {
                 if (observed.kill() != null) evidence.kills.add(observed.kill());
                 if (observed.restart() != null) evidence.restarts.add(observed.restart());
                 evidence.stopFurtherSteps |= !observed.confirmed();
-                succeeded(evidence, phaseIndex, phaseName, path, loopIterations,
+                evidence.steps.add(new PhaseExecutionEvidence.StepEvidence(phaseIndex, phaseName, path, loopIterations,
                         PhaseExecutionEvidence.StepKind.CHECKPOINT_STORAGE_FAULT,
-                        "effectConfirmed=" + observed.confirmed());
+                        observed.confirmed() ? PhaseExecutionEvidence.StepStatus.SUCCEEDED
+                                : PhaseExecutionEvidence.StepStatus.UNCONFIRMED,
+                        "effectConfirmed=" + observed.confirmed()));
             } else if (step instanceof ExecutableScenarioPlan.SavepointRestore restore) {
                 var observation = SavepointLifecycle.execute(path, flink, job, restoreSubmission, savepointDirectory, restore, sleeper, nanoTime);
                 evidence.savepoints.add(observation);
@@ -523,9 +525,9 @@ public final class ExecutablePhaseExecutor {
             }
             if (stateReadiness.isEmpty() || !stateReadiness.orElseThrow().ready()) {
                 evidence.stopFurtherSteps = true;
-                succeeded(evidence, phaseIndex, phaseName, path, loopIterations,
-                        PhaseExecutionEvidence.StepKind.KILL_TASKMANAGER,
-                        "State recovery readiness unconfirmed; kill not injected");
+                evidence.steps.add(new PhaseExecutionEvidence.StepEvidence(phaseIndex, phaseName, path, loopIterations,
+                        PhaseExecutionEvidence.StepKind.KILL_TASKMANAGER, PhaseExecutionEvidence.StepStatus.SKIPPED,
+                        "State recovery readiness unconfirmed; kill not injected"));
                 return;
             }
         }

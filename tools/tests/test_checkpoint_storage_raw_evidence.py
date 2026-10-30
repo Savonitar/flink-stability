@@ -76,6 +76,33 @@ class RawEvidenceTest(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, "retry"):
                 retained.inspector().one([retry, success], "job-manager-clock", "/jobs/job")
 
+    def test_empty_error_retry_is_a_valid_zero_byte_capture(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            retained = Retained(Path(temporary).resolve())
+            retry = retained.put(b"", "/jobs/job", "job-manager-clock-1", status=503)
+            success = retained.put(b'{"now":42}', "/jobs/job", "job-manager-clock-1")
+            self.assertEqual(retry["bytes"], 0)
+            self.assertEqual(retained.inspector().one([retry, success], "job-manager-clock", "/jobs/job"), {"now": 42})
+            self.assertEqual(audit.RetainedEvidence(retained.directory).raw_inventory(retained.root)
+                             ["raw-flink-rest"], dict(files=2, bytes=10))
+
+    def test_reported_rest_utilisation_matches_inventory_and_does_not_replace_required_group(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            directory = Path(temporary).resolve()
+            result, unused, cell, manifest = native.fixture(directory)
+            generated.attach_raw_fixture(result, directory)
+            stored = raw.audit(result, audit.RetainedEvidence(directory))["retainedStores"]["raw-flink-rest"]
+            result["evidence"]["rawEvidence"] = dict(captures=stored["files"], bytes=stored["bytes"],
+                                                     maxCaptures=4096, maxBytes=67108864, complete=True)
+            self.assertTrue(raw.audit(result, audit.RetainedEvidence(directory))["confirmed"])
+            for field, value in (("captures", stored["files"] + 1), ("bytes", stored["bytes"] + 1), ("complete", False)):
+                changed = deepcopy(result); changed["evidence"]["rawEvidence"][field] = value
+                with self.assertRaises(ValueError):
+                    raw.audit(changed, audit.RetainedEvidence(directory))
+            result["evidence"]["checkpointStorageFaults"][0]["configuration"]["rawEvidence"] = []
+            with self.assertRaisesRegex(ValueError, "missing/bounded REST call group"):
+                raw.audit(result, audit.RetainedEvidence(directory))
+
     def test_docker_source_projection_cannot_be_replaced_by_typed_state_or_include_env(self):
         with tempfile.TemporaryDirectory() as temporary:
             retained = Retained(Path(temporary).resolve())

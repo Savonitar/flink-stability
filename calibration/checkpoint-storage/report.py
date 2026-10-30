@@ -138,6 +138,18 @@ def render(report, manifest=None, framework=None, launch=None, platform=None):
         lines.append("- " + escaped(str(row.get("cell", "unknown")) + " run-" + str(row.get("number", "unknown")))
                      + ": " + ("confirmed" if proof.get("confirmed") is True else "unavailable/unconfirmed")
                      + "; captures " + count(proof.get("captureCount")) + "; call groups " + count(proof.get("groupCount")) + ".")
+    lines += ["", "## Raw REST store utilisation", "",
+              "Only selected proof calls are retained; ordinary readiness and completion polling does not consume this store. "
+              "Reported counts below describe the REST store; they are trusted only when the source-response audit confirms the retained inventory. "
+              "Counts remain visible for failed audits. Source-response audit counts above also include Docker and inspector evidence.", ""]
+    for row in rows:
+        usage = row.get("rawEvidence")
+        if not isinstance(usage, dict):
+            usage = {}
+        lines.append("- " + escaped(str(row.get("cell", "unknown")) + " run-" + str(row.get("number", "unknown")))
+                     + ": captures " + count(usage.get("captures")) + "/" + count(usage.get("maxCaptures"))
+                     + "; bytes " + count(usage.get("bytes")) + "/" + count(usage.get("maxBytes"))
+                     + "; complete " + escaped(usage.get("complete", "unknown")) + ".")
     lines += ["", "Scope: hashes establish retained-byte consistency, not responding-daemon authenticity. "
               "Harness monotonic timestamps and JobManager epoch timestamps remain separate observed clocks. "
               "Terminal Kafka counts are trusted framework-oracle output; the checker does not replay raw Kafka records. "

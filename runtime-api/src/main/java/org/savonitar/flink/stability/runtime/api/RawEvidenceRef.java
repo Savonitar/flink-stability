@@ -17,7 +17,7 @@ public record RawEvidenceRef(String path, String sha256, long bytes, String kind
             throw new IllegalArgumentException("Raw evidence path must be absolute and normalized");
         if (!Objects.requireNonNull(sha256, "sha256").matches("[0-9a-f]{64}"))
             throw new IllegalArgumentException("Invalid raw evidence SHA-256");
-        if (bytes < 1 || sequence < 1 || completedNanos - startedNanos < 0)
+        if (bytes < 0 || sequence < 1 || completedNanos - startedNanos < 0)
             throw new IllegalArgumentException("Invalid raw evidence size, sequence or interval");
         kind = Checks.requireNonBlank(kind, "kind");
         group = Checks.requireNonBlank(group, "group");

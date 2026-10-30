@@ -18,6 +18,22 @@ public interface FlinkScenarioControl extends FlinkJobControl, AutoCloseable {
     /** Exact responses from the immediately completed scalar call, never a later endpoint match. */
     default List<org.savonitar.flink.stability.runtime.api.RawEvidenceRef> latestCallEvidence() { return List.of(); }
 
+    /** Select an observation's named response groups; closing an unselected scope discards its bytes. */
+    default RawEvidenceCapture captureRawEvidence() throws IOException { return RawEvidenceCapture.NONE; }
+
+    default java.util.Optional<org.savonitar.flink.stability.runtime.api.RawEvidenceStore.Utilisation> rawEvidenceUtilisation() {
+        return java.util.Optional.empty();
+    }
+
+    interface RawEvidenceCapture extends AutoCloseable {
+        RawEvidenceCapture NONE = new RawEvidenceCapture() {
+            @Override public void retain() {}
+            @Override public void close() {}
+        };
+        void retain() throws IOException;
+        @Override void close();
+    }
+
     String uploadJar(Path jar, String expectedSha256) throws IOException;
 
     FlinkJobHandle submit(FlinkJobSubmission submission) throws IOException;

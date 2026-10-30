@@ -177,7 +177,6 @@ class RetainedEvidence:
                     and re.fullmatch(r"[0-9]{6}\.json", path.name) and 1 <= int(path.stem) <= 4096,
                     "Raw response inventory is outside its source store")
             data = read(self.directory, receipt["localPath"], receipt["sha256"], 2 * 1024 * 1024)
-            require(data, "Raw response inventory contains an empty body")
             stores[name]["files"] += 1; stores[name]["bytes"] += len(data)
             require(stores[name]["files"] <= 4096 and stores[name]["bytes"] <= 64 * 1024 * 1024,
                     "Raw response store exceeds its capture bound")
@@ -284,7 +283,20 @@ def checkpoint_history(value, job):
         require(row["status"] in ("COMPLETED", "FAILED", "IN_PROGRESS") and row["savepoint"] is False
                 and row["checkpointType"] == "CHECKPOINT" and integer(row["triggerTimestamp"], 1),
                 "Unexpected checkpoint history entry")
+    idless_failures(value)
     return counts, rows
+
+
+def idless_failures(history):
+    """Residual only; baseline acceptance also rules out retained/latest real failures."""
+    failed_ids = {row["id"] for row in history["retained"] if row["status"] == "FAILED"}
+    latest = history.get("latestFailed")
+    if latest is not None:
+        require(latest["status"] == "FAILED" and integer(latest["id"], 1), "Invalid latest failed checkpoint")
+        failed_ids.add(latest["id"])
+    failed = history["counts"]["failed"]
+    require(integer(failed) and failed >= len(failed_ids), "Identified failed checkpoints exceed the failed count")
+    return failed - len(failed_ids)
 
 
 def verify_ack(ack, transition, final, rows):
@@ -450,6 +462,11 @@ def audit_storage(result, cell, manifest, retained):
     rc, rr = checkpoint_history(recovered["checkpoints"], job)
     require(baseline in br and br[baseline]["status"] == "COMPLETED" and before["checkpoints"]["latestCompleted"] == br[baseline]
             and max(br) == baseline and bc["inProgress"] == bc["restored"] == 0, "Completed baseline was not exclusive before arming")
+    require(not any(row["status"] == "FAILED" for row in br.values()), "Baseline contains a retained FAILED checkpoint")
+    require(before["checkpoints"].get("latestFailed") is None, "Baseline contains a latest FAILED checkpoint")
+    baseline_idless = fault.get("baselineIdlessTriggerFailures", 0)
+    require(integer(baseline_idless) and baseline_idless == bc["failed"] == idless_failures(before["checkpoints"]),
+            "Recorded baseline ID-less trigger failures differ from checkpoint history")
     require({key: value for key, value in armed["checkpoints"].items() if key != "rawEvidence"}
             == {key: value for key, value in before["checkpoints"].items() if key != "rawEvidence"},
             "Checkpoint boundary changed during ARM")
@@ -602,6 +619,7 @@ def audit_storage(result, cell, manifest, retained):
     original_before = next(item for item in before["storage"]["instances"] if item["instance"] == old_item["instance"])
     materialized = materialization(fault["materialization"], before["storage"], final, job, baseline, arm["startedNanos"], original_before, new_item)
     summary.update(stages=list(STAGES), baselineCheckpoint=baseline, failedCheckpoint=failed_id,
+                   baselineIdlessTriggerFailures=baseline_idless,
                    nativeEioOperations=len(eio), materialization=materialized)
     return summary
 

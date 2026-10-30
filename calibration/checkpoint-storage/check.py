@@ -453,6 +453,7 @@ def audit_attempt_contract(result, exit_code, cell, manifest, directory, retaine
     row["logSha256"] = state.verify_marker_logs(directory, result["evidence"]["stateRecovery"]["trace"]["markers"])
     row.update(subject)
     row["rawEvidenceAudit"] = module("raw_evidence", HERE / "raw_evidence.py").audit(result, retained)
+    row["rawEvidence"] = result["evidence"].get("rawEvidence")
     row["checkpointStorage"] = audit.audit_storage(result, cell, manifest, retained)
     endpoint = parse(read(directory, "command.json"))["environment"]["DOCKER_HOST"]
     row["cleanup"] = audit.cleanup_receipt(directory, result, endpoint)
@@ -528,7 +529,8 @@ def check_matrix(batch, *, re_audit=False):
                 row.update(stdoutSha256=digest(raw_bytes), rawStatus=raw.get("attempt", {}).get("status"),
                            rawReason=raw.get("attempt", {}).get("reason"), status=raw.get("status"), reason=raw.get("reason"),
                            terminalValidation=evidence.get("terminalValidation"), componentErrors=evidence.get("componentErrors"),
-                           flinkRest=evidence.get("flinkRest"), diagnostics=raw.get("diagnostics"))
+                           flinkRest=evidence.get("flinkRest"), rawEvidence=evidence.get("rawEvidence"),
+                           diagnostics=raw.get("diagnostics"))
                 for source, target, field in (("componentErrors", "componentEventCount", "eventCount"), ("flinkRest", "restErrorCount", "errorCount")):
                     value = evidence.get(source, {}).get(field)
                     if audit.integer(value):

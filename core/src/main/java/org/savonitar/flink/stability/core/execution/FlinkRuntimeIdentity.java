@@ -162,9 +162,10 @@ public record FlinkRuntimeIdentity(Outcome outcome, String detail, String reason
         }
         PhaseExecutionEvidence phase = phases.orElseThrow();
         List<PhaseExecutionEvidence.StepEvidence> restartSteps = phase.steps().stream()
-                .filter(step -> (step.kind() == PhaseExecutionEvidence.StepKind.RESTART_TASKMANAGER
-                        || step.kind() == PhaseExecutionEvidence.StepKind.CHECKPOINT_STORAGE_FAULT)
-                        && step.status() == PhaseExecutionEvidence.StepStatus.SUCCEEDED)
+                .filter(step -> step.kind() == PhaseExecutionEvidence.StepKind.RESTART_TASKMANAGER
+                        && step.status() == PhaseExecutionEvidence.StepStatus.SUCCEEDED
+                        || atomicLifecycle(step) && (step.status() == PhaseExecutionEvidence.StepStatus.SUCCEEDED
+                            || phase.taskManagerRestarts().stream().anyMatch(restart -> sameLocation(step, restart.path(), restart.loopIterations()))))
                 .toList();
         if (restartSteps.size() != phase.taskManagerRestarts().size()) {
             return unconfirmed("Every successful TaskManager restart requires targeted identity evidence");
@@ -323,13 +324,24 @@ public record FlinkRuntimeIdentity(Outcome outcome, String detail, String reason
 
     private record StepIdentity(String path, List<PhaseExecutionEvidence.LoopIteration> iterations) {}
 
+    private static boolean atomicLifecycle(PhaseExecutionEvidence.StepEvidence step) {
+        return step.kind() == PhaseExecutionEvidence.StepKind.CHECKPOINT_STORAGE_FAULT
+                && (step.status() == PhaseExecutionEvidence.StepStatus.SUCCEEDED
+                    || step.status() == PhaseExecutionEvidence.StepStatus.UNCONFIRMED);
+    }
+
+    private static boolean sameLocation(PhaseExecutionEvidence.StepEvidence step, String path,
+                                       List<PhaseExecutionEvidence.LoopIteration> iterations) {
+        return step.path().equals(path) && step.loopIterations().equals(iterations);
+    }
+
     private static boolean restartsMatchPrecedingKills(PhaseExecutionEvidence phase) {
         Map<String, PhaseExecutionEvidence.TaskManagerKill> unhealed = new HashMap<>();
         Set<StepIdentity> locations = new HashSet<>();
         int killIndex = 0;
         int restartIndex = 0;
         for (PhaseExecutionEvidence.StepEvidence step : phase.steps()) {
-            if (step.status() != PhaseExecutionEvidence.StepStatus.SUCCEEDED
+            if (step.status() != PhaseExecutionEvidence.StepStatus.SUCCEEDED && !atomicLifecycle(step)
                     || (step.kind() != PhaseExecutionEvidence.StepKind.KILL_TASKMANAGER
                     && step.kind() != PhaseExecutionEvidence.StepKind.RESTART_TASKMANAGER
                     && step.kind() != PhaseExecutionEvidence.StepKind.CHECKPOINT_STORAGE_FAULT)) {
@@ -340,7 +352,8 @@ public record FlinkRuntimeIdentity(Outcome outcome, String detail, String reason
                 return false;
             }
             if (step.kind() == PhaseExecutionEvidence.StepKind.KILL_TASKMANAGER
-                    || step.kind() == PhaseExecutionEvidence.StepKind.CHECKPOINT_STORAGE_FAULT) {
+                    || atomicLifecycle(step) && (step.status() == PhaseExecutionEvidence.StepStatus.SUCCEEDED
+                        || phase.taskManagerKills().stream().anyMatch(kill -> sameLocation(step, kill.path(), kill.loopIterations())))) {
                 if (killIndex >= phase.taskManagerKills().size()) {
                     return false;
                 }
@@ -351,7 +364,8 @@ public record FlinkRuntimeIdentity(Outcome outcome, String detail, String reason
                 }
             }
             if (step.kind() == PhaseExecutionEvidence.StepKind.RESTART_TASKMANAGER
-                    || step.kind() == PhaseExecutionEvidence.StepKind.CHECKPOINT_STORAGE_FAULT) {
+                    || atomicLifecycle(step) && (step.status() == PhaseExecutionEvidence.StepStatus.SUCCEEDED
+                        || phase.taskManagerRestarts().stream().anyMatch(restart -> sameLocation(step, restart.path(), restart.loopIterations())))) {
                 if (restartIndex >= phase.taskManagerRestarts().size()) {
                     return false;
                 }

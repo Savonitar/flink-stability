@@ -64,6 +64,7 @@ final class StateRecoveryGate {
                 prefix = prefix(deadline);
             var identity = runtime.taskManagerIdentity(target, remaining(deadline))
                     .orElseThrow(() -> new IOException("TaskManager identity unavailable before stateful kill"));
+            try (var capture = flink.captureRawEvidence()) {
             var checkpoints = flink.checkpointOverview(job, remaining(deadline));
             var checkpointEvidence = flink.latestCallEvidence();
             var observation = flink.observe(job, remaining(deadline));
@@ -71,7 +72,14 @@ final class StateRecoveryGate {
             latest = StateRecoveryEvidence.ready(job.jobId(), keys, manifest.totalRecords(), identity,
                     observation, checkpoints, trace, prefix).withCheckpointEvidence(checkpointEvidence);
             remaining(deadline);
-            if (latest.ready() || observation.state().terminal()) break;
+            if (latest.ready() || observation.state().terminal()) { capture.retain(); break; }
+            // Poll candidates are not audit evidence. Do not expose references to discarded bytes.
+            latest = StateRecoveryEvidence.ready(job.jobId(), keys, manifest.totalRecords(), identity,
+                    new org.savonitar.flink.stability.core.flink.FlinkJobObservation(
+                            observation.jobManagerTimeMillis(), observation.state(), observation.completedCheckpoints(),
+                            observation.restoredCheckpoints(), observation.latestRestore(), observation.failures(), observation.subtasks()),
+                    checkpoints, trace, prefix);
+            }
             sleeper.sleep(deadline.remaining().compareTo(Duration.ofMillis(100)) < 0
                     ? deadline.remaining() : Duration.ofMillis(100));
         }
