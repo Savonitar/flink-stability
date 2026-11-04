@@ -1,0 +1,9 @@
+format: v1
+kind: expected-result
+
+meta:
+  name: state-prefix-baseline.expected
+  scenario: state-prefix-baseline
+
+default:
+  outcome: pass

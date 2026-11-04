@@ -10,6 +10,30 @@ import static org.savonitar.flink.stability.runtime.api.Checks.requireNonBlank;
 
 /** Typed Flink operations used by the first v1 scenario executor. */
 public interface FlinkScenarioControl extends FlinkJobControl, AutoCloseable {
+    /** Enables bounded source-byte retention only for an attempt that requests this proof. */
+    default void enableRawEvidence(Path directory) throws IOException {
+        throw new UnsupportedOperationException("Raw Flink response evidence unavailable");
+    }
+
+    /** Exact responses from the immediately completed scalar call, never a later endpoint match. */
+    default List<org.savonitar.flink.stability.runtime.api.RawEvidenceRef> latestCallEvidence() { return List.of(); }
+
+    /** Select an observation's named response groups; closing an unselected scope discards its bytes. */
+    default RawEvidenceCapture captureRawEvidence() throws IOException { return RawEvidenceCapture.NONE; }
+
+    default java.util.Optional<org.savonitar.flink.stability.runtime.api.RawEvidenceStore.Utilisation> rawEvidenceUtilisation() {
+        return java.util.Optional.empty();
+    }
+
+    interface RawEvidenceCapture extends AutoCloseable {
+        RawEvidenceCapture NONE = new RawEvidenceCapture() {
+            @Override public void retain() {}
+            @Override public void close() {}
+        };
+        void retain() throws IOException;
+        @Override void close();
+    }
+
     String uploadJar(Path jar, String expectedSha256) throws IOException;
 
     FlinkJobHandle submit(FlinkJobSubmission submission) throws IOException;
@@ -36,6 +60,19 @@ public interface FlinkScenarioControl extends FlinkJobControl, AutoCloseable {
     /** Read-only raw checkpoint statistics; callers retain identity and timestamps, not only counts. */
     default com.fasterxml.jackson.databind.JsonNode checkpointOverview(FlinkJobHandle job, Duration timeout) throws IOException {
         throw new UnsupportedOperationException("Checkpoint overview unavailable");
+    }
+
+    default FlinkCheckpointEvidence.History checkpointHistory(FlinkJobHandle job, Duration timeout) throws IOException {
+        throw new UnsupportedOperationException("Typed checkpoint history unavailable");
+    }
+
+    default FlinkCheckpointEvidence.Checkpoint checkpointDetails(
+            FlinkJobHandle job, long checkpointId, Duration timeout) throws IOException {
+        throw new UnsupportedOperationException("Typed checkpoint details unavailable");
+    }
+
+    default FlinkCheckpointEvidence.Configuration checkpointConfiguration(FlinkJobHandle job, Duration timeout) throws IOException {
+        throw new UnsupportedOperationException("Typed checkpoint configuration unavailable");
     }
 
     /** Every received HTTP error, including failures followed by a successful retry. */

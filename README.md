@@ -57,8 +57,10 @@ Important properties of this boundary:
 - staged connector classpaths are copied and verified before each Flink process starts;
   image-supplied subjects are verified in place;
 - each created Flink container's actual Docker image ID is checked before process start;
-  an optional `setup.flink.image_id` pins the intended local build, and every initial or
-  replacement process must use the same image throughout the attempt;
+  optional `setup.flink.image_id` matches the container ID or inspected repository
+  digests, while `setup.flink.image_digest` pins a content-addressable repository
+  digest; evidence records both forms and Docker's image-store backend, and every
+  replacement process must use the same actual image throughout the attempt;
 - optional `setup.flink.runtime_jar` verifies the distribution JAR's bytes in every
   container and requires matching runtime class-load sources for every incarnation;
 - the subject connector's primary artifact must be the only source of the Kafka
@@ -81,6 +83,51 @@ The [distributed recovery guide](docs/DISTRIBUTED-RECOVERY.md) and
 evidence gates and observed results. These capabilities retain the same exact-ID
 oracle. A passing data check does not dismiss component errors or establish that
 every recovery or token path was exercised.
+
+The opt-in [state-prefix baseline](scenarios/state-prefix-baseline.yaml) adds
+`behavior: { type: keyed-prefix-v1, key_count: 8 }` and one `kafka.state-prefix`
+oracle. The workload emits accumulated keyed counts and sums; the oracle checks
+them independently alongside exact ID coverage in the same fenced Kafka snapshot.
+The first slice requires one worker, parallelism one, one input/output partition,
+HashMap state without TTL, filesystem checkpoints and an EOS sink. It also
+requires the JAR capability `Flink-Stability-Workload-Capabilities: keyed-prefix-v1`.
+Omitting the behavior preserves integer passthrough. Before a TaskManager kill
+in this behavior, an automatic gate spends at most 45 seconds observing RUNNING,
+a committed prefix covering every key, and completed checkpoint state with input
+remaining. If readiness is missing, it skips the kill and remaining phase steps,
+then still attempts natural completion, physical fencing and the terminal oracle.
+Missing recovery proof prevents PASS; an observed data failure stays FAIL.
+`evidence.stateRecovery` retains the workload hash, process/checkpoint-bound
+receipts, readiness observations and recovery verdict. Uninterrupted controls
+with fewer records than keys remain supported through final snapshot evidence;
+scenarios declaring a kill require at least `2 * key_count` input records.
+
+The [state-recovery calibration](calibration/state-recovery/README.md) builds
+separate frozen correct/mutant JARs. The mutant resets the keyed aggregate once
+per key after genuine restore and never on initial startup. Its mode comes from
+its own JAR, with no runtime argument to enable it. The checker requires three
+confirmed attempts in each of four cells; all twelve catalog expectations stay
+PASS, including the mutant recovery cell whose raw state-mismatch FAIL proves
+oracle sensitivity. The [2026-10-26 live qualification](docs/STATE-RECOVERY-VALIDATION.md)
+confirmed all twelve fixed attempts: nine PASS controls and three raw mutant
+FAIL results, with zero ID defects throughout. The isolated
+[FUSE prototype](docs/CHECKPOINT-STORAGE-FUSE-PROTOTYPE.md) subsequently passed
+seven live checks on Docker Desktop `linux/arm64`, including write EIO and recovery
+after healing. The opt-in [Flink checkpoint-storage experiment](docs/CHECKPOINT-STORAGE-FAULTS.md)
+now binds real checkpoint-file EIO to a failed checkpoint, kills the sole
+TaskManager while the fault remains armed, heals storage and verifies state
+restoration in a fresh TaskManager. Docker Desktop `linux/arm64` pilots confirmed
+the healthy control and correct recovery with all 30,000 IDs and keyed values
+intact. The reset-state mutant retained complete IDs but produced 29,671 state
+mismatches. Earlier failed attempts and producer-fencing component events remain
+visible in the report. The subsequent
+[PR 5 qualification](docs/CHECKPOINT-STORAGE-QUALIFICATION.md) confirmed all twelve
+fixed attempts on Docker Desktop `linux/arm64`: nine raw PASS results and three
+state-mismatch FAIL mutants, with all 30,000 IDs intact in every attempt.
+The [frozen recipe](calibration/checkpoint-storage/README.md) retains the exact
+artifacts, raw evidence and byte-reproducible JSON/Markdown reports. All 120
+observed EIO operations were `create`; 18 producer-fenced component events remain
+visible. This does not qualify other disk failure paths or platforms.
 
 A requested Kafka transaction feature selection or `broker-default` observation
 must be confirmed by the broker before the workload starts. A declared version alone does not prove that the broker accepted
@@ -274,8 +321,11 @@ The runner supports:
 - one final [savepoint/restore transition](docs/SAVEPOINT-LIFECYCLE.md), using the
   same workload and connector JARs, optionally rescaling or switching
   INCREMENTING to POOLING; this slice excludes HA, tokens and other faults;
-- one terminal `kafka.id-set` validator, with an expected outcome of `pass` or an
-  expected `kafka.id-set` failure.
+- one terminal `kafka.id-set` validator, or the opt-in `kafka.state-prefix`
+  composite validator, with an expected outcome of `pass` or a registered failure
+  of the selected validator;
+- keyed-state recovery receipts and an automatic pre-kill readiness gate for the
+  narrow state-prefix topology, plus a separate reset-on-restore calibration recipe.
 
 Implementation does not establish live qualification. The broker/protocol
 profiles and common filter retain the [calibration gaps](docs/PR-TESTING.md#live-qualification-is-still-pending)
@@ -380,6 +430,7 @@ validation as the package boundary.
 - connector or Flink upgrades across a savepoint; the implemented lifecycle
   transition keeps both workload and connector artifacts unchanged;
 - broader state-backend and topology support;
+- FUSE checkpoint-storage faults and their qualified recovery matrix;
 - health retries, OCI digest capture, and the complete replay-grade report;
 - automatic real-Docker regression coverage on pull requests and pushes, including
   EndTxn faults and the 1,000,000-record load boundary.

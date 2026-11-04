@@ -56,6 +56,75 @@ class RunScenarioCommandTest {
     @TempDir
     Path temporaryDirectory;
 
+    @Test void skippedAndUnconfirmedStepsCannotRenderAsCompletedPhases() throws Exception {
+        for (var status : List.of(PhaseExecutionEvidence.StepStatus.SKIPPED, PhaseExecutionEvidence.StepStatus.UNCONFIRMED)) {
+            var phases = new PhaseExecutionEvidence(List.of(new PhaseExecutionEvidence.StepEvidence(
+                    0, "fault", "$/phases/0/steps/0", List.of(), PhaseExecutionEvidence.StepKind.CHECKPOINT_STORAGE_FAULT,
+                    status, "readiness missing")));
+            var rendered = renderIncompletePhases(phases).path("phases");
+            assertFalse(rendered.path("completed").asBoolean());
+            assertEquals("partial", rendered.path("status").asText());
+            assertEquals(0, rendered.path("succeeded").asInt());
+            assertEquals(1, rendered.path(status == PhaseExecutionEvidence.StepStatus.SKIPPED ? "skipped" : "unconfirmed").asInt());
+        }
+    }
+
+    @Test void rawStoreUtilisationSurvivesEnrichmentAndCleanupAndRendersAsNumbers() throws Exception {
+        var usage = new org.savonitar.flink.stability.runtime.api.RawEvidenceStore.Utilisation(43, 12345, 4096, 67108864, true);
+        var base = passResult().withRawEvidence(Optional.of(usage));
+        for (var result : List.of(base, base.withKafkaRuntime(Optional.empty()), base.withKafkaLogs(base.kafkaLogs()),
+                base.withComponentErrors(base.componentErrors()), base.withFlinkRestErrors(List.of()),
+                base.withCleanupFailure(new IOException("cleanup")),
+                base.withPreparedArtifactCleanupFailure(new IOException("artifact cleanup")))) {
+            assertEquals(Optional.of(usage), result.rawEvidence());
+            var value = JSON.readTree(new V1ExecutionResultRenderer().render("raw", context("1234abcd"),
+                    ExecutableScenarioPlan.ExpectedOutcome.pass(), result)).at("/evidence/rawEvidence");
+            assertEquals(43, value.path("captures").asInt());
+            assertEquals(12345, value.path("bytes").asLong());
+            assertEquals(4096, value.path("maxCaptures").asInt());
+            assertEquals(67108864, value.path("maxBytes").asLong());
+            assertTrue(value.path("complete").asBoolean());
+        }
+        var incomplete = passResult().withRawEvidence(Optional.of(
+                new org.savonitar.flink.stability.runtime.api.RawEvidenceStore.Utilisation(0, 0, 4096, 67108864, false)));
+        assertEquals(V1ScenarioExecutionResult.Status.INCONCLUSIVE, incomplete.status());
+        assertEquals("raw-evidence.incomplete", incomplete.reason());
+    }
+
+    @Test void statePrefixReportKeepsIdAndStateEvidenceTogetherAndOmitsIncompleteTotals() throws Exception {
+        for (boolean complete : List.of(true, false)) {
+            var terminal = new org.savonitar.flink.stability.core.validation.kafka.KafkaStatePrefixValidationResult(
+                    KafkaIdSetValidationResult.Status.FAIL, complete ? "validator.kafka.state-prefix.state-mismatch"
+                            : "verification.kafka.incomplete-after-timeout", "state validation",
+                    complete ? passResult().terminalValidation().orElseThrow().evidence()
+                            : KafkaIdSetValidationResult.Evidence.unavailable(10),
+                    new org.savonitar.flink.stability.core.validation.kafka.KafkaStatePrefixValidationResult.StateEvidence(
+                            8, complete ? java.util.OptionalLong.of(1) : java.util.OptionalLong.empty(),
+                            complete ? List.of(new org.savonitar.flink.stability.core.validation.kafka.KafkaStatePrefixValidationResult.StateMismatchSample(
+                                    0, 8, 8, 0, 0, 2, 1, 10, 9)) : List.of()));
+            var result = new V1ScenarioExecutionResult(V1ScenarioExecutionResult.Status.FAIL,
+                    terminal.reason(), terminal.message(), Optional.empty(), Optional.empty(), Optional.empty(),
+                    Optional.of(runtimeFence()), Optional.empty(), Optional.of(terminal), Optional.empty(),
+                    SUBJECT_ORIGINS, runtimeComponents(), EXPECTED_RUNTIME, Optional.empty(),
+                    KafkaTransactionVersion.Selection.notRequested(), List.of());
+            var output = JSON.readTree(new V1ExecutionResultRenderer().render("state-prefix", context("1234abcd"),
+                    ExecutableScenarioPlan.ExpectedOutcome.pass(), result)).at("/evidence/terminalValidation");
+            assertEquals("kafka.state-prefix", output.path("type").asText());
+            assertEquals(8, output.at("/statePrefix/keyCount").asInt());
+            assertEquals(complete, output.path("snapshotComplete").asBoolean());
+            assertEquals(complete, output.path("statePrefix").has("mismatches"));
+            if (complete) {
+                assertEquals(0, output.path("missing").asInt());
+                assertEquals(1, output.at("/statePrefix/mismatches").asInt());
+                assertEquals(10, output.at("/statePrefix/mismatchSamples/0/expectedSum").asLong());
+            }
+        }
+        var legacy = JSON.readTree(new V1ExecutionResultRenderer().render("bounded-eos", context("1234abcd"),
+                ExecutableScenarioPlan.ExpectedOutcome.pass(), passResult())).at("/evidence/terminalValidation");
+        assertFalse(legacy.has("statePrefix"));
+        assertFalse(legacy.has("type"));
+    }
+
     @Test
     void customKafkaReceiptsSurviveLogSnapshotsAndBothCleanupPaths() throws Exception {
         var launch = org.savonitar.flink.stability.runtime.api.KafkaRuntimeLaunch.command("confluent-platform");
@@ -425,6 +494,42 @@ class RunScenarioCommandTest {
         assertEquals("taskmanager", rendered.at("/effectiveConfiguration/launcher/2").asText());
         assertEquals(config.get("pipeline.name"), rendered.at("/effectiveConfiguration/observedValues/pipeline.name").asText());
         assertEquals(config.get("pipeline.name"), rendered.at("/config/pipeline.name").asText());
+    }
+
+    @Test
+    void rendersContainerAndRepositoryImageIdentityProofWithoutConflatingPins() throws Exception {
+        String digest = "sha256:" + "d".repeat(64);
+        var proof = new org.savonitar.flink.stability.runtime.api.ImageIdentityEvidence(
+                IMAGE_ID, IMAGE_ID, List.of("flink@" + digest), Optional.of(digest), Optional.of(digest),
+                org.savonitar.flink.stability.runtime.api.ImageIdentityEvidence.MatchForm.REPO_DIGEST,
+                "overlayfs", Optional.of("io.containerd.snapshotter.v1"));
+        var component = passResult().flinkProvisioningEvidence().getFirst().withImageIdentityEvidence(proof);
+        var value = new V1ScenarioExecutionResult(V1ScenarioExecutionResult.Status.INCONCLUSIVE, "test.partial", "partial",
+                Optional.empty(), Optional.empty(), Optional.empty(), Optional.empty(), Optional.empty(), Optional.empty(),
+                Optional.empty(), Optional.empty(), List.of(component),
+                new FlinkRuntimeIdentity.ExpectedTarget(Optional.of(digest), EXPECTED_RUNTIME.components(), Optional.empty(),
+                        Optional.empty(), Optional.empty(), Map.of(), Optional.of(digest)), Optional.empty(),
+                KafkaTransactionVersion.Selection.notRequested(), List.of());
+        JsonNode runtime = JSON.readTree(new V1ExecutionResultRenderer().render(
+                "bounded-eos", context("1234abcd"), expectation, value)).at("/evidence/flinkRuntime");
+        assertEquals(digest, runtime.path("expectedImageId").asText());
+        assertEquals(digest, runtime.path("expectedImageDigest").asText());
+        JsonNode rendered = runtime.at("/components/0");
+        assertEquals(IMAGE_ID, rendered.path("imageId").asText());
+        assertEquals(IMAGE_ID, rendered.at("/imageIdentityEvidence/containerImageId").asText());
+        assertEquals(IMAGE_ID, rendered.at("/imageIdentityEvidence/inspectedImageId").asText());
+        assertEquals("flink@" + digest, rendered.at("/imageIdentityEvidence/repoDigests/0").asText());
+        assertEquals(digest, rendered.at("/imageIdentityEvidence/declaredImageId").asText());
+        assertEquals(digest, rendered.at("/imageIdentityEvidence/declaredImageDigest").asText());
+        assertEquals("REPO_DIGEST", rendered.at("/imageIdentityEvidence/imageIdMatchForm").asText());
+        assertEquals("overlayfs", rendered.at("/imageIdentityEvidence/storageDriver").asText());
+        assertEquals("io.containerd.snapshotter.v1", rendered.at("/imageIdentityEvidence/driverType").asText());
+        var storage = new org.savonitar.flink.stability.runtime.api.StorageFaultControl.Verification(
+                IMAGE_ID, "a".repeat(64), "b".repeat(64), "generated mount", List.of(9999L), List.of(9999L),
+                "0", 17L, "java probe", true, true, true, List.of()).withImageIdentityEvidence(proof);
+        var storageJson = StateRecoveryEvidenceRenderer.render(storage, JSON);
+        assertEquals(digest, storageJson.at("/imageIdentityEvidence/declaredImageDigest").asText());
+        assertEquals("REPO_DIGEST", storageJson.at("/imageIdentityEvidence/imageIdMatchForm").asText());
     }
 
     @Test
@@ -844,7 +949,7 @@ class RunScenarioCommandTest {
                         List.of(otherTaskManager, lostTaskManager), List.of())),
                 Optional.empty());
         FlinkProcessWriteFenceEvidence processes = runtimeFence();
-        KafkaIdSetValidationResult terminal = passResult().terminalValidation().orElseThrow();
+        var terminal = passResult().terminalValidation().orElseThrow();
         V1ScenarioExecutionResult result = new V1ScenarioExecutionResult(
                 V1ScenarioExecutionResult.Status.PASS,
                 terminal.reason(),

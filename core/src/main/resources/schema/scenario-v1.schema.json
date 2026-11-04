@@ -83,6 +83,10 @@
           "type": "string",
           "minLength": 1
         },
+        "allow_state_reset_mutant": {
+          "type": "boolean",
+          "description": "Explicit calibration-only permission for reset-state-on-restore-v1 workload receipts; omission is false."
+        },
         "campaign": {
           "type": "object",
           "additionalProperties": false,
@@ -612,7 +616,11 @@
         "line": {"$ref": "#/$defs/nonEmptyString"},
         "image_id": {
           "$ref": "#/$defs/nonEmptyString",
-          "description": "Optional expected local Docker image ID (sha256 plus 64 lowercase hexadecimal characters), checked before every Flink process starts. This is not a registry manifest digest."
+          "description": "Optional expected Docker image identity (sha256 plus 64 lowercase hexadecimal characters). Docker image IDs depend on the image-store backend; verification records the actual ID and repository digests."
+        },
+        "image_digest": {
+          "type": "string", "pattern": "^sha256:[0-9a-f]{64}$",
+          "description": "Optional content-addressable repository digest, verified against the exact container image's RepoDigests before every Flink process starts."
         },
         "runtime_jar": {
           "type": "object",
@@ -875,6 +883,9 @@
         "parallelism": {
           "$ref": "#/$defs/positiveIntegerOrTemplate"
         },
+        "behavior": {
+          "$ref": "#/$defs/keyedPrefixBehavior"
+        },
         "state_backend": {
           "$ref": "#/$defs/stateBackend",
           "default": "hashmap"
@@ -1046,12 +1057,32 @@
             }
           ]
         },
+        "small_file_threshold": { "type": "integer", "const": 0 },
+        "max_concurrent": { "type": "integer", "const": 1 },
+        "tolerable_failures": { "type": "integer", "minimum": 1, "maximum": 10 },
         "storage": {
           "$ref": "#/$defs/checkpointStorage",
           "default": {
             "type": "jobmanager"
           }
         }
+      }
+    },
+    "fuseCheckpointStorage": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["bundle", "manifest_sha256", "image_id", "platform"],
+      "properties": {
+        "bundle": { "type": "string", "minLength": 1, "maxLength": 1024 },
+        "manifest_sha256": { "oneOf": [
+          { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+          { "$ref": "#/$defs/templatedString" }
+        ] },
+        "image_id": { "oneOf": [
+          { "type": "string", "pattern": "^sha256:[0-9a-f]{64}$" },
+          { "$ref": "#/$defs/templatedString" }
+        ] },
+        "platform": { "enum": ["linux/arm64"] }
       }
     },
     "checkpointStorage": {
@@ -1073,7 +1104,7 @@
         },
         {
           "type": "object",
-          "description": "Harness-managed filesystem storage; the runner generates file:/flink/checkpoints/attempt-<ordinal>-<nonce>/<job-alias> and no public path is accepted.",
+          "description": "Harness-managed filesystem storage; the runner generates the attempt/job URI, or the isolated FUSE URI when explicitly selected. No public checkpoint path is accepted.",
           "additionalProperties": false,
           "required": [
             "type"
@@ -1084,7 +1115,8 @@
               "enum": [
                 "filesystem"
               ]
-            }
+            },
+            "fuse": { "$ref": "#/$defs/fuseCheckpointStorage" }
           }
         },
         {
@@ -1385,6 +1417,7 @@
         { "$ref": "#/$defs/brokerFaultStep" },
         { "$ref": "#/$defs/packetFaultStep" },
         { "$ref": "#/$defs/savepointRestoreStep" },
+        { "$ref": "#/$defs/checkpointStorageFaultStep" },
         {
           "$ref": "#/$defs/checkpointStep"
         },
@@ -1401,6 +1434,23 @@
           "$ref": "#/$defs/validateStep"
         }
       ]
+    },
+    "checkpointStorageFaultStep": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["checkpoint_storage_fault"],
+      "properties": {
+        "checkpoint_storage_fault": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["job", "timeout", "lease"],
+          "properties": {
+            "job": { "$ref": "#/$defs/kebabName" },
+            "timeout": { "$ref": "#/$defs/durationOrTemplate" },
+            "lease": { "$ref": "#/$defs/durationOrTemplate" }
+          }
+        }
+      }
     },
     "savepointRestoreStep": {
       "type": "object",
@@ -2657,10 +2707,27 @@
         }
       ]
     },
+    "keyedPrefixBehavior": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["type", "key_count"],
+      "properties": {
+        "type": {"const": "keyed-prefix-v1"},
+        "key_count": {
+          "oneOf": [
+            {"type": "integer", "minimum": 1, "maximum": 1024},
+            {"$ref": "#/$defs/templateString"}
+          ]
+        }
+      }
+    },
     "terminalValidation": {
       "oneOf": [
         {
           "$ref": "#/$defs/kafkaIdSetValidation"
+        },
+        {
+          "$ref": "#/$defs/kafkaStatePrefixValidation"
         },
         {
           "$ref": "#/$defs/kafkaNoHangingTransactionsValidation"
@@ -2675,6 +2742,23 @@
           "$ref": "#/$defs/customTerminalValidation"
         }
       ]
+    },
+    "kafkaStatePrefixValidation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["type", "job", "cluster", "topic", "expected"],
+      "properties": {
+        "type": {"const": "kafka.state-prefix"},
+        "job": {"$ref": "#/$defs/kebabName"},
+        "cluster": {"$ref": "#/$defs/kebabName"},
+        "topic": {"$ref": "#/$defs/kafkaNameOrTemplate"},
+        "expected": {"const": "input-manifest"},
+        "timeout": {
+          "$ref": "#/$defs/durationOrTemplate",
+          "description": "One absolute deadline covers discovery, the fixed fenced read_committed snapshot, strict decoding and state/ID comparison.",
+          "default": "2m"
+        }
+      }
     },
     "kafkaIdSetValidation": {
       "type": "object",

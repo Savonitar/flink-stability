@@ -70,6 +70,8 @@ class WorkloadProtocolV1ConfigurationTest {
         assertEquals(TransactionIdNamingStrategy.INCREMENTING, workload.transactionNamingStrategy());
         assertEquals(7_200_000, workload.transactionTimeoutMs());
         assertFalse(workload.stateTtl().enabled());
+        assertFalse(workload.keyedPrefixEnabled());
+        assertThrows(IllegalStateException.class, workload::keyedPrefixKeyCount);
         assertEquals("no-watermarks", workload.watermarks().strategy());
 
         assertEquals(Boundedness.BOUNDED, FlinkKafkaEosJob.createSource(workload).getBoundedness());
@@ -118,10 +120,80 @@ class WorkloadProtocolV1ConfigurationTest {
         assertTrue(uids.contains(FlinkKafkaEosJob.SOURCE_UID));
         assertTrue(uids.contains(FlinkKafkaEosJob.THROTTLE_UID));
         assertTrue(uids.contains(FlinkKafkaEosJob.STATEFUL_OPERATOR_UID));
+        assertFalse(uids.contains(FlinkKafkaEosJob.KEYED_PREFIX_OPERATOR_UID));
         assertTrue(uids.contains(FlinkKafkaEosJob.SINK_UID));
         assertDoesNotThrow(() -> {
             streamGraph.getJobGraph();
         });
+    }
+
+    @Test
+    void keyedPrefixIsExplicitAndUsesItsOwnStatefulOperator() {
+        Map<String, String> values = keyedPrefixValues();
+        Configuration configuration = Configuration.fromMap(values);
+        StreamExecutionEnvironment env = StreamExecutionEnvironment.getExecutionEnvironment(configuration);
+        WorkloadProtocolV1Configuration workload = WorkloadProtocolV1Configuration.from(env.getConfiguration());
+        assertTrue(workload.keyedPrefixEnabled());
+        assertEquals(8, workload.keyedPrefixKeyCount());
+        FlinkKafkaEosJob.buildPipeline(env, workload, FlinkKafkaEosJobArguments.from(new String[0]));
+        StreamGraph graph = env.getStreamGraph();
+        Set<String> uids = graph.getStreamNodes().stream().map(StreamNode::getTransformationUID)
+                .filter(uid -> uid != null).collect(Collectors.toSet());
+        assertTrue(uids.contains(FlinkKafkaEosJob.KEYED_PREFIX_OPERATOR_UID));
+        assertFalse(uids.contains(FlinkKafkaEosJob.STATEFUL_OPERATOR_UID));
+        assertTrue(uids.contains(FlinkKafkaEosJob.SOURCE_UID));
+        assertTrue(uids.contains(FlinkKafkaEosJob.SINK_UID));
+        assertDoesNotThrow(() -> { graph.getJobGraph(); });
+    }
+
+    @Test
+    void keyedPrefixRejectsUnsupportedParametersAndCombinations() {
+        for (String value : new String[]{"0", "-1", "1025", "01", "+1", "1.5", "2147483648"}) {
+            Map<String, String> values = keyedPrefixValues();
+            values.put(WorkloadProtocolV1Configuration.BEHAVIOR_KEY_COUNT, value);
+            assertThrows(IllegalArgumentException.class, () -> parse(values), value);
+        }
+        for (String value : new String[]{"1", "1024"}) {
+            Map<String, String> values = keyedPrefixValues();
+            values.put(WorkloadProtocolV1Configuration.BEHAVIOR_KEY_COUNT, value);
+            assertEquals(Integer.parseInt(value), parse(values).keyedPrefixKeyCount());
+        }
+        Map<String, String> missingCount = keyedPrefixValues();
+        missingCount.remove(WorkloadProtocolV1Configuration.BEHAVIOR_KEY_COUNT);
+        assertThrows(IllegalArgumentException.class, () -> parse(missingCount));
+        Map<String, String> orphanCount = keyedPrefixValues();
+        orphanCount.remove(WorkloadProtocolV1Configuration.BEHAVIOR_TYPE);
+        assertThrows(IllegalArgumentException.class, () -> parse(orphanCount));
+        Map<String, String> unknownType = keyedPrefixValues();
+        unknownType.put(WorkloadProtocolV1Configuration.BEHAVIOR_TYPE, "keyed-prefix-v2");
+        assertThrows(IllegalArgumentException.class, () -> parse(unknownType));
+        Map<String, String> partitions = keyedPrefixValues();
+        partitions.put(WorkloadProtocolV1Configuration.SOURCE_STOPPING_OFFSETS, "0:50,1:50");
+        assertThrows(IllegalArgumentException.class, () -> parse(partitions));
+        Map<String, String> ttl = keyedPrefixValues();
+        ttl.put(WorkloadProtocolV1Configuration.STATE_TTL_ENABLED, "true");
+        ttl.put(WorkloadProtocolV1Configuration.STATE_TTL_MS, "1000");
+        assertThrows(IllegalArgumentException.class, () -> parse(ttl));
+        Map<String, String> atLeastOnce = keyedPrefixValues();
+        atLeastOnce.put(WorkloadProtocolV1Configuration.SINK_DELIVERY_GUARANTEE, "AT_LEAST_ONCE");
+        atLeastOnce.remove(WorkloadProtocolV1Configuration.SINK_TRANSACTIONAL_ID_PREFIX);
+        atLeastOnce.remove(WorkloadProtocolV1Configuration.SINK_TRANSACTION_ID_NAMING_STRATEGY);
+        atLeastOnce.remove(WorkloadProtocolV1Configuration.SINK_TRANSACTION_TIMEOUT_MS);
+        assertThrows(IllegalArgumentException.class, () -> parse(atLeastOnce));
+        Map<String, String> parallel = keyedPrefixValues();
+        parallel.put("parallelism.default", "2");
+        StreamExecutionEnvironment env = StreamExecutionEnvironment.getExecutionEnvironment(Configuration.fromMap(parallel));
+        assertThrows(IllegalArgumentException.class, () -> FlinkKafkaEosJob.buildPipeline(env,
+                parse(parallel), FlinkKafkaEosJobArguments.from(new String[0])));
+    }
+
+    private static Map<String, String> keyedPrefixValues() {
+        Map<String, String> values = baseExactlyOnceValues();
+        values.put(WorkloadProtocolV1Configuration.BEHAVIOR_TYPE, "keyed-prefix-v1");
+        values.put(WorkloadProtocolV1Configuration.BEHAVIOR_KEY_COUNT, "8");
+        values.put(WorkloadProtocolV1Configuration.SOURCE_STOPPING_OFFSETS, "0:1000");
+        values.put("parallelism.default", "1");
+        return values;
     }
 
     @Test

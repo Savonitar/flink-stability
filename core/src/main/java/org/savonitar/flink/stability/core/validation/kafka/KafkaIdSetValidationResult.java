@@ -14,7 +14,10 @@ public record KafkaIdSetValidationResult(
         String reason,
         String message,
         Evidence evidence,
-        Mode mode) {
+        Mode mode) implements KafkaTerminalValidationResult {
+
+    @Override
+    public String validatorType() { return "kafka.id-set"; }
 
     public KafkaIdSetValidationResult {
         if (status == null || reason == null || reason.isBlank()

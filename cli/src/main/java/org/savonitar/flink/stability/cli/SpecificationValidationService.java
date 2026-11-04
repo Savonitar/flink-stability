@@ -72,6 +72,7 @@ final class SpecificationValidationService {
                 var mapper = new com.fasterxml.jackson.databind.ObjectMapper();
                 var rendered = mapper.createObjectNode();
                 rendered.put("scenario", scenarioName);
+                rendered.put("allowStateResetMutant", executable.allowStateResetMutant());
                 rendered.set("resolved", resolved.scenario().side(
                         org.savonitar.flink.stability.core.spec.resolution.ScenarioSide.SINGLE).document());
                 if (executable.kafka().runtimeTarget().customConfiguration()) {
@@ -83,7 +84,18 @@ final class SpecificationValidationService {
                     kafka.set("brokerConfig", mapper.valueToTree(executable.kafka().brokerConfig()));
                     kafka.set("launches", mapper.valueToTree(executable.kafka().runtimeTarget().resolvedLaunches()));
                 }
-                rendered.set("flinkConfig", mapper.valueToTree(bound.flinkRuntimeTarget().config()));
+                rendered.set("flinkConfig", mapper.valueToTree(bound.flinkRuntimeTarget().effectiveConfig()));
+                var flinkRuntime = rendered.putObject("flinkRuntime");
+                flinkRuntime.put("imageReference", bound.flinkRuntimeTarget().imageReference());
+                bound.flinkRuntimeTarget().expectedImageId().ifPresent(value -> flinkRuntime.put("imageId", value));
+                bound.flinkRuntimeTarget().expectedImageDigest().ifPresent(value -> flinkRuntime.put("imageDigest", value));
+                bound.flinkRuntimeTarget().checkpointStorage().ifPresent(storage -> rendered.putObject("checkpointStorage")
+                        .put("type", "fuse-filesystem")
+                        .put("checkpointUri", "runtime-generated isolated namespace")
+                        .put("manifestSha256", storage.manifestSha256())
+                        .put("tolerableFailedCheckpoints", storage.tolerableFailedCheckpoints())
+                        .put("imageId", storage.imageId()).put("platform", storage.platform())
+                        .set("files", mapper.valueToTree(storage.files())));
                 CustomRuntimeSubjectEvidence.from(bound).ifPresent(value -> rendered.set("customRuntimeSubject", value));
                 plan = java.util.Optional.of(rendered);
             }

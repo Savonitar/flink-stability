@@ -7,6 +7,8 @@ import org.savonitar.flink.stability.runtime.api.MonotonicDeadline;
 import java.io.IOException;
 import java.time.Duration;
 import java.util.Objects;
+import java.util.List;
+import org.savonitar.flink.stability.runtime.api.RawEvidenceRef;
 import java.util.Optional;
 import java.util.OptionalLong;
 import java.util.function.LongSupplier;
@@ -17,11 +19,19 @@ public final class FlinkCheckpointTrigger {
 
     public enum State { IN_PROGRESS, COMPLETED }
 
-    public record Observation(State state, OptionalLong checkpointId, Optional<String> failure) {
+    public record Observation(State state, OptionalLong checkpointId, Optional<String> failure, List<RawEvidenceRef> rawEvidence) {
         public Observation {
             Objects.requireNonNull(state, "state");
             Objects.requireNonNull(checkpointId, "checkpointId");
             Objects.requireNonNull(failure, "failure");
+            rawEvidence = List.copyOf(rawEvidence);
+        }
+
+        public Observation(State state, OptionalLong checkpointId, Optional<String> failure) {
+            this(state, checkpointId, failure, List.of());
+        }
+        public Observation withRawEvidence(List<RawEvidenceRef> raw) {
+            return new Observation(state, checkpointId, failure, raw);
         }
     }
 

@@ -6,7 +6,7 @@ import java.util.List;
 import java.util.Optional;
 
 /** Infrastructure boundary owned by one isolated v1 attempt. */
-public interface V1AttemptRuntime extends KafkaBrokerControl, PacketFaultControl, TaskManagerControl, FlinkHaControl, AutoCloseable {
+public interface V1AttemptRuntime extends KafkaBrokerControl, PacketFaultControl, TaskManagerControl, FlinkHaControl, StorageFaultControl, AutoCloseable {
     KafkaRuntimeEndpoints startKafka(KafkaRuntimeTarget target);
 
     /** Retained created-container receipts, including failed startup, without additional Docker reads. */

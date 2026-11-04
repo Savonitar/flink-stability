@@ -94,6 +94,13 @@
             <version>${junit.version}</version>
             <scope>test</scope>
         </dependency>
+        <!-- The inspector stays JDK-only; tests serialize real released checkpoint metadata. -->
+        <dependency>
+            <groupId>org.apache.flink</groupId>
+            <artifactId>flink-runtime</artifactId>
+            <version>2.2.0</version>
+            <scope>test</scope>
+        </dependency>
         <dependency>
             <groupId>org.savonitar.flink.stability</groupId>
             <artifactId>synthetic-token-plugin</artifactId>

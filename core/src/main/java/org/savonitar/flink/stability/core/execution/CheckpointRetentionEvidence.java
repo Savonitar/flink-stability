@@ -14,12 +14,20 @@ public record CheckpointRetentionEvidence(String sourceRoot, String outputRoot, 
                                           String haRoot, String status, List<File> files, long bytes,
                                           List<String> diagnostics) {
     public static final String INCOMPLETE = "checkpoint.retention-incomplete";
+    public static final String NOT_APPLICABLE = "not-applicable";
     public record File(String path, long size, String sha256) {}
     public CheckpointRetentionEvidence { files = List.copyOf(files); diagnostics = List.copyOf(diagnostics); }
 
     public static CheckpointRetentionEvidence copy(Path source, Path output, boolean fenced) {
+        return copy(source, output, fenced, false);
+    }
+
+    public static CheckpointRetentionEvidence copy(Path source, Path output, boolean fenced, boolean fuseStorage) {
         Path root = source.toAbsolutePath().normalize();
         Path target = output.toAbsolutePath().normalize();
+        if (fuseStorage) return new CheckpointRetentionEvidence(root.toString(), target.toString(), null, null,
+                NOT_APPLICABLE, List.of(), 0, List.of("FUSE checkpoint state is stored in the attempt-owned Docker volume; "
+                + "the host evidence directory contains logs and receipts, not checkpoint bytes"));
         var files = new ArrayList<File>();
         var diagnostics = new ArrayList<String>();
         Path copied = target.resolve("checkpoints");

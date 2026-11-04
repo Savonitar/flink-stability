@@ -191,6 +191,8 @@ final class FlinkHaEvidenceRenderer {
         state.exitCode().ifPresent(value -> node.put("exitCode", value));
         state.oomKilled().ifPresent(value -> node.put("oomKilled", value));
         state.finishedAt().ifPresent(value -> node.put("finishedAt", value));
+        state.rawEvidence().ifPresent(value -> node.set("rawEvidence",
+                StateRecoveryEvidenceRenderer.render(value, new com.fasterxml.jackson.databind.ObjectMapper())));
     }
 
     private static void observations(ObjectNode node, FlinkHaControl.Observations observations) {

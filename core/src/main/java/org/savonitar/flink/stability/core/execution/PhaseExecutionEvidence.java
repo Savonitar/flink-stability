@@ -22,7 +22,9 @@ public record PhaseExecutionEvidence(
         List<TaskManagerKill> taskManagerKills,
         List<NetworkFault> networkFaults,
         List<TaskManagerRestart> taskManagerRestarts,
-        List<LeaderFault> leaderFaults, List<BrokerOperation> brokerOperations, List<PacketFault> packetFaults, List<SavepointLifecycle.Evidence> savepointRestores) {
+        List<LeaderFault> leaderFaults, List<BrokerOperation> brokerOperations, List<PacketFault> packetFaults,
+        List<SavepointLifecycle.Evidence> savepointRestores, List<CheckpointStorageFault.Evidence> storageFaults,
+        Optional<org.savonitar.flink.stability.runtime.api.StorageFaultControl.Snapshot> checkpointStorage) {
     public PhaseExecutionEvidence {
         steps = List.copyOf(Objects.requireNonNull(steps, "steps"));
         taskManagerKills = List.copyOf(Objects.requireNonNull(
@@ -33,7 +35,38 @@ public record PhaseExecutionEvidence(
         brokerOperations = List.copyOf(brokerOperations);
         packetFaults = List.copyOf(packetFaults);
         savepointRestores = List.copyOf(savepointRestores);
+        storageFaults = List.copyOf(storageFaults);
+        Objects.requireNonNull(checkpointStorage, "checkpointStorage");
         leaderFaults = List.copyOf(Objects.requireNonNull(leaderFaults, "leaderFaults"));
+    }
+
+    public PhaseExecutionEvidence(List<StepEvidence> steps, List<TaskManagerKill> kills, List<NetworkFault> network,
+            List<TaskManagerRestart> restarts, List<LeaderFault> leaders, List<BrokerOperation> brokers,
+            List<PacketFault> packets, List<SavepointLifecycle.Evidence> savepoints) {
+        this(steps, kills, network, restarts, leaders, brokers, packets, savepoints, List.of(), Optional.empty());
+    }
+
+    public PhaseExecutionEvidence(List<StepEvidence> steps, List<TaskManagerKill> kills, List<NetworkFault> network,
+            List<TaskManagerRestart> restarts, List<LeaderFault> leaders, List<BrokerOperation> brokers,
+            List<PacketFault> packets, List<SavepointLifecycle.Evidence> savepoints, List<CheckpointStorageFault.Evidence> faults) {
+        this(steps, kills, network, restarts, leaders, brokers, packets, savepoints, faults, Optional.empty());
+    }
+
+    public PhaseExecutionEvidence withStorageFaults(List<CheckpointStorageFault.Evidence> faults) {
+        return new PhaseExecutionEvidence(steps, taskManagerKills, networkFaults, taskManagerRestarts,
+                leaderFaults, brokerOperations, packetFaults, savepointRestores, faults, checkpointStorage);
+    }
+
+    public PhaseExecutionEvidence withCheckpointStorage(org.savonitar.flink.stability.runtime.api.StorageFaultControl.Snapshot value) {
+        return new PhaseExecutionEvidence(steps, taskManagerKills, networkFaults, taskManagerRestarts,
+                leaderFaults, brokerOperations, packetFaults, savepointRestores, storageFaults, Optional.of(value));
+    }
+
+    public boolean storageConfirmed() {
+        if (checkpointStorage.isEmpty()) return storageFaults.isEmpty();
+        var captured = checkpointStorage.orElseThrow();
+        return CheckpointStorageFault.healthyFinalCapture(captured)
+                && storageFaults.stream().allMatch(fault -> CheckpointStorageFault.finalConfirmed(fault, captured));
     }
 
     public PhaseExecutionEvidence(List<StepEvidence> steps, List<TaskManagerKill> kills, List<NetworkFault> network,
@@ -136,7 +169,8 @@ public record PhaseExecutionEvidence(
             OptionalLong jobManagerTimeAfterKill,
             Optional<TaskManagerControl.Identity> identity,
             Optional<String> identityFailure,
-            Optional<CheckpointKillWindow> checkpointWindow) {
+            Optional<CheckpointKillWindow> checkpointWindow,
+            Optional<StateRecoveryEvidence.Readiness> stateReadiness) {
         public TaskManagerKill {
             path = requireNonBlank(path, "path");
             loopIterations = List.copyOf(Objects.requireNonNull(
@@ -148,9 +182,19 @@ public record PhaseExecutionEvidence(
             Objects.requireNonNull(identity, "identity");
             Objects.requireNonNull(identityFailure, "identityFailure");
             Objects.requireNonNull(checkpointWindow, "checkpointWindow");
+            Objects.requireNonNull(stateReadiness, "stateReadiness");
             if (identity.isPresent() && identityFailure.isPresent()) {
                 throw new IllegalArgumentException("Identity observation cannot both succeed and fail");
             }
+        }
+
+        public TaskManagerKill(String path, List<LoopIteration> loopIterations, String target,
+                               FlinkJobObservation.Attempt jobBeforeKill,
+                               OptionalLong jobManagerTimeBeforeKill, OptionalLong jobManagerTimeAfterKill,
+                               Optional<TaskManagerControl.Identity> identity, Optional<String> identityFailure,
+                               Optional<CheckpointKillWindow> checkpointWindow) {
+            this(path, loopIterations, target, jobBeforeKill, jobManagerTimeBeforeKill,
+                    jobManagerTimeAfterKill, identity, identityFailure, checkpointWindow, Optional.empty());
         }
 
         public TaskManagerKill(String path, List<LoopIteration> loopIterations, String target,
@@ -427,6 +471,7 @@ public record PhaseExecutionEvidence(
         WAIT,
         KILL_TASKMANAGER,
         RESTART_TASKMANAGER,
+        CHECKPOINT_STORAGE_FAULT,
         SAVEPOINT_RESTORE, PACKET_FAULT, BROKER_FAULT, KILL_BROKER,
         RESTART_BROKER,
         NETWORK_FAULT,
@@ -435,6 +480,10 @@ public record PhaseExecutionEvidence(
 
     public enum StepStatus {
         SUCCEEDED,
-        FAILED
+        FAILED,
+        /** The operation returned partial evidence without confirming its required effect. */
+        UNCONFIRMED,
+        /** A readiness condition prevented the physical operation from being invoked. */
+        SKIPPED
     }
 }

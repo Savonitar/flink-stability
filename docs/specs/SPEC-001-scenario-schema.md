@@ -9,15 +9,19 @@ copies and pre-start verifies connector manifests/JARs and provides deterministi
 component lifecycle primitives. The public `run` command now implements the
 first narrow bounded execution vertical: it capability-checks and prepares one
 plain scenario, creates exact Kafka input evidence, runs the supported Flink
-phases, establishes the terminal process fence, performs `kafka.id-set`
-verification, and emits a structured result/evidence summary. The public
+phases, establishes the terminal process fence, performs `kafka.id-set` or opt-in
+`kafka.state-prefix` verification, and emits a structured result/evidence summary.
+Keyed-prefix execution also collects bounded state-recovery receipts and gates
+TaskManager kills on observed checkpoint/input progress. The public
 contract also fixes the workload protocol, omitted job defaults,
 checkpoint-storage boundary, Kafka compatibility line, terminal write fence,
 and validation deadlines. Broader v1 execution capabilities, runtime OCI-digest
 capture, the complete R8.2 replay report, and health/repetition/experiment verdict
 logic remain roadmap work.
 
-**Last updated:** 2026-10-04.
+**Last updated:** 2026-10-29. Implementation and live qualification are separate
+claims; see the exact artifacts and scope in the
+[checkpoint-storage qualification guide](../CHECKPOINT-STORAGE-QUALIFICATION.md).
 
 This document captures *what the scenario format must express* and why. The JSON
 Schema captures structural constraints; this requirements document remains the
@@ -72,6 +76,13 @@ ordering properties are tested.
   that the scenario is a bug reproduction, negative control, or expected
   failure; that intent is expressed only by the expected-result sibling (R1.6,
   R3.5). Suite and expected-result metadata do not accept `tickets` in v1.
+- **R1.2b** `meta.allow_state_reset_mutant` is an optional boolean, false when
+  omitted. It explicitly permits the reset-state workload only for calibration
+  scenarios using `keyed-prefix-v1`; scenario names, artifact names and paths
+  never imply this permission. An observed mutant `START` without the opt-in
+  makes recovery evidence unconfirmed with `state-recovery.unexpected-build-mode`.
+  A passing data check cannot then become PASS, and an expected failure cannot
+  bless the unrequested mutation. An observed data failure remains visible.
 - **R1.3** A scenario's `meta.name` is stable forever once committed, is globally
   unique lower-kebab-case, and equals its filename basename without `.yaml`. It
   is the key used by suites and the run report. Expected-result names are derived
@@ -600,7 +611,8 @@ Connector pull-request gating is the same mechanism with one axis:
   expectation may name only its custom terminal validator; the run report records
   `input_contract: custom-unverified`.
 - **R4.10a** A harness-owned `file`, `generated`, or `generated-rate` input
-  requires a top-level `kafka.id-set` validator. Its target must be the sink of
+  requires a top-level manifest validator: `kafka.id-set`, or `kafka.state-prefix`
+  for the generated keyed-prefix behavior in R5.6c.1. Its target must be the sink of
   exactly one declared job whose source is the sole input-source topic; this is
   the v1 input-manifest lineage. Supplemental custom terminal validators are
   allowed. A custom input instead permits only custom terminal validators.
@@ -779,19 +791,24 @@ Connector pull-request gating is the same mechanism with one axis:
   digests. The Kroxylicious image is a harness-pinned capability in v1 because
   `setup.proxies` has no public image field; its configured reference and resolved
   digest are still recorded by the runner.
-- **R4.13e** The first runner accepts optional `setup.flink.image_id`: a full local
-  Docker image configuration ID, `sha256:` followed by 64 lowercase hexadecimal
-  characters, after string parameter resolution. It is distinct from a registry
-  manifest digest and does not establish the source revision. Before each Flink
-  process starts, inspect its created container and require its actual image ID
-  to match this expected ID when supplied. Without an explicit ID, pin the first
-  observed Flink image for the attempt. JobManager, initial TaskManager, and all
-  replacement TaskManagers must use that same ID. Missing identity, an expected-ID
-  mismatch, or a changed tag resolving to another ID prevents process start.
-  Retain the declared reference and the independently observed ID for every
-  successfully provisioned incarnation. An image pin alone does not relax the
-  version compatibility registry or introduce support for image-changing restart
-  steps; the explicit custom-line declaration is R4.13j.
+- **R4.13e** The first runner accepts optional `setup.flink.image_id`: a full
+  lowercase `sha256:` identity after parameter resolution. Docker's image ID is
+  backend-dependent: the classic graphdriver reports an image configuration
+  digest, while the containerd image store can report a multi-platform index
+  digest. Before each Flink process starts, inspect the created container and
+  its image by immutable container image ID. A declared `image_id` must match
+  either the container's image ID or one of that image's `RepoDigests`. Retain
+  both observed forms, which form matched, the storage driver and the optional
+  `driver-type` from Docker info. Missing inspection evidence rejects startup.
+  Optional `setup.flink.image_digest` is a bare lowercase `sha256:` repository
+  digest, verified against `RepoDigests` when supplied; it provides a
+  content-addressable pin independent of the daemon's image-ID representation.
+  Neither form establishes the source revision. Without an explicit ID, pin
+  the first observed Flink image for the attempt. JobManager, initial
+  TaskManager and replacement TaskManagers must retain that same actual image
+  ID; matching a repository digest does not permit image drift. An image pin
+  does not relax version compatibility or introduce image-changing restarts;
+  the explicit custom-line declaration is R4.13j.
   Before a successful attempt or an expected-failure scenario can pass, its
   provisioning and process-fence evidence must cover every logical component and
   role expected by the executable plan. Observed evidence must not define the
@@ -1171,6 +1188,42 @@ Connector pull-request gating is the same mechanism with one axis:
   `runner.workload.restart-strategy-unsupported`. This is a runner capability
   boundary, not schema narrowing. Harness-managed filesystem checkpoint storage
   is executable in the first vertical per R5.4a.
+- **R5.4c** Explicit FUSE checkpoint storage extends the filesystem object with
+  `fuse: { bundle, manifest_sha256, image_id, platform }`. `bundle` is a local
+  directory relative to the artifact root containing the PR3
+  `build-evidence.json` and its `bundle/` files. The manifest SHA-256, local
+  Docker image ID and `linux/arm64` platform are mandatory. The author-declared
+  image ID must equal `setup.flink.image_id` and be bound to the helper build's
+  recorded image inspection; runtime verification follows R4.13e. There is no
+  compiled image constant. A different image requires separate qualification.
+  The 27 October 2026 qualification used Docker Engine 29.1.3 with the classic
+  graphdriver store: `sha256:2e93ded2cb7bf1a50f71b663d5e3ea01420bcc4e549cbf666d05120f939713c7`
+  is the arm64 config digest. The containerd store reports the index digest
+  `sha256:7ecfab9d5e8ec6987a248b32f6605b5fe9bcb7347aea0d7b1bc3976588408681`.
+  Supporting both identity forms does not extend the retained qualification. Bundle path
+  traversal, symbolic links, missing/extra helpers, changed hashes and incomplete
+  build/cleanup receipts reject before Docker. Preparation snapshots the bounded
+  manifest and the exact daemon, native self-test and Java probe files into the
+  existing owned artifact workspace. Provisioning verifies the snapshot again.
+
+  FUSE requires explicit sibling checkpointing settings
+  `small_file_threshold: 0`, `max_concurrent: 1` and
+  `tolerable_failures: <integer 1..10>`. They materialize as
+  `execution.checkpointing.data-inline-threshold: 0 bytes`,
+  `execution.checkpointing.max-concurrent-checkpoints: 1` and
+  `execution.checkpointing.tolerable-failed-checkpoints`. Canonical keys and the
+  deprecated small-file-threshold aliases cannot be overridden through generic
+  Flink configuration or program arguments when FUSE is selected. Omitted FUSE
+  retains the existing filesystem path and does not add these settings.
+
+  This slice requires `keyed-prefix-v1`, its bound state oracle, HashMap state,
+  TTL disabled, EOS/INCREMENTING, one JobManager/TaskManager, parallelism one,
+  one source/sink partition, no HA/token provider or custom runtime JAR. The
+  adapter generates the checkpoint namespace and mounted URI. Authors cannot
+  supply raw backing, mount, device or checkpoint paths. Ordinary healthy FUSE
+  controls may await/wait and perform one TaskManager kill/restart pair. The
+  atomic experiment below permits no additional faults or loops. Implementation
+  and offline validation do not establish integrated live qualification.
 - **R5.5** A job has a stable **alias** within the scenario, so steps and
   validators can name it. Job identity must survive stop/restart and version
   upgrade — the alias is scenario-level, not the Flink job ID. Resolved job
@@ -1338,6 +1391,8 @@ Connector pull-request gating is the same mechanism with one axis:
 
   ```text
   flink-stability.workload.v1.job-alias
+  flink-stability.workload.v1.behavior.type
+  flink-stability.workload.v1.behavior.key-count
   flink-stability.workload.v1.source.bootstrap-servers
   flink-stability.workload.v1.source.topic
   flink-stability.workload.v1.source.group-id
@@ -1408,6 +1463,83 @@ Connector pull-request gating is the same mechanism with one axis:
   or watermark setting. Such a JAR needs protocol-conformance integration tests
   before it is trusted as a CI oracle. A declaration without conforming behavior
   remains a protocol defect, never permission to fall back to legacy arguments.
+- **R5.6c.1** `workload.jobs[].behavior` is optional. Omission preserves the
+  integer passthrough workload and adds neither behavior configuration key nor a
+  behavior default. The supported opt-in shape is
+  `{ type: keyed-prefix-v1, key_count: 8 }`, with an integer `key_count` in
+  `1..1024` after whole-scalar parameter resolution. Both fields are required;
+  unknown fields and behavior types reject. The runner supplies
+  `flink-stability.workload.v1.behavior.type=keyed-prefix-v1` and the canonical
+  decimal `flink-stability.workload.v1.behavior.key-count`. `program_args` cannot
+  override either reserved key.
+
+  A selected keyed-prefix workload JAR must additionally declare
+  `Flink-Stability-Workload-Capabilities: keyed-prefix-v1` in its main manifest.
+  Capabilities are comma-separated, unique lowercase kebab-case tokens;
+  continuation lines and case-insensitive attribute names follow the existing
+  manifest parser. Missing, duplicate, malformed, or nonmatching capability
+  declarations reject the staged, checksummed artifact before provisioning with
+  `artifact.workload.protocol-capability-missing` or
+  `artifact.workload.protocol-capability-invalid`. A v1 JAR without this optional
+  declaration remains compatible with the omitted behavior. The capability is
+  an author assertion, not a proof of runtime conformance.
+
+  For generated IDs `i = 0..N-1`, the stateful operator selects `key = i mod K`,
+  reads that key's count and sum from Flink keyed state, increments count and
+  adds `i+1` using checked signed 64-bit arithmetic. It emits exactly
+  `{ "version": 1, "id": i, "key": key, "count": count, "prefixSum": sum }`.
+  The output values must depend on accumulated/restored state, not be computed
+  from the oracle's closed-form formula. The operator UID is
+  `flink-stability-keyed-prefix-v1`; its state descriptor is
+  `flink-stability-keyed-prefix-count-sum-v1`, using an explicit two-long tuple
+  serializer. Existing passthrough UID/state remain
+  unchanged. A `kafka.state-prefix` terminal validator bound to this job is
+  mandatory, and `kafka.id-set` cannot decode its state-record sink.
+
+  The initial executable slice requires one JobManager, one TaskManager,
+  parallelism one, one input/output partition, HashMap state, disabled TTL,
+  filesystem checkpoint storage, and an exactly-once sink with INCREMENTING
+  transaction naming. Partial manifests, input faults, HA, rescaling and
+  savepoint/restore transitions are unsupported. Uninterrupted inputs with
+  `N < K` remain valid: final snapshot progress covers the `N` reachable keys;
+  an all-`K` progress receipt is not required for that control. A declared kill
+  requires `N >= 2*K`, otherwise execution planning rejects
+  `runner.state-prefix.input-too-small` before provisioning. This supplies a
+  nonzero prefix and a possible post-restore event for every key; the live gate
+  must still prove the window, rather than infer it from input size.
+
+  The repository's separately built calibration artifact selects
+  `reset-state-on-restore-v1` through the Maven `state-reset-on-restore` profile
+  and classifier. Both arms retain identical class bytes, UID, state serializer,
+  source/sink behavior and scenario configuration. Only the manifest build mode
+  and private `META-INF/flink-stability/keyed-prefix-build.properties` differ.
+  The mode is read from the executing class's own code-source JAR, rejecting a
+  missing, duplicate, malformed or oversized identity; no program argument,
+  JVM property or ambient classpath resource enables the mutation. On a genuine
+  restore, the mutant ignores the existing keyed aggregate on the first event
+  for that key, then resumes ordinary accumulation. Initial startup never
+  activates it. The frozen build recipe records both artifact hashes, source
+  copies and mutation scope, using isolated build outputs and a cloned/copied
+  artifact cache without reading user Maven settings or credentials.
+  Its effective build directory must end in `state-reset-on-restore`; setting
+  `workload.build.mode` alone cannot generate a mutant in the ordinary target
+  directory. The build guard also preserves the existing configuration/mode
+  reuse checks. `evidence.stateRecovery` retains `allowStateResetMutant` and the
+  observed `buildMode` (null when START receipts do not establish one mode).
+  The latter is derived from receipts, not an author-provided verdict label.
+
+  Bounded `STATE_PREFIX_START`, `SNAPSHOT`, `COMPLETED`, `ABORTED` and `PROGRESS`
+  receipts identify JobID, operator UID, execution attempt, subtask and checkpoint.
+  START adds the packaged build mode. PROGRESS is emitted once when every key has
+  received an event in that incarnation. After restore, one `RESTORED_KEY` receipt
+  per key records its first input ID and actual previous/new count and sum;
+  `MUTANT_RESET` additionally records an actual reset of non-null state. A snapshot
+  receipt alone does not prove checkpoint completion. These receipts establish
+  execution provenance; state correctness remains the independent terminal
+  oracle's responsibility. Recovery sensitivity and checkpoint-storage fault
+  qualification remain separate gates in the
+  [state-recovery plan](../STATE-RECOVERY-STORAGE-FAULT-PLAN.md).
+
 - **R5.6d** Installed and verified connector bytes do not prove that the subject
   connector is the code the job runs. Workload protocol v1 builds its job from the
   Kafka connector's entry classes `org.apache.flink.connector.kafka.source.KafkaSource`
@@ -1884,6 +2016,66 @@ Connector pull-request gating is the same mechanism with one axis:
   not show recovery. A scenario whose bounded input finishes before its kill, or
   whose TaskManager hosts no active subtask, therefore cannot pass, including as
   an expected-failure control (R8.7a).
+- **R6.12a.1** A TaskManager kill for `keyed-prefix-v1` has an automatic internal
+  readiness gate with one shared `45s` deadline. Before injection it requires a
+  RUNNING keyed operator on the exact target incarnation, a completely traversed
+  valid `read_committed` output prefix covering every key, and at least one
+  completed checkpoint whose snapshot and completion receipts belong to that
+  execution attempt and contain nonzero progress for every key. Both the prefix
+  and checkpoint must leave enough input for a subsequent event for every key.
+  A sleep, checkpoint count, or RUNNING alone cannot satisfy this gate.
+
+  If readiness is missing or its deadline expires, do not inject the kill or run
+  the remaining phase steps. Retain the miss/error and continue the existing
+  natural-completion, physical-fence and terminal-oracle path. A data failure
+  remains FAIL; passing data with missing recovery proof becomes INCONCLUSIVE
+  with `state-recovery.evidence-unconfirmed`. Interruption retains the existing
+  interrupted phase/error handling.
+
+  After replacement, the existing physical kill-effect proof must identify a
+  restore of one of the checkpoints admitted before the kill. The replacement's
+  START and per-key suffix/progress receipts must bind that checkpoint, the same
+  JobID/operator, a later execution attempt and a distinct registered physical
+  incarnation. Missing, duplicate, malformed, truncated or contradictory
+  provenance cannot confirm recovery. Confirmed provenance is separate from
+  correct state values: the oracle must still expose lost or altered state as
+  a data failure. PR2 calibration requires three retained attempts per cell of
+  correct/mutant × uninterrupted/restart. All twelve expectations stay PASS;
+  only the mutant restart cell is expected by the independent checker to produce
+  raw state-mismatch FAIL with zero ID defects. A miss leaves qualification
+  incomplete and does not authorize replacement attempts or expectation changes.
+- **R6.12a.2** `checkpoint_storage_fault: { job, timeout, lease }` names the one
+  FUSE-backed stateful job. `timeout` and `lease` are positive and at most
+  `120s`; the lease must cover the timeout. One operation owns the complete
+  readiness, arm, failed checkpoint, kill, heal and recovery sequence under its
+  shared budget. Exactly one non-looping operation is permitted, with
+  `N >= 2*K`, and no other fault or savepoint/rescale operation.
+
+  Require healthy instances, a materialized completed checkpoint N with nonzero
+  keyed progress and a suffix remaining, and no known in-flight checkpoint.
+  Before inspecting checkpoint files, reject any retained FAILED checkpoint,
+  `latest.failed` checkpoint, prior restore or changed execution with a specific
+  diagnostic. An ID-less startup trigger failure is permitted only when neither
+  retained history nor `latest.failed` identifies a failed checkpoint; retain the
+  exact `baselineIdlessTriggerFailures` count. Recheck the same checkpoint/count
+  boundary after inspection. The baseline count is not reset or subtracted from
+  evidence: the failed trigger and every post-kill failure still require exact
+  count deltas and identified failed checkpoints. A new unaccounted ID-less
+  failure after arming cannot confirm the operation.
+  Arm every required instance before one REST checkpoint trigger; never retry an
+  uncertain trigger. Confirm one unambiguous newer checkpoint failure and a real
+  matching checkpoint-file create/write EIO. Keep the fault armed through the
+  sole TaskManager's confirmed death and verify no newer checkpoint completed.
+  Only then heal surviving instances and recreate the TaskManager with verified
+  healthy storage. Require restore of N, further events for the same keys and
+  a later successful checkpoint, followed by natural completion, physical writer
+  fencing and the independent state oracle. Missing history, competing
+  checkpoints, expired leases, absent materialization/EIO receipts or an
+  unexpected restart leave the operation unconfirmed. Preserve observed data
+  failures and cleanup errors; passing output cannot substitute for fault proof.
+  Record an unconfirmed atomic operation as `UNCONFIRMED` and a readiness-blocked
+  keyed kill as `SKIPPED`, never `SUCCEEDED`. Neither label invents a physical
+  kill or replacement; any actual partial lifecycle receipts remain available.
 - **R6.12b** `leader_fault: { mode, duration, timeout, token_fault?, recovery_barrier? }` is an atomic,
   automatically healed HA operation. `mode` is `kill`, `pause`, or
   `isolate-zookeeper`; the target is the observed current leader, never a guessed
@@ -2124,6 +2316,11 @@ Connector pull-request gating is the same mechanism with one axis:
   | `kafka.id-set` | `validator.kafka.id-set.unexpected-ids` |
   | `kafka.id-set` | `validator.kafka.id-set.duplicate-ids` |
   | `kafka.id-set` | `validator.kafka.id-set.missing-ids` |
+  | `kafka.state-prefix` | `validator.kafka.state-prefix.malformed-records` |
+  | `kafka.state-prefix` | `validator.kafka.state-prefix.unexpected-ids` |
+  | `kafka.state-prefix` | `validator.kafka.state-prefix.duplicate-ids` |
+  | `kafka.state-prefix` | `validator.kafka.state-prefix.missing-ids` |
+  | `kafka.state-prefix` | `validator.kafka.state-prefix.state-mismatch` |
   | `kafka.no-hanging-transactions` | `validator.kafka.transaction.ongoing-after-timeout` |
 
   `kafka.record-count` and `flink.log-match` remain valid terminal validators for
@@ -2193,20 +2390,66 @@ Connector pull-request gating is the same mechanism with one axis:
   corresponding `validator.*` failure instead.
 - **R7.3c** The broad v1 contract continues to permit one or more terminal
   validators of the types in R7.3. The first narrow executable runner accepts
-  exactly one `kafka.id-set` validator with `expected: input-manifest`.
+  exactly one `kafka.id-set` or `kafka.state-prefix` validator with
+  `expected: input-manifest`, matched to the job's behavior.
   Unsupported validator counts, types, or expected-data sources are rejected
   before artifact preparation or Docker with
   `runner.validation.count-unsupported`,
   `runner.validation.type-unsupported`, or
   `runner.validation.expected-unsupported`, respectively. This is a runner
   capability boundary, not a narrowing of the v1 format.
+- **R7.3c.1** The composite state oracle is declared as:
+
+  ```yaml
+  terminal_validations:
+    - type: kafka.state-prefix
+      job: state-job
+      cluster: main
+      topic: output
+      expected: input-manifest
+      timeout: 2m
+  ```
+
+  `job`, `cluster`, `topic`, and `expected` are required; `timeout` defaults to
+  `2m`. There is no `mode` field or at-least-once alternative. The explicit job
+  must select `keyed-prefix-v1`, read the unique generated input-manifest topic,
+  and own the validator's sink exclusively. The oracle requires complete,
+  reconciled, ordered integer-sequence input evidence. For `i = k+s*K`, it
+  independently computes expected key `k`, count `s+1`, and sum
+  `(s+1)*(k+1) + K*s*(s+1)/2`; it never invokes workload accumulation code or
+  derives expectations from output values. It compares records by ID, independent
+  of output arrival order, in one fixed fenced Kafka snapshot.
+
+  Decoding requires strict UTF-8 and exactly the five JSON fields in R5.6c.1,
+  version `1`, integral values in their declared numeric ranges, and no duplicate
+  fields: `id >= 0`, `0 <= key < K`, `count >= 1`, and `prefixSum >= 1`, all
+  representable as signed 64-bit integers. Values outside these ranges are
+  malformed; a valid nonnegative ID absent from the manifest is unexpected.
+  JSON whitespace, field order and escaped spellings of known field names do
+  not alter their semantic values; no byte-canonical JSON encoding is required.
+  Tombstones, oversized records, unknown fields and invalid encodings
+  count as malformed records. Complete evidence retains all defect totals, with
+  stable precedence `malformed-records` > `unexpected-ids` > `duplicate-ids` >
+  `missing-ids` > `state-mismatch`. State mismatch includes wrong keys, counts or
+  sums even when every expected ID occurs exactly once. Mismatch samples are
+  deterministic and limited to 100.
+
+  The state reader retains at most 1 KiB per record, at most 128 MiB of aggregate
+  raw payload, and at most 1,000,000 records. These are retention bounds, not a
+  bound on Kafka client heap usage. Payload-budget exhaustion returns
+  `verification.kafka.output-byte-limit-exceeded`; invalid manifest evidence
+  returns `verification.kafka.input-manifest-invalid`. Incomplete traversal or
+  expiry while decoding/comparing remains `verification.kafka.*`, never a
+  matchable state-mismatch result. All stages share the original absolute
+  deadline. Legacy ID decoding keeps its existing 64-character behavior.
+
 - **R7.3d** The first narrow in-memory runner observes at most `1,000,000`
   terminal Kafka output records, the same temporary bound used for generated
   input. Encountering the next in-range record stops materialization and fails
   closed with `verification.kafka.output-limit-exceeded`, while retaining the
   fixed partition bounds and bounded record-coordinate evidence already
   observed. Tombstones count toward this observation limit. This verification
-  failure cannot satisfy an expected data-integrity oracle. Each retained record
+  failure cannot satisfy an expected data-integrity oracle. In ID mode each retained record
   keeps at most 64 characters of its value: a longer value cannot be a canonical
   ID, so it keeps a 32-character prefix marked with its length and counts as a
   malformed ID. Retained memory is thus bounded by the record cap, not by the
@@ -2368,6 +2611,15 @@ Connector pull-request gating is the same mechanism with one axis:
   ran, `missingSamples` exposes its existing bounded sample of at most 100 missing IDs
   in ascending order. An incomplete snapshot has an empty array; a stage that never ran
   omits it. This sample is not the complete missing-ID set when the count exceeds 100.
+
+  Keyed-prefix results additionally expose typed `evidence.stateRecovery`:
+  workload SHA-256, JobID, key/input counts, expected restarts, physical-fence
+  confirmation, registered-process marker trace and diagnostics, readiness
+  attempts, checkpoint-bound recoveries and a confirmed/reason result. Retain
+  misses and capture failures even when the terminal data check passes. Missing
+  recovery evidence cannot satisfy a PASS expectation or bless an expected
+  state failure; adding this report never replaces an already observed data FAIL.
+
   This is
   useful executable evidence but is **not** the complete replay-grade R8.2 run
   report. Environment-health sampling, independently resolved OCI digests, and
@@ -3575,6 +3827,7 @@ rationale differs from a numbered requirement, the numbered requirement controls
   override.
 - **12.4 Reason-code namespaces**, defined before expected results depend on
   them: the four `validator.kafka.id-set.{malformed-ids,unexpected-ids,duplicate-ids,missing-ids}`
+  codes, the five `validator.kafka.state-prefix.{malformed-records,unexpected-ids,duplicate-ids,missing-ids,state-mismatch}`
   codes, `validator.kafka.transaction.ongoing-after-timeout`,
   `await.job-state.timeout`, `fault.network.unconfirmed`, and
   `infrastructure.image-pull-failed`. Expected failures reference a registered

@@ -60,6 +60,37 @@ class ArtifactPlanResolverTest {
     Path artifactRoot;
 
     @Test
+    void selectedStateBehaviorRequiresCapabilityOnStagedWorkloadBytes() throws IOException {
+        createJar(artifactRoot.resolve("connector.jar"), false);
+        createJar(artifactRoot.resolve("old-v1.jar"), true);
+        createJar(artifactRoot.resolve("state.jar"), true, "keyed-prefix-v1");
+        for (String jar : List.of("old-v1.jar", "state.jar")) {
+            var plan = plainPlan("state-capability", document -> {
+                setCoreArtifacts(document, "connector.jar", jar);
+                ((ObjectNode) document.at("/workload/jobs/0")).putObject("behavior")
+                        .put("type", "keyed-prefix-v1").put("key_count", 8);
+                ((ObjectNode) document.at("/terminal_validations/0"))
+                        .put("type", "kafka.state-prefix").put("job", "eos-job").remove("mode");
+            });
+            if (jar.equals("old-v1.jar")) {
+                var failure = assertFailsAt(Stage.ARTIFACT, () -> new ArtifactPlanResolver().resolve(
+                        plan, new ArtifactResolutionOptions(artifactRoot, true)));
+                assertSingleIssue(failure, "artifact.workload.protocol-capability-missing", JOB_PATH);
+            } else {
+                try (var prepared = new ArtifactPlanResolver().resolve(
+                        plan, new ArtifactResolutionOptions(artifactRoot, true))) {
+                    var workload = prepared.artifact(ScenarioSide.SINGLE, JOB_PATH).orElseThrow();
+                    assertNotEquals(artifactRoot.resolve(jar), workload.preparedPath());
+                    assertEquals(Digests.sha256(workload.preparedPath()), workload.sha256());
+                }
+            }
+        }
+        try (var prepared = resolvePlain("legacy-capability-optional", "connector.jar", "old-v1.jar")) {
+            assertTrue(prepared.artifact(ScenarioSide.SINGLE, JOB_PATH).isPresent());
+        }
+    }
+
+    @Test
     void imageSubjectsRemainUnstagedAndUnobservedUntilRuntimeVerification() throws IOException {
         createJar(artifactRoot.resolve("job.jar"), true);
         ResolvedScenarioPlan plan = plainPlan("image-primary", document -> {
@@ -913,6 +944,10 @@ class ArtifactPlanResolverTest {
     }
 
     private static Path createJar(Path path, boolean mainClass) throws IOException {
+        return createJar(path, mainClass, null);
+    }
+
+    private static Path createJar(Path path, boolean mainClass, String capabilities) throws IOException {
         Files.createDirectories(path.getParent());
         Manifest manifest = new Manifest();
         manifest.getMainAttributes().put(Attributes.Name.MANIFEST_VERSION, "1.0");
@@ -921,6 +956,10 @@ class ArtifactPlanResolverTest {
             manifest.getMainAttributes().putValue(
                     WorkloadProtocolArtifactValidator.ATTRIBUTE,
                     WorkloadProtocolArtifactValidator.VERSION);
+        }
+        if (capabilities != null) {
+            manifest.getMainAttributes().putValue(
+                    WorkloadProtocolArtifactValidator.CAPABILITIES_ATTRIBUTE, capabilities);
         }
         try (JarOutputStream output = new JarOutputStream(
                 Files.newOutputStream(path), manifest)) {

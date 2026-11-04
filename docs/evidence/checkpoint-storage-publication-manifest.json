@@ -1,0 +1,264 @@
+{
+  "formatVersion": 2,
+  "scope": "Final checkpoint and state-recovery reports. Older matrices retain the scope of their frozen artifacts and verifier.",
+  "archive": {
+    "releaseTag": "checkpoint-storage-review-archive-20261030",
+    "releaseTagCommit": "c92aa34ff403fdc17bd75dbdf3afd89984ec7cfc",
+    "asset": "checkpoint-storage-review-evidence-20261030.tar.gz",
+    "url": "https://github.com/Savonitar/flink-stability/releases/download/checkpoint-storage-review-archive-20261030/checkpoint-storage-review-evidence-20261030.tar.gz",
+    "bytes": 320057,
+    "sha256": "e831b0454b26f4003300a640a6809bb544b1b3c9c4fa45f0e385fdd893d9ab22",
+    "historicalPublicationCommit": "a827fca4d645bfe517f6cf3762c197588b3a7c3e",
+    "sourceTree": "e663bc3fef3cb4511d99b81cd05eb36c86cb6329",
+    "inventory": {
+      "member": "ARCHIVE-INVENTORY.json",
+      "bytes": 22692,
+      "sha256": "33b973e7cbb418171ffd784cb3fda3079390d7b933a2e2f194e0c68995e1e479",
+      "sourceFiles": 103
+    },
+    "originalPublicationManifest": {
+      "member": "docs/evidence/checkpoint-storage-publication-manifest.json",
+      "sha256": "4f15e6a47f01df7b6b8836f2678899f3b62db21e2acef86b532ea3cd1448f8d9",
+      "bytes": 127075,
+      "receiptEntries": 74
+    },
+    "layout": "Members use their historical repository paths. The full publication manifest identifies original and published hashes, redactions and omissions for every historical receipt.",
+    "earlierIndexMembers": [
+      "docs/evidence/README.md",
+      "docs/evidence/checkpoint-storage-publication-manifest.json"
+    ],
+    "archiveOnlyMembers": [
+      "docs/evidence/checkpoint-review-final-fuse-20261029-01/README.md",
+      "docs/evidence/checkpoint-review-final-fuse-20261029-01/finished.json",
+      "docs/evidence/checkpoint-review-final-fuse-20261029-01/manifest.json",
+      "docs/evidence/checkpoint-review-live-20261029-01/README.md",
+      "docs/evidence/checkpoint-review-live-20261029-01/finished.json",
+      "docs/evidence/checkpoint-review-live-20261029-01/manifest.json",
+      "docs/evidence/checkpoint-review-remediation-20261029-01/README.md",
+      "docs/evidence/checkpoint-review-remediation-20261029-01/d-cli-final-validations.json",
+      "docs/evidence/checkpoint-review-remediation-20261029-01/d-cli-validations.json",
+      "docs/evidence/checkpoint-review-remediation-20261029-01/d-current-audit-seed1.json",
+      "docs/evidence/checkpoint-review-remediation-20261029-01/d-final-current-audit-seed1.json",
+      "docs/evidence/checkpoint-review-remediation-20261029-01/d-final-journal-filter-check.json",
+      "docs/evidence/checkpoint-review-remediation-20261029-01/d-final-packaged-pair.json",
+      "docs/evidence/checkpoint-review-remediation-20261029-01/d-packaged-pair.json",
+      "docs/evidence/checkpoint-review-remediation-20261029-01/d-property-only-results.json",
+      "docs/evidence/checkpoint-review-remediation-20261029-01/verification.json",
+      "docs/evidence/checkpoint-storage-checks-20261027-01/README.md",
+      "docs/evidence/checkpoint-storage-checks-20261027-01/checks.json",
+      "docs/evidence/checkpoint-storage-direct-java-pilot-20261027-01/README.md",
+      "docs/evidence/checkpoint-storage-direct-java-pilot-20261027-01/launcher-inputs.json",
+      "docs/evidence/checkpoint-storage-direct-java-pilot-20261027-02/README.md",
+      "docs/evidence/checkpoint-storage-direct-java-pilot-20261027-02/derivation.json",
+      "docs/evidence/checkpoint-storage-direct-java-pilot-20261027-02/run/stdout.summary.json",
+      "docs/evidence/checkpoint-storage-helper-build-20261027-01/README.md",
+      "docs/evidence/checkpoint-storage-helper-build-20261027-01/build-evidence.json",
+      "docs/evidence/checkpoint-storage-helper-build-20261027-02/README.md",
+      "docs/evidence/checkpoint-storage-helper-build-20261027-02/build-evidence.json",
+      "docs/evidence/checkpoint-storage-helper-build-20261027-03/README.md",
+      "docs/evidence/checkpoint-storage-helper-build-20261027-03/build-evidence.json",
+      "docs/evidence/checkpoint-storage-helper-build-20261027-04/README.md",
+      "docs/evidence/checkpoint-storage-helper-build-20261027-04/build-evidence.json",
+      "docs/evidence/checkpoint-storage-helper-build-20261029-01/README.md",
+      "docs/evidence/checkpoint-storage-helper-build-20261029-01/build-evidence.json",
+      "docs/evidence/checkpoint-storage-helper-build-20261029-02/README.md",
+      "docs/evidence/checkpoint-storage-helper-build-20261029-02/build-evidence.json",
+      "docs/evidence/checkpoint-storage-helper-build-20261029-03/README.md",
+      "docs/evidence/checkpoint-storage-helper-build-20261029-03/build-evidence.json",
+      "docs/evidence/checkpoint-storage-integration-checks-20261027-01/README.md",
+      "docs/evidence/checkpoint-storage-integration-checks-20261027-01/cleanup-check.json",
+      "docs/evidence/checkpoint-storage-integration-checks-20261027-01/maven-install-04.log.summary.json",
+      "docs/evidence/checkpoint-storage-integration-checks-20261027-01/maven-install-05.log.summary.json",
+      "docs/evidence/checkpoint-storage-integration-checks-20261027-01/maven-install-06.log.summary.json",
+      "docs/evidence/checkpoint-storage-integration-checks-20261027-01/maven-install-07.log.summary.json",
+      "docs/evidence/checkpoint-storage-integration-checks-20261027-01/maven-verify-final.log.summary.json",
+      "docs/evidence/checkpoint-storage-integration-checks-20261027-01/python-unittest.log.summary.json",
+      "docs/evidence/checkpoint-storage-integration-pilots-20261027-01/README.md",
+      "docs/evidence/checkpoint-storage-integration-pilots-20261027-01/attempts/healthy-fuse/run/pilot-01/stdout.summary.json",
+      "docs/evidence/checkpoint-storage-integration-pilots-20261027-01/attempts/healthy-fuse/run/pilot-02/stdout.summary.json",
+      "docs/evidence/checkpoint-storage-integration-pilots-20261027-02/README.md",
+      "docs/evidence/checkpoint-storage-integration-pilots-20261027-02/attempts/correct-eio/run/pilot-01/stdout.summary.json",
+      "docs/evidence/checkpoint-storage-integration-pilots-20261027-02/attempts/correct-eio/run/pilot-02/stdout.summary.json",
+      "docs/evidence/checkpoint-storage-integration-pilots-20261027-02/attempts/correct-eio/run/pilot-03/framework/manifest.summary.json",
+      "docs/evidence/checkpoint-storage-integration-pilots-20261027-02/attempts/correct-eio/run/pilot-03/stdout.summary.json",
+      "docs/evidence/checkpoint-storage-integration-pilots-20261027-02/attempts/healthy-fuse/run/pilot-01/framework/manifest.summary.json",
+      "docs/evidence/checkpoint-storage-integration-pilots-20261027-02/attempts/healthy-fuse/run/pilot-01/stdout.summary.json",
+      "docs/evidence/checkpoint-storage-integration-pilots-20261027-02/attempts/mutant-eio/run/pilot-01/stdout.summary.json",
+      "docs/evidence/checkpoint-storage-integration-pilots-20261027-02/evidence/derivation.json",
+      "docs/evidence/checkpoint-storage-integration-pilots-20261027-02/manifest.json",
+      "docs/evidence/checkpoint-storage-probe-20261027-01/README.md",
+      "docs/evidence/checkpoint-storage-probe-20261027-01/result.summary.json",
+      "docs/evidence/checkpoint-storage-probe-20261027-02/README.md",
+      "docs/evidence/checkpoint-storage-probe-pilot-20261027-01/README.md",
+      "docs/evidence/checkpoint-storage-probe-pilot-20261027-01/result.summary.json",
+      "docs/evidence/checkpoint-storage-probe-pilot-20261027-02/README.md",
+      "docs/evidence/checkpoint-storage-probe-pilot-20261027-02/result.summary.json",
+      "docs/evidence/checkpoint-storage-qualification-20261027-01/README.md",
+      "docs/evidence/checkpoint-storage-qualification-20261027-01/evidence/platform.json",
+      "docs/evidence/checkpoint-storage-qualification-20261027-01/execution-started.json",
+      "docs/evidence/checkpoint-storage-qualification-20261027-01/framework/manifest.summary.json",
+      "docs/evidence/checkpoint-storage-qualification-20261027-01/manifest.json",
+      "docs/evidence/checkpoint-storage-qualification-20261027-01/reports/reproduction.json",
+      "docs/evidence/checkpoint-storage-qualification-20261027-01/validation-finished.json",
+      "docs/evidence/checkpoint-storage-qualification-pilots-20261027-01/README.md",
+      "docs/evidence/checkpoint-storage-qualification-pilots-20261027-01/attempts/healthy-restart/run/pilot-01/stdout.summary.json",
+      "docs/evidence/checkpoint-storage-qualification-pilots-20261027-01/attempts/healthy-restart/validate/pilot-01/command.json",
+      "docs/evidence/checkpoint-storage-qualification-preparation-20261027-03/README.md",
+      "docs/evidence/checkpoint-storage-qualification-preparation-20261027-03/python-unittest-final.log.summary.json",
+      "docs/evidence/checkpoint-storage-qualification-review-20261027-01/README.md",
+      "docs/evidence/checkpoint-storage-qualification-review-20261027-01/review-finished.json",
+      "docs/evidence/checkpoint-storage-qualification-review-20261027-01/supplemental-summary.json",
+      "docs/evidence/checkpoint-storage-review-fixes-20261027-01/README.md",
+      "docs/evidence/checkpoint-storage-review-fixes-20261027-01/counterexamples.json",
+      "docs/evidence/checkpoint-storage-review-fixes-20261027-01/live-smoke-02/smoke-finished.summary.json",
+      "docs/evidence/checkpoint-storage-review-fixes-20261027-01/maven-install-02.log.summary.json",
+      "docs/evidence/checkpoint-storage-review-fixes-20261027-01/native-tests-02.log.summary.json",
+      "docs/evidence/checkpoint-storage-review-fixes-20261027-01/python-unittest-final.log.summary.json",
+      "docs/evidence/checkpoint-storage-review-fixes-20261027-01/re-audit-final.md",
+      "docs/evidence/checkpoint-storage-review-fixes-20261027-01/re-audit-final.summary.json",
+      "docs/evidence/checkpoint-storage-review-fixes-20261027-01/re-audit-reproduction.json",
+      "docs/evidence/checkpoint-storage-review-fixes-20261027-01/verification-summary.json",
+      "docs/evidence/state-recovery-build-20261026-02/README.md",
+      "docs/evidence/state-recovery-build-20261026-02/build-evidence.json",
+      "docs/evidence/state-recovery-qualification-20261026-01/README.md",
+      "docs/evidence/state-recovery-qualification-20261026-01/execution-started.json",
+      "docs/evidence/state-recovery-qualification-20261026-01/manifest.json"
+    ]
+  },
+  "entries": [
+    {
+      "sourcePath": "jobs/checkpoint-storage-probe-20261027-02/result.json",
+      "originalSha256": "475a8e58309dd466092e1a0668fbdfb6fddbcf1cff5bc53125705341856da794",
+      "originalBytes": 154317,
+      "publishedPath": "docs/evidence/checkpoint-storage-probe-20261027-02/result.summary.json",
+      "sanitizedCopySha256": "bef0efcba3f6808174059977d243ef4c952c0770f4b37c81a59614c802c88bd4",
+      "sanitizedCopyBytes": 12415,
+      "mode": "sanitized-projection",
+      "archiveMember": "docs/evidence/checkpoint-storage-probe-20261027-02/result.summary.json"
+    },
+    {
+      "sourcePath": "jobs/checkpoint-storage-qualification-20261027-01/reports/final/qualification.json",
+      "originalSha256": "ed45ddf31f7af59e0c838f7a301cf1af8037c7b35c6f0df730cdcacce7f4a1c5",
+      "originalBytes": 965303,
+      "publishedPath": "docs/evidence/checkpoint-storage-qualification-20261027-01/reports/final/qualification.summary.json",
+      "sanitizedCopySha256": "dae9ab85a30f0212cf18f3fc956064581f5e1f6220bd53c8eafb6fa084b71af7",
+      "sanitizedCopyBytes": 255596,
+      "mode": "sanitized-projection",
+      "archiveMember": "docs/evidence/checkpoint-storage-qualification-20261027-01/reports/final/qualification.summary.json"
+    },
+    {
+      "sourcePath": "jobs/checkpoint-storage-qualification-20261027-01/reports/final/qualification.md",
+      "originalSha256": "30f96ec95304dd144c3ae246f5a0346e80669ac36b5c299b261b79bb3ee5ce11",
+      "originalBytes": 9119,
+      "publishedPath": "docs/evidence/checkpoint-storage-qualification-20261027-01/reports/final/qualification.md",
+      "sanitizedCopySha256": "3dcc9e54620ba0764e78e8fe82d970406a1228839a9965d0131951c10a47cb7a",
+      "sanitizedCopyBytes": 9483,
+      "mode": "sanitized-copy",
+      "archiveMember": "docs/evidence/checkpoint-storage-qualification-20261027-01/reports/final/qualification.md"
+    },
+    {
+      "sourcePath": "jobs/state-recovery-qualification-20261026-01-report.json",
+      "originalSha256": "22d55cbe88e37458d9deed66a1f1033b9894545ea5cf6706d4f8466dcdc9d53f",
+      "originalBytes": 543957,
+      "publishedPath": "docs/evidence/state-recovery-qualification-20261026-01/final-report.summary.json",
+      "sanitizedCopySha256": "9a7ee57fae017c9175d090e5fa7a716734f39ff46d218b7b9e5ebe5f84b26f32",
+      "sanitizedCopyBytes": 132207,
+      "mode": "sanitized-projection",
+      "archiveMember": "docs/evidence/state-recovery-qualification-20261026-01/final-report.summary.json"
+    },
+    {
+      "sourcePath": "jobs/checkpoint-review-remediation-20261029-01/final-verification.json",
+      "originalSha256": "eee6967f92c0344ff38d63ec362cc43c7c9761b2174ec1b86e675a8951a185df",
+      "originalBytes": 9633,
+      "publishedPath": "docs/evidence/checkpoint-review-remediation-20261029-01/final-verification.json",
+      "sanitizedCopySha256": "f6087edf37c2ef526e9e107effc1c950885d7003243913f4b4a5b3ddbec56e8e",
+      "sanitizedCopyBytes": 9383,
+      "mode": "sanitized-copy",
+      "archiveMember": "docs/evidence/checkpoint-review-remediation-20261029-01/final-verification.json"
+    },
+    {
+      "publishedPath": "docs/evidence/checkpoint-review-n1-n5-20261030-01/verification.json",
+      "sanitizedCopySha256": "4c56b1e647889cedd2b3dfd94ce93bb1be4c87f64aa0d17b1d379d9532db2b4b",
+      "sanitizedCopyBytes": 12542,
+      "mode": "aggregate-summary",
+      "sourceReceipts": [
+        {
+          "sourcePath": "jobs/checkpoint-review-n1-n5-20261030-01/checks/maven-install-02.log",
+          "originalSha256": "9cfc13a73fe3f71edc1f798da07e04f68ab264a8b92aa6efbe8b89b762753b36",
+          "originalBytes": 60031
+        },
+        {
+          "sourcePath": "jobs/checkpoint-review-n1-n5-20261030-01/checks/python-full-03.log",
+          "originalSha256": "2d891c2dda119e0c30d2c8b1f57c6b47e1523ab4ef36b645cf6d90dc577f1cc1",
+          "originalBytes": 94691
+        },
+        {
+          "sourcePath": "jobs/checkpoint-review-n1-n5-20261030-01/checks/validate-show-plan.stdout.log",
+          "originalSha256": "97244720948f452fd458a1744879cafb8c2a093886f3e2862902081d00a77ccb",
+          "originalBytes": 3416
+        },
+        {
+          "sourcePath": "jobs/checkpoint-review-n1-n5-20261030-01/helper/build-evidence.json",
+          "originalSha256": "67d958d62e1d1e3a35ad162f8b72c95483593912a084ca0f139fcfb4db0cb8d7",
+          "originalBytes": 48516
+        },
+        {
+          "sourcePath": "jobs/checkpoint-review-n1-n5-20261030-01/live/attempts/correct-eio/run-1/cleanup.json",
+          "originalSha256": "61e10c8c0077834df438867e9e422231aad7941a4a882601d731897c57ca54d2",
+          "originalBytes": 3077
+        },
+        {
+          "sourcePath": "jobs/checkpoint-review-n1-n5-20261030-01/live/attempts/correct-eio/run-1/execution.json",
+          "originalSha256": "bb10de6e95b5f3f4c4ceac1a6c90475f8399e3d596874b2064dec835f044866f",
+          "originalBytes": 530
+        },
+        {
+          "sourcePath": "jobs/checkpoint-review-n1-n5-20261030-01/live/attempts/correct-eio/run-1/retained-evidence.json",
+          "originalSha256": "409a2f706460f5bd4c045a4dd933d2495070d7864b031867220b5d83fcbf3873",
+          "originalBytes": 44306
+        },
+        {
+          "sourcePath": "jobs/checkpoint-review-n1-n5-20261030-01/live/attempts/correct-eio/run-1/stdout.json",
+          "originalSha256": "1940f534fb2a86a51b0af182855fbcadb88b37b47eba363466f32b7f4ab6f18f",
+          "originalBytes": 2780593
+        },
+        {
+          "sourcePath": "jobs/checkpoint-review-n1-n5-20261030-01/live/attempts/correct-eio/run-2/cleanup.json",
+          "originalSha256": "0ccd7a6118a76519baa38d281f49ad1e8dbdd9e3926fa8741d76a1ab0cc7a954",
+          "originalBytes": 3077
+        },
+        {
+          "sourcePath": "jobs/checkpoint-review-n1-n5-20261030-01/live/attempts/correct-eio/run-2/execution.json",
+          "originalSha256": "55d973d1bbab80425fee7cc5cbb36398e40846d2743669d7e5f56b8da12e2b29",
+          "originalBytes": 531
+        },
+        {
+          "sourcePath": "jobs/checkpoint-review-n1-n5-20261030-01/live/attempts/correct-eio/run-2/retained-evidence.json",
+          "originalSha256": "d20056533c28389014c9d464c59ca52295e366f62471718d090fed254608fe5b",
+          "originalBytes": 44306
+        },
+        {
+          "sourcePath": "jobs/checkpoint-review-n1-n5-20261030-01/live/attempts/correct-eio/run-2/stdout.json",
+          "originalSha256": "a1b9279ecb80ef3bc278d1422341d63cfa32ef08885de91bc0656a716577ed97",
+          "originalBytes": 2781954
+        },
+        {
+          "sourcePath": "jobs/checkpoint-review-n1-n5-20261030-01/live/finished.json",
+          "originalSha256": "c4b404ddab3d247e11d7807fa78d7144b22275b49e7c483b0cb9dca3e97cecdb",
+          "originalBytes": 290880
+        },
+        {
+          "sourcePath": "jobs/checkpoint-review-n1-n5-20261030-01/live/framework/manifest.json",
+          "originalSha256": "75ebe9c6e9186435d8aa5b78e722d2233ff7af9120e84f793d3307bf73eb7308",
+          "originalBytes": 326429
+        },
+        {
+          "sourcePath": "jobs/checkpoint-review-n1-n5-20261030-01/live/manifest.json",
+          "originalSha256": "dea6b924d1e22e71cd7a5e36725df317a9eab32c3ab4a9903075438495a8e2bc",
+          "originalBytes": 13548
+        }
+      ],
+      "archiveMember": "docs/evidence/checkpoint-review-n1-n5-20261030-01/verification.json"
+    }
+  ]
+}

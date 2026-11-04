@@ -60,6 +60,14 @@ public final class ExecutablePhaseExecutor {
     private final LongSupplier nanoTime;
     private org.savonitar.flink.stability.core.flink.FlinkJobSubmission restoreSubmission;
     private String savepointDirectory;
+    private StateRecoveryGate stateRecoveryGate;
+    private boolean keyedPrefix;
+    private Optional<ExecutableScenarioPlan.CheckpointControls> checkpointControls = Optional.empty();
+
+    ExecutablePhaseExecutor withStateRecoveryGate(StateRecoveryGate gate) {
+        this.stateRecoveryGate = gate;
+        return this;
+    }
 
     ExecutablePhaseExecutor withSavepointSubmission(org.savonitar.flink.stability.core.flink.FlinkJobSubmission submission, String directory) {
         this.restoreSubmission = Objects.requireNonNull(submission); this.savepointDirectory = Objects.requireNonNull(directory); return this;
@@ -131,6 +139,8 @@ public final class ExecutablePhaseExecutor {
                                    Optional<TokenScopeProof.Requirement> tokenProof) throws PhaseExecutionException {
         Objects.requireNonNull(plan, "plan");
         Objects.requireNonNull(job, "job");
+        keyedPrefix = plan.job().workloadConfiguration().behavior().isPresent();
+        checkpointControls = plan.job().checkpointing().controls();
         if (!tokenProof.map(TokenScopeProof.Requirement::scope)
                 .equals(plan.flink().tokenProvider().flatMap(provider -> provider.proofScope()))
                 || tokenProof.flatMap(TokenScopeProof.Requirement::submission).filter(binding ->
@@ -139,7 +149,7 @@ public final class ExecutablePhaseExecutor {
         }
         Recorder evidence = new Recorder(plan.flink().taskmanagers(), tokenProof, plan.kafka(), plan.job().sink());
         for (int phaseIndex = 0; phaseIndex < plan.phases().size(); phaseIndex++) {
-            if (evidence.stopFurtherSteps) break;
+            if (evidence.stopped()) break;
             ExecutableScenarioPlan.Phase phase = plan.phases().get(phaseIndex);
             executeSteps(
                     phaseIndex,
@@ -163,7 +173,7 @@ public final class ExecutablePhaseExecutor {
             Recorder evidence)
             throws PhaseExecutionException {
         for (int stepIndex = 0; stepIndex < steps.size(); stepIndex++) {
-            if (evidence.stopFurtherSteps) return;
+            if (evidence.stopped()) return;
             ExecutableScenarioPlan.Step step = steps.get(stepIndex);
             String path = stepsPath + "/" + stepIndex;
             if (step instanceof ExecutableScenarioPlan.AwaitJobState await) {
@@ -182,6 +192,15 @@ public final class ExecutablePhaseExecutor {
             } else if (step instanceof ExecutableScenarioPlan.RestartTaskManager restart) {
                 restartTaskManager(
                         phaseIndex, phaseName, path, loopIterations, restart, evidence);
+            } else if (step instanceof ExecutableScenarioPlan.CheckpointStorageFault storage) {
+                var observed = new CheckpointStorageFault(flink, runtime,
+                        stateRecoveryGate == null ? null : stateRecoveryGate::awaitReady, nanoTime, sleeper)
+                        .execute(path, loopIterations, job, storage, checkpointControls.orElseThrow());
+                evidence.storageFaults.add(observed);
+                if (observed.kill() != null) evidence.kills.add(observed.kill());
+                if (observed.restart() != null) evidence.restarts.add(observed.restart());
+                evidence.recordFaultEffect(phaseIndex, phaseName, path, loopIterations,
+                        PhaseExecutionEvidence.StepKind.CHECKPOINT_STORAGE_FAULT, observed.confirmed());
             } else if (step instanceof ExecutableScenarioPlan.SavepointRestore restore) {
                 var observation = SavepointLifecycle.execute(path, flink, job, restoreSubmission, savepointDirectory, restore, sleeper, nanoTime);
                 evidence.savepoints.add(observation);
@@ -204,9 +223,8 @@ public final class ExecutablePhaseExecutor {
                 }
                 var observed = new PhaseExecutionEvidence.PacketFault(path, loopIterations, raw, before, after);
                 evidence.packets.add(observed);
-                evidence.stopFurtherSteps |= !observed.confirmed();
-                succeeded(evidence, phaseIndex, phaseName, path, loopIterations, PhaseExecutionEvidence.StepKind.PACKET_FAULT,
-                        "effectConfirmed=" + observed.confirmed());
+                evidence.recordFaultEffect(phaseIndex, phaseName, path, loopIterations,
+                        PhaseExecutionEvidence.StepKind.PACKET_FAULT, observed.confirmed());
             } else if (step instanceof ExecutableScenarioPlan.BrokerFault fault) {
                 java.util.List<org.savonitar.flink.stability.runtime.api.KafkaBrokerControl.Evidence> observations;
                 boolean rolling = fault.request().action() == org.savonitar.flink.stability.runtime.api.KafkaBrokerControl.Action.ROLLING_RESTART;
@@ -242,9 +260,9 @@ public final class ExecutablePhaseExecutor {
                     }
                 }
                 for (var observation : observations) evidence.brokers.add(new PhaseExecutionEvidence.BrokerOperation(path, loopIterations, observation, beforeRolling, afterRolling));
-                evidence.stopFurtherSteps |= observations.size() != (rolling ? 6 : 2) || observations.stream().anyMatch(value -> !value.confirmed());
-                succeeded(evidence, phaseIndex, phaseName, path, loopIterations, PhaseExecutionEvidence.StepKind.BROKER_FAULT,
-                        "effectConfirmed=" + !evidence.stopFurtherSteps);
+                boolean confirmed = observations.size() == (rolling ? 6 : 2) && observations.stream().allMatch(value -> value.confirmed());
+                evidence.recordFaultEffect(phaseIndex, phaseName, path, loopIterations,
+                        PhaseExecutionEvidence.StepKind.BROKER_FAULT, confirmed);
             } else if (step instanceof ExecutableScenarioPlan.BrokerOperation operation) {
                 org.savonitar.flink.stability.runtime.api.KafkaBrokerControl.Evidence raw;
                 try {
@@ -471,9 +489,10 @@ public final class ExecutablePhaseExecutor {
             ExecutableScenarioPlan.KillTaskManager kill,
             Recorder evidence)
             throws PhaseExecutionException {
-        // Observe first: whether the kill affected the job is judged against this baseline.
-        FlinkJobObservation.Attempt jobBeforeKill = FlinkJobObservation.Attempt.of(flink, job);
-        IdentityObservation identity = taskManagerIdentity(kill.targetName());
+        Optional<StateRecoveryEvidence.Readiness> stateReadiness = Optional.empty();
+        // For keyed jobs the final readiness observation supplies the bound baseline.
+        FlinkJobObservation.Attempt jobBeforeKill = keyedPrefix ? null : FlinkJobObservation.Attempt.of(flink, job);
+        IdentityObservation identity = keyedPrefix ? null : taskManagerIdentity(kill.targetName());
         // The baseline spans multiple REST calls; its initial timestamp is not the kill boundary.
         com.fasterxml.jackson.databind.JsonNode checkpointBefore = null;
         String checkpointFailure = null;
@@ -484,6 +503,32 @@ public final class ExecutablePhaseExecutor {
                 brokerBefore = observeSinkProducers(evidence);
             }
             catch (Exception failure) { checkpointFailure = failure.toString(); }
+        }
+        if (keyedPrefix) {
+            if (stateRecoveryGate == null) throw failed(evidence, phaseIndex, phaseName, path, loopIterations,
+                    PhaseExecutionEvidence.StepKind.KILL_TASKMANAGER, PhaseExecutionException.Outcome.INCONCLUSIVE,
+                    StateRecoveryReport.UNCONFIRMED, new IllegalStateException("State recovery readiness gate is unavailable"));
+            try {
+                stateReadiness = stateRecoveryGate.awaitReady(job, kill.targetName());
+            } catch (InterruptedException interrupted) {
+                Thread.currentThread().interrupt();
+                throw failed(evidence, phaseIndex, phaseName, path, loopIterations,
+                        PhaseExecutionEvidence.StepKind.KILL_TASKMANAGER, PhaseExecutionException.Outcome.INCONCLUSIVE,
+                        StateRecoveryReport.UNCONFIRMED, interrupted);
+            } catch (Exception failure) {
+                stateRecoveryGate.recordFailure(failure);
+            }
+            if (stateReadiness.isEmpty() || !stateReadiness.orElseThrow().ready()) {
+                evidence.stopAfter(new PhaseExecutionEvidence.StepEvidence(phaseIndex, phaseName, path, loopIterations,
+                        PhaseExecutionEvidence.StepKind.KILL_TASKMANAGER, PhaseExecutionEvidence.StepStatus.SKIPPED,
+                        "State recovery readiness unconfirmed; kill not injected"));
+                return;
+            }
+        }
+        if (stateReadiness.isPresent()) {
+            var readiness = stateReadiness.orElseThrow();
+            jobBeforeKill = new FlinkJobObservation.Attempt(Optional.of(readiness.jobObservation()), Optional.empty());
+            identity = new IdentityObservation(Optional.of(readiness.target()), Optional.empty());
         }
         OptionalLong beforeInjection = jobManagerTimeForKill(job);
         try {
@@ -503,7 +548,7 @@ public final class ExecutablePhaseExecutor {
             }
             evidence.kills.add(new PhaseExecutionEvidence.TaskManagerKill(
                     path, loopIterations, kill.targetName(), jobBeforeKill,
-                    beforeInjection, afterInjection, identity.identity(), identity.failure(), checkpointWindow));
+                    beforeInjection, afterInjection, identity.identity(), identity.failure(), checkpointWindow, stateReadiness));
             succeeded(
                     evidence,
                     phaseIndex,
@@ -630,19 +675,17 @@ public final class ExecutablePhaseExecutor {
                         String name = fault.restartTaskManager().orElseThrow();
                         killTaskManager(phaseIndex, phaseName, path + "/restart/kill", loopIterations, job,
                                 new ExecutableScenarioPlan.KillTaskManager(name), evidence);
-                        restartTaskManager(phaseIndex, phaseName, path + "/restart", loopIterations,
-                                new ExecutableScenarioPlan.RestartTaskManager(name), evidence);
+                        if (!evidence.stopped()) {
+                            restartTaskManager(phaseIndex, phaseName, path + "/restart", loopIterations,
+                                    new ExecutableScenarioPlan.RestartTaskManager(name), evidence);
+                        }
                     });
             evidence.networkFaults.add(observed);
-            succeeded(
-                    evidence,
-                    phaseIndex,
-                    phaseName,
-                    path,
-                    loopIterations,
-                    PhaseExecutionEvidence.StepKind.NETWORK_FAULT,
-                    "fault=" + observed.faultId() + " dropped=" + observed.dropped().size()
-                            + "/" + observed.occurrences());
+            // An armed proxy can finish healing even if its requested TaskManager restart was skipped.
+            evidence.steps.add(new PhaseExecutionEvidence.StepEvidence(phaseIndex, phaseName, path, loopIterations,
+                    PhaseExecutionEvidence.StepKind.NETWORK_FAULT, evidence.stopped()
+                            ? PhaseExecutionEvidence.StepStatus.UNCONFIRMED : PhaseExecutionEvidence.StepStatus.SUCCEEDED,
+                    "fault=" + observed.faultId() + " dropped=" + observed.dropped().size() + "/" + observed.occurrences()));
         } catch (PhaseExecutionException failure) {
             throw failure;
         } catch (InterruptedException interrupted) {
@@ -737,20 +780,19 @@ public final class ExecutablePhaseExecutor {
         }
         Optional<TokenCheckpointBarrier.Evidence> barrierEvidence = Optional.ofNullable(barrier)
                 .map(TokenCheckpointBarrier.Operation::evidence);
-        if (fault.recoveryBarrier().isPresent() && (barrierEvidence.isEmpty()
+        boolean barrierFailed = fault.recoveryBarrier().isPresent() && (barrierEvidence.isEmpty()
                 || !barrierEvidence.orElseThrow().errors().isEmpty()
-                || barrierEvidence.orElseThrow().afterCheckpoint().isEmpty())) {
-            // Continue to the terminal fence/oracle, but no later phase action may overtake this barrier.
-            evidence.stopFurtherSteps = true;
-        }
+                || barrierEvidence.orElseThrow().afterCheckpoint().isEmpty());
         evidence.leaderFaults.add(new PhaseExecutionEvidence.LeaderFault(
                 path, iterations, job.jobId(), before, after, raw, observationErrors, barrierEvidence));
         // Missing effect evidence is evaluated after the data oracle, never used to skip it.
-        evidence.steps.add(new PhaseExecutionEvidence.StepEvidence(
+        var step = new PhaseExecutionEvidence.StepEvidence(
                 phaseIndex, phaseName, path, iterations, PhaseExecutionEvidence.StepKind.LEADER_FAULT,
-                raw.errors().isEmpty() && !(fault.recoveryBarrier().isPresent() && evidence.stopFurtherSteps)
+                raw.errors().isEmpty() && !barrierFailed
                         ? PhaseExecutionEvidence.StepStatus.SUCCEEDED : PhaseExecutionEvidence.StepStatus.FAILED,
-                "mode=" + request.mode() + " applied=" + raw.applied() + " healed=" + raw.healed()));
+                "mode=" + request.mode() + " applied=" + raw.applied() + " healed=" + raw.healed());
+        if (barrierFailed) evidence.stopAfter(step);
+        else evidence.steps.add(step);
     }
 
     private FlinkJobObservation.Attempt observe(FlinkJobHandle job, Duration timeout) {
@@ -783,7 +825,7 @@ public final class ExecutablePhaseExecutor {
             Recorder evidence)
             throws PhaseExecutionException {
         for (int iteration = 1; iteration <= loop.times(); iteration++) {
-            if (evidence.stopFurtherSteps) return;
+            if (evidence.stopped()) return;
             List<PhaseExecutionEvidence.LoopIteration> iterations =
                     new ArrayList<>(outerIterations);
             iterations.add(new PhaseExecutionEvidence.LoopIteration(
@@ -866,10 +908,11 @@ public final class ExecutablePhaseExecutor {
         private final List<PhaseExecutionEvidence.BrokerOperation> brokers = new ArrayList<>();
         private final List<PhaseExecutionEvidence.PacketFault> packets = new ArrayList<>();
         private final List<SavepointLifecycle.Evidence> savepoints = new ArrayList<>();
+        private final List<CheckpointStorageFault.Evidence> storageFaults = new ArrayList<>();
         private final List<org.savonitar.flink.stability.runtime.api.KafkaLogCapture.Partition> kafkaPartitions;
         private final int expectedTaskManagers;
         private final Optional<TokenScopeProof.Requirement> tokenProof;
-        private boolean stopFurtherSteps;
+        private PhaseExecutionEvidence.StepEvidence stoppingStep;
         private com.fasterxml.jackson.databind.JsonNode armedCheckpoint;
         private long armedCheckpointId;
         private final ExecutableScenarioPlan.Sink sink;
@@ -889,8 +932,31 @@ public final class ExecutablePhaseExecutor {
             this.tokenProof = tokenProof;
         }
 
+        private void recordFaultEffect(int phaseIndex, String phaseName, String path,
+                List<PhaseExecutionEvidence.LoopIteration> iterations, PhaseExecutionEvidence.StepKind kind,
+                boolean confirmed) {
+            var step = new PhaseExecutionEvidence.StepEvidence(phaseIndex, phaseName, path, iterations, kind,
+                    confirmed ? PhaseExecutionEvidence.StepStatus.SUCCEEDED : PhaseExecutionEvidence.StepStatus.UNCONFIRMED,
+                    "effectConfirmed=" + confirmed);
+            if (confirmed) steps.add(step);
+            else stopAfter(step);
+        }
+
+        /** Stopping future actions requires the same unsuccessful step that explains the stop to the recovery report. */
+        private void stopAfter(PhaseExecutionEvidence.StepEvidence step) {
+            if (step.status() == PhaseExecutionEvidence.StepStatus.SUCCEEDED) {
+                throw new IllegalArgumentException("A successful step cannot stop phase execution");
+            }
+            steps.add(step);
+            stoppingStep = step;
+        }
+
+        private boolean stopped() {
+            return stoppingStep != null;
+        }
+
         private PhaseExecutionEvidence snapshot() {
-            return new PhaseExecutionEvidence(steps, kills, networkFaults, restarts, leaderFaults, brokers, packets, savepoints);
+            return new PhaseExecutionEvidence(steps, kills, networkFaults, restarts, leaderFaults, brokers, packets, savepoints, storageFaults);
         }
     }
 }
