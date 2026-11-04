@@ -146,6 +146,7 @@ final class V1ExecutionResultRenderer {
         });
         var componentDiagnostics = componentErrorsNode.putArray("diagnostics");
         result.componentErrors().diagnostics().forEach(componentDiagnostics::add);
+        result.rawEvidence().ifPresent(value -> evidence.set("rawEvidence", StateRecoveryEvidenceRenderer.render(value, JSON)));
         ObjectNode rest = evidence.putObject("flinkRest");
         rest.put("errorCount", result.flinkRestErrors().size());
         ArrayNode restErrors = rest.putArray("errors");
@@ -175,13 +176,20 @@ final class V1ExecutionResultRenderer {
         phase.put("steps", 0);
         phase.put("succeeded", 0);
         phase.put("failed", 0);
+        phase.put("skipped", 0);
+        phase.put("unconfirmed", 0);
         result.phaseEvidence().ifPresent(phases -> {
             long failed = phases.steps().stream()
                     .filter(step -> step.status()
                             == PhaseExecutionEvidence.StepStatus.FAILED)
                     .count();
-            phase.put("status", failed == 0 ? "complete" : "partial");
-            phase.put("completed", failed == 0);
+            long skipped = phases.steps().stream().filter(step -> step.status() == PhaseExecutionEvidence.StepStatus.SKIPPED).count();
+            long unconfirmed = phases.steps().stream().filter(step -> step.status() == PhaseExecutionEvidence.StepStatus.UNCONFIRMED).count();
+            boolean completed = failed + skipped + unconfirmed == 0;
+            phase.put("status", completed ? "complete" : "partial");
+            phase.put("completed", completed);
+            phase.put("skipped", skipped);
+            phase.put("unconfirmed", unconfirmed);
             phase.put("steps", phases.steps().size());
             phase.put("succeeded", phases.steps().stream()
                     .filter(step -> step.status()
@@ -209,6 +217,7 @@ final class V1ExecutionResultRenderer {
                 flinkJob.put("state", job.state().name());
                 flinkJob.put("completedCheckpoints", job.completedCheckpoints());
                 flinkJob.put("restoredCheckpoints", job.restoredCheckpoints());
+                if (!job.rawEvidence().isEmpty()) flinkJob.set("observation", StateRecoveryEvidenceRenderer.render(job, JSON));
                 job.latestRestore().ifPresent(restore ->
                         flinkJob.put("latestRestoredCheckpoint", restore.checkpointId()));
                 flinkJob.put("failures", job.failures().size());
@@ -435,6 +444,22 @@ final class V1ExecutionResultRenderer {
             processFence.put("completedAt", fence.completedAt().toString());
         });
         ObjectNode terminal = evidence.putObject("terminalValidation");
+        result.stateRecovery().ifPresent(state -> evidence.set("stateRecovery", StateRecoveryEvidenceRenderer.render(state, JSON)));
+        result.phaseEvidence().ifPresent(phases -> {
+            phases.checkpointStorage().ifPresent(storage -> evidence.set("checkpointStorage",
+                    StateRecoveryEvidenceRenderer.render(storage, JSON)));
+            if (!phases.storageFaults().isEmpty()) {
+                ArrayNode faults = evidence.putArray("checkpointStorageFaults");
+                phases.storageFaults().forEach(fault -> {
+                    ObjectNode node = (ObjectNode) StateRecoveryEvidenceRenderer.render(fault, JSON);
+                    node.put("confirmed", fault.confirmed());
+                    node.put("finalCaptureConfirmed", phases.checkpointStorage()
+                            .map(storage -> org.savonitar.flink.stability.core.execution.CheckpointStorageFault.finalConfirmed(fault, storage))
+                            .orElse(false));
+                    faults.add(node);
+                });
+            }
+        });
         terminal.put("status", "not-run");
         terminal.put("completed", false);
         terminal.put("snapshotComplete", false);
@@ -446,6 +471,13 @@ final class V1ExecutionResultRenderer {
             terminal.put("expected", validation.evidence().expectedCount());
             terminal.put("observed", validation.evidence().observedCount());
             terminal.put("snapshotComplete", validation.evidence().snapshotComplete());
+            if (validation instanceof org.savonitar.flink.stability.core.validation.kafka.KafkaStatePrefixValidationResult state) {
+                terminal.put("type", state.validatorType());
+                ObjectNode stateEvidence = terminal.putObject("statePrefix");
+                stateEvidence.put("keyCount", state.stateEvidence().keyCount());
+                state.stateEvidence().mismatchCount().ifPresent(count -> stateEvidence.put("mismatches", count));
+                stateEvidence.set("mismatchSamples", JSON.valueToTree(state.stateEvidence().mismatchSamples()));
+            }
             ArrayNode missingSamples = terminal.putArray("missingSamples");
             validation.evidence().missingSamples().forEach(missingSamples::add);
             if (!validation.evidence().duplicateSamples().isEmpty())
@@ -506,6 +538,7 @@ final class V1ExecutionResultRenderer {
         runtime.put("status", result.flinkRuntimeIdentity().outcome().name().toLowerCase(Locale.ROOT));
         runtime.put("detail", result.flinkRuntimeIdentity().detail());
         result.expectedFlinkRuntime().imageId().ifPresent(id -> runtime.put("expectedImageId", id));
+        result.expectedFlinkRuntime().imageDigest().ifPresent(digest -> runtime.put("expectedImageDigest", digest));
         result.expectedFlinkRuntime().declaredLine().ifPresent(line -> {
             runtime.put("declaredLine", line);
             runtime.put("compatibilityBasis", "author-assertion");
@@ -564,6 +597,17 @@ final class V1ExecutionResultRenderer {
             rendered.put("runtimeId", component.runtimeId());
             rendered.put("imageReference", component.imageReference());
             rendered.put("imageId", component.imageId());
+            component.imageIdentityEvidence().ifPresent(identity -> {
+                ObjectNode proof = rendered.putObject("imageIdentityEvidence");
+                proof.put("containerImageId", identity.containerImageId());
+                proof.put("inspectedImageId", identity.inspectedImageId());
+                proof.set("repoDigests", JSON.valueToTree(identity.repoDigests()));
+                identity.declaredImageId().ifPresent(value -> proof.put("declaredImageId", value));
+                identity.declaredImageDigest().ifPresent(value -> proof.put("declaredImageDigest", value));
+                proof.put("imageIdMatchForm", identity.imageIdMatchForm().name());
+                proof.put("storageDriver", identity.storageDriver());
+                identity.driverType().ifPresent(value -> proof.put("driverType", value));
+            });
             rendered.put("targetBindingSha256", component.targetBindingSha256());
             rendered.put("classpathManifestSha256", component.classpathManifestSha256());
             if (!component.flinkConfig().isEmpty()) rendered.set("config", JSON.valueToTree(component.flinkConfig()));

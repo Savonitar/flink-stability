@@ -24,6 +24,7 @@ public final class FlinkComponentProvisioningEvidence {
     private final Map<String, String> flinkConfig;
     private final Optional<String> classLoadProcess;
     private final Optional<EffectiveConfigurationEvidence> effectiveConfiguration;
+    private final Optional<ImageIdentityEvidence> imageIdentityEvidence;
 
     private FlinkComponentProvisioningEvidence(
             String logicalName,
@@ -36,7 +37,7 @@ public final class FlinkComponentProvisioningEvidence {
             List<ProvisionedConnectorArtifact> connectorArtifacts,
             Optional<RuntimeJarEvidence> runtimeJarEvidence,
             List<ImageConnectorArtifact> imageConnectorArtifacts, Map<String, String> flinkConfig,
-            Optional<String> classLoadProcess, Optional<EffectiveConfigurationEvidence> effectiveConfiguration) {
+            Optional<String> classLoadProcess, Optional<EffectiveConfigurationEvidence> effectiveConfiguration, Optional<ImageIdentityEvidence> imageIdentityEvidence) {
         this.logicalName = requireNonBlank(logicalName, "logicalName");
         this.role = Objects.requireNonNull(role, "role");
         this.runtimeId = requireNonBlank(runtimeId, "runtimeId");
@@ -53,6 +54,10 @@ public final class FlinkComponentProvisioningEvidence {
         this.flinkConfig = FlinkConfiguration.validate(flinkConfig);
         this.classLoadProcess = Objects.requireNonNull(classLoadProcess, "classLoadProcess");
         this.effectiveConfiguration = Objects.requireNonNull(effectiveConfiguration, "effectiveConfiguration");
+        this.imageIdentityEvidence = Objects.requireNonNull(imageIdentityEvidence, "imageIdentityEvidence");
+        imageIdentityEvidence.ifPresent(value -> {
+            if (!imageId.equals(value.containerImageId())) throw new IllegalArgumentException("Image identity receipt belongs to another image");
+        });
     }
 
     public static FlinkComponentProvisioningEvidence verified(
@@ -68,7 +73,7 @@ public final class FlinkComponentProvisioningEvidence {
                 logicalName, role, runtimeId, imageReference, imageId,
                 requireNonBlank(targetBindingSha256, "targetBindingSha256"),
                 requireNonBlank(classpathManifestSha256, "classpathManifestSha256"),
-                connectorArtifacts, Optional.empty(), List.of(), Map.of(), Optional.empty(), Optional.empty());
+                connectorArtifacts, Optional.empty(), List.of(), Map.of(), Optional.empty(), Optional.empty(), Optional.empty());
     }
 
     /** Attaches bytes read from this container and its explicitly registered JVM log key. */
@@ -77,7 +82,7 @@ public final class FlinkComponentProvisioningEvidence {
         return new FlinkComponentProvisioningEvidence(logicalName, role, runtimeId, imageReference,
                 imageId, targetBindingSha256, classpathManifestSha256, connectorArtifacts,
                 Optional.of(new RuntimeJarEvidence(jar, classLoadProcess)), imageConnectorArtifacts, flinkConfig,
-                this.classLoadProcess, effectiveConfiguration);
+                this.classLoadProcess, effectiveConfiguration, imageIdentityEvidence);
     }
 
     /** Actual parsed startup configuration and registered log key for this physical incarnation. */
@@ -86,19 +91,28 @@ public final class FlinkComponentProvisioningEvidence {
         return new FlinkComponentProvisioningEvidence(logicalName, role, runtimeId, imageReference,
                 imageId, targetBindingSha256, classpathManifestSha256, connectorArtifacts,
                 runtimeJarEvidence, imageConnectorArtifacts, config, Optional.of(requireNonBlank(process, "process")),
-                effectiveConfiguration);
+                effectiveConfiguration, imageIdentityEvidence);
     }
 
     public FlinkComponentProvisioningEvidence withImageConnectorArtifacts(List<ImageConnectorArtifact> artifacts) {
         return new FlinkComponentProvisioningEvidence(logicalName, role, runtimeId, imageReference,
                 imageId, targetBindingSha256, classpathManifestSha256, connectorArtifacts,
-                runtimeJarEvidence, artifacts, flinkConfig, classLoadProcess, effectiveConfiguration);
+                runtimeJarEvidence, artifacts, flinkConfig, classLoadProcess, effectiveConfiguration, imageIdentityEvidence);
     }
 
     public FlinkComponentProvisioningEvidence withEffectiveConfiguration(EffectiveConfigurationEvidence receipt) {
         return new FlinkComponentProvisioningEvidence(logicalName, role, runtimeId, imageReference,
                 imageId, targetBindingSha256, classpathManifestSha256, connectorArtifacts,
                 runtimeJarEvidence, imageConnectorArtifacts, receipt.observedValues(), classLoadProcess,
+                Optional.of(receipt), imageIdentityEvidence);
+    }
+
+    public Optional<ImageIdentityEvidence> imageIdentityEvidence() { return imageIdentityEvidence; }
+
+    public FlinkComponentProvisioningEvidence withImageIdentityEvidence(ImageIdentityEvidence receipt) {
+        return new FlinkComponentProvisioningEvidence(logicalName, role, runtimeId, imageReference,
+                imageId, targetBindingSha256, classpathManifestSha256, connectorArtifacts,
+                runtimeJarEvidence, imageConnectorArtifacts, flinkConfig, classLoadProcess, effectiveConfiguration,
                 Optional.of(receipt));
     }
 

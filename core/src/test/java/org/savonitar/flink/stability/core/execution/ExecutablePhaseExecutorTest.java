@@ -34,6 +34,8 @@ import org.savonitar.flink.stability.core.spec.document.ScenarioSpecification;
 import org.savonitar.flink.stability.core.spec.document.SpecificationLoader;
 import org.savonitar.flink.stability.core.execution.plan.ExecutableScenarioPlan;
 import org.savonitar.flink.stability.core.execution.plan.ExecutableScenarioPlanCompiler;
+import org.savonitar.flink.stability.core.execution.kafka.KafkaInputManifest;
+import org.savonitar.flink.stability.core.validation.kafka.KafkaSnapshotException;
 
 import java.io.IOException;
 import java.net.URISyntaxException;
@@ -60,6 +62,79 @@ class ExecutablePhaseExecutorTest {
 
     @TempDir
     Path temporaryDirectory;
+
+    @Test
+    void atomicStorageFaultWithoutReadinessIsUnconfirmedAndStopsFollowingSteps() throws Exception {
+        var plan = storagePlan(document -> {
+            var steps = replaceSteps(document);
+            steps.addObject().putObject("checkpoint_storage_fault").put("job", "state-job")
+                    .put("timeout", "90s").put("lease", "120s");
+            steps.addObject().putObject("wait").put("duration", "25ms");
+        });
+        var events = new ArrayList<String>();
+        var executor = new ExecutablePhaseExecutor(new FakeFlink(events), new FakeTaskManagers(events),
+                ExecutablePhaseExecutor.NetworkFaults.NONE, duration -> events.add("sleep"));
+        var evidence = executor.execute(plan, JOB);
+        assertEquals(1, evidence.steps().size());
+        assertEquals(PhaseExecutionEvidence.StepStatus.UNCONFIRMED, evidence.steps().getFirst().status());
+        assertFalse(evidence.storageFaults().getFirst().confirmed());
+        assertTrue(evidence.storageFaults().getFirst().errors().stream()
+                .anyMatch(value -> value.contains("State readiness gate is unavailable")));
+        assertTrue(evidence.taskManagerKills().isEmpty());
+        assertTrue(evidence.taskManagerRestarts().isEmpty());
+        assertEquals(0, StateRecoveryReport.countKills(evidence));
+        assertTrue(events.isEmpty(), events.toString());
+    }
+
+    @Test
+    void keyedKillWhosePrefixCannotBeObservedIsSkippedWithoutKillOrRestart() throws Exception {
+        var plan = storagePlan(document -> {
+            ((ObjectNode) document.at("/workload/jobs/0/checkpointing/storage")).remove("fuse");
+            ((ObjectNode) document.at("/workload/jobs/0/checkpointing"))
+                    .remove(List.of("small_file_threshold", "max_concurrent", "tolerable_failures"));
+            var steps = replaceSteps(document);
+            steps.addObject().putObject("kill").putObject("target")
+                    .put("kind", "named").put("role", "taskmanager").put("name", "taskmanager-1");
+            steps.addObject().putObject("restart").put("component", "taskmanager");
+        });
+        var events = new ArrayList<String>();
+        var flink = new FakeFlink(events);
+        var runtime = new FakeTaskManagers(events);
+        var gate = unavailablePrefixGate(flink, runtime);
+        var executor = new ExecutablePhaseExecutor(flink, runtime, ExecutablePhaseExecutor.NetworkFaults.NONE,
+                duration -> events.add("sleep")).withStateRecoveryGate(gate);
+        var evidence = executor.execute(plan, JOB);
+        assertEquals(1, evidence.steps().size());
+        assertEquals(PhaseExecutionEvidence.StepStatus.SKIPPED, evidence.steps().getFirst().status());
+        assertTrue(evidence.taskManagerKills().isEmpty());
+        assertTrue(evidence.taskManagerRestarts().isEmpty());
+        assertEquals(0, StateRecoveryReport.countKills(evidence));
+        assertEquals(1, gate.failures().size());
+        assertTrue(events.isEmpty(), events.toString());
+    }
+
+    private static StateRecoveryGate unavailablePrefixGate(FakeFlink flink, FakeTaskManagers runtime) {
+        var records = java.util.stream.IntStream.range(0, 6).mapToObj(id -> new KafkaInputManifest.RecordAcknowledgement(id,
+                org.savonitar.flink.stability.runtime.api.Digests.sha256(Integer.toString(id)),
+                List.of(new KafkaInputManifest.ProducerAttempt(1, 0, 0, id, KafkaInputManifest.AcknowledgementOutcome.ACKNOWLEDGED)),
+                0, id, KafkaInputManifest.AcknowledgementOutcome.ACKNOWLEDGED, KafkaInputManifest.TerminalDisposition.PRESENT)).toList();
+        var manifest = new KafkaInputManifest("main", "input", 6, records, java.util.Map.of(0, 0L), java.util.Map.of(0, 6L),
+                KafkaInputManifest.EvidenceStatus.COMPLETE, new KafkaInputManifest.ReconciliationEvidence(
+                java.util.Map.of("isolation.level", "read_uncommitted"), List.of(0L, 1L, 2L, 3L, 4L, 5L), true));
+        return new StateRecoveryGate(flink, runtime, manifest, "kafka:9092", "output", 2,
+                (bootstrap, topic, timeout, maximumRecords, maximumBytes) -> {
+                    throw new KafkaSnapshotException("snapshot.unavailable", "No committed prefix before deadline");
+                }, System::nanoTime, duration -> { throw new AssertionError("No polling after snapshot failure"); });
+    }
+
+    private ExecutableScenarioPlan storagePlan(Consumer<ObjectNode> mutation) {
+        var source = resource("checkpoint-storage-fault.yaml");
+        var document = loader.loadScenario(source).document();
+        mutation.accept(document);
+        return compiler.compile(new ScenarioPlanResolver().resolve(new ScenarioBundle(
+                loader.validateScenarioDocument(source, document),
+                loader.loadExpectedResult(resource("checkpoint-storage-fault.expected.yaml"))), ResolutionRequest.none()));
+    }
 
     @Test
     void checkpointPollArmsTheNextKillAndObservesAllSinkPartitions() throws Exception {
@@ -546,7 +621,47 @@ class ExecutablePhaseExecutorTest {
         });
         List<String> events = new ArrayList<>();
         var runtime = new FakeTaskManagers(events);
-        var faults = new ExecutablePhaseExecutor.NetworkFaults() {
+        var evidence = new ExecutablePhaseExecutor(new FakeFlink(events), runtime, armedNetworkFaults(events),
+                duration -> {}).execute(plan, JOB);
+        assertEquals("armed", events.getFirst()); assertEquals("healed", events.getLast());
+        assertTrue(events.indexOf("kill:taskmanager-1") < events.indexOf("restart:taskmanager"));
+        assertEquals(Duration.ofMinutes(2), runtime.killTimeout); assertEquals(Duration.ofMinutes(2), runtime.restartTimeout);
+        assertEquals(1, evidence.taskManagerKills().size()); assertEquals(1, evidence.taskManagerRestarts().size());
+        assertEquals("taskmanager-1-container-2", evidence.taskManagerRestarts().getFirst().replacementIdentity().orElseThrow().runtimeId());
+    }
+
+    @Test void skippedKeyedKillInsideArmedFaultPreservesHealingAndStopsRestartsAndLaterPhases() throws Exception {
+        var plan = plan(document -> {
+            var job = (ObjectNode) document.at("/workload/jobs/0");
+            job.putObject("behavior").put("type", "keyed-prefix-v1").put("key_count", 2);
+            ((ObjectNode) job.path("checkpointing")).putObject("storage").put("type", "filesystem");
+            ((ObjectNode) document.at("/terminal_validations/0")).put("type", "kafka.state-prefix").put("job", "eos-job");
+            addProtocolFault(document);
+            ((ObjectNode) document.at("/phases/0/steps/0/network_fault")).putObject("restart").put("component", "taskmanager");
+            ((ArrayNode) document.at("/phases/0/steps")).addObject().putObject("wait").put("duration", "1ms");
+            ((ArrayNode) document.path("phases")).addObject().put("name", "next-phase").putArray("steps")
+                    .addObject().putObject("wait").put("duration", "1ms");
+        });
+        var events = new ArrayList<String>();
+        var flink = new FakeFlink(events);
+        var runtime = new FakeTaskManagers(events);
+        var evidence = new ExecutablePhaseExecutor(flink, runtime, armedNetworkFaults(events),
+                duration -> events.add("wait")).withStateRecoveryGate(unavailablePrefixGate(flink, runtime)).execute(plan, JOB);
+
+        assertEquals(List.of("armed", "healed"), events);
+        assertEquals(1, evidence.networkFaults().size());
+        assertEquals(List.of(PhaseExecutionEvidence.StepKind.KILL_TASKMANAGER, PhaseExecutionEvidence.StepKind.NETWORK_FAULT),
+                evidence.steps().stream().map(PhaseExecutionEvidence.StepEvidence::kind).toList());
+        assertEquals(List.of(PhaseExecutionEvidence.StepStatus.SKIPPED, PhaseExecutionEvidence.StepStatus.UNCONFIRMED),
+                evidence.steps().stream().map(PhaseExecutionEvidence.StepEvidence::status).toList());
+        assertEquals("$/phases/0/steps/0/restart/kill", evidence.steps().getFirst().path());
+        assertTrue(evidence.taskManagerKills().isEmpty());
+        assertTrue(evidence.taskManagerRestarts().isEmpty());
+        assertEquals(0, StateRecoveryReport.countKills(evidence));
+    }
+
+    private static ExecutablePhaseExecutor.NetworkFaults armedNetworkFaults(List<String> events) {
+        return new ExecutablePhaseExecutor.NetworkFaults() {
             public PhaseExecutionEvidence.NetworkFault inject(String path, ExecutableScenarioPlan.ProtocolFault fault) {
                 throw new AssertionError("Recovery must be synchronized with arm");
             }
@@ -556,12 +671,6 @@ class ExecutablePhaseExecutorTest {
                         1, fault.triggerDeadline(), 1, 2, List.of(), List.of());
             }
         };
-        var evidence = new ExecutablePhaseExecutor(new FakeFlink(events), runtime, faults, duration -> {}).execute(plan, JOB);
-        assertEquals("armed", events.getFirst()); assertEquals("healed", events.getLast());
-        assertTrue(events.indexOf("kill:taskmanager-1") < events.indexOf("restart:taskmanager"));
-        assertEquals(Duration.ofMinutes(2), runtime.killTimeout); assertEquals(Duration.ofMinutes(2), runtime.restartTimeout);
-        assertEquals(1, evidence.taskManagerKills().size()); assertEquals(1, evidence.taskManagerRestarts().size());
-        assertEquals("taskmanager-1-container-2", evidence.taskManagerRestarts().getFirst().replacementIdentity().orElseThrow().runtimeId());
     }
 
     @Test void packetFaultRequiresRunningJobCountersAndHealingBeforeProceeding() throws Exception {
@@ -583,6 +692,8 @@ class ExecutablePhaseExecutorTest {
             var result=new ExecutablePhaseExecutor(flink,runtime,ExecutablePhaseExecutor.NetworkFaults.NONE,
                     duration -> events.add("after-packet")).execute(plan,JOB);
             assertEquals(mode==0,result.packetFaults().getFirst().confirmed());
+            assertEquals(mode == 0 ? PhaseExecutionEvidence.StepStatus.SUCCEEDED
+                    : PhaseExecutionEvidence.StepStatus.UNCONFIRMED, result.steps().getFirst().status());
             assertEquals(mode==0,events.contains("after-packet"));
             assertTrue(events.contains("packet-fault"));
         }
@@ -609,6 +720,8 @@ class ExecutablePhaseExecutorTest {
             assertEquals(!finished, events.contains("after-roll"));
             assertEquals(6, evidence.brokerOperations().size());
             assertEquals(!finished, evidence.brokerOperations().getFirst().raw().confirmed());
+            assertEquals(finished ? PhaseExecutionEvidence.StepStatus.UNCONFIRMED
+                    : PhaseExecutionEvidence.StepStatus.SUCCEEDED, evidence.steps().getFirst().status());
             assertEquals(FlinkJobState.RUNNING, evidence.brokerOperations().getFirst().jobBefore().observation().orElseThrow().state());
             assertEquals(finished ? FlinkJobState.FINISHED : FlinkJobState.RUNNING,
                     evidence.brokerOperations().getFirst().jobAfter().observation().orElseThrow().state());

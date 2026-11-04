@@ -10,6 +10,8 @@ import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
+import java.util.Set;
+import java.util.HashSet;
 import java.util.jar.JarEntry;
 import java.util.jar.JarFile;
 
@@ -17,6 +19,8 @@ import java.util.jar.JarFile;
 public final class WorkloadProtocolArtifactValidator {
     public static final String ATTRIBUTE = "Flink-Stability-Workload-Protocol";
     public static final String VERSION = "v1";
+    public static final String CAPABILITIES_ATTRIBUTE = "Flink-Stability-Workload-Capabilities";
+    public static final String KEYED_PREFIX_V1 = "keyed-prefix-v1";
     private static final String MAIN_CLASS_ATTRIBUTE = "Main-Class";
 
     private static final int MAX_MANIFEST_BYTES = 1024 * 1024;
@@ -30,7 +34,13 @@ public final class WorkloadProtocolArtifactValidator {
      * java.util.jar.Manifest} collapses duplicate attributes.
      */
     public static void validate(Path jar) throws ValidationException {
+        validate(jar, Set.of());
+    }
+
+    /** Requires optional, comma-separated capability tokens only for opted-in behaviors. */
+    public static void validate(Path jar, Set<String> requiredCapabilities) throws ValidationException {
         Objects.requireNonNull(jar, "jar");
+        requiredCapabilities = Set.copyOf(requiredCapabilities);
         try (JarFile jarFile = new JarFile(jar.toFile(), false)) {
             JarEntry manifest = jarFile.getJarEntry(JarFile.MANIFEST_NAME);
             if (manifest == null) {
@@ -81,6 +91,9 @@ public final class WorkloadProtocolArtifactValidator {
                         "Workload protocol '" + value + "' is unsupported; expected '"
                                 + VERSION + "'");
             }
+            if (!requiredCapabilities.isEmpty()) {
+                validateCapabilities(mainSection.capabilityValues(), requiredCapabilities);
+            }
         } catch (ValidationException exception) {
             throw exception;
         } catch (IOException | RuntimeException exception) {
@@ -91,16 +104,44 @@ public final class WorkloadProtocolArtifactValidator {
         }
     }
 
+    private static void validateCapabilities(List<String> values, Set<String> required)
+            throws ValidationException {
+        if (values.isEmpty() || (values.size() == 1 && values.getFirst().isBlank())) {
+            throw failure(FailureKind.CAPABILITY_MISSING,
+                    "Workload JAR must declare " + CAPABILITIES_ATTRIBUTE + ": "
+                            + String.join(",", required.stream().sorted().toList()));
+        }
+        if (values.size() != 1) {
+            throw failure(FailureKind.CAPABILITY_INVALID,
+                    "Workload JAR declares " + CAPABILITIES_ATTRIBUTE + " more than once");
+        }
+        Set<String> declared = new HashSet<>();
+        for (String token : values.getFirst().split(",", -1)) {
+            String capability = token.strip();
+            if (!capability.matches("[a-z][a-z0-9]*(?:-[a-z0-9]+)*")
+                    || !declared.add(capability)) {
+                throw failure(FailureKind.CAPABILITY_INVALID,
+                        "Workload JAR capability declaration contains an invalid or duplicate token");
+            }
+        }
+        if (!declared.containsAll(required)) {
+            throw failure(FailureKind.CAPABILITY_MISSING,
+                    "Workload JAR lacks required capabilities: " + required.stream()
+                            .filter(capability -> !declared.contains(capability)).sorted().toList());
+        }
+    }
+
     private static MainSection mainSection(BufferedReader reader)
             throws IOException, ValidationException {
         List<String> protocolValues = new ArrayList<>();
         List<String> mainClasses = new ArrayList<>();
+        List<String> capabilityValues = new ArrayList<>();
         String currentName = null;
         StringBuilder currentValue = null;
         for (String line; (line = reader.readLine()) != null;) {
             if (line.isEmpty()) {
-                addRecognized(protocolValues, mainClasses, currentName, currentValue);
-                return new MainSection(protocolValues, mainClasses);
+                addRecognized(protocolValues, mainClasses, capabilityValues, currentName, currentValue);
+                return new MainSection(protocolValues, mainClasses, capabilityValues);
             }
             if (line.charAt(0) == ' ') {
                 if (currentName == null) {
@@ -110,7 +151,7 @@ public final class WorkloadProtocolArtifactValidator {
                 currentValue.append(line, 1, line.length());
                 continue;
             }
-            addRecognized(protocolValues, mainClasses, currentName, currentValue);
+            addRecognized(protocolValues, mainClasses, capabilityValues, currentName, currentValue);
             int separator = line.indexOf(':');
             if (separator <= 0) {
                 throw failure(FailureKind.UNREADABLE,
@@ -123,19 +164,22 @@ public final class WorkloadProtocolArtifactValidator {
             }
             currentValue = new StringBuilder(line.substring(valueStart));
         }
-        addRecognized(protocolValues, mainClasses, currentName, currentValue);
-        return new MainSection(protocolValues, mainClasses);
+        addRecognized(protocolValues, mainClasses, capabilityValues, currentName, currentValue);
+        return new MainSection(protocolValues, mainClasses, capabilityValues);
     }
 
     private static void addRecognized(
             List<String> protocolValues,
             List<String> mainClasses,
+            List<String> capabilityValues,
             String name,
             StringBuilder value) {
         if (name != null && ATTRIBUTE.equalsIgnoreCase(name)) {
             protocolValues.add(value.toString());
         } else if (name != null && MAIN_CLASS_ATTRIBUTE.equalsIgnoreCase(name)) {
             mainClasses.add(value.toString());
+        } else if (name != null && CAPABILITIES_ATTRIBUTE.equalsIgnoreCase(name)) {
+            capabilityValues.add(value.toString());
         }
     }
 
@@ -155,6 +199,8 @@ public final class WorkloadProtocolArtifactValidator {
         MISSING("missing"),
         DUPLICATE("duplicate"),
         UNSUPPORTED("unsupported"),
+        CAPABILITY_MISSING("capability-missing"),
+        CAPABILITY_INVALID("capability-invalid"),
         UNREADABLE("unreadable");
 
         private final String diagnosticSuffix;
@@ -168,10 +214,12 @@ public final class WorkloadProtocolArtifactValidator {
         }
     }
 
-    private record MainSection(List<String> protocolValues, List<String> mainClasses) {
+    private record MainSection(
+            List<String> protocolValues, List<String> mainClasses, List<String> capabilityValues) {
         private MainSection {
             protocolValues = List.copyOf(protocolValues);
             mainClasses = List.copyOf(mainClasses);
+            capabilityValues = List.copyOf(capabilityValues);
         }
     }
 

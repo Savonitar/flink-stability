@@ -46,9 +46,10 @@ public final class ExecutableScenarioPlan {
     private final GeneratedIntegerSequenceInput input;
     private final Job job;
     private final List<Phase> phases;
-    private final KafkaIdSetValidation terminalValidation;
+    private final TerminalValidationPlan terminalValidation;
     private final ExpectedOutcome expectedOutcome;
     private final Duration jobCompletionTimeout;
+    private final boolean allowStateResetMutant;
 
     ExecutableScenarioPlan(
             ResolvedScenarioPlan sourcePlan,
@@ -59,9 +60,17 @@ public final class ExecutableScenarioPlan {
             GeneratedIntegerSequenceInput input,
             Job job,
             List<Phase> phases,
-            KafkaIdSetValidation terminalValidation,
+            TerminalValidationPlan terminalValidation,
             ExpectedOutcome expectedOutcome,
             Duration jobCompletionTimeout) {
+        this(sourcePlan, scenarioName, invocation, kafka, flink, input, job, phases, terminalValidation,
+                expectedOutcome, jobCompletionTimeout, false);
+    }
+
+    ExecutableScenarioPlan(ResolvedScenarioPlan sourcePlan, String scenarioName, InvocationPolicy invocation,
+            KafkaCluster kafka, FlinkCluster flink, GeneratedIntegerSequenceInput input, Job job, List<Phase> phases,
+            TerminalValidationPlan terminalValidation, ExpectedOutcome expectedOutcome, Duration jobCompletionTimeout,
+            boolean allowStateResetMutant) {
         this.sourcePlan = Objects.requireNonNull(sourcePlan, "sourcePlan");
         this.scenarioName = requireNonBlank(scenarioName, "scenarioName");
         this.invocation = Objects.requireNonNull(invocation, "invocation");
@@ -78,6 +87,7 @@ public final class ExecutableScenarioPlan {
         this.expectedOutcome = Objects.requireNonNull(expectedOutcome, "expectedOutcome");
         this.jobCompletionTimeout = requirePositive(
                 jobCompletionTimeout, "jobCompletionTimeout");
+        this.allowStateResetMutant = allowStateResetMutant;
         if (job.parallelism() > (long) flink.taskmanagers()
                 * FlinkRuntimeTarget.TASK_SLOTS_PER_TASK_MANAGER) {
             throw new IllegalArgumentException("Job parallelism exceeds the provisioned task slots");
@@ -111,6 +121,52 @@ public final class ExecutableScenarioPlan {
         }
         if (!job.sink().topic().equals(terminalValidation.output())) {
             throw new IllegalArgumentException("Terminal validation must inspect the job sink");
+        }
+        boolean keyed = job.workloadConfiguration().behavior().isPresent();
+        if (allowStateResetMutant && !keyed)
+            throw new IllegalArgumentException("State-reset mutant opt-in requires keyed-prefix-v1");
+        if (keyed != (terminalValidation instanceof KafkaStatePrefixValidation)) {
+            throw new IllegalArgumentException("keyed-prefix-v1 requires kafka.state-prefix validation");
+        }
+        if (job.checkpointing().fuse().isPresent()) {
+            var fuse = job.checkpointing().fuse().orElseThrow();
+            if (!keyed || job.stateBackend() != StateBackend.HASHMAP || job.stateTtl().enabled()
+                    || flink.tokenProvider().isPresent() || flink.expectedRuntimeJar().isPresent()
+                    || !flink.expectedImageId().equals(Optional.of(fuse.imageId())))
+                throw new IllegalArgumentException("FUSE checkpoint storage requires the pinned keyed-prefix HashMap runtime");
+            long atomicFaults = this.phases.stream().flatMap(phase -> phase.steps().stream())
+                    .filter(CheckpointStorageFault.class::isInstance).count();
+            long ordinaryKills = this.phases.stream().flatMap(phase -> phase.steps().stream())
+                    .filter(KillTaskManager.class::isInstance).count();
+            if (atomicFaults > 1 || ordinaryKills > 1 || atomicFaults > 0 && ordinaryKills > 0)
+                throw new IllegalArgumentException("Only one storage fault or ordinary recovery control is supported");
+            for (Step step : this.phases.stream().flatMap(phase -> phase.steps().stream()).toList()) {
+                if (step instanceof CheckpointStorageFault fault) {
+                    if (!fault.jobAlias().equals(job.alias())
+                            || input.totalRecords() < 2L * job.workloadConfiguration().behavior().orElseThrow().keyCount())
+                        throw new IllegalArgumentException("Storage fault requires the compiled job and a prefix/suffix for every key");
+                } else if (!(step instanceof AwaitJobState || step instanceof AwaitCheckpoints
+                        || step instanceof AwaitCheckpointInProgress || step instanceof Wait
+                        || atomicFaults == 0 && (step instanceof KillTaskManager || step instanceof RestartTaskManager))) {
+                    throw new IllegalArgumentException("FUSE checkpoint storage cannot be combined with other faults or loops");
+                }
+            }
+        } else if (this.phases.stream().flatMap(phase -> phase.steps().stream())
+                .anyMatch(CheckpointStorageFault.class::isInstance)) {
+            throw new IllegalArgumentException("Checkpoint storage fault requires explicit FUSE provisioning");
+        }
+        if (terminalValidation instanceof KafkaStatePrefixValidation state) {
+            if (!state.jobAlias().equals(job.alias())
+                    || state.keyCount() != job.workloadConfiguration().behavior().orElseThrow().keyCount()
+                    || flink.jobmanagers() != 1 || flink.taskmanagers() != 1
+                    || flink.highAvailability().isPresent() || job.parallelism() != 1
+                    || input.partitions() != 1
+                    || topicIndex.get(job.sink().topic().topic()).partitions() != 1
+                    || job.checkpointing().storage() != CheckpointStorage.FILESYSTEM
+                    || job.sink().transactionIdNamingStrategy().orElse(null)
+                            != TransactionIdNamingStrategy.INCREMENTING) {
+                throw new IllegalArgumentException("Unsupported keyed-prefix-v1 topology or oracle binding");
+            }
         }
         if (job.sink().proxy().isPresent() && !job.sink().proxy().equals(kafka.proxy())) {
             throw new IllegalArgumentException("A routed sink must use the cluster's proxy");
@@ -171,7 +227,7 @@ public final class ExecutableScenarioPlan {
         return phases;
     }
 
-    public KafkaIdSetValidation terminalValidation() {
+    public TerminalValidationPlan terminalValidation() {
         return terminalValidation;
     }
 
@@ -182,6 +238,8 @@ public final class ExecutableScenarioPlan {
     public Duration jobCompletionTimeout() {
         return jobCompletionTimeout;
     }
+
+    public boolean allowStateResetMutant() { return allowStateResetMutant; }
 
     public record InvocationPolicy(int runs, int healthRetryLimit) {
         public InvocationPolicy {
@@ -310,7 +368,17 @@ public final class ExecutableScenarioPlan {
             Optional<String> declaredLine,
             Map<String, String> config,
             @com.fasterxml.jackson.annotation.JsonInclude(com.fasterxml.jackson.annotation.JsonInclude.Include.NON_EMPTY)
-            List<org.savonitar.flink.stability.runtime.api.FlinkLogMarker> logMarkers) {
+            List<org.savonitar.flink.stability.runtime.api.FlinkLogMarker> logMarkers,
+            Optional<String> expectedImageDigest) {
+        public FlinkCluster(String imageReference, Optional<String> expectedImageId, int jobmanagers, int taskmanagers,
+                            Optional<FlinkRuntimeTarget.RuntimeJar> expectedRuntimeJar,
+                            Optional<FlinkRuntimeTarget.HighAvailability> highAvailability,
+                            Optional<FlinkRuntimeTarget.TokenProvider> tokenProvider, Optional<String> declaredLine,
+                            Map<String, String> config,
+                            List<org.savonitar.flink.stability.runtime.api.FlinkLogMarker> logMarkers) {
+            this(imageReference, expectedImageId, jobmanagers, taskmanagers, expectedRuntimeJar,
+                    highAvailability, tokenProvider, declaredLine, config, logMarkers, Optional.empty());
+        }
         public FlinkCluster(String imageReference, Optional<String> expectedImageId, int jobmanagers, int taskmanagers,
                             Optional<FlinkRuntimeTarget.RuntimeJar> expectedRuntimeJar,
                             Optional<FlinkRuntimeTarget.HighAvailability> highAvailability,
@@ -344,12 +412,16 @@ public final class ExecutableScenarioPlan {
             config = org.savonitar.flink.stability.runtime.api.FlinkConfiguration.validate(config);
             imageReference = requireNonBlank(imageReference, "imageReference");
             expectedImageId = Objects.requireNonNull(expectedImageId, "expectedImageId");
+            expectedImageDigest = Objects.requireNonNull(expectedImageDigest, "expectedImageDigest");
             expectedRuntimeJar = Objects.requireNonNull(expectedRuntimeJar, "expectedRuntimeJar");
             highAvailability = Objects.requireNonNull(highAvailability, "highAvailability");
             tokenProvider = Objects.requireNonNull(tokenProvider, "tokenProvider");
             expectedImageId.ifPresent(id ->
                     org.savonitar.flink.stability.runtime.api.Checks.requireDockerImageId(
                             id, "expectedImageId"));
+            expectedImageDigest.ifPresent(digest ->
+                    org.savonitar.flink.stability.runtime.api.Checks.requireDockerImageId(
+                            digest, "expectedImageDigest"));
             if (jobmanagers != (highAvailability.isPresent() ? 2 : 1) || taskmanagers < 1
                     || taskmanagers > FlinkRuntimeTarget.MAX_TASK_MANAGERS) {
                 throw new IllegalArgumentException(
@@ -569,15 +641,53 @@ public final class ExecutableScenarioPlan {
     public record Checkpointing(
             Duration interval,
             CheckpointMode mode,
-            CheckpointStorage storage) {
+            CheckpointStorage storage,
+            Optional<FuseStorageSpec> fuse,
+            Optional<CheckpointControls> controls) {
+        public Checkpointing(Duration interval, CheckpointMode mode, CheckpointStorage storage) {
+            this(interval, mode, storage, Optional.empty(), Optional.empty());
+        }
+
         public Checkpointing {
             interval = requirePositive(interval, "interval");
             Objects.requireNonNull(mode, "mode");
             Objects.requireNonNull(storage, "storage");
+            Objects.requireNonNull(fuse, "fuse");
+            Objects.requireNonNull(controls, "controls");
+            if (fuse.isPresent() != controls.isPresent()
+                    || fuse.isPresent() && storage != CheckpointStorage.FILESYSTEM) {
+                throw new IllegalArgumentException("FUSE requires filesystem storage and explicit checkpoint controls");
+            }
             if (mode != CheckpointMode.EXACTLY_ONCE) {
                 throw new IllegalArgumentException(
                         "The first executable boundary requires exactly-once checkpointing");
             }
+        }
+    }
+
+    /** The only author-selected filesystem input is a pinned helper bundle, never a mount path. */
+    public record FuseStorageSpec(String bundle, String manifestSha256, String imageId, String platform) {
+        public FuseStorageSpec {
+            bundle = requireNonBlank(bundle, "bundle");
+            java.nio.file.Path path = java.nio.file.Path.of(bundle);
+            if (path.isAbsolute() || bundle.contains("\\") || bundle.contains(":")
+                    || path.getNameCount() == 0 || path.normalize().toString().isEmpty()
+                    || java.util.stream.StreamSupport.stream(path.spliterator(), false)
+                            .anyMatch(component -> component.toString().equals(".."))) {
+                throw new IllegalArgumentException("FUSE bundle must be an artifact-root-relative directory without traversal");
+            }
+            if (manifestSha256 == null || !manifestSha256.matches("[0-9a-f]{64}")
+                    || imageId == null || !imageId.matches("sha256:[0-9a-f]{64}")
+                    || !"linux/arm64".equals(platform)) {
+                throw new IllegalArgumentException("FUSE helper requires a manifest hash, image identity and supported Linux platform");
+            }
+        }
+    }
+
+    public record CheckpointControls(int smallFileThreshold, int maxConcurrent, int tolerableFailures) {
+        public CheckpointControls {
+            if (smallFileThreshold != 0 || maxConcurrent != 1 || tolerableFailures < 1 || tolerableFailures > 10)
+                throw new IllegalArgumentException("FUSE requires threshold 0, one concurrent checkpoint and failure tolerance 1..10");
         }
     }
 
@@ -749,6 +859,14 @@ public final class ExecutableScenarioPlan {
     }
 
     /** Canonical workload settings, materialized only after Kafka endpoints/offsets exist. */
+    public record KeyedPrefixBehavior(int keyCount) {
+        public KeyedPrefixBehavior {
+            if (keyCount < 1 || keyCount > 1024) {
+                throw new IllegalArgumentException("keyCount must be in [1,1024]");
+            }
+        }
+    }
+
     public record WorkloadConfiguration(
             String jobAlias,
             TopicReference source,
@@ -758,8 +876,16 @@ public final class ExecutableScenarioPlan {
             StateTtl stateTtl,
             Watermarks watermarks,
             RunScopedIdentityPolicy identityPolicy,
-            Duration transactionTimeout) {
+            Duration transactionTimeout,
+            Optional<KeyedPrefixBehavior> behavior) {
         public static final String PREFIX = "flink-stability.workload.v1.";
+
+        public WorkloadConfiguration(String jobAlias, TopicReference source, int sourcePartitions,
+                long expectedInputRecords, Sink sink, StateTtl stateTtl, Watermarks watermarks,
+                RunScopedIdentityPolicy identityPolicy, Duration transactionTimeout) {
+            this(jobAlias, source, sourcePartitions, expectedInputRecords, sink, stateTtl,
+                    watermarks, identityPolicy, transactionTimeout, Optional.empty());
+        }
 
         public WorkloadConfiguration {
             jobAlias = requireNonBlank(jobAlias, "jobAlias");
@@ -772,6 +898,11 @@ public final class ExecutableScenarioPlan {
             Objects.requireNonNull(stateTtl, "stateTtl");
             Objects.requireNonNull(watermarks, "watermarks");
             Objects.requireNonNull(identityPolicy, "identityPolicy");
+            Objects.requireNonNull(behavior, "behavior");
+            if (behavior.isPresent() && (sourcePartitions != 1 || stateTtl.enabled()
+                    || sink.deliveryGuarantee() != DeliveryGuarantee.EXACTLY_ONCE)) {
+                throw new IllegalArgumentException("keyed-prefix-v1 requires one source partition, EOS and disabled TTL");
+            }
             transactionTimeout = requirePositive(transactionTimeout, "transactionTimeout");
             if (!jobAlias.equals(identityPolicy.jobAlias())) {
                 throw new IllegalArgumentException("Identity policy must target this job");
@@ -800,6 +931,10 @@ public final class ExecutableScenarioPlan {
             String canonicalOffsets = canonicalStoppingOffsets(stoppingOffsets);
             Map<String, String> values = new TreeMap<>();
             values.put("flink-stability.workload.protocol", "v1");
+            behavior.ifPresent(value -> {
+                values.put(PREFIX + "behavior.type", "keyed-prefix-v1");
+                values.put(PREFIX + "behavior.key-count", Integer.toString(value.keyCount()));
+            });
             values.put(PREFIX + "job-alias", jobAlias);
             values.put(PREFIX + "source.bootstrap-servers", kafkaBootstrapServers);
             values.put(PREFIX + "source.topic", source.topic());
@@ -876,7 +1011,19 @@ public final class ExecutableScenarioPlan {
     }
 
     public sealed interface Step permits AwaitJobState, AwaitCheckpoints, AwaitCheckpointInProgress, Wait,
-            KillTaskManager, RestartTaskManager, BrokerOperation, BrokerFault, PacketFault, SavepointRestore, Loop, ProtocolFault, LeaderFault {}
+            KillTaskManager, RestartTaskManager, BrokerOperation, BrokerFault, PacketFault, SavepointRestore, Loop, ProtocolFault, LeaderFault, CheckpointStorageFault {}
+
+    /** One indivisible write-EIO, TaskManager replacement and recovery experiment. */
+    public record CheckpointStorageFault(String jobAlias, Duration timeout, Duration lease) implements Step {
+        public CheckpointStorageFault {
+            jobAlias = requireNonBlank(jobAlias, "jobAlias");
+            timeout = requirePositive(timeout, "timeout");
+            lease = requirePositive(lease, "lease");
+            if (timeout.compareTo(Duration.ofSeconds(120)) > 0 || lease.compareTo(Duration.ofSeconds(120)) > 0
+                    || lease.compareTo(timeout) < 0)
+                throw new IllegalArgumentException("Storage fault timeout must fit within a lease of at most 120s");
+        }
+    }
 
     public record SavepointRestore(int parallelism, TransactionIdNamingStrategy strategy, Duration timeout) implements Step {
         public SavepointRestore {
@@ -1073,11 +1220,20 @@ public final class ExecutableScenarioPlan {
 
     public enum IdSetMode { EXACTLY_ONCE, AT_LEAST_ONCE }
 
+    public sealed interface TerminalValidationPlan permits KafkaIdSetValidation, KafkaStatePrefixValidation {
+        TopicReference output();
+        ExpectedRecords expected();
+        Duration timeout();
+        IdSetMode mode();
+        String validatorType();
+    }
+
     public record KafkaIdSetValidation(
             TopicReference output,
             ExpectedRecords expected,
             Duration timeout,
-            IdSetMode mode) {
+            IdSetMode mode) implements TerminalValidationPlan {
+        @Override public String validatorType() { return "kafka.id-set"; }
         public KafkaIdSetValidation(TopicReference output, ExpectedRecords expected, Duration timeout) {
             this(output, expected, timeout, IdSetMode.EXACTLY_ONCE);
         }
@@ -1087,6 +1243,19 @@ public final class ExecutableScenarioPlan {
             Objects.requireNonNull(expected, "expected");
             timeout = requirePositive(timeout, "timeout");
         }
+    }
+
+    public record KafkaStatePrefixValidation(String jobAlias, TopicReference output,
+            ExpectedRecords expected, Duration timeout, int keyCount) implements TerminalValidationPlan {
+        public KafkaStatePrefixValidation {
+            jobAlias = requireNonBlank(jobAlias, "jobAlias");
+            Objects.requireNonNull(output, "output");
+            Objects.requireNonNull(expected, "expected");
+            timeout = requirePositive(timeout, "timeout");
+            new KeyedPrefixBehavior(keyCount);
+        }
+        @Override public IdSetMode mode() { return IdSetMode.EXACTLY_ONCE; }
+        @Override public String validatorType() { return "kafka.state-prefix"; }
     }
 
     public enum ExpectedRecords {
@@ -1135,6 +1304,11 @@ public final class ExecutableScenarioPlan {
         values.put("execution.checkpointing.mode", checkpointing.mode().name());
         values.put("execution.checkpointing.storage",
                 checkpointing.storage().configurationValue());
+        checkpointing.controls().ifPresent(controls -> {
+            values.put("execution.checkpointing.data-inline-threshold", controls.smallFileThreshold() + " bytes");
+            values.put("execution.checkpointing.max-concurrent-checkpoints", Integer.toString(controls.maxConcurrent()));
+            values.put("execution.checkpointing.tolerable-failed-checkpoints", Integer.toString(controls.tolerableFailures()));
+        });
         values.put("parallelism.default", Integer.toString(parallelism));
         values.put("state.backend.type", stateBackend.configurationValue());
         return Collections.unmodifiableMap(new LinkedHashMap<>(values));

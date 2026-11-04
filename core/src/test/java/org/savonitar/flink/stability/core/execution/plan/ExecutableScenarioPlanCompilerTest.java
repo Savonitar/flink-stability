@@ -54,6 +54,88 @@ class ExecutableScenarioPlanCompilerTest {
     @TempDir
     Path artifactRoot;
 
+    @Test void keyedPrefixCompilesOnlyWithItsStateOracleAndMaterializesReservedSettings() {
+        var plan = compiler.compile(resolved(ExecutableScenarioPlanCompilerTest::keyedPrefix));
+        var oracle = (ExecutableScenarioPlan.KafkaStatePrefixValidation) plan.terminalValidation();
+        assertEquals("eos-job", oracle.jobAlias());
+        assertEquals(8, oracle.keyCount());
+        assertEquals("kafka.state-prefix", oracle.validatorType());
+        var config = plan.job().workloadConfiguration().materialize("localhost:9092", Map.of(0, 10L), 1, "a1b2c3d4");
+        assertEquals("keyed-prefix-v1", config.get(ExecutableScenarioPlan.WorkloadConfiguration.PREFIX + "behavior.type"));
+        assertEquals("8", config.get(ExecutableScenarioPlan.WorkloadConfiguration.PREFIX + "behavior.key-count"));
+        assertFalse(compiler.compile(resolved(document -> {})).job().workloadConfiguration().materialize(
+                "localhost:9092", Map.of(0, 10L), 1, "a1b2c3d4").keySet().stream().anyMatch(key -> key.contains("behavior")));
+    }
+
+    @Test void stateRecoveryRejectsInsufficientPerKeyInputBeforeArtifacts() {
+        assertFailsAt(Stage.RUNNER_CAPABILITY, () -> compiler.compile(resolved(document -> {
+            keyedPrefix(document);
+            var steps = replaceSteps(document);
+            steps.addObject().putObject("kill").putObject("target").put("kind", "named")
+                    .put("role", "taskmanager").put("name", "taskmanager-1");
+            steps.addObject().putObject("restart").put("component", "taskmanager");
+        })));
+        var control = compiler.compile(resolved(document -> {
+            keyedPrefix(document);
+            ((ObjectNode) document.at("/workload/jobs/0/behavior")).put("key_count", 16);
+        }));
+        assertEquals(10, control.input().totalRecords());
+    }
+
+    @Test void keyedPrefixRejectsUnsupportedTopologiesBeforeArtifacts() {
+        for (String change : List.of("parallelism", "taskmanagers", "source-partitions", "sink-partitions", "ttl", "storage", "pooling", "restore")) {
+            var failure = assertThrows(SpecificationException.class, () -> compiler.compile(resolved(document -> {
+                keyedPrefix(document);
+                var job = (ObjectNode) document.at("/workload/jobs/0");
+                switch (change) {
+                    case "parallelism" -> job.put("parallelism", 2);
+                    case "taskmanagers" -> ((ObjectNode) document.at("/setup/flink")).put("taskmanagers", 2);
+                    case "source-partitions" -> ((ObjectNode) document.at("/setup/kafka/clusters/main/topics/0")).put("partitions", 2);
+                    case "sink-partitions" -> ((ObjectNode) document.at("/setup/kafka/clusters/main/topics/1")).put("partitions", 2);
+                    case "ttl" -> job.putObject("state_ttl").put("enabled", true).put("ttl", "1m");
+                    case "storage" -> ((ObjectNode) job.at("/checkpointing/storage")).put("type", "jobmanager");
+                    case "pooling" -> ((ObjectNode) job.path("sink")).put("transaction_id_naming_strategy", "POOLING");
+                    case "restore" -> replaceSteps(document).addObject().putObject("savepoint_restore").put("job", "eos-job")
+                            .put("parallelism", 1).put("transaction_id_naming_strategy", "INCREMENTING").put("timeout", "3m");
+                }
+            })), change);
+            assertEquals(Stage.RUNNER_CAPABILITY, failure.stage(), change);
+            assertTrue(failure.diagnostics().stream().anyMatch(d -> d.code().startsWith("runner.state-prefix.")), change);
+        }
+    }
+
+    private static void keyedPrefix(ObjectNode document) {
+        var job = (ObjectNode) document.at("/workload/jobs/0");
+        job.putObject("behavior").put("type", "keyed-prefix-v1").put("key_count", 8);
+        ((ObjectNode) job.path("checkpointing")).putObject("storage").put("type", "filesystem");
+        ((ObjectNode) document.at("/terminal_validations/0")).put("type", "kafka.state-prefix").put("job", "eos-job");
+    }
+
+    @Test void resetMutantRequiresExplicitTypedOptInAndCannotBeInferredFromScenarioName() {
+        var base = loader.loadScenario(resource("minimal.yaml"));
+        var renamedDocument = base.document();
+        renamedDocument.put("health_retry_limit", 0);
+        keyedPrefix(renamedDocument);
+        ((ObjectNode) renamedDocument.path("meta")).put("name", "mutant-calibration");
+        var named = loader.validateScenarioDocument(base.source().resolveSibling("mutant-calibration.yaml"), renamedDocument);
+        var expectedBase = expected(value -> ((ObjectNode) value.path("meta"))
+                .put("name", "mutant-calibration.expected").put("scenario", "mutant-calibration"));
+        var namedExpected = loader.validateExpectedResultDocument(
+                expectedBase.source().resolveSibling("mutant-calibration.expected.yaml"), expectedBase.document());
+        var normal = compiler.compile(new ScenarioPlanResolver().resolve(
+                new ScenarioBundle(named, namedExpected), ResolutionRequest.none()));
+        assertFalse(normal.allowStateResetMutant());
+        var calibration = compiler.compile(resolved(document -> {
+            keyedPrefix(document);
+            ((ObjectNode) document.path("meta")).put("allow_state_reset_mutant", true);
+        }));
+        assertTrue(calibration.allowStateResetMutant());
+        var failure = assertThrows(SpecificationException.class, () -> compiler.compile(resolved(document ->
+                ((ObjectNode) document.path("meta")).put("allow_state_reset_mutant", true))));
+        assertEquals(Stage.RUNNER_CAPABILITY, failure.stage());
+        assertTrue(failure.diagnostics().stream().anyMatch(value -> value.code().equals("runner.state-prefix.mutant-opt-in-requires-behavior")));
+    }
+
     @Test void savepointRestoreRequiresOneFinalEosTransitionWithinCapacityAndSupportedStrategy() {
         for (String invalid : List.of("none", "capacity", "overflow", "reverse", "non-eos", "later", "loop", "wrong-job", "long-timeout")) {
             Runnable compile = () -> {
@@ -1234,25 +1316,100 @@ class ExecutableScenarioPlanCompilerTest {
     }
 
     @Test
+    void bindingChecksTypedBehaviorCapabilityEvenWithLegacySourceProvenance()
+            throws IOException {
+        createJar(artifactRoot.resolve("connector.jar"), false, null);
+        createJar(artifactRoot.resolve("job.jar"), true, "v1");
+        ResolvedScenarioPlan legacySource = resolved(this::useLocalArtifacts);
+        ExecutableScenarioPlan keyed = compiler.compile(resolved(document -> {
+            useLocalArtifacts(document);
+            keyedPrefix(document);
+        }));
+        // Sharing the resolved-plan identity does not attest the separately typed behavior.
+        ExecutableScenarioPlan rebound = new ExecutableScenarioPlan(
+                legacySource, keyed.scenarioName(), keyed.invocation(), keyed.kafka(),
+                keyed.flink(), keyed.input(), keyed.job(), keyed.phases(),
+                keyed.terminalValidation(), keyed.expectedOutcome(), keyed.jobCompletionTimeout());
+
+        try (PreparedScenarioPlan prepared = new ArtifactPlanResolver().resolve(
+                legacySource, ArtifactResolutionOptions.online(artifactRoot))) {
+            SpecificationException exception = assertFailsAt(
+                    Stage.RUNNER_CAPABILITY, () -> compiler.bind(prepared, rebound));
+
+            assertEquals("runner.workload.protocol-capability-missing",
+                    exception.diagnostics().getFirst().code());
+            assertEquals("$/workload/jobs/0/jar", exception.diagnostics().getFirst().path());
+        }
+    }
+
+    @Test
     void carriesExpectedRuntimeIdentitiesFromScenarioThroughArtifactBinding() throws IOException {
         createJar(artifactRoot.resolve("connector.jar"), false, null);
         createJar(artifactRoot.resolve("job.jar"), true, "v1");
         String imageId = "sha256:" + "b".repeat(64);
+        String imageDigest = "sha256:" + "d".repeat(64);
         ResolvedScenarioPlan resolved = resolved(document -> {
             useLocalArtifacts(document);
-            ((ObjectNode) document.at("/setup/flink")).put("image_id", imageId);
+            ((ObjectNode) document.at("/setup/flink")).put("image_id", imageId).put("image_digest", imageDigest);
             ((ObjectNode) document.at("/setup/flink")).putObject("runtime_jar")
                     .put("container_path", "/opt/flink/lib/flink-dist-2.2.0.jar")
                     .put("sha256", "c".repeat(64));
         });
         ExecutableScenarioPlan executable = compiler.compile(resolved);
         assertEquals(imageId, executable.flink().expectedImageId().orElseThrow());
+        assertEquals(imageDigest, executable.flink().expectedImageDigest().orElseThrow());
         assertEquals("c".repeat(64), executable.flink().expectedRuntimeJar().orElseThrow().sha256());
         try (PreparedScenarioPlan prepared = new ArtifactPlanResolver().resolve(
                 resolved, ArtifactResolutionOptions.online(artifactRoot))) {
             var runtime = compiler.bind(prepared, executable).flinkRuntimeTarget();
             assertEquals(imageId, runtime.expectedImageId().orElseThrow());
+            assertEquals(imageDigest, runtime.expectedImageDigest().orElseThrow());
             assertEquals(executable.flink().expectedRuntimeJar(), runtime.expectedRuntimeJar());
+        }
+    }
+
+    @Test void bindsDeclaredCheckpointControlsToProcessSettingsAndRejectsReboundTolerance() throws IOException {
+        createJar(artifactRoot.resolve("connector.jar"), false, null);
+        var manifest = new Manifest();
+        manifest.getMainAttributes().put(Attributes.Name.MANIFEST_VERSION, "1.0");
+        manifest.getMainAttributes().put(Attributes.Name.MAIN_CLASS, "example.Main");
+        manifest.getMainAttributes().putValue("Flink-Stability-Workload-Protocol", "v1");
+        manifest.getMainAttributes().putValue("Flink-Stability-Workload-Capabilities", "keyed-prefix-v1");
+        createJar(artifactRoot.resolve("job.jar"), manifest, List.of("example.Main"));
+        String image = "sha256:" + "b".repeat(64);
+        var json = new com.fasterxml.jackson.databind.ObjectMapper();
+        var receipt = json.createObjectNode().put("schemaVersion", 1).put("status", "built")
+                .put("networkDisconnectedBeforeSourceCopy", true).put("javaRelease", 17).put("libfuseVersion", "3.14.0")
+                .put("imageId", image).put("platform", "linux/arm64");
+        receipt.putArray("cleanup").addObject().put("status", "removed");
+        Path helper = Files.createDirectories(artifactRoot.resolve("helper-build/bundle"));
+        var pins = receipt.putObject("files");
+        for (String name : org.savonitar.flink.stability.runtime.api.FuseCheckpointStorage.REQUIRED_FILES) {
+            Path file = Files.writeString(helper.resolve(name), "synthetic helper " + name);
+            pins.put(name, org.savonitar.flink.stability.runtime.api.Digests.sha256(file));
+        }
+        Path receiptFile = artifactRoot.resolve("helper-build/build-evidence.json");
+        Files.write(receiptFile, json.writeValueAsBytes(receipt));
+        String receiptHash = org.savonitar.flink.stability.runtime.api.Digests.sha256(receiptFile);
+        var resolved = resolved(document -> {
+            useLocalArtifacts(document); keyedPrefix(document);
+            ((ObjectNode) document.at("/setup/flink")).put("image_id", image);
+            var checkpointing = (ObjectNode) document.at("/workload/jobs/0/checkpointing");
+            checkpointing.put("small_file_threshold", 0).put("max_concurrent", 1).put("tolerable_failures", 3);
+            ((ObjectNode) checkpointing.path("storage")).putObject("fuse").put("bundle", "./helper-build")
+                    .put("manifest_sha256", receiptHash).put("image_id", image).put("platform", "linux/arm64");
+        });
+        var plan = compiler.compile(resolved);
+        try (var prepared = new ArtifactPlanResolver().resolve(resolved, ArtifactResolutionOptions.online(artifactRoot))) {
+            var bound = compiler.bind(prepared, plan);
+            var target = bound.flinkRuntimeTarget();
+            assertEquals(3, target.checkpointStorage().orElseThrow().tolerableFailedCheckpoints());
+            for (String key : List.of("execution.checkpointing.data-inline-threshold",
+                    "execution.checkpointing.max-concurrent-checkpoints", "execution.checkpointing.tolerable-failed-checkpoints"))
+                assertEquals(plan.job().standardFlinkConfiguration().get(key), target.effectiveConfig().get(key), key);
+            var wrong = target.withCheckpointStorage(target.checkpointStorage().orElseThrow().withTolerableFailedCheckpoints(10));
+            assertThrows(IllegalArgumentException.class, () -> new PreparedExecutableScenarioPlan(prepared, plan,
+                    bound.workloadArtifact(), bound.connectorBundle(), wrong));
         }
     }
 

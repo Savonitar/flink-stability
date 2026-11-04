@@ -5,6 +5,7 @@ import org.savonitar.flink.stability.core.flink.FlinkJobHandle;
 import org.savonitar.flink.stability.core.flink.FlinkJobObservation;
 import org.savonitar.flink.stability.core.flink.FlinkJobState;
 import org.savonitar.flink.stability.core.flink.FlinkRestTimeoutException;
+import org.savonitar.flink.stability.core.flink.FlinkScenarioControl;
 import org.savonitar.flink.stability.runtime.api.FlinkProcessWriteFenceEvidence;
 
 import java.time.Duration;
@@ -43,7 +44,7 @@ public final class FlinkTerminalWriteFence {
                     "Flink bounded completion did not establish FINISHED");
         }
         // Read-only recovery evidence; the job is terminal, so this cannot admit new writes.
-        FlinkJobObservation.Attempt jobBeforeFence = FlinkJobObservation.Attempt.of(jobs, job);
+        FlinkJobObservation.Attempt jobBeforeFence = finalObservation(job);
         FlinkProcessWriteFenceEvidence processEvidence = stopProcesses(jobBeforeFence);
         return new Evidence(state, processEvidence, jobBeforeFence);
     }
@@ -52,7 +53,7 @@ public final class FlinkTerminalWriteFence {
             FlinkJobHandle job,
             Exception primary,
             String message) {
-        FlinkJobObservation.Attempt jobBeforeFence = FlinkJobObservation.Attempt.of(jobs, job);
+        FlinkJobObservation.Attempt jobBeforeFence = finalObservation(job);
         boolean processFenceFailed = false;
         FlinkProcessWriteFenceEvidence processEvidence = null;
         try {
@@ -89,6 +90,18 @@ public final class FlinkTerminalWriteFence {
                     failure,
                     Optional.empty(),
                     jobBeforeFence);
+        }
+    }
+
+    private FlinkJobObservation.Attempt finalObservation(FlinkJobHandle job) {
+        if (!(jobs instanceof FlinkScenarioControl scenario)) return FlinkJobObservation.Attempt.of(jobs, job);
+        try (var capture = scenario.captureRawEvidence()) {
+            var observation = FlinkJobObservation.Attempt.of(jobs, job);
+            capture.retain();
+            return observation;
+        } catch (java.io.IOException | RuntimeException failure) {
+            return new FlinkJobObservation.Attempt(Optional.empty(), Optional.of(
+                    "Final response capture failed: " + failure.getMessage()));
         }
     }
 

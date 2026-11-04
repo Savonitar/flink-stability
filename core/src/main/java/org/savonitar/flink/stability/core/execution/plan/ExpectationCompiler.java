@@ -15,18 +15,18 @@ final class ExpectationCompiler {
 
     /**
      * Semantic validation already pairs every expected failure with a registered reason of a
-     * declared validator; the runner can evaluate only its one kafka.id-set oracle.
+     * declared validator; the runner evaluates one of its two supported Kafka oracles.
      */
     static void validate(ResolvedScenarioPlan sourcePlan, List<Diagnostic> issues) {
         ObjectNode expectation = sourcePlan.expectationFor(ScenarioSide.SINGLE);
-        if (isFailure(expectation) && !ExecutableScenarioPlanCompiler.KAFKA_ID_SET.equals(
-                expectation.path("oracle").textValue())) {
+        if (isFailure(expectation) && !java.util.Set.of(ExecutableScenarioPlanCompiler.KAFKA_ID_SET,
+                ExecutableScenarioPlanCompiler.KAFKA_STATE_PREFIX).contains(expectation.path("oracle").textValue())) {
             issues.add(new Diagnostic(
                     sourcePlan.selectedExpectation().specification().source(),
                     ResolutionScope.SINGLE,
                     "runner.expectation.outcome-unsupported",
                     sourcePlan.selectedExpectation().originPointer() + "/oracle",
-                    "The first runner can expect failures only from the kafka.id-set oracle"));
+                    "The runner can expect failures only from kafka.id-set or kafka.state-prefix"));
         }
     }
 

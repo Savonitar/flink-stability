@@ -25,6 +25,26 @@ class ScenarioVerdictTest {
     private static final ExpectedOutcome EXPECT_DUPLICATES =
             ExpectedOutcome.failure("kafka.id-set", DUPLICATES);
 
+    @Test void unexpectedMutantCannotPassOrBlessAnExpectedFailureAndNeverErasesDataFailure() {
+        String job = "a".repeat(32);
+        var trace = StateRecoveryEvidence.parse(new StateRecoveryEvidence.ProcessIdentity(
+                "taskmanager-1", "tm", "taskmanager-1#1"),
+                "STATE_PREFIX_START version=1 jobId=" + job + " operatorUid=" + StateRecoveryEvidence.OPERATOR_UID
+                        + " attempt=0 subtask=0 checkpoint=-1 restoredCheckpoint=-1 buildMode=reset-state-on-restore-v1\n", job);
+        var report = StateRecoveryReport.evaluate(job, "b".repeat(64), 2, 20, 0, true,
+                trace, List.of(), List.of(), List.of());
+        var passed = attempt(V1ScenarioExecutionResult.Status.PASS, "validator.kafka.id-set.match").withStateRecovery(report);
+        assertEquals(V1ScenarioExecutionResult.Status.INCONCLUSIVE, passed.status());
+        assertEquals(StateRecoveryReport.UNEXPECTED_BUILD_MODE, passed.reason());
+        assertEquals(ScenarioVerdict.Status.INCONCLUSIVE, ScenarioVerdict.of(ExpectedOutcome.pass(), passed).status());
+        var failed = attempt(V1ScenarioExecutionResult.Status.FAIL, DUPLICATES).withStateRecovery(report);
+        assertEquals(V1ScenarioExecutionResult.Status.FAIL, failed.status());
+        assertEquals(DUPLICATES, failed.reason());
+        assertTrue(failed.diagnostics().contains(StateRecoveryReport.UNEXPECTED_BUILD_MODE));
+        assertEquals(ScenarioVerdict.Status.FAIL, ScenarioVerdict.of(ExpectedOutcome.pass(), failed).status());
+        assertEquals(StateRecoveryReport.UNEXPECTED_BUILD_MODE, ScenarioVerdict.of(EXPECT_DUPLICATES, failed).reason());
+    }
+
     @Test void requiredLogMarkersCannotHideDataFailuresOrBlessNegativeControls() {
         var marker = new org.savonitar.flink.stability.runtime.api.FlinkLogMarker("patched", "CUSTOM-FIX", "taskmanager", true);
         var missing = FlinkLogMarkerEvidence.collect(List.of(marker), List.of(), List.of(), true);
@@ -61,6 +81,18 @@ class ScenarioVerdictTest {
             assertEquals(ScenarioVerdict.Status.PASS, ScenarioVerdict.of(status == V1ScenarioExecutionResult.Status.PASS
                     ? ExpectedOutcome.pass() : EXPECT_DUPLICATES, result).status());
         }
+    }
+
+    @Test
+    void fuseRetentionNotApplicableDoesNotAddAnIncompleteCopyDiagnostic() {
+        var retained = CheckpointRetentionEvidence.copy(java.nio.file.Path.of("fuse-evidence"),
+                java.nio.file.Path.of("unused-copy"), true, true);
+        var original = attempt(V1ScenarioExecutionResult.Status.PASS, "validator.kafka.id-set.match");
+        var result = original.withCheckpointRetention(retained);
+        assertEquals(original.status(), result.status());
+        assertEquals(original.diagnostics(), result.diagnostics());
+        assertEquals(CheckpointRetentionEvidence.NOT_APPLICABLE, result.checkpointRetention().orElseThrow().status());
+        assertEquals(ScenarioVerdict.Status.PASS, ScenarioVerdict.of(ExpectedOutcome.pass(), result).status());
     }
 
     @Test
@@ -326,18 +358,17 @@ class ScenarioVerdictTest {
     @Test
     void matchingFailuresNeedSuccessfulPhasesBothFencesAndACompletePinnedOracle() {
         V1ScenarioExecutionResult complete = attempt(V1ScenarioExecutionResult.Status.FAIL, DUPLICATES);
-        PhaseExecutionEvidence failedPhase = new PhaseExecutionEvidence(List.of(
-                new PhaseExecutionEvidence.StepEvidence(0, "fault", "$/phases/0/steps/0",
-                        List.of(), PhaseExecutionEvidence.StepKind.KILL_TASKMANAGER,
-                        PhaseExecutionEvidence.StepStatus.FAILED, "kill unavailable")));
-        for (String missing : List.of("phases", "successful-phases", "write-fence",
+        for (String missing : List.of("phases", "FAILED", "SKIPPED", "UNCONFIRMED", "write-fence",
                 "both-fences", "oracle", "complete-snapshot", "pinned-reason", "failing-oracle")) {
             Optional<PhaseExecutionEvidence> phases = switch (missing) {
                 case "phases" -> Optional.empty();
-                case "successful-phases" -> Optional.of(failedPhase);
+                case "FAILED", "SKIPPED", "UNCONFIRMED" -> Optional.of(new PhaseExecutionEvidence(List.of(
+                        new PhaseExecutionEvidence.StepEvidence(0, "fault", "$/phases/0/steps/0",
+                                List.of(), PhaseExecutionEvidence.StepKind.KILL_TASKMANAGER,
+                                PhaseExecutionEvidence.StepStatus.valueOf(missing), "kill unavailable"))));
                 default -> complete.phaseEvidence();
             };
-            Optional<KafkaIdSetValidationResult> oracle = switch (missing) {
+            Optional<? extends org.savonitar.flink.stability.core.validation.kafka.KafkaTerminalValidationResult> oracle = switch (missing) {
                 case "oracle", "both-fences" -> Optional.empty();
                 case "complete-snapshot" -> Optional.of(new KafkaIdSetValidationResult(
                         KafkaIdSetValidationResult.Status.FAIL, DUPLICATES, "partial",
@@ -369,6 +400,56 @@ class ScenarioVerdictTest {
             assertFalse(verdict.matched(), missing);
             assertEquals(V1ScenarioExecutionResult.Status.FAIL, invalid.status(), missing);
         }
+    }
+
+    @Test
+    void incompleteRawEvidencePreservesDataFailureButCannotValidateANegativeControl() {
+        var incomplete = new org.savonitar.flink.stability.runtime.api.RawEvidenceStore.Utilisation(
+                1, 0, 4096, 64L * 1024 * 1024, false);
+        var failed = attempt(V1ScenarioExecutionResult.Status.FAIL, DUPLICATES)
+                .withRawEvidence(Optional.of(incomplete));
+        assertEquals(V1ScenarioExecutionResult.Status.FAIL, failed.status());
+        assertEquals(DUPLICATES, failed.reason());
+        assertEquals(ScenarioVerdict.Status.FAIL, ScenarioVerdict.of(ExpectedOutcome.pass(), failed).status());
+        var verdict = ScenarioVerdict.of(EXPECT_DUPLICATES, failed);
+        assertEquals(ScenarioVerdict.Status.INCONCLUSIVE, verdict.status());
+        assertEquals("raw-evidence.incomplete", verdict.reason());
+        assertFalse(verdict.matched());
+
+        var complete = attempt(V1ScenarioExecutionResult.Status.FAIL, DUPLICATES)
+                .withRawEvidence(Optional.of(new org.savonitar.flink.stability.runtime.api.RawEvidenceStore.Utilisation(
+                        1, 0, 4096, 64L * 1024 * 1024, true)));
+        assertTrue(ScenarioVerdict.of(EXPECT_DUPLICATES, complete).matched());
+    }
+
+    @Test
+    void incompleteFinalStorageEvidenceDowngradesPassAndPreservesObservedDataFailure() {
+        var incomplete = new org.savonitar.flink.stability.runtime.api.StorageFaultControl.Snapshot(
+                "attempt", "storage", "job_test", "file:/flink/checkpoints/job_test", "a".repeat(64),
+                List.of(), List.of(), false, false, List.of("journal truncated"));
+        var passed = attempt(V1ScenarioExecutionResult.Status.PASS, "validator.kafka.id-set.match")
+                .withCheckpointStorage(incomplete);
+        assertEquals(V1ScenarioExecutionResult.Status.INCONCLUSIVE, passed.status());
+        assertEquals(CheckpointStorageFault.UNCONFIRMED, passed.reason());
+        assertFalse(ScenarioVerdict.of(ExpectedOutcome.pass(), passed).matched());
+        var failed = attempt(V1ScenarioExecutionResult.Status.FAIL, DUPLICATES).withCheckpointStorage(incomplete);
+        assertEquals(V1ScenarioExecutionResult.Status.FAIL, failed.status());
+        assertEquals(DUPLICATES, failed.reason());
+        assertEquals(ScenarioVerdict.Status.INCONCLUSIVE, ScenarioVerdict.of(EXPECT_DUPLICATES, failed).status());
+        assertEquals(CheckpointStorageFault.UNCONFIRMED, ScenarioVerdict.of(EXPECT_DUPLICATES, failed).reason());
+        assertEquals("journal truncated", failed.phaseEvidence().orElseThrow().checkpointStorage().orElseThrow().diagnostics().getFirst());
+    }
+
+    @Test
+    void verificationFailureIsNeverReplacedByMissingStorageEvidence() {
+        var incomplete = new org.savonitar.flink.stability.runtime.api.StorageFaultControl.Snapshot(
+                "attempt", "storage", "job_test", "file:/flink/checkpoints/job_test", "a".repeat(64),
+                List.of(), List.of(), false, false, List.of("capture failed"));
+        var failed = attempt(V1ScenarioExecutionResult.Status.FAIL, "verification.kafka.incomplete-after-timeout")
+                .withCheckpointStorage(incomplete);
+        assertEquals(V1ScenarioExecutionResult.Status.FAIL, failed.status());
+        assertEquals("verification.kafka.incomplete-after-timeout", failed.reason());
+        assertEquals(ScenarioVerdict.Status.FAIL, ScenarioVerdict.of(ExpectedOutcome.pass(), failed).status());
     }
 
     private static V1ScenarioExecutionResult attempt(

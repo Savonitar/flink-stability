@@ -1,0 +1,330 @@
+{
+  "version": 1,
+  "kind": "checkpoint-fuse-probe",
+  "attemptId": "fuse_eb659a2bba454c2a8eed",
+  "storageId": "storage_2282cf249f464d42",
+  "namespace": "job_f8961f66db0c49bc",
+  "imageId": "sha256:2e93ded2cb7bf1a50f71b663d5e3ea01420bcc4e549cbf666d05120f939713c7",
+  "platform": "linux/arm64",
+  "status": "pass",
+  "cleanup": [
+    {
+      "containerId": "fce10048480f3bfc4cba98b176728311d8fc72a3c63e981c8af30848dd3a4c4f",
+      "instance": "a",
+      "removed": true
+    },
+    {
+      "containerId": "9b01312452df60a1d72ac56356e28c4d30712d3ec8f5b9962060c55552ce070d",
+      "instance": "b",
+      "removed": true
+    },
+    {
+      "containerId": "c079975da69fa36aa7499a6a22dfd131aca53af2f7ba607063d30f322fb0f836",
+      "instance": "c",
+      "removed": true
+    },
+    {
+      "containerId": "06033e799e8e03c66cacbb537077d3244d3870dcc6a3fcfdd88afd4cd4589a91",
+      "instance": "d",
+      "removed": true
+    },
+    {
+      "volume": "fsi-fuse_eb659a2bba454c2a8eed",
+      "removed": true
+    }
+  ],
+  "harnessFiles": {
+    "adapter-checkpoint_storage_probe.py": "76b8962cc0cf1c39832fdddf4dd7a77e8d66c25a2c034065dc955161f82e1c8d",
+    "entrypoint-checkpoint_storage_probe.py": "16a73efaa9ad80e2c0381bfcf81ba2d41439f9633d081e35747d2076a711e8fa"
+  },
+  "engine": {
+    "Platform": {
+      "Name": "Docker Desktop 4.56.0 (214940)"
+    },
+    "Version": "29.1.3",
+    "ApiVersion": "1.52",
+    "MinAPIVersion": "1.24",
+    "Os": "linux",
+    "Arch": "arm64",
+    "Components": [
+      {
+        "Name": "Engine",
+        "Version": "29.1.3",
+        "Details": {
+          "ApiVersion": "1.52",
+          "Arch": "arm64",
+          "BuildTime": "Fri Dec 12 14:50:40 2025",
+          "Experimental": "false",
+          "GitCommit": "fbf3ed2",
+          "GoVersion": "go1.25.5",
+          "KernelVersion": "6.12.54-linuxkit",
+          "MinAPIVersion": "1.24",
+          "Os": "linux"
+        }
+      },
+      {
+        "Name": "containerd",
+        "Version": "v2.2.1",
+        "Details": {
+          "GitCommit": "dea7da592f5d1d2b7755e3a161be07f43fad8f75"
+        }
+      },
+      {
+        "Name": "runc",
+        "Version": "1.3.4",
+        "Details": {
+          "GitCommit": "v1.3.4-0-gd6d73eb8"
+        }
+      },
+      {
+        "Name": "docker-init",
+        "Version": "0.19.0",
+        "Details": {
+          "GitCommit": "de40ad0"
+        }
+      }
+    ],
+    "GitCommit": "fbf3ed2",
+    "GoVersion": "go1.25.5",
+    "KernelVersion": "6.12.54-linuxkit",
+    "BuildTime": "2025-12-12T14:50:40.000000000+00:00"
+  },
+  "image": {
+    "Id": "sha256:2e93ded2cb7bf1a50f71b663d5e3ea01420bcc4e549cbf666d05120f939713c7",
+    "Os": "linux",
+    "Architecture": "arm64",
+    "RepoDigests": [
+      "flink@sha256:7ecfab9d5e8ec6987a248b32f6605b5fe9bcb7347aea0d7b1bc3976588408681"
+    ]
+  },
+  "checks": [
+    "cross-mount-visibility",
+    "create-and-held-write-eio",
+    "preserved-reads-and-healing",
+    "fsync-rename-stat-list-delete",
+    "daemon-death-no-fallback",
+    "cancellation-deadline-lease",
+    "namespace-identity-and-evidence-isolation"
+  ],
+  "observationsPublicationSummary": {
+    "omitted": true,
+    "items": 82,
+    "labels": [
+      "a.ready",
+      "b.ready",
+      "a.hello",
+      "a.create",
+      "a.open",
+      "a.fsync",
+      "a.fdatasync",
+      "a.raw-read",
+      "a.raw-write",
+      "b.hello",
+      "b.create",
+      "b.open",
+      "b.fsync",
+      "b.fdatasync",
+      "b.raw-read",
+      "b.raw-write",
+      "a.peer-read",
+      "b.peer-read",
+      "a.arm",
+      "b.arm",
+      "a.fault-create",
+      "a.fault-write",
+      "a.fault-read",
+      "a.evidence-write",
+      "b.fault-create",
+      "b.fault-write",
+      "b.fault-read",
+      "b.evidence-write",
+      "a.heal",
+      "b.heal",
+      "a.healed-write",
+      "a.healed-fsync",
+      "a.healed-create",
+      "a.close",
+      "a.rename",
+      "a.stale",
+      "a.foreign",
+      "a.traversal",
+      "b.healed-write",
+      "b.healed-fsync",
+      "b.healed-create",
+      "b.close",
+      "b.rename",
+      "b.stale",
+      "b.foreign",
+      "b.traversal",
+      "a.healed-peer-read",
+      "a.peer-stat",
+      "a.peer-list",
+      "a.peer-delete",
+      "a.missing-created",
+      "b.healed-peer-read",
+      "b.peer-stat",
+      "b.peer-list",
+      "b.peer-delete",
+      "b.missing-created",
+      "a.scope-hello",
+      "a.outside",
+      "a.symlink",
+      "b.symlink",
+      "a.before-death",
+      "a.dead-read",
+      "a.still-alive",
+      "b.expiry-arm",
+      "b.expired",
+      "b.expired-create",
+      "b.expired-heal",
+      "b.expired-stop",
+      "c.ready",
+      "c.hello",
+      "c.arm",
+      "c.exit",
+      "c.abort",
+      "c.heal-rejected",
+      "c.stop",
+      "d.ready",
+      "d.hello",
+      "d.arm",
+      "d.exit",
+      "d.abort",
+      "d.heal-rejected",
+      "d.stop"
+    ]
+  },
+  "instances": {
+    "a": {
+      "containerId": "fce10048480f3bfc4cba98b176728311d8fc72a3c63e981c8af30848dd3a4c4f",
+      "copiedHashes": "49d01b4f62b6a7bd8256779777cf1e6d193d2e1d7365796c115f4ffb66c85f66  checkpoint-fuse\n3c7e87c4a5e924116dd3ac47cc5f4cb6c2b1e4d1849fe278ee7a50d7fcc454b7  probe.jar\n",
+      "daemonPid": 25,
+      "kernel": "Linux 6.12.54-linuxkit aarch64 GNU/Linux",
+      "daemonStoppedBeforeCapture": true,
+      "journalCaptureExit": 0,
+      "journalSha256": "f68242929408f2b4d1f8bb26bdc5f0d64d13ff69e7a15035d3572e398aa701cd"
+    },
+    "b": {
+      "containerId": "9b01312452df60a1d72ac56356e28c4d30712d3ec8f5b9962060c55552ce070d",
+      "copiedHashes": "49d01b4f62b6a7bd8256779777cf1e6d193d2e1d7365796c115f4ffb66c85f66  checkpoint-fuse\n3c7e87c4a5e924116dd3ac47cc5f4cb6c2b1e4d1849fe278ee7a50d7fcc454b7  probe.jar\n",
+      "daemonPid": 25,
+      "kernel": "Linux 6.12.54-linuxkit aarch64 GNU/Linux",
+      "daemonStoppedBeforeCapture": true,
+      "journalCaptureExit": 0,
+      "journalSha256": "339361054f7ce6498947a47cdfb266f1e27786ed100d8f9314fe09de9e28080c"
+    },
+    "c": {
+      "containerId": "c079975da69fa36aa7499a6a22dfd131aca53af2f7ba607063d30f322fb0f836",
+      "copiedHashes": "49d01b4f62b6a7bd8256779777cf1e6d193d2e1d7365796c115f4ffb66c85f66  checkpoint-fuse\n3c7e87c4a5e924116dd3ac47cc5f4cb6c2b1e4d1849fe278ee7a50d7fcc454b7  probe.jar\n",
+      "daemonPid": 25,
+      "kernel": "Linux 6.12.54-linuxkit aarch64 GNU/Linux",
+      "daemonStoppedBeforeCapture": true,
+      "journalCaptureExit": 0,
+      "journalSha256": "cfbb44afbdd612f79758f49e2ef94ac8001f3359b4746251d77b56ddcbae3d3f"
+    },
+    "d": {
+      "containerId": "06033e799e8e03c66cacbb537077d3244d3870dcc6a3fcfdd88afd4cd4589a91",
+      "copiedHashes": "49d01b4f62b6a7bd8256779777cf1e6d193d2e1d7365796c115f4ffb66c85f66  checkpoint-fuse\n3c7e87c4a5e924116dd3ac47cc5f4cb6c2b1e4d1849fe278ee7a50d7fcc454b7  probe.jar\n",
+      "daemonPid": 25,
+      "kernel": "Linux 6.12.54-linuxkit aarch64 GNU/Linux",
+      "daemonStoppedBeforeCapture": true,
+      "journalCaptureExit": 0,
+      "journalSha256": "8ba5da548e4a0908b6334522288806050e036b3c21feda9dfe12b059c032afd8"
+    }
+  },
+  "bundle": {
+    "cleanup": [
+      {
+        "container": "checkpoint-fuse-smoke-ff1dac522c1e4af1",
+        "status": "removed"
+      },
+      {
+        "container": "checkpoint-fuse-build-616a2e2574d24acb",
+        "status": "removed"
+      }
+    ],
+    "compiler": "gcc (Ubuntu 13.3.0-6ubuntu2~24.04.1) 13.3.0\nCopyright (C) 2023 Free Software Foundation, Inc.\nThis is free software; see the source for copying conditions.  There is NO\nwarranty; not even for MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.",
+    "compilerFlags": [
+      "-std=c11",
+      "-D_FILE_OFFSET_BITS=64",
+      "-O2",
+      "-Wall",
+      "-Wextra",
+      "-Werror",
+      "-pthread"
+    ],
+    "dependencyLockSha256": "1458d129527d65c94d60fee9226cd557049f4e89b541b6f1aa93f7a3d516ba47",
+    "dockerEndpoint": "unix:///var/run/docker.sock",
+    "downloadedPackageCount": 51,
+    "files": {
+      "checkpoint-fuse": "49d01b4f62b6a7bd8256779777cf1e6d193d2e1d7365796c115f4ffb66c85f66",
+      "checkpoint-fuse-selftest": "bbdd6a07da940c9d9db135958ec7f1caf8502f03767203f349aa65b5c7a3b9d5",
+      "probe.jar": "3c7e87c4a5e924116dd3ac47cc5f4cb6c2b1e4d1849fe278ee7a50d7fcc454b7"
+    },
+    "fuseStaticLibraries": "-lfuse3 -lpthread -ldl -pthread -lrt",
+    "helperVersion": "checkpoint-fuse-v1 libfuse=3.14.0",
+    "imageDigest": "flink@sha256:7ecfab9d5e8ec6987a248b32f6605b5fe9bcb7347aea0d7b1bc3976588408681",
+    "imageId": "sha256:2e93ded2cb7bf1a50f71b663d5e3ea01420bcc4e549cbf666d05120f939713c7",
+    "imageInspection": {
+      "Architecture": "arm64",
+      "Id": "sha256:2e93ded2cb7bf1a50f71b663d5e3ea01420bcc4e549cbf666d05120f939713c7",
+      "Os": "linux",
+      "RepoDigests": [
+        "flink@sha256:7ecfab9d5e8ec6987a248b32f6605b5fe9bcb7347aea0d7b1bc3976588408681"
+      ]
+    },
+    "javaRelease": 17,
+    "javac": "javac 21.0.7",
+    "libfuseVersion": "3.14.0",
+    "linkage": "static libfuse3; dynamic runtime libc",
+    "neededLibraries": [
+      "libc.so.6",
+      "ld-linux-aarch64.so.1"
+    ],
+    "networkDisconnectedBeforeSourceCopy": true,
+    "platform": "linux/arm64",
+    "pristineHelperVersion": "checkpoint-fuse-v1 libfuse=3.14.0",
+    "pristineNativeSelftest": "{\"status\":\"pass\",\"tests\":243,\"scope\":\"native-core-and-jail-no-fuse-mount\"}",
+    "runtimeJava": "openjdk version \"17.0.19\" 2026-04-21\nOpenJDK Runtime Environment Temurin-17.0.19+10 (build 17.0.19+10)\nOpenJDK 64-Bit Server VM Temurin-17.0.19+10 (build 17.0.19+10, mixed mode, sharing)",
+    "schemaVersion": 1,
+    "signedIndexReceipt": "80a36b0a6de2f69f49d2df75ef473ccde121e9e190b9ea01d20a4f63778d5c31  /usr/share/keyrings/ubuntu-archive-keyring.gpg\n25fe752bf07eb17eb5db1fd5a1fe4e40c0382dc2308a602ee9da1abb9d49bac7  /var/lib/apt/lists/ports.ubuntu.com_ubuntu-ports_dists_noble-security_InRelease\nc607e7ab2685b82c6d37a57261f8413d68c82b01a6a4225e1c6292fcb95691b4  /var/lib/apt/lists/ports.ubuntu.com_ubuntu-ports_dists_noble-updates_InRelease\ncdb2f31d809f589719a53c6ad15f255b27569c4059542ada282aaa21b8e164b0  /var/lib/apt/lists/ports.ubuntu.com_ubuntu-ports_dists_noble_InRelease",
+    "sourceHashes": {
+      "testcontainers/checkpoint_storage_build.py": "85e55c306e83f4e5facd2f57ea3c1a9f9ad929f1b272f21c8b98a43cb192e3e9",
+      "testcontainers/src/main/java/org/savonitar/flink/stability/testcontainers/storage/CheckpointStorageIoProbe.java": "b855410c8ffef766cca6c1228b03b1d6a9f3eb3eb8b05f20911aac61c72824dd",
+      "testcontainers/src/main/native/checkpoint-fuse/checkpoint_fuse.c": "b2e1c10bdea0e79939971677edee99f3abac39b625c3c1b804f27f21ce8399a8",
+      "testcontainers/src/main/native/checkpoint-fuse/core.c": "f8b0a5ca2a49b1172803f7a174133eeb79cc9ff6ebe5dda16a2be4204bf89976",
+      "testcontainers/src/main/native/checkpoint-fuse/core.h": "1313b5c1ea4e61f12d9d30a13df2c54dc347d57a42a29c842f472dcc3670510e",
+      "testcontainers/src/main/native/checkpoint-fuse/dependencies.json": "1458d129527d65c94d60fee9226cd557049f4e89b541b6f1aa93f7a3d516ba47",
+      "testcontainers/src/main/native/checkpoint-fuse/jail.c": "2e5590446991aca9cf0d389b35ee0389dec76783b886c2dcb1da7900b4ea4131",
+      "testcontainers/src/main/native/checkpoint-fuse/jail.h": "5f0270f2b9d4914a9606aa14b44a5d01c431dab30edfa1b6827668fce320e630",
+      "testcontainers/src/main/native/checkpoint-fuse/selftest.c": "245503aec3ddb3130649f85e8aa883c386f71807f967705e38f01b0cf20c644f"
+    },
+    "status": "built"
+  },
+  "_publication": {
+    "kind": "sanitized-projection",
+    "originalSourcePath": "jobs/checkpoint-storage-probe-20261027-02/result.json",
+    "originalSha256": "475a8e58309dd466092e1a0668fbdfb6fddbcf1cff5bc53125705341856da794",
+    "originalBytes": 154317,
+    "sanitizationNotes": [
+      "Host workspace<host-home> paths replaced with <workspace>, <host-home>, <host-temporary>; Docker/container paths are retained.",
+      "Original bytes remain in the local jobs evidence; this publication is not a replayable raw proof.",
+      "Detailed omitted fields are listed in publicationOmissions; counts, verdicts, diagnostics and component events are retained."
+    ],
+    "publicationOmissions": [
+      {
+        "jsonPointer": "/observations",
+        "kind": "I/O-transcript",
+        "items": 82
+      },
+      {
+        "jsonPointer": "/instances/*",
+        "kind": "mount-inspection-and-process-transcript"
+      },
+      {
+        "jsonPointer": "/bundle/commands",
+        "kind": "build-command-transcript"
+      }
+    ]
+  }
+}

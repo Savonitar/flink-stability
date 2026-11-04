@@ -38,6 +38,20 @@ public final class DockerV1AttemptRuntime implements V1AttemptRuntime {
         this.clusters = Objects.requireNonNull(clusters, "clusters");
     }
 
+    @Override public org.savonitar.flink.stability.runtime.api.StorageFaultControl.Snapshot storageSnapshot(Duration timeout) { return clusters.storageControl().storageSnapshot(timeout); }
+    @Override public Materialization inspectCheckpoint(String jobId, long checkpointId, Duration timeout) {
+        return clusters.storageControl().inspectCheckpoint(jobId, checkpointId, timeout);
+    }
+    @Override public Transition armStorage(String faultId, long revision, Duration lease, Duration timeout) {
+        return clusters.storageControl().armStorage(faultId, revision, lease, timeout);
+    }
+    @Override public Transition healStorage(String faultId, long revision, Duration timeout) {
+        return clusters.storageControl().healStorage(faultId, revision, timeout);
+    }
+    @Override public Transition abortStorage(String faultId, long revision, Duration timeout) {
+        return clusters.storageControl().abortStorage(faultId, revision, timeout);
+    }
+
     @Override
     public KafkaRuntimeEndpoints startKafka(KafkaRuntimeTarget target) {
         KafkaRuntimeEndpoints endpoints = clusters.startKafka(target);

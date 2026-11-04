@@ -1483,7 +1483,7 @@ public final class ArtifactPlanResolver {
             return true;
         }
         try {
-            WorkloadProtocolArtifactValidator.validate(realPath);
+            WorkloadProtocolArtifactValidator.validate(realPath, reference.requiredCapabilities());
             return true;
         } catch (WorkloadProtocolArtifactValidator.ValidationException exception) {
             String code = exception.kind()
@@ -1522,8 +1522,11 @@ public final class ArtifactPlanResolver {
             ArtifactReference left = baseline.get(identity);
             ArtifactReference right = candidate.get(identity);
             if (left != null && right != null && left.reference().equals(right.reference())) {
+                Set<String> requiredCapabilities = new HashSet<>(left.requiredCapabilities());
+                requiredCapabilities.addAll(right.requiredCapabilities());
                 merged.add(new ArtifactReference(
-                        ResolutionScope.COMMON, identity.role(), identity.path(), left.reference()));
+                        ResolutionScope.COMMON, identity.role(), identity.path(), left.reference(),
+                        requiredCapabilities));
             } else {
                 if (left != null) {
                     merged.add(left);
@@ -1594,8 +1597,12 @@ public final class ArtifactPlanResolver {
             return;
         }
         for (int index = 0; index < jobArray.size(); index++) {
-            addReference(references, scope, ArtifactRole.WORKLOAD_JOB,
-                    "$/workload/jobs/" + index + "/jar", jobArray.get(index).get("jar"));
+            JsonNode job = jobArray.get(index);
+            Set<String> capabilities = "keyed-prefix-v1".equals(
+                    job.path("behavior").path("type").textValue())
+                    ? Set.of(WorkloadProtocolArtifactValidator.KEYED_PREFIX_V1) : Set.of();
+            references.add(new ArtifactReference(scope, ArtifactRole.WORKLOAD_JOB,
+                    "$/workload/jobs/" + index + "/jar", job.path("jar").textValue(), capabilities));
         }
     }
 
@@ -1701,7 +1708,16 @@ public final class ArtifactPlanResolver {
             ResolutionScope scope,
             ArtifactRole role,
             String path,
-            String reference) {}
+            String reference,
+            Set<String> requiredCapabilities) {
+        private ArtifactReference {
+            requiredCapabilities = Set.copyOf(requiredCapabilities);
+        }
+
+        private ArtifactReference(ResolutionScope scope, ArtifactRole role, String path, String reference) {
+            this(scope, role, path, reference, Set.of());
+        }
+    }
 
     private record ConnectorDeclaration(
             String alias,

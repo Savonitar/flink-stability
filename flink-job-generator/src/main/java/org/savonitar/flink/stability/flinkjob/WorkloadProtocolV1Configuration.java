@@ -19,6 +19,8 @@ final class WorkloadProtocolV1Configuration {
 
     static final String PROTOCOL = "flink-stability.workload.protocol";
     static final String JOB_ALIAS = "flink-stability.workload.v1.job-alias";
+    static final String BEHAVIOR_TYPE = "flink-stability.workload.v1.behavior.type";
+    static final String BEHAVIOR_KEY_COUNT = "flink-stability.workload.v1.behavior.key-count";
 
     static final String SOURCE_BOOTSTRAP_SERVERS =
             "flink-stability.workload.v1.source.bootstrap-servers";
@@ -63,6 +65,8 @@ final class WorkloadProtocolV1Configuration {
     private static final Set<String> KNOWN_KEYS = Set.of(
             PROTOCOL,
             JOB_ALIAS,
+            BEHAVIOR_TYPE,
+            BEHAVIOR_KEY_COUNT,
             SOURCE_BOOTSTRAP_SERVERS,
             SOURCE_TOPIC,
             SOURCE_GROUP_ID,
@@ -95,6 +99,7 @@ final class WorkloadProtocolV1Configuration {
     private final Integer transactionTimeoutMs;
     private final StateTtlSettings stateTtl;
     private final WatermarkSettings watermarks;
+    private final Integer keyedPrefixKeyCount;
 
     private WorkloadProtocolV1Configuration(
             String jobAlias,
@@ -109,7 +114,8 @@ final class WorkloadProtocolV1Configuration {
             TransactionIdNamingStrategy transactionNamingStrategy,
             Integer transactionTimeoutMs,
             StateTtlSettings stateTtl,
-            WatermarkSettings watermarks) {
+            WatermarkSettings watermarks,
+            Integer keyedPrefixKeyCount) {
         this.jobAlias = jobAlias;
         this.sourceBootstrapServers = sourceBootstrapServers;
         this.sourceTopic = sourceTopic;
@@ -123,6 +129,7 @@ final class WorkloadProtocolV1Configuration {
         this.transactionTimeoutMs = transactionTimeoutMs;
         this.stateTtl = stateTtl;
         this.watermarks = watermarks;
+        this.keyedPrefixKeyCount = keyedPrefixKeyCount;
     }
 
     static WorkloadProtocolV1Configuration from(ReadableConfig readableConfig) {
@@ -159,6 +166,18 @@ final class WorkloadProtocolV1Configuration {
 
         StateTtlSettings stateTtl = parseStateTtl(values);
         WatermarkSettings watermarks = parseWatermarks(values);
+        Integer keyedPrefixKeyCount = parseBehavior(values);
+        if (keyedPrefixKeyCount != null) {
+            if (stateTtl.enabled()) {
+                throw invalid(STATE_TTL_ENABLED, "keyed-prefix-v1 requires disabled TTL");
+            }
+            if (deliveryGuarantee != DeliveryGuarantee.EXACTLY_ONCE) {
+                throw invalid(SINK_DELIVERY_GUARANTEE, "keyed-prefix-v1 requires EXACTLY_ONCE");
+            }
+            if (stoppingOffsets.size() != 1 || !stoppingOffsets.containsKey(0)) {
+                throw invalid(SOURCE_STOPPING_OFFSETS, "keyed-prefix-v1 requires source partition zero only");
+            }
+        }
 
         return new WorkloadProtocolV1Configuration(
                 jobAlias,
@@ -173,7 +192,23 @@ final class WorkloadProtocolV1Configuration {
                 namingStrategy,
                 transactionTimeoutMs,
                 stateTtl,
-                watermarks);
+                watermarks,
+                keyedPrefixKeyCount);
+    }
+
+    private static Integer parseBehavior(Map<String, String> values) {
+        String behavior = optional(values, BEHAVIOR_TYPE);
+        if (behavior == null) {
+            rejectPresent(values, BEHAVIOR_KEY_COUNT, "keyed-prefix-v1 behavior is not selected");
+            return null;
+        }
+        if (!"keyed-prefix-v1".equals(behavior)) {
+            throw invalid(BEHAVIOR_TYPE, "must be keyed-prefix-v1, or omitted for passthrough");
+        }
+        Integer keyCount = optionalPositiveInt(values, BEHAVIOR_KEY_COUNT);
+        if (keyCount == null) throw missing(BEHAVIOR_KEY_COUNT);
+        if (keyCount > 1024) throw invalid(BEHAVIOR_KEY_COUNT, "must be between 1 and 1024");
+        return keyCount;
     }
 
     private static void rejectUnknownReservedKeys(Map<String, String> values) {
@@ -506,6 +541,15 @@ final class WorkloadProtocolV1Configuration {
 
     WatermarkSettings watermarks() {
         return watermarks;
+    }
+
+    boolean keyedPrefixEnabled() {
+        return keyedPrefixKeyCount != null;
+    }
+
+    int keyedPrefixKeyCount() {
+        if (keyedPrefixKeyCount == null) throw new IllegalStateException("keyed-prefix-v1 is not selected");
+        return keyedPrefixKeyCount;
     }
 
     /** Wire choices owned by the protocol, independent of the connector builder API. */

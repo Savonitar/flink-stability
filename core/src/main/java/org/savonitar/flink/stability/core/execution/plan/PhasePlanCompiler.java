@@ -10,7 +10,7 @@ import static org.savonitar.flink.stability.core.execution.plan.ExecutableScenar
 /** Phase capability checks and mapping, separated from artifact binding and topology. */
 final class PhasePlanCompiler {
     private static final Set<String> SUPPORTED_STEP_KEYS = Set.of(
-            "await", "wait", "loop", "kill", "restart", "network_fault", "leader_fault", "broker_fault", "packet_fault", "savepoint_restore");
+            "await", "wait", "loop", "kill", "restart", "network_fault", "leader_fault", "broker_fault", "packet_fault", "savepoint_restore", "checkpoint_storage_fault");
     static void validatePhases(
             Path source,
             ObjectNode document,
@@ -71,7 +71,7 @@ final class PhasePlanCompiler {
                             true,
                             issues);
                 }
-                case "kill", "restart", "leader_fault", "broker_fault", "packet_fault", "savepoint_restore" -> { /* Validated with their topology/lifecycle. */ }
+                case "kill", "restart", "leader_fault", "broker_fault", "packet_fault", "savepoint_restore", "checkpoint_storage_fault" -> { /* Validated with their topology/lifecycle. */ }
                 case "network_fault" -> NetworkFaultCompiler.validateStep(
                         source, (ObjectNode) step.get(key), stepPath + "/network_fault",
                         inLoop, issues);
@@ -170,6 +170,8 @@ final class PhasePlanCompiler {
                         : new ExecutableScenarioPlan.RestartTaskManager(step.path("restart").path("name").asText("taskmanager-1")));
             } else if (step.get("network_fault") instanceof ObjectNode networkFault) {
                 steps.add(NetworkFaultCompiler.step(networkFault));
+            } else if (step.has("checkpoint_storage_fault")) {
+                steps.add(CheckpointStoragePlanCompiler.fault(step.path("checkpoint_storage_fault")));
             } else if (step.has("savepoint_restore")) {
                 steps.add(SavepointPlanCompiler.step(step.path("savepoint_restore"), document));
             } else if (step.has("packet_fault")) {

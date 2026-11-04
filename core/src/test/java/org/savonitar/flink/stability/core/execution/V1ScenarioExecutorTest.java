@@ -38,6 +38,7 @@ import org.savonitar.flink.stability.runtime.api.TaskManagerControl;
 import org.savonitar.flink.stability.runtime.api.FlinkComponentProvisioningEvidence;
 import org.savonitar.flink.stability.runtime.api.FlinkProcessWriteFenceEvidence;
 import org.savonitar.flink.stability.runtime.api.FlinkRuntimeTarget;
+import org.savonitar.flink.stability.runtime.api.ImageIdentityEvidence;
 import org.savonitar.flink.stability.runtime.api.KafkaProxyEndpoint;
 import org.savonitar.flink.stability.runtime.api.KafkaProxyTarget;
 import org.savonitar.flink.stability.runtime.api.KafkaRuntimeEndpoints;
@@ -89,6 +90,154 @@ class V1ScenarioExecutorTest {
     private int coordinatorPartitionCount = 7;
 
     private V1ScenarioExecutor.TransactionVersionSelection featureSelection = new KafkaTransactionVersion()::select;
+
+    private V1ScenarioExecutor.StateTerminalValidation stateValidation = (bootstrap, topic, manifest, keys, timeout) -> {
+        throw new AssertionError("Unexpected state oracle invocation");
+    };
+
+    @Test void stateOracleRunsOnlyAfterFenceWithFullManifestAndKeepsIndependentStateFailure() throws Exception {
+        for (String outcome : List.of("pass", "state-mismatch", "fence-failure", "proof-missing")) {
+            var events = new ArrayList<String>();
+            try (var fixture = fixture(document -> {
+                var job = (ObjectNode) document.at("/workload/jobs/0");
+                job.putObject("behavior").put("type", "keyed-prefix-v1").put("key_count", 8);
+                ((ObjectNode) job.path("checkpointing")).putObject("storage").put("type", "filesystem");
+                ((ObjectNode) document.at("/terminal_validations/0")).put("type", "kafka.state-prefix").put("job", "eos-job");
+            })) {
+                var runtime = new FakeRuntime(events);
+                if (outcome.equals("fence-failure")) runtime.processFenceFailure = new IllegalStateException("cannot fence");
+                if (!outcome.equals("proof-missing")) {
+                    runtime.provisioningOverride = FlinkRuntimeIdentityTest.provisioning(1).stream()
+                            .map(component -> component.withProcessConfiguration(Map.of(), component.logicalName() + "#" + component.runtimeId())).toList();
+                    var log = Files.writeString(temporaryDirectory.resolve("state-progress.log"),
+                            "STATE_PREFIX_START version=1 jobId=job-1 operatorUid=flink-stability-keyed-prefix-v1 attempt=0 subtask=0 checkpoint=-1 restoredCheckpoint=-1 buildMode=correct\n"
+                            + "STATE_PREFIX_PROGRESS version=1 jobId=job-1 operatorUid=flink-stability-keyed-prefix-v1 attempt=0 subtask=0 checkpoint=-1 restoredCheckpoint=-1 keyCount=8 observedKeys=8 minimumObservedCount=1 processedThisAttempt=8 maximumInputId=7\n");
+                    runtime.componentLogs = List.of(new org.savonitar.flink.stability.runtime.api.FlinkComponentLog(
+                            "taskmanager-1#tm-1", log, false, Optional.empty()));
+                }
+                var invoked = new AtomicBoolean();
+                stateValidation = (bootstrap, topic, manifest, keys, timeout) -> {
+                    assertTrue(runtime.fenced);
+                    assertEquals(preparedInput().inputManifest(), manifest);
+                    assertEquals(8, keys);
+                    assertEquals("output", topic);
+                    invoked.set(true);
+                    boolean pass = outcome.equals("pass") || outcome.equals("proof-missing");
+                    return new org.savonitar.flink.stability.core.validation.kafka.KafkaStatePrefixValidationResult(
+                            pass ? KafkaIdSetValidationResult.Status.PASS : KafkaIdSetValidationResult.Status.FAIL,
+                            "validator.kafka.state-prefix." + (pass ? "match" : "state-mismatch"), "state comparison",
+                            passResult().evidence(), new org.savonitar.flink.stability.core.validation.kafka.KafkaStatePrefixValidationResult.StateEvidence(
+                                    keys, OptionalLong.of(pass ? 0 : 1), List.of()));
+                };
+                var result = executor(events, runtime, new FakeFlink(events), (bootstrap, topic, ids, timeout) -> {
+                    throw new AssertionError("State workload must not run the ID-only oracle");
+                }).execute(fixture.bound(), attemptContext());
+                assertEquals(!outcome.equals("fence-failure"), invoked.get());
+                assertEquals(outcome.equals("proof-missing") ? V1ScenarioExecutionResult.Status.INCONCLUSIVE
+                        : outcome.equals("pass") ? V1ScenarioExecutionResult.Status.PASS
+                        : V1ScenarioExecutionResult.Status.FAIL, result.status());
+                assertTrue(result.stateRecovery().isPresent());
+                if (outcome.equals("pass")) {
+                    var withoutProof = new V1ScenarioExecutionResult(result.status(), result.reason(), result.message(),
+                            result.inputManifest(), result.phaseEvidence(), result.writeFenceEvidence(), result.processFenceEvidence(),
+                            result.finalJobObservation(), result.terminalValidation(), result.sinkTransactions(), result.subjectClassOrigins(),
+                            result.flinkProvisioningEvidence(), result.expectedFlinkRuntime(), result.runtimeClassOrigins(), result.kafkaTransactionVersion(),
+                            result.flinkRestErrors(), result.expectedHa(), result.tokenEvidence(), result.haObservations(), result.processObservations(),
+                            result.kafkaLogs(), result.componentErrors(), result.kafkaRuntime(), result.flinkLogMarkers(), result.checkpointRetention(), result.diagnostics());
+                    assertEquals(ScenarioVerdict.Status.INCONCLUSIVE,
+                            ScenarioVerdict.of(ExecutableScenarioPlan.ExpectedOutcome.pass(), withoutProof).status());
+                }
+                assertEquals(result.stateRecovery(), result.withCleanupFailure(new IOException("cleanup")).stateRecovery());
+                if (outcome.equals("state-mismatch")) {
+                    assertEquals("validator.kafka.state-prefix.state-mismatch", result.reason());
+                    assertEquals(0, result.terminalValidation().orElseThrow().evidence().defectTotals().orElseThrow().missingCount());
+                    assertEquals(ScenarioVerdict.Status.PASS, ScenarioVerdict.of(
+                            ExecutableScenarioPlan.ExpectedOutcome.failure("kafka.state-prefix", result.reason()), result).status());
+                    assertEquals(ScenarioVerdict.Status.FAIL, ScenarioVerdict.of(
+                            ExecutableScenarioPlan.ExpectedOutcome.failure("kafka.id-set", result.reason()), result).status());
+                }
+            }
+        }
+    }
+
+    @Test void unconfirmedFaultBeforeKeyedKillCannotConfirmUninterruptedRecoveryProof() throws Exception {
+        for (String faultType : List.of("packet_fault", "broker_fault")) {
+            var events = new ArrayList<String>();
+            try (var fixture = fixture(document -> {
+                var job = (ObjectNode) document.at("/workload/jobs/0");
+                job.putObject("behavior").put("type", "keyed-prefix-v1").put("key_count", 2);
+                ((ObjectNode) job.path("checkpointing")).putObject("storage").put("type", "filesystem");
+                ((ObjectNode) document.at("/terminal_validations/0")).put("type", "kafka.state-prefix").put("job", "eos-job");
+                ((ObjectNode) document.at("/setup/kafka/clusters/main")).put("brokers", 3);
+                document.at("/setup/kafka/clusters/main/topics").forEach(topic -> ((ObjectNode) topic).put("replication_factor", 3));
+                var steps = ((ArrayNode) document.at("/phases/0/steps")).removeAll();
+                var fault = steps.addObject().putObject(faultType).put("duration", "15s").put("timeout", "2m");
+                var target = fault.putObject("target").put("kind", "selector").put("role", "broker").put("cluster", "main");
+                if (faultType.equals("packet_fault")) {
+                    fault.put("taskmanager", "taskmanager-1").put("mode", "loss").put("loss_percent", 25);
+                    target.put("type", "partition-leader").put("topic", "output").put("partition", 0);
+                } else {
+                    fault.put("mode", "kill");
+                    target.put("type", "transaction-coordinator").put("job", "eos-job");
+                }
+                steps.addObject().putObject("kill").putObject("target")
+                        .put("kind", "named").put("role", "taskmanager").put("name", "taskmanager-1");
+                steps.addObject().putObject("restart").put("component", "taskmanager");
+            })) {
+                var runtime = new FakeRuntime(events);
+                runtime.confirmBroker = false;
+                runtime.provisioningOverride = FlinkRuntimeIdentityTest.provisioning(1).stream()
+                        .map(component -> component.withProcessConfiguration(Map.of(), component.logicalName() + "#" + component.runtimeId())).toList();
+                var log = Files.writeString(temporaryDirectory.resolve(faultType + "-progress.log"),
+                        "STATE_PREFIX_START version=1 jobId=job-1 operatorUid=flink-stability-keyed-prefix-v1 attempt=0 subtask=0 checkpoint=-1 restoredCheckpoint=-1 buildMode=correct\n"
+                        + "STATE_PREFIX_PROGRESS version=1 jobId=job-1 operatorUid=flink-stability-keyed-prefix-v1 attempt=0 subtask=0 checkpoint=-1 restoredCheckpoint=-1 keyCount=2 observedKeys=2 minimumObservedCount=1 processedThisAttempt=2 maximumInputId=1\n");
+                runtime.componentLogs = List.of(new org.savonitar.flink.stability.runtime.api.FlinkComponentLog(
+                        "taskmanager-1#tm-1", log, false, Optional.empty()));
+                var flink = new FakeFlink(events);
+                if (faultType.equals("packet_fault")) {
+                    flink.observations.add(job(1_000, FlinkJobState.RUNNING, 1, 0));
+                    flink.observations.add(job(2_000, FlinkJobState.RUNNING, 1, 0));
+                }
+                var oracleInvoked = new AtomicBoolean();
+                stateValidation = (bootstrap, topic, manifest, keys, timeout) -> {
+                    assertTrue(runtime.fenced);
+                    oracleInvoked.set(true);
+                    return new org.savonitar.flink.stability.core.validation.kafka.KafkaStatePrefixValidationResult(
+                            KafkaIdSetValidationResult.Status.PASS, "validator.kafka.state-prefix.match", "state comparison",
+                            passResult().evidence(), new org.savonitar.flink.stability.core.validation.kafka.KafkaStatePrefixValidationResult.StateEvidence(
+                                    keys, OptionalLong.of(0), List.of()));
+                };
+                var result = executor(events, runtime, flink, (bootstrap, topic, ids, timeout) -> {
+                    throw new AssertionError("State workload must not run the ID-only oracle");
+                }).execute(fixture.bound(), attemptContext());
+
+                assertTrue(oracleInvoked.get());
+                assertEquals(V1ScenarioExecutionResult.Status.INCONCLUSIVE, result.status());
+                assertEquals(faultType.equals("packet_fault") ? "packet.fault.effect-unconfirmed"
+                        : "broker.operation.effect-unconfirmed", result.reason());
+                var phases = result.phaseEvidence().orElseThrow();
+                assertEquals(1, phases.steps().size());
+                assertEquals(PhaseExecutionEvidence.StepStatus.UNCONFIRMED, phases.steps().getFirst().status());
+                assertTrue(phases.taskManagerKills().isEmpty());
+                assertTrue(phases.taskManagerRestarts().isEmpty());
+                assertFalse(events.contains("taskmanager-kill"));
+                assertFalse(events.contains("taskmanager-restart"));
+                assertTrue(events.contains(faultType.equals("packet_fault") ? "packet-fault" : "broker-kill"));
+                var recovery = result.stateRecovery().orElseThrow();
+                assertEquals(0, recovery.expectedRestarts());
+                assertFalse(recovery.confirmed());
+                assertEquals(1, recovery.observationErrors().size());
+                assertTrue(recovery.observationErrors().getFirst().startsWith("Phase UNCONFIRMED"));
+                // The same fenced trace is a valid uninterrupted control. Only the missed fault
+                // prevents this run from reporting that its recovery proof was confirmed.
+                assertTrue(StateRecoveryReport.evaluate(recovery.jobId(), recovery.workloadSha256(), recovery.keyCount(),
+                        recovery.totalRecords(), 0, recovery.physicalFenceConfirmed(), recovery.trace(),
+                        recovery.readinessAttempts(), recovery.recoveries(), List.of()).confirmed());
+                assertEquals(ScenarioVerdict.Status.INCONCLUSIVE,
+                        ScenarioVerdict.of(ExecutableScenarioPlan.ExpectedOutcome.pass(), result).status());
+            }
+        }
+    }
 
     @Test void markerEvidenceAndCheckpointRetentionAreCapturedAfterFenceBeforeCleanup() throws Exception {
         for (boolean markerPresent : List.of(true, false)) {
@@ -473,7 +622,7 @@ class V1ScenarioExecutorTest {
                     assertEquals(ScenarioVerdict.Status.INCONCLUSIVE, ScenarioVerdict.of(
                             new ExecutableScenarioPlan.ExpectedOutcome(
                                     ExecutableScenarioPlan.ExpectedOutcome.Outcome.FAIL,
-                                    Optional.of("kafka-id-set"), Optional.of(missingResult().reason())),
+                                    Optional.of("kafka.id-set"), Optional.of(missingResult().reason())),
                             result).status());
                 }
                 assertThrows(IllegalArgumentException.class, () -> new V1ScenarioExecutionResult(
@@ -1041,7 +1190,16 @@ class V1ScenarioExecutorTest {
         List<String> events = new ArrayList<>();
         try (Fixture fixture = fixture(document -> ((ObjectNode) document.at("/setup/flink"))
                 .put("image_id", FlinkRuntimeIdentityTest.OTHER_IMAGE_ID))) {
-            V1ScenarioExecutionResult result = executor(events, new FakeRuntime(events),
+            FakeRuntime runtime = new FakeRuntime(events);
+            // Retain complete inspection proof for the wrong image, rather than missing proof.
+            runtime.provisioningOverride = FlinkRuntimeIdentityTest.provisioning(1).stream()
+                    .map(component -> component.withImageIdentityEvidence(new ImageIdentityEvidence(
+                            component.imageId(), component.imageId(),
+                            List.of("flink@" + component.imageId()), Optional.of(component.imageId()),
+                            Optional.empty(), ImageIdentityEvidence.MatchForm.CONTAINER_IMAGE_ID,
+                            "overlay2", Optional.empty())))
+                    .toList();
+            V1ScenarioExecutionResult result = executor(events, runtime,
                     new FakeFlink(events), (bootstrap, topic, ids, timeout) -> missingResult())
                     .execute(fixture.bound(), attemptContext());
 
@@ -2294,7 +2452,7 @@ class V1ScenarioExecutorTest {
                             org.savonitar.flink.stability.runtime.api.MonotonicDeadline deadline) { return coordinatorPartitionCount; }
                 },
                 cleanupTimeout,
-                endpoint -> networkFaults, featureSelection);
+                endpoint -> networkFaults, featureSelection, stateValidation);
     }
 
     private Fixture fixture() throws IOException {
@@ -2447,6 +2605,7 @@ class V1ScenarioExecutorTest {
         attributes.put(Attributes.Name.MANIFEST_VERSION, "1.0");
         if (executable) {
             attributes.put(Attributes.Name.MAIN_CLASS, "example.Main");
+            attributes.putValue("Flink-Stability-Workload-Capabilities", "keyed-prefix-v1");
         }
         if (protocol != null) {
             attributes.putValue(
@@ -2574,6 +2733,12 @@ class V1ScenarioExecutorTest {
         }
 
         private boolean includeCommitWitness;
+        @Override public org.savonitar.flink.stability.runtime.api.PacketFaultControl.Evidence packetFault(
+                org.savonitar.flink.stability.runtime.api.PacketFaultControl.Request request) {
+            events.add("packet-fault");
+            return org.savonitar.flink.stability.runtime.api.PacketFaultControl.unconfirmed(request, "No packet counters");
+        }
+
         @Override public List<org.savonitar.flink.stability.runtime.api.KafkaBrokerControl.Evidence> brokerFault(
                 org.savonitar.flink.stability.runtime.api.KafkaBrokerControl.Request request,
                 List<org.savonitar.flink.stability.runtime.api.KafkaLogCapture.Partition> partitions) {

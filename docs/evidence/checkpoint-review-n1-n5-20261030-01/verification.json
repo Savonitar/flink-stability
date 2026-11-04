@@ -1,0 +1,299 @@
+{
+  "date": "2026-10-30",
+  "helper": {
+    "cleanupConfirmed": true,
+    "files": {
+      "checkpoint-fuse": "c45845195feb47442d993b3d4757bac74cf118bb88a50628ebadd7f3093830fe",
+      "checkpoint-fuse-selftest": "f1799cbf544d85dbcc2fd0cb0b52736bb883ae57c4f608b9a95afa3a6be7f584",
+      "probe.jar": "131f0713101a4e98532d4e3a0915b0d13ff953ee372d03bb0a3b6406498e4043"
+    },
+    "javaModulesSha256": "852f7944c7fdfbad7b5df4c465b8f79aa27a9d14a09634e5a366c15ca4295eec",
+    "javaRelease": {
+      "IMPLEMENTOR": "Amazon.com Inc.",
+      "IMPLEMENTOR_VERSION": "Corretto-21.0.7.6.1",
+      "JAVA_RUNTIME_VERSION": "21.0.7+6-LTS",
+      "JAVA_VERSION": "21.0.7",
+      "JAVA_VERSION_DATE": "2025-04-15",
+      "OS_ARCH": "aarch64",
+      "OS_NAME": "Darwin"
+    },
+    "javaToolSha256": {
+      "jar": "723b2b55cf5adc87c44824a96e0741c47ca71c729316fcf2fa3f98d7ef3b63dc",
+      "java": "e09233a5d606938176734fb4eb70407659a8fede3073949c495631f43612e65c",
+      "javac": "a0e3b24a64457c3df6d19e91022bc95445927f67dc37815343282eea46ee51b9"
+    },
+    "javaVendor": "Amazon.com Inc.",
+    "manifest": {
+      "originalPath": "jobs/checkpoint-review-n1-n5-20261030-01/helper/build-evidence.json",
+      "originalSha256": "67d958d62e1d1e3a35ad162f8b72c95483593912a084ca0f139fcfb4db0cb8d7"
+    },
+    "nativeHashesMatchHistoricalBuild03": true,
+    "sameToolchainRepeatedProbeBuildTest": true,
+    "status": "built"
+  },
+  "java": {
+    "command": "mvn -B -ntp install with explicit public-only user/global settings",
+    "errors": 0,
+    "failures": 0,
+    "jdk": "Amazon Corretto 21.0.7+6-LTS",
+    "log": {
+      "originalPath": "jobs/checkpoint-review-n1-n5-20261030-01/checks/maven-install-02.log",
+      "originalSha256": "9cfc13a73fe3f71edc1f798da07e04f68ab264a8b92aa6efbe8b89b762753b36"
+    },
+    "skipped": 1,
+    "tests": 1699
+  },
+  "kind": "sanitized-n1-n5-verification-summary",
+  "limitations": [
+    "Neither live attempt observed a nonzero initial ID-less baseline; that path is covered by unit regressions.",
+    "600 seconds is the outer process limit and simulated polling test duration, not the wall duration of either live attempt.",
+    "Trigger scan covers the complete hash-bound retained JobManager prefix, not an attested complete process lifetime.",
+    "Source-response hashes attest consistency of retained bytes, not responding-daemon authenticity.",
+    "Same-toolchain JAR reproducibility does not guarantee identical bytecode across JDK vendors or releases.",
+    "This is not a replacement 12-attempt qualification matrix or a new mutant calibration."
+  ],
+  "live": {
+    "attempts": [
+      {
+        "attempt": 1,
+        "baselineIdlessTriggerFailures": 0,
+        "checkpointTriggerLogAudit": {
+          "complete": true,
+          "count": 0,
+          "literal": "Failed to trigger checkpoint",
+          "logs": [
+            {
+              "bytes": 114570,
+              "count": 0,
+              "matches": [],
+              "path": "logs/flink-stability-output-jobmanager-1-1.log",
+              "sha256": "89c234489960f376a7fc0f77e66968b848570c6acdf82c021843d7d80b00e6b1"
+            }
+          ],
+          "scope": "complete hashed retained JobManager output prefixes; not the full process lifetime"
+        },
+        "cleanupConfirmed": true,
+        "componentEvents": 2,
+        "confirmed": true,
+        "durationSeconds": 243.419,
+        "failedCountByStage": {
+          "ARMED": 0,
+          "BEFORE_ARM": 0,
+          "FAILED_CHECKPOINT": 1,
+          "HEALED": 3,
+          "RECOVERED": 3,
+          "STOPPED": 3
+        },
+        "finishedAt": "2026-10-30T10:45:26.672590+00:00",
+        "killJobManagerEpochMillis": {
+          "after": 1793356907342,
+          "before": 1793356907165
+        },
+        "rawEvidence": {
+          "bytes": 368971,
+          "captures": 66,
+          "complete": true,
+          "maxBytes": 67108864,
+          "maxCaptures": 4096
+        },
+        "reason": "validator.kafka.state-prefix.match",
+        "restErrors": 0,
+        "sourceReceipts": {
+          "cleanup.json": {
+            "originalPath": "jobs/checkpoint-review-n1-n5-20261030-01/live/attempts/correct-eio/run-1/cleanup.json",
+            "originalSha256": "61e10c8c0077834df438867e9e422231aad7941a4a882601d731897c57ca54d2"
+          },
+          "execution.json": {
+            "originalPath": "jobs/checkpoint-review-n1-n5-20261030-01/live/attempts/correct-eio/run-1/execution.json",
+            "originalSha256": "bb10de6e95b5f3f4c4ceac1a6c90475f8399e3d596874b2064dec835f044866f"
+          },
+          "retained-evidence.json": {
+            "originalPath": "jobs/checkpoint-review-n1-n5-20261030-01/live/attempts/correct-eio/run-1/retained-evidence.json",
+            "originalSha256": "409a2f706460f5bd4c045a4dd933d2495070d7864b031867220b5d83fcbf3873"
+          },
+          "stdout.json": {
+            "originalPath": "jobs/checkpoint-review-n1-n5-20261030-01/live/attempts/correct-eio/run-1/stdout.json",
+            "originalSha256": "1940f534fb2a86a51b0af182855fbcadb88b37b47eba363466f32b7f4ab6f18f"
+          }
+        },
+        "sourceResponseAudit": {
+          "captures": 59,
+          "confirmed": true,
+          "groups": 21
+        },
+        "startedAt": "2026-10-30T10:41:23.253259+00:00",
+        "stateRecoveryConfirmed": true,
+        "status": "pass",
+        "stdoutBytes": 2780593,
+        "terminalValidation": {
+          "completed": true,
+          "distinctExpected": 30000,
+          "duplicates": 0,
+          "expected": 30000,
+          "malformed": 0,
+          "missing": 0,
+          "missingSamples": [],
+          "mode": "exactly-once",
+          "observed": 30000,
+          "reason": "validator.kafka.state-prefix.match",
+          "snapshotComplete": true,
+          "statePrefix": {
+            "keyCount": 8,
+            "mismatchSamples": [],
+            "mismatches": 0
+          },
+          "status": "pass",
+          "type": "kafka.state-prefix",
+          "unexpected": 0
+        },
+        "triggerFailureTiming": "no matching retained JobManager line"
+      },
+      {
+        "attempt": 2,
+        "baselineIdlessTriggerFailures": 0,
+        "checkpointTriggerLogAudit": {
+          "complete": true,
+          "count": 1,
+          "literal": "Failed to trigger checkpoint",
+          "logs": [
+            {
+              "bytes": 119798,
+              "count": 1,
+              "matches": [
+                {
+                  "line": 705,
+                  "text": "2026-10-30 10:46:19,279 INFO  org.apache.flink.runtime.checkpoint.CheckpointFailureManager [] - Failed to trigger checkpoint for job 1f5e091c7235d0e21a4fa190144ca52a since Checkpoint triggering task Source: Kafka Source -> Source Throttle (1/1) of job 1f5e091c7235d0e21a4fa190144ca52a is not being executed at the moment. Aborting checkpoint. Failure reason: Not all required tasks are currently running.."
+                }
+              ],
+              "path": "logs/flink-stability-output-jobmanager-1-1.log",
+              "sha256": "b1192d3faddbba38b76494876049942695a177a70c3d07947856098f4e5f0c8c"
+            }
+          ],
+          "scope": "complete hashed retained JobManager output prefixes; not the full process lifetime"
+        },
+        "cleanupConfirmed": true,
+        "componentEvents": 2,
+        "confirmed": true,
+        "durationSeconds": 260.113,
+        "failedCountByStage": {
+          "ARMED": 0,
+          "BEFORE_ARM": 0,
+          "FAILED_CHECKPOINT": 1,
+          "HEALED": 3,
+          "RECOVERED": 4,
+          "STOPPED": 3
+        },
+        "finishedAt": "2026-10-30T10:49:48.814652+00:00",
+        "killJobManagerEpochMillis": {
+          "after": 1793357154504,
+          "before": 1793357154306
+        },
+        "rawEvidence": {
+          "bytes": 370450,
+          "captures": 66,
+          "complete": true,
+          "maxBytes": 67108864,
+          "maxCaptures": 4096
+        },
+        "reason": "validator.kafka.state-prefix.match",
+        "restErrors": 0,
+        "sourceReceipts": {
+          "cleanup.json": {
+            "originalPath": "jobs/checkpoint-review-n1-n5-20261030-01/live/attempts/correct-eio/run-2/cleanup.json",
+            "originalSha256": "0ccd7a6118a76519baa38d281f49ad1e8dbdd9e3926fa8741d76a1ab0cc7a954"
+          },
+          "execution.json": {
+            "originalPath": "jobs/checkpoint-review-n1-n5-20261030-01/live/attempts/correct-eio/run-2/execution.json",
+            "originalSha256": "55d973d1bbab80425fee7cc5cbb36398e40846d2743669d7e5f56b8da12e2b29"
+          },
+          "retained-evidence.json": {
+            "originalPath": "jobs/checkpoint-review-n1-n5-20261030-01/live/attempts/correct-eio/run-2/retained-evidence.json",
+            "originalSha256": "d20056533c28389014c9d464c59ca52295e366f62471718d090fed254608fe5b"
+          },
+          "stdout.json": {
+            "originalPath": "jobs/checkpoint-review-n1-n5-20261030-01/live/attempts/correct-eio/run-2/stdout.json",
+            "originalSha256": "a1b9279ecb80ef3bc278d1422341d63cfa32ef08885de91bc0656a716577ed97"
+          }
+        },
+        "sourceResponseAudit": {
+          "captures": 59,
+          "confirmed": true,
+          "groups": 21
+        },
+        "startedAt": "2026-10-30T10:45:28.701500+00:00",
+        "stateRecoveryConfirmed": true,
+        "status": "pass",
+        "stdoutBytes": 2781954,
+        "terminalValidation": {
+          "completed": true,
+          "distinctExpected": 30000,
+          "duplicates": 0,
+          "expected": 30000,
+          "malformed": 0,
+          "missing": 0,
+          "missingSamples": [],
+          "mode": "exactly-once",
+          "observed": 30000,
+          "reason": "validator.kafka.state-prefix.match",
+          "snapshotComplete": true,
+          "statePrefix": {
+            "keyCount": 8,
+            "mismatchSamples": [],
+            "mismatches": 0
+          },
+          "status": "pass",
+          "type": "kafka.state-prefix",
+          "unexpected": 0
+        },
+        "triggerFailureTiming": "after deliberate kill, before replacement tasks became ready; initial baseline remains zero"
+      }
+    ],
+    "automaticRetries": 0,
+    "confirmed": true,
+    "errors": [],
+    "finished": {
+      "originalPath": "jobs/checkpoint-review-n1-n5-20261030-01/live/finished.json",
+      "originalSha256": "c4b404ddab3d247e11d7807fa78d7144b22275b49e7c483b0cb9dca3e97cecdb"
+    },
+    "framework": {
+      "originalPath": "jobs/checkpoint-review-n1-n5-20261030-01/live/framework/manifest.json",
+      "originalSha256": "75ebe9c6e9186435d8aa5b78e722d2233ff7af9120e84f793d3307bf73eb7308"
+    },
+    "manifest": {
+      "originalPath": "jobs/checkpoint-review-n1-n5-20261030-01/live/manifest.json",
+      "originalSha256": "dea6b924d1e22e71cd7a5e36725df317a9eab32c3ab4a9903075438495a8e2bc"
+    },
+    "outerTimeoutSeconds": 600
+  },
+  "provenance": "This selected-field summary has its own bytes and hash; original hashes below identify untouched local receipts, not this summary.",
+  "python": {
+    "command": "python3 -B -m unittest discover -s tools/tests -v",
+    "log": {
+      "originalPath": "jobs/checkpoint-review-n1-n5-20261030-01/checks/python-full-03.log",
+      "originalSha256": "2d891c2dda119e0c30d2c8b1f57c6b47e1523ab4ef36b645cf6d90dc577f1cc1"
+    },
+    "passed": true,
+    "tests": 497
+  },
+  "qualificationMatrix": false,
+  "scope": "Two new correct-arm FUSE EIO/replacement regression attempts; historical matrix and all retained originals unchanged.",
+  "unitRegressions": [
+    "600 simulated seconds: 6000 polling iterations / 18000 fake REST calls persist zero files until a proof group is selected",
+    "Missing mandatory raw group still rejects; counter mismatch and incomplete stores cannot qualify",
+    "Zero-byte response hashing and empty retry bodies; later requests remain usable",
+    "Two real same-JDK probe compilations produce byte-identical executable JARs",
+    "Nonzero ID-less baseline passes full fault sequence; retained/latest FAILED checkpoint rejects before inspector",
+    "SKIPPED and UNCONFIRMED phase steps do not qualify expected-failure controls; actual late-failure kill/replacement receipts remain bound"
+  ],
+  "validation": {
+    "exitCode": 0,
+    "frozenCatalogExitCode": 0,
+    "output": {
+      "originalPath": "jobs/checkpoint-review-n1-n5-20261030-01/checks/validate-show-plan.stdout.log",
+      "originalSha256": "97244720948f452fd458a1744879cafb8c2a093886f3e2862902081d00a77ccb"
+    },
+    "scenario": "checkpoint-storage-fault",
+    "showPlan": true
+  },
+  "version": 1
+}

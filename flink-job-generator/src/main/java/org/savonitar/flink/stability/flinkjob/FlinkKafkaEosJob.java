@@ -30,6 +30,7 @@ public class FlinkKafkaEosJob {
     static final String SOURCE_UID = "flink-stability-kafka-source-v1";
     static final String THROTTLE_UID = "flink-stability-source-throttle-v1";
     static final String STATEFUL_OPERATOR_UID = "flink-stability-managed-state-pass-through-v1";
+    static final String KEYED_PREFIX_OPERATOR_UID = "flink-stability-keyed-prefix-v1";
     static final String SINK_UID = "flink-stability-kafka-sink-v1";
 
     public static void main(String[] args) throws Exception {
@@ -54,6 +55,9 @@ public class FlinkKafkaEosJob {
             FlinkKafkaEosJobArguments arguments) {
         KafkaSource<String> source = createSource(workload);
         KafkaSink<String> sink = createSink(workload, arguments.producerMaxBlockMs(), arguments.producerRequestTimeoutMs());
+        if (workload.keyedPrefixEnabled() && env.getParallelism() != 1) {
+            throw new IllegalArgumentException("keyed-prefix-v1 requires parallelism one");
+        }
 
         // The delay runs in an operator chained to the source, so it slows the source itself.
         // A delay after the keyBy shuffle would let the source fill the network buffers
@@ -69,13 +73,17 @@ public class FlinkKafkaEosJob {
                                 arguments.failAsyncSnapshotForCheckpoints(), arguments.failAsyncSnapshotDelayMs(),
                                 arguments.failAfterSnapshotOfCheckpoint(),
                                 arguments.failAfterSnapshotDelayMs()));
-        throttled.name("Source Throttle")
-                .uid(THROTTLE_UID)
-                .keyBy(value -> value)
-                .map(new ManagedStatePassThrough(workload.stateTtl()))
-                .name("Managed State Pass-Through")
-                .uid(STATEFUL_OPERATOR_UID)
-                .sinkTo(sink)
+        throttled.name("Source Throttle").uid(THROTTLE_UID);
+        var output = workload.keyedPrefixEnabled()
+                ? throttled.keyBy(new KeyedPrefixFunction.PrefixKeySelector(workload.keyedPrefixKeyCount()))
+                        .map(new KeyedPrefixFunction(workload.keyedPrefixKeyCount()))
+                        .name("Keyed Prefix v1")
+                        .uid(KEYED_PREFIX_OPERATOR_UID)
+                : throttled.keyBy(value -> value)
+                        .map(new ManagedStatePassThrough(workload.stateTtl()))
+                        .name("Managed State Pass-Through")
+                        .uid(STATEFUL_OPERATOR_UID);
+        output.sinkTo(sink)
                 .name("Kafka Sink")
                 .uid(SINK_UID);
     }
